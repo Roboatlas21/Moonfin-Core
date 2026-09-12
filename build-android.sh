@@ -70,6 +70,7 @@ MEDIA3_DIR="$REPO_ROOT/android/.media3"
 rm -rf "$MEDIA3_DIR"
 git clone --depth 1 --branch 1.10.1 https://github.com/androidx/media.git "$MEDIA3_DIR"
 sed -i "/include modulePrefix + 'lib-cast'/,+1d" "$MEDIA3_DIR/core_settings.gradle"
+sed -i "/include modulePrefix + 'lib-ui-compose'/,+1d" "$MEDIA3_DIR/core_settings.gradle"
 git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
 
 echo "Cleaning previous Flutter outputs..."
