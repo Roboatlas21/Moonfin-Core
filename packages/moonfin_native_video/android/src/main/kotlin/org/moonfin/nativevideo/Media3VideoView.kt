@@ -778,6 +778,7 @@ class Media3VideoView(
     private var currentUrl: String? = null
     private var currentHeaders: Map<String, String> = emptyMap()
     private lateinit var httpDataSourceFactory: DefaultHttpDataSource.Factory
+    private lateinit var bootDataSourceFactory: DefaultDataSource.Factory
     private lateinit var hlsMediaSourceFactory: HlsMediaSource.Factory
     private var requestedSubtitleRendererMode: SubtitleRendererMode = SubtitleRendererMode.NATIVE
     private var activeSubtitleRendererMode: SubtitleRendererMode = SubtitleRendererMode.NATIVE
@@ -1621,7 +1622,7 @@ class Media3VideoView(
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(120_000)
             .setReadTimeoutMs(120_000)
-        val bootDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+        bootDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         val assHandler = AssHandler(
             AssRenderType.OVERLAY_CANVAS,
             AssHandlerConfig(cacheSize = assCacheSizeMb()),
