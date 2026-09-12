@@ -66,7 +66,7 @@ echo "${APP_NAME} Android TV version: ${TV_VERSION} (${TV_BUILD_NUMBER})"
 
 cd "$REPO_ROOT"
 
-MEDIA3_DIR="$REPO_ROOT/.media3"
+MEDIA3_DIR="$REPO_ROOT/android/.media3"
 rm -rf "$MEDIA3_DIR"
 git clone --depth 1 --branch 1.10.1 https://github.com/androidx/media.git "$MEDIA3_DIR"
 git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
