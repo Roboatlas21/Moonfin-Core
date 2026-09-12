@@ -3315,7 +3315,7 @@ class Media3VideoView(
                         arrayOf(
                             SubtitleExtractor(
                                 assParserFactory.create(format),
-                                null,
+                                format,
                             ),
                         )
                     }
