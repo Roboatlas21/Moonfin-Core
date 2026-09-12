@@ -100,9 +100,7 @@ def modules = [
     ['lib-extractor', 'libraries/extractor'],
     ['lib-effect', 'libraries/effect'],
     ['lib-muxer', 'libraries/muxer'],
-    ['lib-transformer', 'libraries/transformer'],
-    ['test-utils', 'libraries/test_utils'],
-    ['test-utils-robolectric', 'libraries/test_utils_robolectric']
+    ['lib-transformer', 'libraries/transformer']
 ]
 
 modules.each { m ->
@@ -112,6 +110,14 @@ modules.each { m ->
 MEDIA3_SETTINGS
 
 git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
+
+# Media3 local modules declare test-only project dependencies. We are not
+# running Media3 tests, so remove those project references to avoid pulling
+# the entire Media3 test graph into the Moonfin application build.
+find "$MEDIA3_DIR/libraries" -name build.gradle -type f -print0 |
+while IFS= read -r -d "" f; do
+  sed -i "/^[[:space:]]*testImplementation[[:space:]]\+project(modulePrefix[[:space:]]\+['\"]test-/d" "$f"
+done
 
 echo "Cleaning previous Flutter outputs..."
 "$FLUTTER" clean
