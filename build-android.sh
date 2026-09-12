@@ -70,6 +70,45 @@ echo "Preparing patched Media3 1.10.1 diagnostic source..."
 MEDIA3_DIR="$REPO_ROOT/android/.media3"
 rm -rf "$MEDIA3_DIR"
 git clone --depth 1 --branch 1.10.1 https://github.com/androidx/media.git "$MEDIA3_DIR"
+
+# Only include Media3 modules required by Moonfin. The stock 1.10.1
+# core_settings.gradle also includes optional modules such as Cast/Compose
+# that require plugins not present in Moonfin's Gradle build.
+cat > "$MEDIA3_DIR/core_settings.gradle" <<'MEDIA3_SETTINGS'
+def rootDir = file(".")
+if (!gradle.ext.has('androidxMediaSettingsDir')) {
+    gradle.ext.androidxMediaSettingsDir = rootDir.getCanonicalPath()
+}
+def modulePrefix = ':'
+if (gradle.ext.has('androidxMediaModulePrefix')) {
+    modulePrefix += gradle.ext.androidxMediaModulePrefix
+}
+
+def modules = [
+    ['lib-common', 'libraries/common'],
+    ['lib-container', 'libraries/container'],
+    ['lib-session', 'libraries/session'],
+    ['lib-exoplayer', 'libraries/exoplayer'],
+    ['lib-exoplayer-dash', 'libraries/exoplayer_dash'],
+    ['lib-exoplayer-hls', 'libraries/exoplayer_hls'],
+    ['lib-exoplayer-rtsp', 'libraries/exoplayer_rtsp'],
+    ['lib-exoplayer-smoothstreaming', 'libraries/exoplayer_smoothstreaming'],
+    ['lib-ui', 'libraries/ui'],
+    ['lib-database', 'libraries/database'],
+    ['lib-datasource', 'libraries/datasource'],
+    ['lib-decoder', 'libraries/decoder'],
+    ['lib-extractor', 'libraries/extractor'],
+    ['lib-effect', 'libraries/effect'],
+    ['lib-muxer', 'libraries/muxer'],
+    ['lib-transformer', 'libraries/transformer']
+]
+
+modules.each { m ->
+    include modulePrefix + m[0]
+    project(modulePrefix + m[0]).projectDir = new File(rootDir, m[1])
+}
+MEDIA3_SETTINGS
+
 git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
 
 echo "Cleaning previous Flutter outputs..."
