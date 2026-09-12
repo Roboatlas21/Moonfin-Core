@@ -74,7 +74,8 @@ git clone --depth 1 --branch 1.10.1 https://github.com/androidx/media.git "$MEDI
 # Only include Media3 modules required by Moonfin. The stock 1.10.1
 # core_settings.gradle also includes optional modules such as Cast/Compose
 # that require plugins not present in Moonfin's Gradle build.
-cat > "$MEDIA3_DIR/core_settings.gradle" <<'MEDIA3_SETTINGS'
+curl -fsSL https://raw.githubusercontent.com/androidx/media/1.10.1/core_settings.gradle \
+  -o "$MEDIA3_DIR/core_settings.gradle"'
 def rootDir = file(".")
 if (!gradle.ext.has('androidxMediaSettingsDir')) {
     gradle.ext.androidxMediaSettingsDir = rootDir.getCanonicalPath()
