@@ -1,0 +1,309 @@
+diff --git a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java
+index 188b9de..2b9a604 100644
+--- a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java
++++ b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java
+@@ -25,6 +25,7 @@ import androidx.media3.common.C;
+ import androidx.media3.common.DrmInitData;
+ import androidx.media3.common.Format;
+ import androidx.media3.common.Metadata;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.ParsableByteArray;
+ import androidx.media3.common.util.TimestampAdjuster;
+ import androidx.media3.common.util.UriUtil;
+@@ -39,6 +40,7 @@ import androidx.media3.extractor.DefaultExtractorInput;
+ import androidx.media3.extractor.ExtractorInput;
+ import androidx.media3.extractor.metadata.id3.Id3Decoder;
+ import androidx.media3.extractor.metadata.id3.PrivFrame;
++import androidx.media3.extractor.ts.TsExtractor;
+ import com.google.common.base.Ascii;
+ import com.google.common.collect.ImmutableList;
+ import java.io.EOFException;
+@@ -434,10 +436,26 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+   public void load() throws IOException {
+     // output == null means init() hasn't been called.
+     checkNotNull(output);
++    boolean extractorReused = false;
+     if (extractor == null && previousExtractor != null && previousExtractor.isReusable()) {
+       extractor = previousExtractor;
+       initDataLoadRequired = false;
++      extractorReused = true;
+     }
++    Log.d(
++        "MF_HLS_TRACE",
++        "HLS_CHUNK_LOAD seq="
++            + chunkMediaSequence
++            + " uri="
++            + dataSpec.uri
++            + " startUs="
++            + startTimeUs
++            + " endUs="
++            + endTimeUs
++            + " previousExtractor="
++            + (previousExtractor != null)
++            + " extractorReused="
++            + extractorReused);
+     maybeLoadInitData();
+     if (!loadCanceled) {
+       if (!hasGapTag) {
+@@ -445,6 +463,16 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+       }
+       loadCompleted = !loadCanceled;
+     }
++    Log.d(
++        "MF_HLS_TRACE",
++        "HLS_CHUNK_LOAD_END seq="
++            + chunkMediaSequence
++            + " completed="
++            + loadCompleted
++            + " canceled="
++            + loadCanceled
++            + " nextLoadPosition="
++            + nextLoadPosition);
+   }
+ 
+   /**
+@@ -497,8 +525,13 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+ 
+   @RequiresNonNull("output")
+   private void loadMedia() throws IOException {
+-    feedDataToExtractor(
+-        dataSource, dataSpec, mediaSegmentEncrypted, /* initializeTimestampAdjuster= */ true);
++    TsExtractor.debugBeginHlsSegment(chunkMediaSequence, dataSpec.uri.toString());
++    try {
++      feedDataToExtractor(
++          dataSource, dataSpec, mediaSegmentEncrypted, /* initializeTimestampAdjuster= */ true);
++    } finally {
++      TsExtractor.debugEndHlsSegment();
++    }
+   }
+ 
+   /**
+diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java
+index a86c81f..d09fc11 100644
+--- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java
++++ b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java
+@@ -25,6 +25,7 @@ import androidx.media3.common.ColorInfo;
+ import androidx.media3.common.Format;
+ import androidx.media3.common.MimeTypes;
+ import androidx.media3.common.util.CodecSpecificDataUtil;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.ParsableByteArray;
+ import androidx.media3.common.util.UnstableApi;
+ import androidx.media3.common.util.Util;
+@@ -124,6 +125,10 @@ public final class H264Reader implements ElementaryStreamReader {
+   public void packetStarted(long pesTimeUs, @TsPayloadReader.Flags int flags) {
+     this.pesTimeUs = pesTimeUs;
+     randomAccessIndicator |= (flags & FLAG_RANDOM_ACCESS_INDICATOR) != 0;
++    TsExtractor.debugPes(
++        "H264_PES_START timeUs=" + pesTimeUs
++            + " flags=0x" + Integer.toHexString(flags)
++            + " randomAccess=" + randomAccessIndicator);
+   }
+ 
+   @Override
+@@ -196,6 +201,13 @@ public final class H264Reader implements ElementaryStreamReader {
+ 
+   @RequiresNonNull("sampleReader")
+   private void startNalUnit(long position, int nalUnitType, long pesTimeUs) {
++    TsExtractor.debugH264Nal(
++        nalUnitType,
++        position,
++        pesTimeUs,
++        randomAccessIndicator,
++        allowNonIdrKeyframes,
++        detectAccessUnits);
+     if (!hasOutputFormat || sampleReader.needsSpsPps()) {
+       sps.startNalUnit(nalUnitType);
+       pps.startNalUnit(nalUnitType);
+@@ -277,6 +289,7 @@ public final class H264Reader implements ElementaryStreamReader {
+     }
+     boolean sampleIsKeyFrame = sampleReader.endNalUnit(position, offset, hasOutputFormat);
+     if (sampleIsKeyFrame) {
++      TsExtractor.debugH264Keyframe(position, pesTimeUs);
+       // This is either an IDR frame or the first I-frame since the random access indicator, so mark
+       // it as a keyframe. Clear the flag so that subsequent non-IDR I-frames are not marked as
+       // keyframes until we see another random access indicator.
+diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
+index a13bf74..b2f01d2 100644
+--- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
++++ b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
+@@ -91,6 +91,12 @@ public final class PesReader implements TsPayloadReader {
+     checkNotNull(timestampAdjuster);
+ 
+     if ((flags & FLAG_PAYLOAD_UNIT_START_INDICATOR) != 0) {
++      TsExtractor.debugPes(
++          "PUSI reader=" + reader.getClass().getSimpleName()
++              + " state=" + stateName(state)
++              + " bytesRead=" + bytesRead
++              + " payloadSize=" + payloadSize
++              + " timeUs=" + timeUs);
+       switch (state) {
+         case STATE_FINDING_HEADER:
+         case STATE_READING_HEADER:
+@@ -183,10 +189,28 @@ public final class PesReader implements TsPayloadReader {
+   }
+ 
+   private void setState(int state) {
++    TsExtractor.debugPes(
++        "STATE " + stateName(this.state) + " -> " + stateName(state)
++            + " bytesRead=" + bytesRead
++            + " payloadSize=" + payloadSize
++            + " timeUs=" + timeUs
++            + " pts=" + ptsFlag
++            + " dts=" + dtsFlag
++            + " extHeader=" + extendedHeaderLength);
+     this.state = state;
+     bytesRead = 0;
+   }
+ 
++  private static String stateName(int state) {
++    switch (state) {
++      case STATE_FINDING_HEADER: return "FINDING_HEADER";
++      case STATE_READING_HEADER: return "READING_HEADER";
++      case STATE_READING_HEADER_EXTENSION: return "READING_HEADER_EXTENSION";
++      case STATE_READING_BODY: return "READING_BODY";
++      default: return "UNKNOWN(" + state + ")";
++    }
++  }
++
+   /**
+    * Continues a read from the provided {@code source} into a given {@code target}. It's assumed
+    * that the data should be written into {@code target} starting from an offset of zero.
+@@ -216,6 +240,14 @@ public final class PesReader implements TsPayloadReader {
+     pesScratch.setPosition(0);
+     int startCodePrefix = pesScratch.readBits(24);
+     if (startCodePrefix != 0x000001) {
++      TsExtractor.debugPes(
++          "BAD_START_CODE prefix=" + startCodePrefix
++              + " hex=0x" + Integer.toHexString(startCodePrefix)
++              + " reader=" + reader.getClass().getSimpleName()
++              + " state=" + stateName(state)
++              + " bytesRead=" + bytesRead
++              + " payloadSize=" + payloadSize
++              + " timeUs=" + timeUs);
+       Log.w(TAG, "Unexpected start code prefix: " + startCodePrefix);
+       payloadSize = C.LENGTH_UNSET;
+       return false;
+diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
+index 4f27e9b..9d96adf 100644
+--- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
++++ b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
+@@ -29,6 +29,7 @@ import androidx.annotation.Nullable;
+ import androidx.media3.common.C;
+ import androidx.media3.common.MimeTypes;
+ import androidx.media3.common.ParserException;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.NullableType;
+ import androidx.media3.common.util.ParsableBitArray;
+ import androidx.media3.common.util.ParsableByteArray;
+@@ -158,6 +159,96 @@ public final class TsExtractor implements Extractor {
+   private static final long HEVC_FORMAT_IDENTIFIER = 0x48455643;
+ 
+   private static final int BUFFER_SIZE = TS_PACKET_SIZE * 50;
++
++  private static final ThreadLocal<DebugSegment> DEBUG_SEGMENT = new ThreadLocal<>();
++  private static final int DEBUG_MAX_TS_PACKETS = 80;
++  private static final int DEBUG_MAX_NALS = 80;
++
++  private static final class DebugSegment {
++    final long sequence;
++    final String uri;
++    int tsPackets;
++    int nals;
++
++    DebugSegment(long sequence, String uri) {
++      this.sequence = sequence;
++      this.uri = uri;
++    }
++  }
++
++  public static void debugBeginHlsSegment(long sequence, String uri) {
++    DEBUG_SEGMENT.set(new DebugSegment(sequence, uri));
++    Log.d("MF_HLS_TRACE",
++        "========== HLS_SEGMENT_START seq=" + sequence + " uri=" + uri + " ==========");
++  }
++
++  public static void debugEndHlsSegment() {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment != null) {
++      Log.d("MF_HLS_TRACE",
++          "========== HLS_SEGMENT_END seq=" + segment.sequence
++              + " tsPackets=" + segment.tsPackets
++              + " nals=" + segment.nals + " ==========");
++    }
++    DEBUG_SEGMENT.remove();
++  }
++
++  static void debugPes(String message) {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    Log.d("MF_PES_TRACE",
++        "seq=" + (segment == null ? "?" : segment.sequence) + " " + message);
++  }
++
++  static void debugH264Nal(
++      int nalType,
++      long position,
++      long pesTimeUs,
++      boolean randomAccess,
++      boolean allowNonIdr,
++      boolean detectAccessUnits) {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment == null || segment.nals >= DEBUG_MAX_NALS) return;
++    segment.nals++;
++    Log.d("MF_H264_TRACE",
++        "seq=" + segment.sequence
++            + " NAL type=" + nalType
++            + " position=" + position
++            + " pesTimeUs=" + pesTimeUs
++            + " randomAccess=" + randomAccess
++            + " allowNonIdr=" + allowNonIdr
++            + " detectAccessUnits=" + detectAccessUnits);
++  }
++
++  static void debugH264Keyframe(long position, long pesTimeUs) {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment != null) {
++      Log.d("MF_H264_TRACE",
++          "seq=" + segment.sequence
++              + " KEYFRAME position=" + position
++              + " pesTimeUs=" + pesTimeUs);
++    }
++  }
++
++  private static void debugTsPacket(
++      int pid,
++      boolean payloadUnitStart,
++      boolean adaptationFieldExists,
++      boolean payloadExists,
++      int continuityCounter,
++      boolean randomAccessIndicator) {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment == null || segment.tsPackets >= DEBUG_MAX_TS_PACKETS) return;
++    segment.tsPackets++;
++    Log.d("MF_TS_TRACE",
++        "seq=" + segment.sequence
++            + " packet=" + segment.tsPackets
++            + " pid=" + pid
++            + " pusi=" + payloadUnitStart
++            + " adaptation=" + adaptationFieldExists
++            + " payload=" + payloadExists
++            + " cc=" + continuityCounter
++            + " randomAccess=" + randomAccessIndicator);
++  }
+   private static final int SNIFF_TS_PACKET_COUNT = 5;
+ 
+   private final @Mode int mode;
+@@ -520,6 +611,13 @@ public final class TsExtractor implements Extractor {
+     // Read the payload.
+     boolean wereTracksEnded = tracksEnded;
+     if (shouldConsumePacketPayload(pid)) {
++      debugTsPacket(
++          pid,
++          (packetHeaderFlags & FLAG_PAYLOAD_UNIT_START_INDICATOR) != 0,
++          adaptationFieldExists,
++          payloadExists,
++          tsPacketHeader & 0xF,
++          (packetHeaderFlags & TsPayloadReader.FLAG_RANDOM_ACCESS_INDICATOR) != 0);
+       tsPacketBuffer.setLimit(endOfPacket);
+       payloadReader.consume(tsPacketBuffer, packetHeaderFlags);
+       tsPacketBuffer.setLimit(limit);

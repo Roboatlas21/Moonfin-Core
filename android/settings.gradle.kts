@@ -9,6 +9,10 @@ pluginManagement {
 
     includeBuild("$flutterSdkPath/packages/flutter_tools/gradle")
 
+// Temporary Media3 1.10.1 diagnostic build.
+(gradle as ExtensionAware).extra["androidxMediaModulePrefix"] = "media3-"
+apply(from = file(".media3/core_settings.gradle"))
+
     repositories {
         google()
         mavenCentral()
