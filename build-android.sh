@@ -116,7 +116,27 @@ git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
 # the entire Media3 test graph into the Moonfin application build.
 find "$MEDIA3_DIR/libraries" -name build.gradle -type f -print0 |
 while IFS= read -r -d "" f; do
-  sed -i "/testImplementation[[:space:]]*project(modulePrefix/d" "$f"
+  python3 - "$f" <<'PY2'
+from pathlib import Path
+import sys
+
+p = Path(sys.argv[1])
+lines = p.read_text().splitlines()
+out = []
+skip_close = False
+
+for line in lines:
+    if "testImplementation project(modulePrefix" in line:
+        skip_close = True
+        continue
+    if skip_close:
+        if line.strip() == ")":
+            skip_close = False
+        continue
+    out.append(line)
+
+p.write_text("\n".join(out) + "\n")
+PY2
 done
 
 echo "Cleaning previous Flutter outputs..."
