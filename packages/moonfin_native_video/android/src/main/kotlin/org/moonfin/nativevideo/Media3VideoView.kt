@@ -780,6 +780,7 @@ class Media3VideoView(
     private lateinit var httpDataSourceFactory: DefaultHttpDataSource.Factory
     private lateinit var bootDataSourceFactory: DefaultDataSource.Factory
     private lateinit var hlsMediaSourceFactory: HlsMediaSource.Factory
+    private lateinit var assParserFactory: MoonfinAssParserFactory
     private var requestedSubtitleRendererMode: SubtitleRendererMode = SubtitleRendererMode.NATIVE
     private var activeSubtitleRendererMode: SubtitleRendererMode = SubtitleRendererMode.NATIVE
     private var selectedSubtitleCodec: String? = null
@@ -1630,7 +1631,7 @@ class Media3VideoView(
         registerAssFonts(assHandler)
         // Serializes track creation and dialogue reads against the overlay's
         // render thread.
-        val assParserFactory = MoonfinAssParserFactory(
+        assParserFactory = MoonfinAssParserFactory(
             AssSubtitleParserFactory(assHandler),
             assHandler,
         )
