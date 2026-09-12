@@ -74,6 +74,10 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.source.SingleSampleMediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
 import androidx.media3.exoplayer.video.VideoRendererEventListener
@@ -81,6 +85,7 @@ import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.mp4.FragmentedMp4Extractor
+import androidx.media3.extractor.text.SubtitleExtractor
 import androidx.media3.extractor.text.SubtitleParser
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import androidx.media3.extractor.ts.TsExtractor
@@ -3272,14 +3277,65 @@ class Media3VideoView(
         mediaItem: MediaItem,
         startPositionMs: Long,
     ) {
-        if (mediaItem.localConfiguration?.mimeType == MimeTypes.APPLICATION_M3U8) {
-            player.setMediaSource(
-                hlsMediaSourceFactory.createMediaSource(mediaItem),
-                startPositionMs,
-            )
-        } else {
+        if (mediaItem.localConfiguration?.mimeType != MimeTypes.APPLICATION_M3U8) {
             player.setMediaItem(mediaItem, startPositionMs)
+            return
         }
+
+        val hlsMediaSource = hlsMediaSourceFactory.createMediaSource(mediaItem)
+        val subtitleConfigurations =
+            mediaItem.localConfiguration?.subtitleConfigurations.orEmpty()
+
+        if (subtitleConfigurations.isEmpty()) {
+            player.setMediaSource(hlsMediaSource, startPositionMs)
+            return
+        }
+
+        val mediaSources = arrayOfNulls<MediaSource>(subtitleConfigurations.size + 1)
+        mediaSources[0] = hlsMediaSource
+
+        val subtitleMediaSourceFactory =
+            SingleSampleMediaSource.Factory(bootDataSourceFactory)
+
+        subtitleConfigurations.forEachIndexed { index, subtitleConfiguration ->
+            val format = Format.Builder()
+                .setSampleMimeType(subtitleConfiguration.mimeType)
+                .setLanguage(subtitleConfiguration.language)
+                .setSelectionFlags(subtitleConfiguration.selectionFlags)
+                .setRoleFlags(subtitleConfiguration.roleFlags)
+                .setLabel(subtitleConfiguration.label)
+                .setId(subtitleConfiguration.id)
+                .build()
+
+            mediaSources[index + 1] =
+                if (assParserFactory.supportsFormat(format)) {
+                    val extractorsFactory = ExtractorsFactory {
+                        arrayOf(
+                            SubtitleExtractor(
+                                assParserFactory.create(format),
+                                null,
+                            ),
+                        )
+                    }
+
+                    ProgressiveMediaSource.Factory(
+                        bootDataSourceFactory,
+                        extractorsFactory,
+                    ).createMediaSource(
+                        MediaItem.fromUri(subtitleConfiguration.uri.toString()),
+                    )
+                } else {
+                    subtitleMediaSourceFactory.createMediaSource(
+                        subtitleConfiguration,
+                        C.TIME_UNSET,
+                    )
+                }
+        }
+
+        player.setMediaSource(
+            MergingMediaSource(*mediaSources.requireNoNulls()),
+            startPositionMs,
+        )
     }
 
     private fun setMediaItem(startPositionMs: Long, playWhenReady: Boolean) {
