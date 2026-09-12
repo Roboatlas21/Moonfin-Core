@@ -100,7 +100,9 @@ def modules = [
     ['lib-extractor', 'libraries/extractor'],
     ['lib-effect', 'libraries/effect'],
     ['lib-muxer', 'libraries/muxer'],
-    ['lib-transformer', 'libraries/transformer']
+    ['lib-transformer', 'libraries/transformer'],
+    ['test-utils', 'libraries/test_utils'],
+    ['test-utils-robolectric', 'libraries/test_utils_robolectric']
 ]
 
 modules.each { m ->
