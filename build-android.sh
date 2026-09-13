@@ -68,6 +68,8 @@ cd "$REPO_ROOT"
 
 MEDIA3_DIR="$REPO_ROOT/android/.media3"
 MEDIA3_REPO="$MEDIA3_DIR/repo"
+MEDIA3_TRACE_VERSION="1.10.1-moonfin-trace"
+export MEDIA3_TRACE_VERSION
 
 rm -rf "$MEDIA3_DIR"
 git clone --depth 1 --branch 1.10.1 https://github.com/androidx/media.git "$MEDIA3_DIR"
@@ -84,22 +86,20 @@ echo "===== END MEDIA3 PUBLISH CONFIG ====="
 #
 # The publication is the normal Media3 1.10.1 release publication, but the
 # repository is redirected into the Actions workspace.
-cat > /tmp/print-media3-version.gradle <<'EOF'
+cat > /tmp/set-media3-publication-version.gradle <<'EOF'
 gradle.beforeProject { project ->
     project.tasks.matching {
         it.name == 'publishReleasePublicationToMavenRepository'
     }.configureEach {
         doFirst {
-            println "===== ACTUAL MEDIA3 MAVEN PUBLICATION VERSIONS ====="
+            def traceVersion = System.getenv("MEDIA3_TRACE_VERSION")
             def publishing = project.extensions.findByName("publishing")
-            if (publishing != null) {
+            if (publishing != null && traceVersion != null) {
                 publishing.publications.each { publication ->
-                    println "project=${project.path} publication=${publication.name} version=${publication.version}"
+                    publication.version = traceVersion
+                    println "MEDIA3 TRACE: ${project.path}:${publication.name} version=${publication.version}"
                 }
-            } else {
-                println "project=${project.path} publishing extension NOT FOUND"
             }
-            println "===== END ACTUAL MEDIA3 MAVEN PUBLICATION VERSIONS ====="
         }
     }
 }
@@ -108,11 +108,11 @@ EOF
 (
     cd "$MEDIA3_DIR"
     ./gradlew \
-        -I /tmp/print-media3-version.gradle \
+        -I /tmp/set-media3-publication-version.gradle \
         :lib-exoplayer-hls:publishReleasePublicationToMavenRepository \
         :lib-extractor:publishReleasePublicationToMavenRepository \
         -PmavenRepo="$MEDIA3_REPO" \
-        -PreleaseVersion=1.10.1-moonfin-trace \
+        -PreleaseVersion="$MEDIA3_TRACE_VERSION" \
         -x test \
         -x lint \
         --no-daemon

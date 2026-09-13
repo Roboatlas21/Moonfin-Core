@@ -30,6 +30,9 @@ val media3Version = "1.10.1"
 val newBuildDir: Directory = rootProject.layout.buildDirectory.dir("../../build").get()
 rootProject.layout.buildDirectory.value(newBuildDir)
 
+val media3TraceVersion =
+    System.getenv("MEDIA3_TRACE_VERSION") ?: "1.10.1"
+
 subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
@@ -42,10 +45,10 @@ subprojects {
     configurations.configureEach {
         resolutionStrategy.dependencySubstitution {
             substitute(module("androidx.media3:media3-exoplayer-hls:1.10.1"))
-                .using(module("androidx.media3:media3-exoplayer-hls:1.10.1-moonfin-trace"))
+                .using(module("androidx.media3:media3-exoplayer-hls:${media3TraceVersion}"))
 
             substitute(module("androidx.media3:media3-extractor:1.10.1"))
-                .using(module("androidx.media3:media3-extractor:1.10.1-moonfin-trace"))
+                .using(module("androidx.media3:media3-extractor:${media3TraceVersion}"))
         }
     }
 }
