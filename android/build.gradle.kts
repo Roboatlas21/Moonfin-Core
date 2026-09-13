@@ -17,6 +17,9 @@ buildscript {
 
 allprojects {
     repositories {
+        maven {
+            url = uri("$rootDir/.media3/repo")
+        }
         google()
         mavenCentral()
     }
