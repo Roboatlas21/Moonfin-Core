@@ -17,6 +17,16 @@ pluginManagement {
     }
 }
 
+dependencyResolutionManagement {
+    repositories {
+        maven {
+            url = uri("$rootDir/.media3/repo")
+        }
+        google()
+        mavenCentral()
+    }
+}
+
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "8.13.2" apply false
