@@ -1,5 +1,5 @@
 diff --git a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java
-index 188b9de..2b9a604 100644
+index 188b9de..af1781d 100644
 --- a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java
 +++ b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java
 @@ -25,6 +25,7 @@ import androidx.media3.common.C;
@@ -18,7 +18,7 @@ index 188b9de..2b9a604 100644
  import com.google.common.base.Ascii;
  import com.google.common.collect.ImmutableList;
  import java.io.EOFException;
-@@ -434,10 +436,42 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+@@ -434,16 +436,55 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
    public void load() throws IOException {
      // output == null means init() hasn't been called.
      checkNotNull(output);
@@ -78,8 +78,8 @@ index 188b9de..2b9a604 100644
 +              + " elapsedMs=" + (System.currentTimeMillis() - traceStartMs));
      }
    }
-
-@@ -497,8 +525,13 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+ 
+@@ -497,8 +538,13 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
  
    @RequiresNonNull("output")
    private void loadMedia() throws IOException {
