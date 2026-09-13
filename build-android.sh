@@ -235,3 +235,12 @@ fi
 
 echo "TV App Bundle created: $TV_BUNDLE_SOURCE"
 echo "TV App Bundle copied to root: $TV_BUNDLE_OUTPUT"
+
+echo "=== MEDIA3 PUBLISHED ARTIFACTS ==="
+find "$MEDIA3_REPO" -type f | sort | grep -E 'media3-(exoplayer-hls|extractor)/1.10.1-moonfin-trace/'
+echo "=== MEDIA3 POM VERSIONS ==="
+find "$MEDIA3_REPO" -type f -name '*.pom' | sort | grep -E 'media3-(exoplayer-hls|extractor)/1.10.1-moonfin-trace/' | while read -r pom; do
+  echo "--- $pom"
+  grep -m1 '<version>' "$pom" || true
+done
+echo "=== END MEDIA3 DIAGNOSTIC ==="
