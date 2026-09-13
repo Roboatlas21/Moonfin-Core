@@ -87,18 +87,23 @@ echo "===== END MEDIA3 PUBLISH CONFIG ====="
 # The publication is the normal Media3 1.10.1 release publication, but the
 # repository is redirected into the Actions workspace.
 cat > /tmp/set-media3-publication-version.gradle <<'EOF'
+def traceVersion = System.getenv("MEDIA3_TRACE_VERSION")
+
 gradle.beforeProject { project ->
-    project.tasks.matching {
-        it.name == 'publishReleasePublicationToMavenRepository'
-    }.configureEach {
-        doFirst {
-            def traceVersion = System.getenv("MEDIA3_TRACE_VERSION")
+    if (traceVersion != null &&
+        (project.path == ':lib-exoplayer-hls' || project.path == ':lib-extractor')) {
+        project.version = traceVersion
+        println "MEDIA3 TRACE: ${project.path} project.version=${project.version}"
+    }
+}
+
+gradle.projectsEvaluated {
+    gradle.allprojects.each { project ->
+        if (traceVersion != null &&
+            (project.path == ':lib-exoplayer-hls' || project.path == ':lib-extractor')) {
             def publishing = project.extensions.findByName("publishing")
-            if (publishing != null && traceVersion != null) {
-                project.version = traceVersion
-                println "MEDIA3 TRACE: ${project.path} project.version=${project.version}"
+            if (publishing != null) {
                 publishing.publications.each { publication ->
-                    publication.version = traceVersion
                     println "MEDIA3 TRACE: ${project.path}:${publication.name} version=${publication.version}"
                 }
             }
