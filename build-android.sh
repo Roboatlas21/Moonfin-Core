@@ -96,20 +96,6 @@ gradle.beforeProject { project ->
         println "MEDIA3 TRACE: ${project.path} project.version=${project.version}"
     }
 }
-
-gradle.projectsEvaluated {
-    gradle.allprojects.each { project ->
-        if (traceVersion != null &&
-            (project.path == ':lib-exoplayer-hls' || project.path == ':lib-extractor')) {
-            def publishing = project.extensions.findByName("publishing")
-            if (publishing != null) {
-                publishing.publications.each { publication ->
-                    println "MEDIA3 TRACE: ${project.path}:${publication.name} version=${publication.version}"
-                }
-            }
-        }
-    }
-}
 EOF
 
 (
