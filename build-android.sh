@@ -86,23 +86,24 @@ echo "===== END MEDIA3 PUBLISH CONFIG ====="
 # repository is redirected into the Actions workspace.
 cat > /tmp/print-media3-version.gradle <<'EOF'
 gradle.beforeProject { project ->
-    if (project.path == ':lib-exoplayer-hls' || project.path == ':lib-extractor') {
-        println "===== EFFECTIVE MEDIA3 releaseVersion ====="
-        println "project=${project.path}"
-        println "releaseVersion=${project.findProperty('releaseVersion')}"
-        println "hasProperty=${project.hasProperty('releaseVersion')}"
-        println "===== END EFFECTIVE MEDIA3 releaseVersion ====="
+    project.tasks.matching {
+        it.name == 'publishReleasePublicationToMavenRepository'
+    }.configureEach {
+        doFirst {
+            println "===== ACTUAL MEDIA3 MAVEN PUBLICATION VERSIONS ====="
+            def publishing = project.extensions.findByName("publishing")
+            if (publishing != null) {
+                publishing.publications.each { publication ->
+                    println "project=${project.path} publication=${publication.name} version=${publication.version}"
+                }
+            } else {
+                println "project=${project.path} publishing extension NOT FOUND"
+            }
+            println "===== END ACTUAL MEDIA3 MAVEN PUBLICATION VERSIONS ====="
+        }
     }
 }
 EOF
-
-echo "===== MEDIA3 VERSION ASSIGNMENTS ====="
-grep -RniE \
-  --include='*.gradle' \
-  --include='*.gradle.kts' \
-  '(^|[[:space:]])(version[[:space:]]*=|releaseVersion[[:space:]]*=|\.version[[:space:]]*=)' \
-  "$MEDIA3_DIR" | head -200
-echo "===== END MEDIA3 VERSION ASSIGNMENTS ====="
 
 (
     cd "$MEDIA3_DIR"
