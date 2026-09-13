@@ -67,13 +67,30 @@ echo "${APP_NAME} Android TV version: ${TV_VERSION} (${TV_BUILD_NUMBER})"
 cd "$REPO_ROOT"
 
 MEDIA3_DIR="$REPO_ROOT/android/.media3"
+MEDIA3_REPO="$MEDIA3_DIR/repo"
+
 rm -rf "$MEDIA3_DIR"
 git clone --depth 1 --branch 1.10.1 https://github.com/androidx/media.git "$MEDIA3_DIR"
-sed -i 's/^def rootDir = file(".")/def rootDir = file(".media3")/' "$MEDIA3_DIR/core_settings.gradle"
-sed -i "/lib-cast/,+1d" "$MEDIA3_DIR/core_settings.gradle"
-sed -i "/lib-ui-compose-material3/,+1d" "$MEDIA3_DIR/core_settings.gradle"
-sed -i "/lib-ui-compose/,+1d" "$MEDIA3_DIR/core_settings.gradle"
+
+# Apply temporary diagnostic instrumentation to Media3 itself.
 git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
+
+# Build Media3 using Media3's own Gradle project and publish only the
+# instrumented libraries to a workspace-local Maven repository.
+#
+# The publication is the normal Media3 1.10.1 release publication, but the
+# repository is redirected into the Actions workspace.
+(
+    cd "$MEDIA3_DIR"
+    ./gradlew \
+        :lib-exoplayer-hls:publishReleasePublicationToMavenRepository \
+        :lib-extractor:publishReleasePublicationToMavenRepository \
+        -PmavenRepo="$MEDIA3_REPO" \
+        -PreleaseVersion=1.10.1 \
+        -x test \
+        -x lint \
+        --no-daemon
+)
 
 echo "Cleaning previous Flutter outputs..."
 "$FLUTTER" clean

@@ -31,7 +31,7 @@ index 188b9de..2b9a604 100644
 +    Log.d(
 +        "MF_HLS_TRACE",
 +        "HLS_CHUNK_LOAD seq="
-+            + chunkMediaSequence
++            + chunkIndex
 +            + " uri="
 +            + dataSpec.uri
 +            + " startUs="
@@ -52,7 +52,7 @@ index 188b9de..2b9a604 100644
 +    Log.d(
 +        "MF_HLS_TRACE",
 +        "HLS_CHUNK_LOAD_END seq="
-+            + chunkMediaSequence
++            + chunkIndex
 +            + " completed="
 +            + loadCompleted
 +            + " canceled="
@@ -68,7 +68,7 @@ index 188b9de..2b9a604 100644
    private void loadMedia() throws IOException {
 -    feedDataToExtractor(
 -        dataSource, dataSpec, mediaSegmentEncrypted, /* initializeTimestampAdjuster= */ true);
-+    TsExtractor.debugBeginHlsSegment(chunkMediaSequence, dataSpec.uri.toString());
++    TsExtractor.debugBeginHlsSegment(chunkIndex, dataSpec.uri.toString());
 +    try {
 +      feedDataToExtractor(
 +          dataSource, dataSpec, mediaSegmentEncrypted, /* initializeTimestampAdjuster= */ true);

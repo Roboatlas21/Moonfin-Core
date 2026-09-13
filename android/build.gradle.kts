@@ -1,5 +1,8 @@
 buildscript {
     repositories {
+        maven {
+            url = uri("$rootDir/.media3/repo")
+        }
         google()
         mavenCentral()
     }
@@ -9,9 +12,6 @@ buildscript {
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20")
 
         // Required by Media3 1.10.1 legacy module build.gradle files.
-        classpath("com.google.android.gms:strict-version-matcher-plugin:1.2.4")
-        classpath("org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.2.20")
-        classpath("com.google.protobuf:protobuf-gradle-plugin:0.9.5")
     }
 }
 
@@ -32,11 +32,7 @@ subprojects {
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
 subprojects {
-    // Media3 is imported as Android library subprojects. Do not force those
-    // projects to evaluate :app first, because :app depends on Media3.
-    if (!project.name.startsWith("media3-")) {
-        project.evaluationDependsOn(":app")
-    }
+    project.evaluationDependsOn(":app")
 }
 
 subprojects {
