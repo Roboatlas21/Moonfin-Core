@@ -95,6 +95,8 @@ gradle.beforeProject { project ->
             def traceVersion = System.getenv("MEDIA3_TRACE_VERSION")
             def publishing = project.extensions.findByName("publishing")
             if (publishing != null && traceVersion != null) {
+                project.version = traceVersion
+                println "MEDIA3 TRACE: ${project.path} project.version=${project.version}"
                 publishing.publications.each { publication ->
                     publication.version = traceVersion
                     println "MEDIA3 TRACE: ${project.path}:${publication.name} version=${publication.version}"
