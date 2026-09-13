@@ -91,7 +91,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.media3:media3-exoplayer:1.10.1")
-    implementation("androidx.media3:media3-exoplayer-hls:1.10.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.10.1-moonfin-trace")
     implementation("androidx.media3:media3-exoplayer-dash:1.10.1")
     implementation("androidx.media3:media3-exoplayer-rtsp:1.10.1")
     implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.10.1")
@@ -99,7 +99,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.10.1")
     implementation("androidx.media3:media3-common:1.10.1")
     implementation("androidx.media3:media3-datasource:1.10.1")
-    implementation("androidx.media3:media3-extractor:1.10.1")
+    implementation("androidx.media3:media3-extractor:1.10.1-moonfin-trace")
     implementation("androidx.media3:media3-transformer:1.10.1")
     // dav1d (AV1) software decoder, unpacked from its .aar into a plain .jar +
     // src/main/jniLibs. A library module cannot bundle a direct local .aar

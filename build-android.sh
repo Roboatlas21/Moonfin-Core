@@ -86,7 +86,7 @@ git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
         :lib-exoplayer-hls:publishReleasePublicationToMavenRepository \
         :lib-extractor:publishReleasePublicationToMavenRepository \
         -PmavenRepo="$MEDIA3_REPO" \
-        -PreleaseVersion=1.10.1 \
+        -PreleaseVersion=1.10.1-moonfin-trace \
         -x test \
         -x lint \
         --no-daemon
