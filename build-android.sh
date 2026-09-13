@@ -100,6 +100,19 @@ echo "===== END MEDIA3 PUBLISH CONFIG ====="
     echo "===== END MEDIA3 LOCAL REPO ====="
 )
 
+echo "===== MEDIA3 REPOSITORY CHECK ====="
+echo "MEDIA3_REPO=$MEDIA3_REPO"
+if [ -d "$MEDIA3_REPO" ]; then
+    echo "LOCAL MEDIA3 REPO EXISTS"
+    find "$MEDIA3_REPO" -maxdepth 4 -type f | sort | head -100
+else
+    echo "ERROR: LOCAL MEDIA3 REPO DOES NOT EXIST"
+fi
+
+echo "===== ANDROID SETTINGS REPOSITORIES ====="
+grep -n -A12 -B2 "dependencyResolutionManagement" "$REPO_ROOT/android/settings.gradle.kts"
+echo "===== END ANDROID SETTINGS REPOSITORIES ====="
+
 echo "Cleaning previous Flutter outputs..."
 "$FLUTTER" clean
 
