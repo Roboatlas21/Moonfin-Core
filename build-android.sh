@@ -96,6 +96,14 @@ gradle.beforeProject { project ->
 }
 EOF
 
+echo "===== MEDIA3 VERSION ASSIGNMENTS ====="
+grep -RniE \
+  --include='*.gradle' \
+  --include='*.gradle.kts' \
+  '(^|[[:space:]])(version[[:space:]]*=|releaseVersion[[:space:]]*=|\.version[[:space:]]*=)' \
+  "$MEDIA3_DIR" | head -200
+echo "===== END MEDIA3 VERSION ASSIGNMENTS ====="
+
 (
     cd "$MEDIA3_DIR"
     ./gradlew \
