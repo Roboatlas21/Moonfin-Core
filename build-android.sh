@@ -84,9 +84,22 @@ echo "===== END MEDIA3 PUBLISH CONFIG ====="
 #
 # The publication is the normal Media3 1.10.1 release publication, but the
 # repository is redirected into the Actions workspace.
+cat > /tmp/print-media3-version.gradle <<'EOF'
+gradle.beforeProject { project ->
+    if (project.path == ':lib-exoplayer-hls' || project.path == ':lib-extractor') {
+        println "===== EFFECTIVE MEDIA3 releaseVersion ====="
+        println "project=${project.path}"
+        println "releaseVersion=${project.findProperty('releaseVersion')}"
+        println "hasProperty=${project.hasProperty('releaseVersion')}"
+        println "===== END EFFECTIVE MEDIA3 releaseVersion ====="
+    }
+}
+EOF
+
 (
     cd "$MEDIA3_DIR"
     ./gradlew \
+        -I /tmp/print-media3-version.gradle \
         :lib-exoplayer-hls:publishReleasePublicationToMavenRepository \
         :lib-extractor:publishReleasePublicationToMavenRepository \
         -PmavenRepo="$MEDIA3_REPO" \
