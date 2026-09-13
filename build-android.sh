@@ -74,6 +74,10 @@ export MEDIA3_TRACE_VERSION
 rm -rf "$MEDIA3_DIR"
 git clone --depth 1 --branch 1.10.1 https://github.com/androidx/media.git "$MEDIA3_DIR"
 
+sed -i "s/^    releaseVersion = '.*'/    releaseVersion = '$MEDIA3_TRACE_VERSION'/" "$MEDIA3_DIR/constants.gradle"
+echo "MEDIA3 TRACE: constants.gradle releaseVersion:"
+grep -n "releaseVersion" "$MEDIA3_DIR/constants.gradle"
+
 # Apply temporary diagnostic instrumentation to Media3 itself.
 git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
 
