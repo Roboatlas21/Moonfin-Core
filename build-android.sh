@@ -90,6 +90,10 @@ git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
         -x test \
         -x lint \
         --no-daemon
+
+    echo "===== MEDIA3 LOCAL REPO AFTER PUBLISH ====="
+    find "$MEDIA3_REPO" -type f | sort
+    echo "===== END MEDIA3 LOCAL REPO ====="
 )
 
 echo "Cleaning previous Flutter outputs..."
