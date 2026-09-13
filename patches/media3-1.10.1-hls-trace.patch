@@ -18,47 +18,71 @@ index 188b9de..2b9a604 100644
  import com.google.common.base.Ascii;
  import com.google.common.collect.ImmutableList;
  import java.io.EOFException;
-@@ -434,10 +436,26 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+@@ -434,10 +436,42 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
    public void load() throws IOException {
      // output == null means init() hasn't been called.
      checkNotNull(output);
++    long traceStartMs = System.currentTimeMillis();
 +    boolean extractorReused = false;
      if (extractor == null && previousExtractor != null && previousExtractor.isReusable()) {
        extractor = previousExtractor;
        initDataLoadRequired = false;
 +      extractorReused = true;
      }
+-    maybeLoadInitData();
+-    if (!loadCanceled) {
+-      if (!hasGapTag) {
+-        loadMedia();
 +    Log.d(
 +        "MF_HLS_TRACE",
-+        "HLS_CHUNK_LOAD seq="
-+            + chunkIndex
-+            + " uri="
-+            + dataSpec.uri
-+            + " startUs="
-+            + startTimeUs
-+            + " endUs="
-+            + endTimeUs
-+            + " previousExtractor="
-+            + (previousExtractor != null)
-+            + " extractorReused="
-+            + extractorReused);
-     maybeLoadInitData();
-     if (!loadCanceled) {
-       if (!hasGapTag) {
++        "LOAD START"
++            + " seq=" + chunkIndex
++            + " uri=" + dataSpec.uri
++            + " startUs=" + startTimeUs
++            + " endUs=" + endTimeUs
++            + " previousExtractor=" + (previousExtractor != null)
++            + " extractorReused=" + extractorReused
++            + " extractorBefore="
++            + (extractor != null ? extractor.getClass().getSimpleName() : "null"));
++    try {
++      maybeLoadInitData();
++      if (!loadCanceled) {
++        if (!hasGapTag) {
++          loadMedia();
++        }
++        loadCompleted = !loadCanceled;
+       }
+-      loadCompleted = !loadCanceled;
++    } catch (Exception e) {
++      Log.e(
++          "MF_HLS_TRACE",
++          "LOAD ERROR"
++              + " seq=" + chunkIndex
++              + " uri=" + dataSpec.uri
++              + " exception=" + e.getClass().getSimpleName()
++              + " message=" + e.getMessage(),
++          e);
++      throw e;
++    } finally {
++      Log.d(
++          "MF_HLS_TRACE",
++          "LOAD END"
++              + " seq=" + chunkIndex
++              + " uri=" + dataSpec.uri
++              + " completed=" + loadCompleted
++              + " canceled=" + loadCanceled
++              + " nextLoadPosition=" + nextLoadPosition
++              + " extractor="
++              + (extractor != null ? extractor.getClass().getSimpleName() : "null")
++              + " extractorReused=" + extractorReused
++              + " elapsedMs=" + (System.currentTimeMillis() - traceStartMs));
+     }
+   }
+
 @@ -445,6 +463,16 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
        }
        loadCompleted = !loadCanceled;
      }
-+    Log.d(
-+        "MF_HLS_TRACE",
-+        "HLS_CHUNK_LOAD_END seq="
-+            + chunkIndex
-+            + " completed="
-+            + loadCompleted
-+            + " canceled="
-+            + loadCanceled
-+            + " nextLoadPosition="
-+            + nextLoadPosition);
    }
  
    /**
