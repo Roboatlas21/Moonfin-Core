@@ -79,13 +79,6 @@ index 188b9de..2b9a604 100644
      }
    }
 
-@@ -445,6 +463,16 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
-       }
-       loadCompleted = !loadCanceled;
-     }
-   }
- 
-   /**
 @@ -497,8 +525,13 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
  
    @RequiresNonNull("output")
