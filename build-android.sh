@@ -75,6 +75,10 @@ git clone --depth 1 --branch 1.10.1 https://github.com/androidx/media.git "$MEDI
 # Apply temporary diagnostic instrumentation to Media3 itself.
 git -C "$MEDIA3_DIR" apply "$REPO_ROOT/patches/media3-1.10.1-hls-trace.patch"
 
+echo "===== MEDIA3 PUBLISH CONFIG ====="
+grep -n -A5 -B5 "releaseVersion" "$MEDIA3_DIR/publish.gradle"
+echo "===== END MEDIA3 PUBLISH CONFIG ====="
+
 # Build Media3 using Media3's own Gradle project and publish only the
 # instrumented libraries to a workspace-local Maven repository.
 #
