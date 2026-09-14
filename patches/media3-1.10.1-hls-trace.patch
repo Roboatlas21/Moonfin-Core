@@ -1,3 +1,199 @@
+diff --git a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsChunkSource.java b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsChunkSource.java
+index d527f52..602bcf3 100644
+--- a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsChunkSource.java
++++ b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsChunkSource.java
+@@ -31,6 +31,7 @@ import androidx.annotation.VisibleForTesting;
+ import androidx.media3.common.C;
+ import androidx.media3.common.Format;
+ import androidx.media3.common.TrackGroup;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.TimestampAdjuster;
+ import androidx.media3.common.util.UriUtil;
+ import androidx.media3.common.util.Util;
+@@ -442,6 +443,38 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+       boolean allowEndOfStream,
+       HlsChunkHolder out) {
+     @Nullable HlsMediaChunk previous = queue.isEmpty() ? null : Iterables.getLast(queue);
++
++    boolean traceSchedule =
++        previous == null || previous.chunkIndex <= 1;
++
++    if (traceSchedule) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "CHUNK_SOURCE_ENTER"
++              + " previousSeq="
++              + (previous == null
++                  ? "none"
++                  : previous.chunkIndex)
++              + " previousCompleted="
++              + (previous == null
++                  ? "n/a"
++                  : previous.isLoadCompleted())
++              + " previousPublished="
++              + (previous == null
++                  ? "n/a"
++                  : previous.isPublished())
++              + " playbackUs="
++              + loadingInfo.playbackPositionUs
++              + " loadPositionUs="
++              + loadPositionUs
++              + " largestReadUs="
++              + largestReadPositionUs
++              + " queueSize="
++              + queue.size()
++              + " allowEndOfStream="
++              + allowEndOfStream);
++    }
++
+     int oldTrackIndex = previous == null ? C.INDEX_UNSET : trackGroup.indexOf(previous.trackFormat);
+     long playbackPositionUs = loadingInfo.playbackPositionUs;
+     long bufferedDurationUs = loadPositionUs - playbackPositionUs;
+@@ -473,6 +506,15 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+     boolean switchingTrack = oldTrackIndex != selectedTrackIndex;
+     Uri selectedPlaylistUrl = redundantGroups[selectedTrackIndex].getCurrentPlaylistUrl();
+     if (!playlistTracker.isSnapshotValid(selectedPlaylistUrl)) {
++      if (traceSchedule) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "CHUNK_SOURCE_WAIT"
++                + " reason=invalidPlaylistSnapshot"
++                + " selectedTrack="
++                + selectedTrackIndex);
++      }
++
+       out.playlistUrl = selectedPlaylistUrl;
+       nextChunkStuckOnPlaylistUrl = selectedPlaylistUrl;
+       // Retry when playlist is refreshed.
+@@ -524,6 +566,36 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+       partIndex = nextMediaSequenceAndPartIndexWithoutAdapting.second;
+     }
+ 
++    if (traceSchedule || chunkMediaSequence <= 2) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "CHUNK_SOURCE_SELECTED"
++              + " previousSeq="
++              + (previous == null
++                  ? "none"
++                  : previous.chunkIndex)
++              + " nextSeq="
++              + chunkMediaSequence
++              + " partIndex="
++              + partIndex
++              + " playlistMediaSequence="
++              + playlist.mediaSequence
++              + " playlistSegments="
++              + playlist.segments.size()
++              + " hasEndTag="
++              + playlist.hasEndTag
++              + " independentSegments="
++              + playlist.hasIndependentSegments
++              + " oldTrack="
++              + oldTrackIndex
++              + " selectedTrack="
++              + selectedTrackIndex
++              + " switchingTrack="
++              + switchingTrack
++              + " forcedKeep="
++              + shouldForceKeepCurrentTrackSelection);
++    }
++
+     // If the selected track index changes from another one, we should deactivate the old
+     // playlist for playback.
+     if (selectedTrackIndex != oldTrackIndex && oldTrackIndex != C.INDEX_UNSET) {
+@@ -532,6 +604,17 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+     }
+ 
+     if (chunkMediaSequence < playlist.mediaSequence) {
++      if (traceSchedule) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "CHUNK_SOURCE_STOP"
++                + " reason=behindLiveWindow"
++                + " nextSeq="
++                + chunkMediaSequence
++                + " playlistMediaSequence="
++                + playlist.mediaSequence);
++      }
++
+       fatalError = new BehindLiveWindowException();
+       return;
+     }
+@@ -541,11 +624,33 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+         getNextSegmentHolder(playlist, chunkMediaSequence, partIndex);
+     if (segmentBaseHolder == null) {
+       if (!playlist.hasEndTag) {
++        if (traceSchedule) {
++          Log.d(
++              "MF_HLS_SCHED",
++              "CHUNK_SOURCE_WAIT"
++                  + " reason=segmentNotAvailableRefreshPlaylist"
++                  + " nextSeq="
++                  + chunkMediaSequence);
++        }
++
+         // Reload the playlist in case of a live stream.
+         out.playlistUrl = selectedPlaylistUrl;
+         nextChunkStuckOnPlaylistUrl = selectedPlaylistUrl;
+         return;
+       } else if (allowEndOfStream || playlist.segments.isEmpty()) {
++        if (traceSchedule) {
++          Log.d(
++              "MF_HLS_SCHED",
++              "CHUNK_SOURCE_STOP"
++                  + " reason=endOfStream"
++                  + " nextSeq="
++                  + chunkMediaSequence
++                  + " allowEndOfStream="
++                  + allowEndOfStream
++                  + " playlistSegments="
++                  + playlist.segments.size());
++        }
++
+         out.endOfStream = true;
+         return;
+       }
+@@ -626,6 +731,17 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+             segmentBaseHolder,
+             startOfPlaylistInPeriodUs);
+     if (shouldSpliceIn && segmentBaseHolder.isPreload) {
++      if (traceSchedule) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "CHUNK_SOURCE_WAIT"
++                + " reason=splicePreload"
++                + " nextSeq="
++                + chunkMediaSequence
++                + " partIndex="
++                + partIndex);
++      }
++
+       // We don't support discarding spliced-in segments [internal: b/159904763], but preload
+       // parts may need to be discarded if they are removed before becoming permanently published.
+       // Hence, don't allow this combination and instead wait with loading the next part until it
+@@ -655,6 +771,21 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+             isIndependent,
+             playerId,
+             cmcdDataFactory);
++
++    if (traceSchedule || chunkMediaSequence <= 2) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "CHUNK_SOURCE_RESULT"
++              + " result=mediaChunk"
++              + " seq="
++              + chunkMediaSequence
++              + " partIndex="
++              + partIndex
++              + " splice="
++              + shouldSpliceIn
++              + " independent="
++              + isIndependent);
++    }
+   }
+ 
+   private static boolean isIndependent(
 diff --git a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java
 index 188b9de..af1781d 100644
 --- a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaChunk.java
@@ -95,6 +291,477 @@ index 188b9de..af1781d 100644
    }
  
    /**
+diff --git a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaPeriod.java b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaPeriod.java
+index 43f0fa3..e5105d2 100644
+--- a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaPeriod.java
++++ b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsMediaPeriod.java
+@@ -29,6 +29,7 @@ import androidx.media3.common.Metadata;
+ import androidx.media3.common.MimeTypes;
+ import androidx.media3.common.StreamKey;
+ import androidx.media3.common.TrackGroup;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.NullableType;
+ import androidx.media3.common.util.Util;
+ import androidx.media3.datasource.DataSource;
+@@ -441,15 +442,49 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+ 
+   @Override
+   public boolean continueLoading(LoadingInfo loadingInfo) {
++    boolean traceSchedule =
++        loadingInfo.playbackPositionUs <= 10_000_000L;
++
++    if (traceSchedule) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "PERIOD_CONTINUE_ENTER"
++              + " playbackUs="
++              + loadingInfo.playbackPositionUs
++              + " prepared="
++              + (trackGroups != null)
++              + " enabledWrappers="
++              + enabledSampleStreamWrappers.length
++              + " nextLoadUs="
++              + compositeSequenceableLoader.getNextLoadPositionUs());
++    }
++
++    boolean result;
++
+     if (trackGroups == null) {
+       // Preparation is still going on.
+       for (HlsSampleStreamWrapper wrapper : sampleStreamWrappers) {
+         wrapper.continuePreparing();
+       }
+-      return false;
++      result = false;
+     } else {
+-      return compositeSequenceableLoader.continueLoading(loadingInfo);
++      result =
++          compositeSequenceableLoader.continueLoading(loadingInfo);
+     }
++
++    if (traceSchedule) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "PERIOD_CONTINUE_RETURN"
++              + " playbackUs="
++              + loadingInfo.playbackPositionUs
++              + " result="
++              + result
++              + " nextLoadUs="
++              + compositeSequenceableLoader.getNextLoadPositionUs());
++    }
++
++    return result;
+   }
+ 
+   @Override
+@@ -1085,7 +1120,19 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
+ 
+     @Override
+     public void onContinueLoadingRequested(HlsSampleStreamWrapper sampleStreamWrapper) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "PERIOD_CALLBACK_RECEIVED"
++              + " wrapperLoading="
++              + sampleStreamWrapper.isLoading()
++              + " nextLoadUs="
++              + sampleStreamWrapper.getNextLoadPositionUs());
++
+       mediaPeriodCallback.onContinueLoadingRequested(HlsMediaPeriod.this);
++
++      Log.d(
++          "MF_HLS_SCHED",
++          "PERIOD_CALLBACK_FORWARD");
+     }
+   }
+ }
+diff --git a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsSampleStreamWrapper.java b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsSampleStreamWrapper.java
+index 40ce0bf..1edf36a 100644
+--- a/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsSampleStreamWrapper.java
++++ b/libraries/exoplayer_hls/src/main/java/androidx/media3/exoplayer/hls/HlsSampleStreamWrapper.java
+@@ -793,7 +793,69 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+ 
+   @Override
+   public boolean continueLoading(LoadingInfo loadingInfo) {
+-    if (loadingFinished || loader.isLoading() || loader.hasFatalError()) {
++    @Nullable HlsMediaChunk traceLastChunk =
++        mediaChunks.isEmpty() ? null : getLastMediaChunk();
++
++    boolean traceSchedule =
++        traceLastChunk == null || traceLastChunk.chunkIndex <= 1;
++
++    boolean traceLoaderLoading = loader.isLoading();
++    boolean traceFatalError = loader.hasFatalError();
++
++    if (traceSchedule) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "CONTINUE_ENTER"
++              + " uid="
++              + uid
++              + " playbackUs="
++              + loadingInfo.playbackPositionUs
++              + " prepared="
++              + prepared
++              + " loadingFinished="
++              + loadingFinished
++              + " loaderLoading="
++              + traceLoaderLoading
++              + " fatalError="
++              + traceFatalError
++              + " pendingReset="
++              + isPendingReset()
++              + " enabledTrackGroups="
++              + enabledTrackGroupCount
++              + " queueSize="
++              + mediaChunks.size()
++              + " lastSeq="
++              + (traceLastChunk == null
++                  ? "none"
++                  : traceLastChunk.chunkIndex)
++              + " lastCompleted="
++              + (traceLastChunk == null
++                  ? "n/a"
++                  : traceLastChunk.isLoadCompleted())
++              + " lastPublished="
++              + (traceLastChunk == null
++                  ? "n/a"
++                  : traceLastChunk.isPublished()));
++    }
++
++    if (loadingFinished || traceLoaderLoading || traceFatalError) {
++      if (traceSchedule) {
++        String reason =
++            loadingFinished
++                ? "loadingFinished"
++                : traceLoaderLoading
++                    ? "loaderAlreadyLoading"
++                    : "fatalError";
++
++        Log.d(
++            "MF_HLS_SCHED",
++            "CONTINUE_SKIP"
++                + " uid="
++                + uid
++                + " reason="
++                + reason);
++      }
++
+       return false;
+     }
+ 
+@@ -826,7 +888,26 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+         }
+       }
+     }
++    if (traceSchedule) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "GET_NEXT_CALL"
++              + " uid="
++              + uid
++              + " playbackUs="
++              + loadingInfo.playbackPositionUs
++              + " loadPositionUs="
++              + loadPositionUs
++              + " largestReadUs="
++              + largestReadPositionUs
++              + " queueSize="
++              + chunkQueue.size()
++              + " allowEndOfStream="
++              + (prepared || !chunkQueue.isEmpty()));
++    }
++
+     nextChunkHolder.clear();
++
+     chunkSource.getNextChunk(
+         loadingInfo,
+         loadPositionUs,
+@@ -838,26 +919,138 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+     @Nullable Chunk loadable = nextChunkHolder.chunk;
+     @Nullable Uri playlistUrlToLoad = nextChunkHolder.playlistUrl;
+ 
++    long traceResultSeq =
++        loadable instanceof HlsMediaChunk
++            ? ((HlsMediaChunk) loadable).chunkIndex
++            : C.INDEX_UNSET;
++
++    boolean traceResult =
++        traceSchedule
++            || (traceResultSeq != C.INDEX_UNSET
++                && traceResultSeq <= 2);
++
++    if (traceResult) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "GET_NEXT_RESULT"
++              + " uid="
++              + uid
++              + " endOfStream="
++              + endOfStream
++              + " loadable="
++              + (loadable == null
++                  ? "null"
++                  : loadable.getClass().getSimpleName())
++              + " seq="
++              + (traceResultSeq == C.INDEX_UNSET
++                  ? "n/a"
++                  : traceResultSeq)
++              + " playlistRefresh="
++              + (playlistUrlToLoad != null));
++    }
++
+     if (endOfStream) {
++      if (traceResult) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "CONTINUE_RESULT"
++                + " uid="
++                + uid
++                + " result=endOfStream");
++      }
++
+       pendingResetPositionUs = C.TIME_UNSET;
+       loadingFinished = true;
+       return true;
+     }
+ 
+     if (loadable == null) {
++      if (traceResult) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "CONTINUE_RESULT"
++                + " uid="
++                + uid
++                + " result=noChunk"
++                + " playlistRefresh="
++                + (playlistUrlToLoad != null));
++      }
++
+       if (playlistUrlToLoad != null) {
+         callback.onPlaylistRefreshRequired(playlistUrlToLoad);
+       }
++
+       return false;
+     }
+ 
+     if (isMediaChunk(loadable)) {
++      if (traceResult) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "MEDIA_CHUNK_INIT_CALL"
++                + " uid="
++                + uid
++                + " seq="
++                + traceResultSeq);
++      }
++
+       maybeDiscardUpstreamForNewMediaChunk((HlsMediaChunk) loadable);
+       initMediaChunkLoad((HlsMediaChunk) loadable);
++
++      if (traceResult) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "MEDIA_CHUNK_INIT_RETURN"
++                + " uid="
++                + uid
++                + " seq="
++                + traceResultSeq
++                + " queueSize="
++                + mediaChunks.size());
++      }
+     }
++
+     loadingChunk = loadable;
+-    loader.startLoading(
+-        loadable, this, loadErrorHandlingPolicy.getMinimumLoadableRetryCount(loadable.type));
++    int minimumRetryCount =
++        loadErrorHandlingPolicy.getMinimumLoadableRetryCount(loadable.type);
++
++    if (traceResult) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "LOADER_START_CALL"
++              + " uid="
++              + uid
++              + " loadable="
++              + loadable.getClass().getSimpleName()
++              + " seq="
++              + (traceResultSeq == C.INDEX_UNSET
++                  ? "n/a"
++                  : traceResultSeq)
++              + " loaderLoadingBefore="
++              + loader.isLoading()
++              + " retryCount="
++              + minimumRetryCount);
++    }
++
++    long loaderStartRealtimeMs =
++        loader.startLoading(loadable, this, minimumRetryCount);
++
++    if (traceResult) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "LOADER_START_RETURN"
++              + " uid="
++              + uid
++              + " seq="
++              + (traceResultSeq == C.INDEX_UNSET
++                  ? "n/a"
++                  : traceResultSeq)
++              + " loaderLoadingAfter="
++              + loader.isLoading()
++              + " startRealtimeMs="
++              + loaderStartRealtimeMs);
++    }
++
+     return true;
+   }
+ 
+@@ -933,6 +1126,30 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+   @Override
+   public void onLoadStarted(
+       Chunk loadable, long elapsedRealtimeMs, long loadDurationMs, int retryCount) {
++
++    long startedSeq =
++        loadable instanceof HlsMediaChunk
++            ? ((HlsMediaChunk) loadable).chunkIndex
++            : C.INDEX_UNSET;
++
++    if (startedSeq == C.INDEX_UNSET || startedSeq <= 1) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "LOAD_CALLBACK_STARTED"
++              + " uid="
++              + uid
++              + " loadable="
++              + loadable.getClass().getSimpleName()
++              + " seq="
++              + (startedSeq == C.INDEX_UNSET
++                  ? "n/a"
++                  : startedSeq)
++              + " retryCount="
++              + retryCount
++              + " durationMs="
++              + loadDurationMs);
++    }
++
+     LoadEventInfo loadEventInfo =
+         retryCount == 0
+             ? new LoadEventInfo(loadable.loadTaskId, loadable.dataSpec, elapsedRealtimeMs)
+@@ -960,6 +1177,43 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+   public void onLoadCompleted(Chunk loadable, long elapsedRealtimeMs, long loadDurationMs) {
+     loadingChunk = null;
+     chunkSource.onChunkLoadCompleted(loadable);
++
++    long completedSeq =
++        loadable instanceof HlsMediaChunk
++            ? ((HlsMediaChunk) loadable).chunkIndex
++            : C.INDEX_UNSET;
++
++    boolean traceCompleted =
++        completedSeq == C.INDEX_UNSET || completedSeq <= 1;
++
++    if (traceCompleted) {
++      Log.d(
++          "MF_HLS_SCHED",
++          "LOAD_CALLBACK_COMPLETED"
++              + " uid="
++              + uid
++              + " loadable="
++              + loadable.getClass().getSimpleName()
++              + " seq="
++              + (completedSeq == C.INDEX_UNSET
++                  ? "n/a"
++                  : completedSeq)
++              + " prepared="
++              + prepared
++              + " loaderLoading="
++              + loader.isLoading()
++              + " loadingFinished="
++              + loadingFinished
++              + " pendingReset="
++              + isPendingReset()
++              + " enabledTrackGroups="
++              + enabledTrackGroupCount
++              + " queueSize="
++              + mediaChunks.size()
++              + " durationMs="
++              + loadDurationMs);
++    }
++
+     LoadEventInfo loadEventInfo =
+         new LoadEventInfo(
+             loadable.loadTaskId,
+@@ -980,9 +1234,67 @@ import org.checkerframework.checker.nullness.qual.RequiresNonNull;
+         loadable.startTimeUs,
+         loadable.endTimeUs);
+     if (!prepared) {
+-      continueLoading(new LoadingInfo.Builder().setPlaybackPositionUs(lastSeekPositionUs).build());
++      if (traceCompleted) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "NEXT_TRIGGER"
++                + " uid="
++                + uid
++                + " seq="
++                + (completedSeq == C.INDEX_UNSET
++                    ? "n/a"
++                    : completedSeq)
++                + " mode=directContinueLoading");
++      }
++
++      boolean continueResult =
++          continueLoading(
++              new LoadingInfo.Builder()
++                  .setPlaybackPositionUs(lastSeekPositionUs)
++                  .build());
++
++      if (traceCompleted) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "NEXT_TRIGGER_RETURN"
++                + " uid="
++                + uid
++                + " seq="
++                + (completedSeq == C.INDEX_UNSET
++                    ? "n/a"
++                    : completedSeq)
++                + " mode=directContinueLoading"
++                + " result="
++                + continueResult);
++      }
+     } else {
++      if (traceCompleted) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "NEXT_TRIGGER"
++                + " uid="
++                + uid
++                + " seq="
++                + (completedSeq == C.INDEX_UNSET
++                    ? "n/a"
++                    : completedSeq)
++                + " mode=callback");
++      }
++
+       callback.onContinueLoadingRequested(this);
++
++      if (traceCompleted) {
++        Log.d(
++            "MF_HLS_SCHED",
++            "NEXT_TRIGGER_RETURN"
++                + " uid="
++                + uid
++                + " seq="
++                + (completedSeq == C.INDEX_UNSET
++                    ? "n/a"
++                    : completedSeq)
++                + " mode=callback");
++      }
+     }
+   }
+ 
 diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java
 index a86c81f..9f5a778 100644
 --- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java
@@ -147,7 +814,7 @@ index a86c81f..9f5a778 100644
  
      private static final class SliceHeaderData {
 diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
-index a13bf74..8a79829 100644
+index a13bf74..ee0dce1 100644
 --- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
 +++ b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
 @@ -90,6 +90,21 @@ public final class PesReader implements TsPayloadReader {
@@ -155,9 +822,9 @@ index a13bf74..8a79829 100644
      checkNotNull(timestampAdjuster);
  
 +    if (data.bytesLeft() > 0 && reader instanceof H264Reader) {
-+      TsExtractor.debugVideoPesFlags(flags);
++      boolean logVideoPusi = TsExtractor.debugVideoPesFlags(flags);
 +
-+      if ((flags & FLAG_PAYLOAD_UNIT_START_INDICATOR) != 0) {
++      if (logVideoPusi) {
 +        TsExtractor.debugPes(
 +            "VIDEO_PUSI"
 +                + " state=" + stateName(state)
@@ -206,7 +873,7 @@ index a13bf74..8a79829 100644
        payloadSize = C.LENGTH_UNSET;
        return false;
 diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
-index 4f27e9b..7b56ca5 100644
+index 4f27e9b..cfa6f66 100644
 --- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
 +++ b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
 @@ -29,6 +29,7 @@ import androidx.annotation.Nullable;
@@ -217,7 +884,7 @@ index 4f27e9b..7b56ca5 100644
  import androidx.media3.common.util.NullableType;
  import androidx.media3.common.util.ParsableBitArray;
  import androidx.media3.common.util.ParsableByteArray;
-@@ -158,6 +159,262 @@ public final class TsExtractor implements Extractor {
+@@ -158,6 +159,279 @@ public final class TsExtractor implements Extractor {
    private static final long HEVC_FORMAT_IDENTIFIER = 0x48455643;
  
    private static final int BUFFER_SIZE = TS_PACKET_SIZE * 50;
@@ -243,6 +910,7 @@ index 4f27e9b..7b56ca5 100644
 +
 +    int nalsSeen;
 +    int videoPesStartsLogged;
++    boolean loggedTsBoundaryAfterInitial;
 +
 +    DebugSegment(long sequence, String uri) {
 +      this.sequence = sequence;
@@ -295,19 +963,24 @@ index 4f27e9b..7b56ca5 100644
 +    }
 +  }
 +
-+  static void debugVideoPesFlags(int flags) {
++  static boolean debugVideoPesFlags(int flags) {
 +    DebugSegment segment = DEBUG_SEGMENT.get();
 +    if (segment == null) {
-+      return;
++      return false;
 +    }
++
++    boolean firstVideoPusi = false;
 +
 +    if ((flags & FLAG_PAYLOAD_UNIT_START_INDICATOR) != 0) {
 +      segment.videoPusiCount++;
++      firstVideoPusi = segment.videoPusiCount == 1;
 +    }
 +
 +    if ((flags & TsPayloadReader.FLAG_RANDOM_ACCESS_INDICATOR) != 0) {
 +      segment.videoRandomAccessCount++;
 +    }
++
++    return firstVideoPusi;
 +  }
 +
 +  static void debugBadPesStartCode() {
@@ -451,10 +1124,21 @@ index 4f27e9b..7b56ca5 100644
 +      return;
 +    }
 +
-+    if (segment.tsPacketsTotal > DEBUG_INITIAL_TS_PACKETS
-+        && !payloadUnitStart
-+        && !randomAccessIndicator) {
++    boolean initialPacket =
++        segment.tsPacketsTotal <= DEBUG_INITIAL_TS_PACKETS;
++
++    boolean firstImportantBoundaryAfterInitial =
++        !initialPacket
++            && payloadUnitStart
++            && randomAccessIndicator
++            && !segment.loggedTsBoundaryAfterInitial;
++
++    if (!initialPacket && !firstImportantBoundaryAfterInitial) {
 +      return;
++    }
++
++    if (firstImportantBoundaryAfterInitial) {
++      segment.loggedTsBoundaryAfterInitial = true;
 +    }
 +
 +    Log.d(
@@ -480,7 +1164,7 @@ index 4f27e9b..7b56ca5 100644
    private static final int SNIFF_TS_PACKET_COUNT = 5;
  
    private final @Mode int mode;
-@@ -477,6 +734,9 @@ public final class TsExtractor implements Extractor {
+@@ -477,6 +751,9 @@ public final class TsExtractor implements Extractor {
        tsPacketBuffer.setPosition(endOfPacket);
        return RESULT_CONTINUE;
      }
@@ -490,7 +1174,7 @@ index 4f27e9b..7b56ca5 100644
      packetHeaderFlags |= (tsPacketHeader & 0x400000) != 0 ? FLAG_PAYLOAD_UNIT_START_INDICATOR : 0;
      // Ignoring transport_priority (tsPacketHeader & 0x200000)
      int pid = (tsPacketHeader & 0x1FFF00) >> 8;
-@@ -520,6 +780,13 @@ public final class TsExtractor implements Extractor {
+@@ -520,6 +797,13 @@ public final class TsExtractor implements Extractor {
      // Read the payload.
      boolean wereTracksEnded = tracksEnded;
      if (shouldConsumePacketPayload(pid)) {
