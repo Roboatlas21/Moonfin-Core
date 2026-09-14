@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -58,15 +59,18 @@ class _DiagnosticsSettingsScreenState extends State<DiagnosticsSettingsScreen> {
         '${now.year}${two(now.month)}${two(now.day)}-'
         '${two(now.hour)}${two(now.minute)}${two(now.second)}.txt';
 
-    final path = await FilePicker.saveFile(
-      dialogTitle: 'Export Moonfin diagnostics',
-      fileName: fileName,
-    );
-
-    if (path == null) return;
-
     try {
-      await File(path).writeAsString(_log.exportText());
+      final bytes = Uint8List.fromList(
+        utf8.encode(_log.exportText()),
+      );
+
+      final result = await FilePicker.saveFile(
+        dialogTitle: 'Export Moonfin diagnostics',
+        fileName: fileName,
+        bytes: bytes,
+      );
+
+      if (result == null) return;
 
       if (!mounted) return;
       _showSnack('Logs exported successfully');
