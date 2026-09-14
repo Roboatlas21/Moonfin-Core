@@ -96,7 +96,7 @@ index 188b9de..af1781d 100644
  
    /**
 diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java
-index a86c81f..d09fc11 100644
+index a86c81f..9f5a778 100644
 --- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java
 +++ b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/H264Reader.java
 @@ -25,6 +25,7 @@ import androidx.media3.common.ColorInfo;
@@ -107,18 +107,16 @@ index a86c81f..d09fc11 100644
  import androidx.media3.common.util.ParsableByteArray;
  import androidx.media3.common.util.UnstableApi;
  import androidx.media3.common.util.Util;
-@@ -124,6 +125,10 @@ public final class H264Reader implements ElementaryStreamReader {
+@@ -124,6 +125,8 @@ public final class H264Reader implements ElementaryStreamReader {
    public void packetStarted(long pesTimeUs, @TsPayloadReader.Flags int flags) {
      this.pesTimeUs = pesTimeUs;
      randomAccessIndicator |= (flags & FLAG_RANDOM_ACCESS_INDICATOR) != 0;
-+    TsExtractor.debugPes(
-+        "H264_PES_START timeUs=" + pesTimeUs
-+            + " flags=0x" + Integer.toHexString(flags)
-+            + " randomAccess=" + randomAccessIndicator);
++    TsExtractor.debugH264PesStart(
++        pesTimeUs, flags, randomAccessIndicator);
    }
  
    @Override
-@@ -196,6 +201,13 @@ public final class H264Reader implements ElementaryStreamReader {
+@@ -196,6 +199,13 @@ public final class H264Reader implements ElementaryStreamReader {
  
    @RequiresNonNull("sampleReader")
    private void startNalUnit(long position, int nalUnitType, long pesTimeUs) {
@@ -132,7 +130,7 @@ index a86c81f..d09fc11 100644
      if (!hasOutputFormat || sampleReader.needsSpsPps()) {
        sps.startNalUnit(nalUnitType);
        pps.startNalUnit(nalUnitType);
-@@ -277,6 +289,7 @@ public final class H264Reader implements ElementaryStreamReader {
+@@ -277,6 +287,7 @@ public final class H264Reader implements ElementaryStreamReader {
      }
      boolean sampleIsKeyFrame = sampleReader.endNalUnit(position, offset, hasOutputFormat);
      if (sampleIsKeyFrame) {
@@ -140,36 +138,41 @@ index a86c81f..d09fc11 100644
        // This is either an IDR frame or the first I-frame since the random access indicator, so mark
        // it as a keyframe. Clear the flag so that subsequent non-IDR I-frames are not marked as
        // keyframes until we see another random access indicator.
+@@ -539,6 +550,7 @@ public final class H264Reader implements ElementaryStreamReader {
+       @C.BufferFlags int flags = sampleIsKeyframe ? C.BUFFER_FLAG_KEY_FRAME : 0;
+       int size = (int) (nalUnitStartPosition - samplePosition);
+       output.sampleMetadata(sampleTimeUs, flags, size, offset, null);
++      TsExtractor.debugSampleOutput(sampleTimeUs, sampleIsKeyframe, size);
+     }
+ 
+     private static final class SliceHeaderData {
 diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
-index a13bf74..b2f01d2 100644
+index a13bf74..8a79829 100644
 --- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
 +++ b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/PesReader.java
-@@ -91,6 +91,12 @@ public final class PesReader implements TsPayloadReader {
+@@ -90,6 +90,21 @@ public final class PesReader implements TsPayloadReader {
+     // Asserts init has been called.
      checkNotNull(timestampAdjuster);
  
++    if (data.bytesLeft() > 0 && reader instanceof H264Reader) {
++      TsExtractor.debugVideoPesFlags(flags);
++
++      if ((flags & FLAG_PAYLOAD_UNIT_START_INDICATOR) != 0) {
++        TsExtractor.debugPes(
++            "VIDEO_PUSI"
++                + " state=" + stateName(state)
++                + " bytesRead=" + bytesRead
++                + " payloadSize=" + payloadSize
++                + " timeUs=" + timeUs
++                + " randomAccess="
++                + ((flags & FLAG_RANDOM_ACCESS_INDICATOR) != 0));
++      }
++    }
++
      if ((flags & FLAG_PAYLOAD_UNIT_START_INDICATOR) != 0) {
-+      TsExtractor.debugPes(
-+          "PUSI reader=" + reader.getClass().getSimpleName()
-+              + " state=" + stateName(state)
-+              + " bytesRead=" + bytesRead
-+              + " payloadSize=" + payloadSize
-+              + " timeUs=" + timeUs);
        switch (state) {
          case STATE_FINDING_HEADER:
-         case STATE_READING_HEADER:
-@@ -183,10 +189,28 @@ public final class PesReader implements TsPayloadReader {
-   }
- 
-   private void setState(int state) {
-+    TsExtractor.debugPes(
-+        "STATE " + stateName(this.state) + " -> " + stateName(state)
-+            + " bytesRead=" + bytesRead
-+            + " payloadSize=" + payloadSize
-+            + " timeUs=" + timeUs
-+            + " pts=" + ptsFlag
-+            + " dts=" + dtsFlag
-+            + " extHeader=" + extendedHeaderLength);
-     this.state = state;
+@@ -187,6 +202,16 @@ public final class PesReader implements TsPayloadReader {
      bytesRead = 0;
    }
  
@@ -186,10 +189,11 @@ index a13bf74..b2f01d2 100644
    /**
     * Continues a read from the provided {@code source} into a given {@code target}. It's assumed
     * that the data should be written into {@code target} starting from an offset of zero.
-@@ -216,6 +240,14 @@ public final class PesReader implements TsPayloadReader {
+@@ -216,6 +241,15 @@ public final class PesReader implements TsPayloadReader {
      pesScratch.setPosition(0);
      int startCodePrefix = pesScratch.readBits(24);
      if (startCodePrefix != 0x000001) {
++      TsExtractor.debugBadPesStartCode();
 +      TsExtractor.debugPes(
 +          "BAD_START_CODE prefix=" + startCodePrefix
 +              + " hex=0x" + Integer.toHexString(startCodePrefix)
@@ -202,7 +206,7 @@ index a13bf74..b2f01d2 100644
        payloadSize = C.LENGTH_UNSET;
        return false;
 diff --git a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
-index 4f27e9b..9d96adf 100644
+index 4f27e9b..7b56ca5 100644
 --- a/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
 +++ b/libraries/extractor/src/main/java/androidx/media3/extractor/ts/TsExtractor.java
 @@ -29,6 +29,7 @@ import androidx.annotation.Nullable;
@@ -213,20 +217,32 @@ index 4f27e9b..9d96adf 100644
  import androidx.media3.common.util.NullableType;
  import androidx.media3.common.util.ParsableBitArray;
  import androidx.media3.common.util.ParsableByteArray;
-@@ -158,6 +159,96 @@ public final class TsExtractor implements Extractor {
+@@ -158,6 +159,262 @@ public final class TsExtractor implements Extractor {
    private static final long HEVC_FORMAT_IDENTIFIER = 0x48455643;
  
    private static final int BUFFER_SIZE = TS_PACKET_SIZE * 50;
 +
 +  private static final ThreadLocal<DebugSegment> DEBUG_SEGMENT = new ThreadLocal<>();
-+  private static final int DEBUG_MAX_TS_PACKETS = 80;
-+  private static final int DEBUG_MAX_NALS = 80;
++
++  private static final int DEBUG_INITIAL_TS_PACKETS = 10;
++  private static final int DEBUG_INITIAL_NALS = 5;
++  private static final int DEBUG_INITIAL_SAMPLES = 5;
++  private static final int DEBUG_INITIAL_VIDEO_PES = 2;
 +
 +  private static final class DebugSegment {
 +    final long sequence;
 +    final String uri;
-+    int tsPackets;
-+    int nals;
++
++    long tsPacketsTotal;
++    int pesBadStartCodes;
++    int videoPusiCount;
++    int videoRandomAccessCount;
++    int idrCount;
++    int samplesOutput;
++    int keyframesOutput;
++
++    int nalsSeen;
++    int videoPesStartsLogged;
 +
 +    DebugSegment(long sequence, String uri) {
 +      this.sequence = sequence;
@@ -236,25 +252,104 @@ index 4f27e9b..9d96adf 100644
 +
 +  public static void debugBeginHlsSegment(long sequence, String uri) {
 +    DEBUG_SEGMENT.set(new DebugSegment(sequence, uri));
-+    Log.d("MF_HLS_TRACE",
-+        "========== HLS_SEGMENT_START seq=" + sequence + " uri=" + uri + " ==========");
++    Log.d(
++        "MF_HLS_TRACE",
++        "========== HLS_SEGMENT_START seq="
++            + sequence
++            + " uri="
++            + uri
++            + " ==========");
 +  }
 +
 +  public static void debugEndHlsSegment() {
 +    DebugSegment segment = DEBUG_SEGMENT.get();
 +    if (segment != null) {
-+      Log.d("MF_HLS_TRACE",
-+          "========== HLS_SEGMENT_END seq=" + segment.sequence
-+              + " tsPackets=" + segment.tsPackets
-+              + " nals=" + segment.nals + " ==========");
++      Log.d(
++          "MF_HLS_TRACE",
++          "========== HLS_SEGMENT_END"
++              + " seq="
++              + segment.sequence
++              + " tsPacketsTotal="
++              + segment.tsPacketsTotal
++              + " pesBadStartCodes="
++              + segment.pesBadStartCodes
++              + " videoPusiCount="
++              + segment.videoPusiCount
++              + " videoRandomAccessCount="
++              + segment.videoRandomAccessCount
++              + " idrCount="
++              + segment.idrCount
++              + " samplesOutput="
++              + segment.samplesOutput
++              + " keyframesOutput="
++              + segment.keyframesOutput
++              + " ==========");
 +    }
 +    DEBUG_SEGMENT.remove();
 +  }
 +
++  static void debugTsPacketSeen() {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment != null) {
++      segment.tsPacketsTotal++;
++    }
++  }
++
++  static void debugVideoPesFlags(int flags) {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment == null) {
++      return;
++    }
++
++    if ((flags & FLAG_PAYLOAD_UNIT_START_INDICATOR) != 0) {
++      segment.videoPusiCount++;
++    }
++
++    if ((flags & TsPayloadReader.FLAG_RANDOM_ACCESS_INDICATOR) != 0) {
++      segment.videoRandomAccessCount++;
++    }
++  }
++
++  static void debugBadPesStartCode() {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment != null) {
++      segment.pesBadStartCodes++;
++    }
++  }
++
 +  static void debugPes(String message) {
 +    DebugSegment segment = DEBUG_SEGMENT.get();
-+    Log.d("MF_PES_TRACE",
-+        "seq=" + (segment == null ? "?" : segment.sequence) + " " + message);
++    if (segment == null) {
++      return;
++    }
++    Log.d("MF_PES_TRACE", "seq=" + segment.sequence + " " + message);
++  }
++
++  static void debugH264PesStart(long pesTimeUs, int flags, boolean randomAccess) {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment == null) {
++      return;
++    }
++
++    boolean important = randomAccess;
++
++    if (segment.videoPesStartsLogged >= DEBUG_INITIAL_VIDEO_PES && !important) {
++      return;
++    }
++
++    segment.videoPesStartsLogged++;
++
++    Log.d(
++        "MF_H264_TRACE",
++        "seq="
++            + segment.sequence
++            + " H264_PES_START"
++            + " timeUs="
++            + pesTimeUs
++            + " flags=0x"
++            + Integer.toHexString(flags)
++            + " randomAccess="
++            + randomAccess);
 +  }
 +
 +  static void debugH264Nal(
@@ -265,25 +360,82 @@ index 4f27e9b..9d96adf 100644
 +      boolean allowNonIdr,
 +      boolean detectAccessUnits) {
 +    DebugSegment segment = DEBUG_SEGMENT.get();
-+    if (segment == null || segment.nals >= DEBUG_MAX_NALS) return;
-+    segment.nals++;
-+    Log.d("MF_H264_TRACE",
-+        "seq=" + segment.sequence
-+            + " NAL type=" + nalType
-+            + " position=" + position
-+            + " pesTimeUs=" + pesTimeUs
-+            + " randomAccess=" + randomAccess
-+            + " allowNonIdr=" + allowNonIdr
-+            + " detectAccessUnits=" + detectAccessUnits);
++    if (segment == null) {
++      return;
++    }
++
++    segment.nalsSeen++;
++
++    if (nalType == 5) {
++      segment.idrCount++;
++    }
++
++    boolean importantNal =
++        nalType == 5
++            || nalType == 7
++            || nalType == 8;
++
++    if (segment.nalsSeen > DEBUG_INITIAL_NALS && !importantNal) {
++      return;
++    }
++
++    Log.d(
++        "MF_H264_TRACE",
++        "seq="
++            + segment.sequence
++            + " NAL type="
++            + nalType
++            + " position="
++            + position
++            + " pesTimeUs="
++            + pesTimeUs
++            + " randomAccess="
++            + randomAccess
++            + " allowNonIdr="
++            + allowNonIdr
++            + " detectAccessUnits="
++            + detectAccessUnits);
 +  }
 +
 +  static void debugH264Keyframe(long position, long pesTimeUs) {
 +    DebugSegment segment = DEBUG_SEGMENT.get();
 +    if (segment != null) {
-+      Log.d("MF_H264_TRACE",
-+          "seq=" + segment.sequence
-+              + " KEYFRAME position=" + position
-+              + " pesTimeUs=" + pesTimeUs);
++      Log.d(
++          "MF_H264_TRACE",
++          "seq="
++              + segment.sequence
++              + " KEYFRAME position="
++              + position
++              + " pesTimeUs="
++              + pesTimeUs);
++    }
++  }
++
++  static void debugSampleOutput(long timeUs, boolean keyframe, int size) {
++    DebugSegment segment = DEBUG_SEGMENT.get();
++    if (segment == null) {
++      return;
++    }
++
++    segment.samplesOutput++;
++
++    if (keyframe) {
++      segment.keyframesOutput++;
++    }
++
++    if (segment.samplesOutput <= DEBUG_INITIAL_SAMPLES || keyframe) {
++      Log.d(
++          "MF_H264_TRACE",
++          "seq="
++              + segment.sequence
++              + " SAMPLE_OUTPUT number="
++              + segment.samplesOutput
++              + " timeUs="
++              + timeUs
++              + " keyframe="
++              + keyframe
++              + " size="
++              + size);
 +    }
 +  }
 +
@@ -295,22 +447,50 @@ index 4f27e9b..9d96adf 100644
 +      int continuityCounter,
 +      boolean randomAccessIndicator) {
 +    DebugSegment segment = DEBUG_SEGMENT.get();
-+    if (segment == null || segment.tsPackets >= DEBUG_MAX_TS_PACKETS) return;
-+    segment.tsPackets++;
-+    Log.d("MF_TS_TRACE",
-+        "seq=" + segment.sequence
-+            + " packet=" + segment.tsPackets
-+            + " pid=" + pid
-+            + " pusi=" + payloadUnitStart
-+            + " adaptation=" + adaptationFieldExists
-+            + " payload=" + payloadExists
-+            + " cc=" + continuityCounter
-+            + " randomAccess=" + randomAccessIndicator);
++    if (segment == null) {
++      return;
++    }
++
++    if (segment.tsPacketsTotal > DEBUG_INITIAL_TS_PACKETS
++        && !payloadUnitStart
++        && !randomAccessIndicator) {
++      return;
++    }
++
++    Log.d(
++        "MF_TS_TRACE",
++        "seq="
++            + segment.sequence
++            + " packet="
++            + segment.tsPacketsTotal
++            + " pid="
++            + pid
++            + " pusi="
++            + payloadUnitStart
++            + " adaptation="
++            + adaptationFieldExists
++            + " payload="
++            + payloadExists
++            + " cc="
++            + continuityCounter
++            + " randomAccess="
++            + randomAccessIndicator);
 +  }
++
    private static final int SNIFF_TS_PACKET_COUNT = 5;
  
    private final @Mode int mode;
-@@ -520,6 +611,13 @@ public final class TsExtractor implements Extractor {
+@@ -477,6 +734,9 @@ public final class TsExtractor implements Extractor {
+       tsPacketBuffer.setPosition(endOfPacket);
+       return RESULT_CONTINUE;
+     }
++
++    debugTsPacketSeen();
++
+     packetHeaderFlags |= (tsPacketHeader & 0x400000) != 0 ? FLAG_PAYLOAD_UNIT_START_INDICATOR : 0;
+     // Ignoring transport_priority (tsPacketHeader & 0x200000)
+     int pid = (tsPacketHeader & 0x1FFF00) >> 8;
+@@ -520,6 +780,13 @@ public final class TsExtractor implements Extractor {
      // Read the payload.
      boolean wereTracksEnded = tracksEnded;
      if (shouldConsumePacketPayload(pid)) {
