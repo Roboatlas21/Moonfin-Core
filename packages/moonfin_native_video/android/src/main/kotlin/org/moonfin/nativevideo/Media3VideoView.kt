@@ -815,7 +815,6 @@ class Media3VideoView(
     private var pendingSubtitleIsBitmap: Boolean? = null
     private var pendingExternalSubtitleUrl: String? = null
     private var pendingAudioIndex: Int? = null
-    private var deferInitialTrackSelectionUntilReady = false
     private var zoomMode = ZoomMode.FIT
     private var videoWidthPx = 0
     private var videoHeightPx = 0
@@ -976,10 +975,6 @@ class Media3VideoView(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_READY && deferInitialTrackSelectionUntilReady) {
-                deferInitialTrackSelectionUntilReady = false
-                applyPendingTrackSelections()
-            }
             if (
                 playbackState == Player.STATE_READY &&
                 !firstFrameRendered &&
@@ -1071,8 +1066,31 @@ class Media3VideoView(
         }
 
         override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
-            if (!deferInitialTrackSelectionUntilReady) {
-                applyPendingTrackSelections()
+            pendingSubtitleIndex?.let { index ->
+                if (selectTextTrack(index, pendingExternalSubtitleUrl)) {
+                    selectedSubtitleCodec = pendingSubtitleCodec?.trim()?.lowercase()
+                    selectedSubtitleIsExternal = pendingSubtitleIsExternal ?: false
+                    selectedSubtitleIsBitmap = pendingSubtitleIsBitmap ?: false
+                    selectedExternalSubtitleUrl = pendingExternalSubtitleUrl?.takeIf { it.isNotBlank() }
+                    subtitleTrackEnabled = true
+                    applyTrackSelectorForCurrentSource()
+                    refreshSubtitleRendererMode()
+
+                    pendingSubtitleIndex = null
+                    pendingSubtitleCodec = null
+                    pendingSubtitleIsExternal = null
+                    pendingSubtitleIsBitmap = null
+                    pendingExternalSubtitleUrl = null
+                } else if (index in 1..trackCount(C.TRACK_TYPE_TEXT)) {
+                    // The target track exists but can't be selected (for
+                    // example an unsupported codec), so retrying on the next
+                    // tracks change won't help.
+                    pendingSubtitleIndex = null
+                    pendingSubtitleCodec = null
+                    pendingSubtitleIsExternal = null
+                    pendingSubtitleIsBitmap = null
+                    pendingExternalSubtitleUrl = null
+                }
             }
             pendingClosedCaptionId?.let { id ->
                 if (selectClosedCaptionTrack(id)) {
@@ -1081,6 +1099,13 @@ class Media3VideoView(
                     // The track is there and still won't select, so waiting for
                     // another track change won't help.
                     pendingClosedCaptionId = null
+                }
+            }
+            pendingAudioIndex?.let { index ->
+                if (selectTrack(C.TRACK_TYPE_AUDIO, index) ||
+                    index in 1..trackCount(C.TRACK_TYPE_AUDIO)
+                ) {
+                    pendingAudioIndex = null
                 }
             }
             emitTracksChanged()
@@ -2326,7 +2351,6 @@ class Media3VideoView(
             ?: emptyMap()
         httpDataSourceFactory.setDefaultRequestProperties(currentHeaders)
 
-        deferInitialTrackSelectionUntilReady = true
         resetTrackSelectionsForNewSource()
         externalSubtitleConfigurations.clear()
         selectedSubtitleCodec = null
@@ -2340,8 +2364,9 @@ class Media3VideoView(
         pendingSubtitleIsExternal = null
         pendingSubtitleIsBitmap = null
         pendingExternalSubtitleUrl = null
-        // Keep the automatic initial audio selection pending until the first
-        // STATE_READY. Runtime changes after that still apply immediately.
+        // The first onTracksChanged applies this while the player is still
+        // buffering, so playback starts on the requested track rather than
+        // opening the container default and switching once it lands.
         pendingAudioIndex = (args["audioTrackOrdinal"] as? Number)
             ?.toInt()
             ?.takeIf { it > 0 }
@@ -3858,41 +3883,6 @@ class Media3VideoView(
         )
     }
 
-    private fun applyPendingTrackSelections() {
-        pendingSubtitleIndex?.let { index ->
-            if (selectTextTrack(index, pendingExternalSubtitleUrl)) {
-                selectedSubtitleCodec = pendingSubtitleCodec?.trim()?.lowercase()
-                selectedSubtitleIsExternal = pendingSubtitleIsExternal ?: false
-                selectedSubtitleIsBitmap = pendingSubtitleIsBitmap ?: false
-                selectedExternalSubtitleUrl = pendingExternalSubtitleUrl?.takeIf { it.isNotBlank() }
-                subtitleTrackEnabled = true
-                applyTrackSelectorForCurrentSource()
-                refreshSubtitleRendererMode()
-
-                pendingSubtitleIndex = null
-                pendingSubtitleCodec = null
-                pendingSubtitleIsExternal = null
-                pendingSubtitleIsBitmap = null
-                pendingExternalSubtitleUrl = null
-            } else if (index in 1..trackCount(C.TRACK_TYPE_TEXT)) {
-                // The target track exists but can't be selected (for example an
-                // unsupported codec), so retrying on the next track change won't help.
-                pendingSubtitleIndex = null
-                pendingSubtitleCodec = null
-                pendingSubtitleIsExternal = null
-                pendingSubtitleIsBitmap = null
-                pendingExternalSubtitleUrl = null
-            }
-        }
-        pendingAudioIndex?.let { index ->
-            if (selectTrack(C.TRACK_TYPE_AUDIO, index) ||
-                index in 1..trackCount(C.TRACK_TYPE_AUDIO)
-            ) {
-                pendingAudioIndex = null
-            }
-        }
-    }
-
     private fun selectTrack(trackType: Int, oneBasedIndex: Int): Boolean {
         val entries = collectTracks(trackType)
         if (oneBasedIndex <= 0 || oneBasedIndex > entries.size) {
@@ -3951,8 +3941,6 @@ class Media3VideoView(
         pendingSubtitleIsExternal = isExternal
         pendingSubtitleIsBitmap = isBitmap
         pendingExternalSubtitleUrl = externalUrl
-
-        if (deferInitialTrackSelectionUntilReady) return
 
         val selected = selectTextTrack(index, externalUrl)
         if (selected) {
