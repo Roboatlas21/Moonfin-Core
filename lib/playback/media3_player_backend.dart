@@ -412,7 +412,11 @@ class Media3PlayerBackend extends PlayerBackend {
           'Media3 [${map['tag']}]: ${map['message']}'
           '${repeats > 0 ? ' (and $repeats more like it)' : ''}'
           '${error == null || error.isEmpty ? '' : ' $error'}',
-          level: map['level'] == 'error' ? LogLevel.error : LogLevel.warning,
+          level: switch (map['level']?.toString()) {
+            'error' => LogLevel.error,
+            'warning' => LogLevel.warning,
+            _ => LogLevel.debug,
+          },
         );
       case 'videoSizeChanged':
         _diag(

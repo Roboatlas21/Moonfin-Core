@@ -70,7 +70,9 @@ class LogService extends ChangeNotifier {
     _syncFromPreferences();
   }
 
-  static const int _maxEntries = 2000;
+  // Trace builds can emit hundreds of Media3 parser events per HLS segment.
+  // Keep enough history to retain the segment boundary leading into a stall.
+  static const int _maxEntries = 20000;
 
   // Stops at the path so the endpoint stays readable. Only the host is
   // private, and a report of bare hosts cannot say which call misbehaved.

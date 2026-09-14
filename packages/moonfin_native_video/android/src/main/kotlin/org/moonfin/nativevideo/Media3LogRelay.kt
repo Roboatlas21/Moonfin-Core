@@ -57,8 +57,16 @@ object Media3LogRelay : Log.Logger {
         Log.setLogger(this)
     }
 
-    override fun d(tag: String, message: String, throwable: Throwable?) =
+    override fun d(tag: String, message: String, throwable: Throwable?) {
         Log.Logger.DEFAULT.d(tag, message, throwable)
+
+        // Diagnostic Media3 trace builds use MF_* tags. Normally Media3 debug
+        // logging stays in logcat, but these traces need to appear in Moonfin's
+        // in-app diagnostic export so HLS stalls can be captured without adb.
+        if (tag.startsWith("MF_")) {
+            relay("debug", tag, message, throwable)
+        }
+    }
 
     override fun i(tag: String, message: String, throwable: Throwable?) =
         Log.Logger.DEFAULT.i(tag, message, throwable)
