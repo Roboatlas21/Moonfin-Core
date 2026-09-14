@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
@@ -42,6 +45,34 @@ class _DiagnosticsSettingsScreenState extends State<DiagnosticsSettingsScreen> {
       _showSnack('Could not send report: $e');
     } finally {
       if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  Future<void> _exportLogs() async {
+    final now = DateTime.now();
+
+    String two(int value) => value.toString().padLeft(2, '0');
+
+    final fileName =
+        'moonfin-diagnostics-'
+        '${now.year}${two(now.month)}${two(now.day)}-'
+        '${two(now.hour)}${two(now.minute)}${two(now.second)}.txt';
+
+    final path = await FilePicker.saveFile(
+      dialogTitle: 'Export Moonfin diagnostics',
+      fileName: fileName,
+    );
+
+    if (path == null) return;
+
+    try {
+      await File(path).writeAsString(_log.exportText());
+
+      if (!mounted) return;
+      _showSnack('Logs exported successfully');
+    } catch (e) {
+      if (!mounted) return;
+      _showSnack('Could not save logs: $e');
     }
   }
 
@@ -188,6 +219,13 @@ class _DiagnosticsSettingsScreenState extends State<DiagnosticsSettingsScreen> {
                 subtitle: 'Copy the full report to the clipboard.',
                 enabled: hasEntries,
                 onTap: _copyAll,
+              ),
+              _ActionTile(
+                icon: Icons.save_alt,
+                title: 'Export logs to file',
+                subtitle: 'Save the full diagnostic report to a text file.',
+                enabled: hasEntries,
+                onTap: _exportLogs,
               ),
               _ActionTile(
                 icon: Icons.delete_outline,
