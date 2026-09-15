@@ -90,7 +90,7 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("androidx.media3:media3-exoplayer:1.10.1")
+    implementation("androidx.media3:media3-exoplayer:1.10.1-moonfin-trace")
     implementation("androidx.media3:media3-exoplayer-hls:1.10.1-moonfin-trace")
     implementation("androidx.media3:media3-exoplayer-dash:1.10.1")
     implementation("androidx.media3:media3-exoplayer-rtsp:1.10.1")

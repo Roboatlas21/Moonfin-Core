@@ -44,6 +44,9 @@ subprojects {
 subprojects {
     configurations.configureEach {
         resolutionStrategy.dependencySubstitution {
+            substitute(module("androidx.media3:media3-exoplayer:1.10.1"))
+                .using(module("androidx.media3:media3-exoplayer:${media3TraceVersion}"))
+
             substitute(module("androidx.media3:media3-exoplayer-hls:1.10.1"))
                 .using(module("androidx.media3:media3-exoplayer-hls:${media3TraceVersion}"))
 

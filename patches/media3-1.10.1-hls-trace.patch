@@ -1188,3 +1188,258 @@ index 4f27e9b..cfa6f66 100644
        tsPacketBuffer.setLimit(endOfPacket);
        payloadReader.consume(tsPacketBuffer, packetHeaderFlags);
        tsPacketBuffer.setLimit(limit);
+
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/ExoPlayerImplInternal.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/ExoPlayerImplInternal.java
+index 88f9114..b6fb908 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/ExoPlayerImplInternal.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/ExoPlayerImplInternal.java
+@@ -651,6 +651,15 @@ import java.util.Objects;
+ 
+   @Override
+   public void onContinueLoadingRequested(MediaPeriod source) {
++    Log.d(
++        "MF_EXO_CORE",
++        "CORE_CALLBACK_ENQUEUE"
++            + " sourceId="
++            + System.identityHashCode(source)
++            + " sourceClass="
++            + source.getClass().getSimpleName()
++            + " onPlaybackThread="
++            + (Looper.myLooper() == playbackLooper));
+     handler.obtainMessage(MSG_SOURCE_CONTINUE_LOADING_REQUESTED, source).sendToTarget();
+   }
+ 
+@@ -3132,11 +3141,41 @@ import java.util.Objects;
+   }
+ 
+   private void handleContinueLoadingRequested(MediaPeriod mediaPeriod) {
++    Log.d(
++        "MF_EXO_CORE",
++        "CORE_CALLBACK_HANDLE"
++            + " sourceId="
++            + System.identityHashCode(mediaPeriod)
++            + " sourceClass="
++            + mediaPeriod.getClass().getSimpleName());
++
+     if (queue.isLoading(mediaPeriod)) {
++      Log.d(
++          "MF_EXO_CORE",
++          "CORE_CALLBACK_MAYBE_CONTINUE"
++              + " sourceId="
++              + System.identityHashCode(mediaPeriod));
+       queue.reevaluateBuffer(rendererPositionUs);
+       maybeContinueLoading();
+     } else if (queue.isPreloading(mediaPeriod)) {
++      Log.d(
++          "MF_EXO_CORE",
++          "CORE_CALLBACK_PRELOAD"
++              + " sourceId="
++              + System.identityHashCode(mediaPeriod));
+       maybeContinuePreloading();
++    } else {
++      @Nullable MediaPeriodHolder loadingPeriodHolder = queue.getLoadingPeriod();
++      Log.d(
++          "MF_EXO_CORE",
++          "CORE_CALLBACK_IGNORED"
++              + " sourceId="
++              + System.identityHashCode(mediaPeriod)
++              + " loadingId="
++              + (loadingPeriodHolder == null
++                  ? "null"
++                  : Integer.toString(
++                      System.identityHashCode(loadingPeriodHolder.mediaPeriod))));
+     }
+   }
+ 
+@@ -3170,15 +3209,31 @@ import java.util.Objects;
+   }
+ 
+   private void maybeContinueLoading() {
++    boolean previousShouldContinueLoading = shouldContinueLoading;
+     shouldContinueLoading = shouldContinueLoading();
+     if (shouldContinueLoading) {
+       MediaPeriodHolder loadingPeriod = checkNotNull(queue.getLoadingPeriod());
+-      loadingPeriod.continueLoading(
++      long playbackPositionUs = loadingPeriod.toPeriodTime(rendererPositionUs);
++      LoadingInfo loadingInfo =
+           new LoadingInfo.Builder()
+-              .setPlaybackPositionUs(loadingPeriod.toPeriodTime(rendererPositionUs))
++              .setPlaybackPositionUs(playbackPositionUs)
+               .setPlaybackSpeed(mediaClock.getPlaybackParameters().speed)
+               .setLastRebufferRealtimeMs(lastRebufferRealtimeMs)
+-              .build());
++              .build();
++
++      if (playbackPositionUs >= 0 && playbackPositionUs < 10_000_000L) {
++        Log.d(
++            "MF_EXO_CORE",
++            "CORE_CONTINUE_CALL"
++                + " periodId="
++                + System.identityHashCode(loadingPeriod.mediaPeriod)
++                + " previousLatch="
++                + previousShouldContinueLoading
++                + " playbackUs="
++                + playbackPositionUs);
++      }
++
++      loadingPeriod.continueLoading(loadingInfo);
+     }
+     updateIsLoading();
+   }
+@@ -3212,6 +3267,7 @@ import java.util.Objects;
+             targetLiveOffsetUs,
+             lastRebufferRealtimeMs);
+     boolean shouldContinueLoading = loadControl.shouldContinueLoading(loadParameters);
++    boolean initialShouldContinueLoading = shouldContinueLoading;
+     MediaPeriodHolder playingPeriodHolder = queue.getPlayingPeriod();
+     if (!shouldContinueLoading
+         && playingPeriodHolder.prepared
+@@ -3223,13 +3279,53 @@ import java.util.Objects;
+           playbackInfo.positionUs, /* toKeyframe= */ false);
+       shouldContinueLoading = loadControl.shouldContinueLoading(loadParameters);
+     }
++
++    if (playbackPositionUs >= 0 && playbackPositionUs < 10_000_000L) {
++      Log.d(
++          "MF_EXO_CORE",
++          "LOAD_CONTROL_DECISION"
++              + " playbackUs="
++              + playbackPositionUs
++              + " bufferedUs="
++              + bufferedDurationUs
++              + " initial="
++              + initialShouldContinueLoading
++              + " result="
++              + shouldContinueLoading);
++    }
++
+     return shouldContinueLoading;
+   }
+ 
+   private boolean isLoadingPossible(@Nullable MediaPeriodHolder mediaPeriodHolder) {
+-    return mediaPeriodHolder != null
+-        && !mediaPeriodHolder.hasLoadingError()
+-        && mediaPeriodHolder.getNextLoadPositionUs() != C.TIME_END_OF_SOURCE;
++    if (mediaPeriodHolder == null) {
++      Log.d(
++          "MF_EXO_CORE",
++          "LOADING_POSSIBLE result=false reason=noLoadingPeriod");
++      return false;
++    }
++
++    if (mediaPeriodHolder.hasLoadingError()) {
++      Log.d(
++          "MF_EXO_CORE",
++          "LOADING_POSSIBLE"
++              + " result=false reason=loadingError"
++              + " periodId="
++              + System.identityHashCode(mediaPeriodHolder.mediaPeriod));
++      return false;
++    }
++
++    if (mediaPeriodHolder.getNextLoadPositionUs() == C.TIME_END_OF_SOURCE) {
++      Log.d(
++          "MF_EXO_CORE",
++          "LOADING_POSSIBLE"
++              + " result=false reason=endOfSource"
++              + " periodId="
++              + System.identityHashCode(mediaPeriodHolder.mediaPeriod));
++      return false;
++    }
++
++    return true;
+   }
+ 
+   private void updateIsLoading() {
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/ClippingMediaPeriod.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/ClippingMediaPeriod.java
+index 014ad17..f726cf2 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/ClippingMediaPeriod.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/ClippingMediaPeriod.java
+@@ -26,6 +26,7 @@ import androidx.media3.common.Format;
+ import androidx.media3.common.MimeTypes;
+ import androidx.media3.common.StreamKey;
+ import androidx.media3.common.util.ExperimentalApi;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.NullableType;
+ import androidx.media3.common.util.UnstableApi;
+ import androidx.media3.common.util.Util;
+@@ -289,6 +290,13 @@ public final class ClippingMediaPeriod implements MediaPeriod, MediaPeriod.Callb
+ 
+   @Override
+   public boolean continueLoading(LoadingInfo loadingInfo) {
++    Log.d(
++        "MF_EXO_CORE",
++        "CLIPPING_CONTINUE_ENTER"
++            + " thisId="
++            + System.identityHashCode(this)
++            + " childId="
++            + System.identityHashCode(mediaPeriod));
+     return mediaPeriod.continueLoading(loadingInfo);
+   }
+ 
+@@ -309,6 +317,17 @@ public final class ClippingMediaPeriod implements MediaPeriod, MediaPeriod.Callb
+ 
+   @Override
+   public void onContinueLoadingRequested(MediaPeriod source) {
++    Log.d(
++        "MF_EXO_CORE",
++        "CLIPPING_CALLBACK_ENTER"
++            + " thisId="
++            + System.identityHashCode(this)
++            + " sourceId="
++            + System.identityHashCode(source)
++            + " childId="
++            + System.identityHashCode(mediaPeriod)
++            + " sourceMatchesChild="
++            + (source == mediaPeriod));
+     checkNotNull(callback).onContinueLoadingRequested(this);
+   }
+ 
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/MaskingMediaPeriod.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/MaskingMediaPeriod.java
+index 8f34681..88f5a97 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/MaskingMediaPeriod.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/MaskingMediaPeriod.java
+@@ -22,6 +22,7 @@ import static com.google.common.base.Preconditions.checkState;
+ import androidx.annotation.Nullable;
+ import androidx.media3.common.C;
+ import androidx.media3.common.StreamKey;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.NullableType;
+ import androidx.media3.common.util.UnstableApi;
+ import androidx.media3.exoplayer.LoadingInfo;
+@@ -233,6 +234,15 @@ public final class MaskingMediaPeriod implements MediaPeriod, MediaPeriod.Callba
+ 
+   @Override
+   public boolean continueLoading(LoadingInfo loadingInfo) {
++    Log.d(
++        "MF_EXO_CORE",
++        "MASKING_CONTINUE_ENTER"
++            + " thisId="
++            + System.identityHashCode(this)
++            + " childId="
++            + (mediaPeriod == null
++                ? "null"
++                : Integer.toString(System.identityHashCode(mediaPeriod))));
+     return mediaPeriod != null && mediaPeriod.continueLoading(loadingInfo);
+   }
+ 
+@@ -243,6 +253,19 @@ public final class MaskingMediaPeriod implements MediaPeriod, MediaPeriod.Callba
+ 
+   @Override
+   public void onContinueLoadingRequested(MediaPeriod source) {
++    Log.d(
++        "MF_EXO_CORE",
++        "MASKING_CALLBACK_ENTER"
++            + " thisId="
++            + System.identityHashCode(this)
++            + " sourceId="
++            + System.identityHashCode(source)
++            + " childId="
++            + (mediaPeriod == null
++                ? "null"
++                : Integer.toString(System.identityHashCode(mediaPeriod)))
++            + " sourceMatchesChild="
++            + (source == mediaPeriod));
+     castNonNull(callback).onContinueLoadingRequested(this);
+   }
+ 

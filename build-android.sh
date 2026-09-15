@@ -96,7 +96,9 @@ def traceVersion = System.getenv("MEDIA3_TRACE_VERSION")
 
 gradle.beforeProject { project ->
     if (traceVersion != null &&
-        (project.path == ':lib-exoplayer-hls' || project.path == ':lib-extractor')) {
+        (project.path == ':lib-exoplayer-hls' ||
+            project.path == ':lib-extractor' ||
+            project.path == ':lib-exoplayer')) {
         project.version = traceVersion
         println "MEDIA3 TRACE: ${project.path} project.version=${project.version}"
     }
@@ -107,6 +109,7 @@ EOF
     cd "$MEDIA3_DIR"
     ./gradlew \
         -I /tmp/set-media3-publication-version.gradle \
+        :lib-exoplayer:publishReleasePublicationToMavenRepository \
         :lib-exoplayer-hls:publishReleasePublicationToMavenRepository \
         :lib-extractor:publishReleasePublicationToMavenRepository \
         -PmavenRepo="$MEDIA3_REPO" \
@@ -242,9 +245,9 @@ echo "TV App Bundle created: $TV_BUNDLE_SOURCE"
 echo "TV App Bundle copied to root: $TV_BUNDLE_OUTPUT"
 
 echo "=== MEDIA3 PUBLISHED ARTIFACTS ==="
-find "$MEDIA3_REPO" -type f | sort | grep -E 'media3-(exoplayer-hls|extractor)/1.10.1-moonfin-trace/'
+find "$MEDIA3_REPO" -type f | sort | grep -E 'media3-(exoplayer|exoplayer-hls|extractor)/1.10.1-moonfin-trace/'
 echo "=== MEDIA3 POM VERSIONS ==="
-find "$MEDIA3_REPO" -type f -name '*.pom' | sort | grep -E 'media3-(exoplayer-hls|extractor)/1.10.1-moonfin-trace/' | while read -r pom; do
+find "$MEDIA3_REPO" -type f -name '*.pom' | sort | grep -E 'media3-(exoplayer|exoplayer-hls|extractor)/1.10.1-moonfin-trace/' | while read -r pom; do
   echo "--- $pom"
   grep -m1 '<version>' "$pom" || true
 done
