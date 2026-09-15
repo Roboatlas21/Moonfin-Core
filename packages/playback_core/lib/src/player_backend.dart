@@ -47,6 +47,9 @@ class EmbeddedCaptionTrack {
   }
 }
 
+/// Backend receives effective external subtitles with the initial media source.
+abstract interface class PreloadsExternalSubtitles {}
+
 abstract class PlayerBackend {
   Future<void> play(
     dynamic mediaItem, {

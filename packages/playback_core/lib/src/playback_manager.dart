@@ -390,6 +390,8 @@ class PlaybackManager implements AudioOwnable {
     Map<String, String> headers = const {},
     double? normalizationGainDb,
     String? hybridAudioUrl,
+    List<Map<String, dynamic>> externalSubtitles = const [],
+    bool deferExternalSubtitleSelection = false,
     bool isLive = false,
     bool autoPlay = true,
   }) {
@@ -489,6 +491,9 @@ class PlaybackManager implements AudioOwnable {
       if (headers.isNotEmpty) 'headers': headers,
       if (hybridAudioUrl != null && hybridAudioUrl.isNotEmpty)
         'hybridAudioUrl': hybridAudioUrl,
+      if (externalSubtitles.isNotEmpty) 'externalSubtitles': externalSubtitles,
+      if (deferExternalSubtitleSelection)
+        'deferExternalSubtitleSelection': true,
       'isLive': isLive,
       'mediaType':
           (resolvedMediaType == 'audio' || resolvedMediaType == 'video')
@@ -1683,6 +1688,27 @@ class PlaybackManager implements AudioOwnable {
     Object? startupError;
     StackTrace? startupStackTrace;
     final useNativeStart = startTicks != null;
+    final preloadedExternalSubtitles = <Map<String, dynamic>>[];
+
+    if (_backend is PreloadsExternalSubtitles) {
+      for (final subtitle in _effectiveExternalSubtitles) {
+        preloadedExternalSubtitles.add(<String, dynamic>{
+          'url': _ensureSubtitleApiKey(subtitle.deliveryUrl),
+          if (subtitle.title != null) 'title': subtitle.title,
+          if (subtitle.language != null) 'language': subtitle.language,
+          'codec': subtitle.codec,
+          if (subtitle.streamIndex != null) 'streamIndex': subtitle.streamIndex,
+        });
+      }
+    }
+
+    final deferExternalSubtitleSelection =
+        _subtitleStreamIndex != null &&
+        _subtitleStreamIndex != -1 &&
+        preloadedExternalSubtitles.any(
+          (subtitle) => subtitle['streamIndex'] == _subtitleStreamIndex,
+        );
+
     try {
       final backendMediaPayload = _buildBackendMediaPayload(
         url: resolution.streamUrl,
@@ -1695,6 +1721,8 @@ class PlaybackManager implements AudioOwnable {
         headers: resolution.requestHeaders,
         normalizationGainDb: resolution.normalizationGainDb,
         hybridAudioUrl: resolution.hybridAudioUrl,
+        externalSubtitles: preloadedExternalSubtitles,
+        deferExternalSubtitleSelection: deferExternalSubtitleSelection,
         isLive: resolution.liveStreamId != null,
         autoPlay: autoPlay,
       );
@@ -1862,7 +1890,8 @@ class PlaybackManager implements AudioOwnable {
       );
     }
 
-    if (resolution.externalSubtitles.isNotEmpty) {
+    if (resolution.externalSubtitles.isNotEmpty &&
+        _backend is! PreloadsExternalSubtitles) {
       _waitAndAddExternalSubtitles(sessionToken, resolution);
     } else {
       _externalSubsLoaded = Future.value();
@@ -2880,7 +2909,7 @@ class PlaybackManager implements AudioOwnable {
   bool get _embeddedSubtitlesUnavailable =>
       _embeddedTracksStripped || !(_backend?.demuxesEmbeddedSubtitles ?? true);
 
-  /// The external subtitles that actually get sub-added, in add order.
+  /// The external subtitles exposed to the backend, in source order.
   List<ExternalSubtitle> get _effectiveExternalSubtitles {
     final resolution = _currentResolution;
     if (resolution == null) return const [];
