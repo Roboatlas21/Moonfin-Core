@@ -1443,3 +1443,261 @@ index 8f34681..88f5a97 100644
      castNonNull(callback).onContinueLoadingRequested(this);
    }
  
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/CompositeSequenceableLoader.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/CompositeSequenceableLoader.java
+index 3def7e4..2c25ace 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/CompositeSequenceableLoader.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/CompositeSequenceableLoader.java
+@@ -19,6 +19,7 @@ import static com.google.common.base.Preconditions.checkArgument;
+ import static java.lang.Math.min;
+ 
+ import androidx.media3.common.C;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.UnstableApi;
+ import androidx.media3.exoplayer.LoadingInfo;
+ import com.google.common.collect.ImmutableList;
+@@ -114,25 +115,127 @@ public final class CompositeSequenceableLoader implements SequenceableLoader {
+ 
+   @Override
+   public boolean continueLoading(LoadingInfo loadingInfo) {
++    boolean traceStartup =
++        loadingInfo.playbackPositionUs >= 0
++            && loadingInfo.playbackPositionUs < 10_000_000L;
++
++    if (traceStartup) {
++      Log.d(
++          "MF_EXO_MERGE",
++          "COMPOSITE_ENTER"
++              + " playbackUs="
++              + loadingInfo.playbackPositionUs
++              + " loaders="
++              + loadersWithTrackTypes.size());
++    }
++
+     boolean madeProgress = false;
+     boolean madeProgressThisIteration;
++    int iteration = 0;
++
+     do {
+       madeProgressThisIteration = false;
++
++      // This is the same single global next-position lookup used upstream.
+       long nextLoadPositionUs = getNextLoadPositionUs();
++
++      if (traceStartup) {
++        Log.d(
++            "MF_EXO_MERGE",
++            "COMPOSITE_ITERATION"
++                + " iteration="
++                + iteration
++                + " minNextLoadUs="
++                + nextLoadPositionUs);
++      }
++
+       if (nextLoadPositionUs == C.TIME_END_OF_SOURCE) {
+         break;
+       }
++
+       for (int i = 0; i < loadersWithTrackTypes.size(); i++) {
+-        long loaderNextLoadPositionUs = loadersWithTrackTypes.get(i).getNextLoadPositionUs();
++        SequenceableLoaderWithTrackTypes loaderWithTrackTypes =
++            loadersWithTrackTypes.get(i);
++
++        // Same one-per-child next-position lookup used upstream.
++        long loaderNextLoadPositionUs =
++            loaderWithTrackTypes.getNextLoadPositionUs();
++
+         boolean isLoaderBehind =
+             loaderNextLoadPositionUs != C.TIME_END_OF_SOURCE
+                 && loaderNextLoadPositionUs <= loadingInfo.playbackPositionUs;
+-        if (loaderNextLoadPositionUs == nextLoadPositionUs || isLoaderBehind) {
+-          madeProgressThisIteration |= loadersWithTrackTypes.get(i).continueLoading(loadingInfo);
++
++        boolean selected =
++            loaderNextLoadPositionUs == nextLoadPositionUs || isLoaderBehind;
++
++        // Requested diagnostic state query. SequenceableLoaderWithTrackTypes
++        // simply delegates this to the underlying child loader.
++        boolean childIsLoading =
++            traceStartup && loaderWithTrackTypes.isLoading();
++
++        if (traceStartup) {
++          Log.d(
++              "MF_EXO_MERGE",
++              "COMPOSITE_CHILD"
++                  + " iteration="
++                  + iteration
++                  + " index="
++                  + i
++                  + " loaderId="
++                  + System.identityHashCode(loaderWithTrackTypes.loader)
++                  + " loaderClass="
++                  + loaderWithTrackTypes.loader.getClass().getSimpleName()
++                  + " trackTypes="
++                  + loaderWithTrackTypes.getTrackTypes()
++                  + " nextLoadUs="
++                  + loaderNextLoadPositionUs
++                  + " minNextLoadUs="
++                  + nextLoadPositionUs
++                  + " behind="
++                  + isLoaderBehind
++                  + " selected="
++                  + selected
++                  + " isLoading="
++                  + childIsLoading);
++        }
++
++        if (selected) {
++          // Exactly one continueLoading() call, just like upstream.
++          boolean childMadeProgress =
++              loaderWithTrackTypes.continueLoading(loadingInfo);
++
++          if (traceStartup) {
++            Log.d(
++                "MF_EXO_MERGE",
++                "COMPOSITE_CHILD_CONTINUE"
++                    + " iteration="
++                    + iteration
++                    + " index="
++                    + i
++                    + " loaderId="
++                    + System.identityHashCode(loaderWithTrackTypes.loader)
++                    + " result="
++                    + childMadeProgress);
++          }
++
++          madeProgressThisIteration |= childMadeProgress;
+         }
+       }
++
+       madeProgress |= madeProgressThisIteration;
++      iteration++;
+     } while (madeProgressThisIteration);
++
++    if (traceStartup) {
++      Log.d(
++          "MF_EXO_MERGE",
++          "COMPOSITE_RETURN"
++              + " iterations="
++              + iteration
++              + " madeProgress="
++              + madeProgress);
++    }
++
+     return madeProgress;
+   }
+ 
+diff --git a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/MergingMediaPeriod.java b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/MergingMediaPeriod.java
+index b9bff4b..5ea2997 100644
+--- a/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/MergingMediaPeriod.java
++++ b/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/source/MergingMediaPeriod.java
+@@ -23,6 +23,7 @@ import androidx.media3.common.C;
+ import androidx.media3.common.Format;
+ import androidx.media3.common.StreamKey;
+ import androidx.media3.common.TrackGroup;
++import androidx.media3.common.util.Log;
+ import androidx.media3.common.util.NullableType;
+ import androidx.media3.exoplayer.LoadingInfo;
+ import androidx.media3.exoplayer.SeekParameters;
+@@ -202,15 +203,58 @@ import java.util.List;
+ 
+   @Override
+   public boolean continueLoading(LoadingInfo loadingInfo) {
++    boolean traceStartup =
++        loadingInfo.playbackPositionUs >= 0
++            && loadingInfo.playbackPositionUs < 10_000_000L;
++
++    if (traceStartup) {
++      Log.d(
++          "MF_EXO_MERGE",
++          "MERGE_CONTINUE_ENTER"
++              + " thisId="
++              + System.identityHashCode(this)
++              + " playbackUs="
++              + loadingInfo.playbackPositionUs
++              + " pendingPreparation="
++              + childrenPendingPreparation.size()
++              + " enabledPeriods="
++              + enabledPeriods.length);
++    }
++
+     if (!childrenPendingPreparation.isEmpty()) {
+       // Preparation is still going on.
+       int childrenPendingPreparationSize = childrenPendingPreparation.size();
++
+       for (int i = 0; i < childrenPendingPreparationSize; i++) {
+         childrenPendingPreparation.get(i).continueLoading(loadingInfo);
+       }
++
++      if (traceStartup) {
++        Log.d(
++            "MF_EXO_MERGE",
++            "MERGE_CONTINUE_RETURN"
++                + " mode=preparing"
++                + " result=false"
++                + " pendingPreparation="
++                + childrenPendingPreparationSize);
++      }
++
+       return false;
+     } else {
+-      return compositeSequenceableLoader.continueLoading(loadingInfo);
++      boolean result = compositeSequenceableLoader.continueLoading(loadingInfo);
++
++      if (traceStartup) {
++        Log.d(
++            "MF_EXO_MERGE",
++            "MERGE_CONTINUE_RETURN"
++                + " mode=composite"
++                + " result="
++                + result
++                + " enabledPeriods="
++                + enabledPeriods.length);
++      }
++
++      return result;
+     }
+   }
+ 
+@@ -328,7 +372,41 @@ import java.util.List;
+   }
+ 
+   @Override
+-  public void onContinueLoadingRequested(MediaPeriod ignored) {
++  public void onContinueLoadingRequested(MediaPeriod source) {
++    int sourceIndex = C.INDEX_UNSET;
++    for (int i = 0; i < periods.length; i++) {
++      if (periods[i] == source) {
++        sourceIndex = i;
++        break;
++      }
++    }
++
++    int enabledIndex = C.INDEX_UNSET;
++    for (int i = 0; i < enabledPeriods.length; i++) {
++      if (enabledPeriods[i] == source) {
++        enabledIndex = i;
++        break;
++      }
++    }
++
++    Log.d(
++        "MF_EXO_MERGE",
++        "MERGE_CALLBACK_ENTER"
++            + " thisId="
++            + System.identityHashCode(this)
++            + " sourceId="
++            + System.identityHashCode(source)
++            + " sourceClass="
++            + source.getClass().getSimpleName()
++            + " sourceIndex="
++            + sourceIndex
++            + " enabledIndex="
++            + enabledIndex
++            + " pendingPreparation="
++            + childrenPendingPreparation.size()
++            + " enabledPeriods="
++            + enabledPeriods.length);
++
+     checkNotNull(callback).onContinueLoadingRequested(this);
+   }
+ 
