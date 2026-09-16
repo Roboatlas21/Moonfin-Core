@@ -53,7 +53,6 @@ import androidx.media3.datasource.DataSourceInputStream
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.HttpDataSource
 import androidx.media3.decoder.av1.Dav1dLibrary
 import androidx.media3.decoder.av1.Libdav1dVideoRenderer
 import androidx.media3.decoder.ffmpeg.FfmpegLibrary
@@ -4125,9 +4124,7 @@ class Media3VideoView(
             val elapsedMs = SystemClock.elapsedRealtime() - startedMs
             mainHandler.post {
                 if (warmingExternalSubtitleRequests[url] !== request) return@post
-                val status = generateSequence<Throwable>(failure) { it.cause }.take(16)
-                    .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
-                    .firstOrNull()?.responseCode
+                val status = failure?.httpStatus
                 val stillRequested = !isDisposed && !request.canceled &&
                     request.generation == subtitleSelectionGeneration && pendingExternalSubtitleUrl == url
                 val classifierRetryable = failure?.let { canRetrySubtitle(url, it) } == true
@@ -4136,8 +4133,9 @@ class Media3VideoView(
                 subtitleWarmDiagnostic(
                     "attempt=$attempt generation=${request.generation} track=$track $outcome " +
                         "elapsedMs=$elapsedMs bytes=$bytesRead http=$status " +
-                        "error=${failure?.javaClass?.simpleName} " +
-                        "cause=${failure?.cause?.javaClass?.simpleName} " +
+                        "error=${failure?.cause?.javaClass?.simpleName} " +
+                        "cause=${failure?.cause?.cause?.javaClass?.simpleName} " +
+                        "readingBody=${failure?.readingBody == true} " +
                         "canceled=${request.canceled} stillRequested=$stillRequested " +
                         "classifierRetryable=$classifierRetryable willRetry=$willRetry",
                 )
