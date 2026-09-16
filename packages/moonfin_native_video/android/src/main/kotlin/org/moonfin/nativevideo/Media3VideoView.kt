@@ -4132,6 +4132,8 @@ class Media3VideoView(
                     .firstOrNull()?.responseCode
                 val stillRequested = !isDisposed && !request.canceled &&
                     request.generation == subtitleSelectionGeneration && pendingExternalSubtitleUrl == url
+                val classifierRetryable = failure?.let { canRetrySubtitle(url, it) } == true
+                val willRetry = classifierRetryable && stillRequested
                 val outcome = if (failure == null) "downloaded" else "failed"
                 subtitleWarmDiagnostic(
                     "attempt=$attempt generation=${request.generation} track=$track $outcome " +
@@ -4139,7 +4141,7 @@ class Media3VideoView(
                         "error=${failure?.javaClass?.simpleName} " +
                         "cause=${failure?.cause?.javaClass?.simpleName} " +
                         "canceled=${request.canceled} stillRequested=$stillRequested " +
-                        "retryable=${failure?.let { canRetrySubtitle(url, it) }}",
+                        "classifierRetryable=$classifierRetryable willRetry=$willRetry",
                 )
                 warmingExternalSubtitleRequests.remove(url)
                 if (warmingExtractionSubtitleUrl == url) warmingExtractionSubtitleUrl = null
