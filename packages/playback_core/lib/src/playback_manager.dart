@@ -391,7 +391,6 @@ class PlaybackManager implements AudioOwnable {
     double? normalizationGainDb,
     String? hybridAudioUrl,
     List<Map<String, dynamic>> externalSubtitles = const [],
-    bool deferExternalSubtitleSelection = false,
     bool isLive = false,
     bool autoPlay = true,
   }) {
@@ -492,8 +491,6 @@ class PlaybackManager implements AudioOwnable {
       if (hybridAudioUrl != null && hybridAudioUrl.isNotEmpty)
         'hybridAudioUrl': hybridAudioUrl,
       if (externalSubtitles.isNotEmpty) 'externalSubtitles': externalSubtitles,
-      if (deferExternalSubtitleSelection)
-        'deferExternalSubtitleSelection': true,
       'isLive': isLive,
       'mediaType':
           (resolvedMediaType == 'audio' || resolvedMediaType == 'video')
@@ -741,50 +738,12 @@ class PlaybackManager implements AudioOwnable {
       backend.completedStream.listen(_onTrackCompleted),
     ]);
 
-    if (backend is ReportsSubtitleSelectionFailures) {
-      _streamSubs.add(
-        (backend as ReportsSubtitleSelectionFailures)
-            .subtitleSelectionFailures
-            .listen(_onSubtitleSelectionFailure),
-      );
-    }
     final errorStream = backend.errorStream;
     if (errorStream != null) {
       _streamSubs.add(
         errorStream.listen(_onBackendErrorEvent, onError: (_) {}),
       );
     }
-  }
-
-  void _onSubtitleSelectionFailure(SubtitleSelectionFailure failure) {
-    final requested = _subtitleStreamIndex;
-    if (requested == null ||
-        requested < 0 ||
-        _mpvTrackIdForStream(requested, 'Subtitle') != failure.requestedTrackIndex) {
-      return;
-    }
-    final active = failure.activeTrackIndex > 0
-        ? _streamIndexForMpvTrackId(failure.activeTrackIndex, 'Subtitle')
-        : -1;
-    if (active == null) return;
-    _subtitleStreamIndex = active;
-    _lastExplicitSubtitleEnabled = active >= 0;
-    _lastExplicitSubtitleLanguage = null;
-    if (active >= 0) {
-      final stream = _currentMediaStreams.firstWhere(
-        (stream) => stream['Type'] == 'Subtitle' && stream['Index'] == active,
-        orElse: () => const <String, dynamic>{},
-      );
-      _lastExplicitSubtitleLanguage = _extractLanguage(stream);
-    }
-    final item = queueService.currentItem;
-    if (item != null) {
-      onSubtitleTrackChanged?.call(
-        MediaStreamResolver.extractItemId(item),
-        active >= 0 ? active : null,
-      );
-    }
-    _diagnosticLogger?.call('Subtitle selection failed; retained stream $active.');
   }
 
   void _disposeStreamSubs() {
@@ -1751,13 +1710,6 @@ class PlaybackManager implements AudioOwnable {
       }
     }
 
-    final deferExternalSubtitleSelection =
-        _subtitleStreamIndex != null &&
-        _subtitleStreamIndex != -1 &&
-        preloadedExternalSubtitles.any(
-          (subtitle) => subtitle['streamIndex'] == _subtitleStreamIndex,
-        );
-
     try {
       final backendMediaPayload = _buildBackendMediaPayload(
         url: resolution.streamUrl,
@@ -1771,7 +1723,6 @@ class PlaybackManager implements AudioOwnable {
         normalizationGainDb: resolution.normalizationGainDb,
         hybridAudioUrl: resolution.hybridAudioUrl,
         externalSubtitles: preloadedExternalSubtitles,
-        deferExternalSubtitleSelection: deferExternalSubtitleSelection,
         isLive: resolution.liveStreamId != null,
         autoPlay: autoPlay,
       );

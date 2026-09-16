@@ -15,7 +15,7 @@ import 'known_defects.dart';
 import 'server_transcode_capabilities.dart';
 
 class Media3PlayerBackend extends PlayerBackend
-    implements PreloadsExternalSubtitles, ReportsSubtitleSelectionFailures {
+    implements PreloadsExternalSubtitles {
   static const _discontinuityWindowMs = 15000;
   static const _discontinuityThreshold = 3;
   static const _audioSinkErrorThreshold = 2;
@@ -142,15 +142,6 @@ class Media3PlayerBackend extends PlayerBackend
   bool _bufferingFailed = false;
   bool _sourceIsLive = false;
   String? _lastFrameRateLine;
-
-  static int _nextSubtitleRequestId = 0;
-  int _subtitleRequestId = 0;
-  final _subtitleFailures =
-      StreamController<SubtitleSelectionFailure>.broadcast(sync: true);
-
-  @override
-  Stream<SubtitleSelectionFailure> get subtitleSelectionFailures =>
-      _subtitleFailures.stream;
 
   final _positionStream = StreamController<Duration>.broadcast();
   final _durationStream = StreamController<Duration>.broadcast();
@@ -321,19 +312,6 @@ class Media3PlayerBackend extends PlayerBackend
           'Media3: audio underrun (buffer ${_toInt(map['bufferSizeMs'])}ms, '
           '${_toInt(map['elapsedMs'])}ms since last feed)',
           level: LogLevel.warning,
-        );
-      case 'subtitleSelectionFailed':
-        if (map['requestId'] != _subtitleRequestId) return;
-        _diag(
-          'Media3: subtitle track ${_toInt(map['trackId'])} failed to load; '
-          'keeping track ${_toInt(map['activeTrackId'])}',
-          level: LogLevel.warning,
-        );
-        _subtitleFailures.add(
-          SubtitleSelectionFailure(
-            requestedTrackIndex: _toInt(map['trackId']),
-            activeTrackIndex: _toInt(map['activeTrackId']),
-          ),
         );
       case 'subtitleSelection':
         final how = map['how']?.toString() ?? 'unknown';
@@ -931,7 +909,6 @@ class Media3PlayerBackend extends PlayerBackend
         ? mediaItem
         : payload['url']?.toString() ?? '';
     if (_disposed || url.isEmpty) return;
-    _subtitleRequestId = ++_nextSubtitleRequestId;
 
     final mediaType = payload['mediaType']?.toString() ?? 'video';
     final container = payload['container']?.toString();
@@ -1030,8 +1007,6 @@ class Media3PlayerBackend extends PlayerBackend
       'preferredTextLanguage': preferredSubtitleLanguage,
       if (payload['externalSubtitles'] is List)
         'externalSubtitles': payload['externalSubtitles'],
-      if (payload['deferExternalSubtitleSelection'] == true)
-        'deferExternalSubtitleSelection': true,
       if (payload['audioTrackOrdinal'] is int)
         'audioTrackOrdinal': payload['audioTrackOrdinal'],
       'selectUndeterminedTextLanguage': false,
@@ -1090,7 +1065,6 @@ class Media3PlayerBackend extends PlayerBackend
   }
 
   Future<void> _teardown(String command) async {
-    _subtitleRequestId = ++_nextSubtitleRequestId;
     // The watchdogs guard a single item's bring-up, so stopping has to stop
     // the timer too or it keeps warning about a player that was told to stop.
     _watchdogTimer?.cancel();
@@ -1281,9 +1255,7 @@ class Media3PlayerBackend extends PlayerBackend
     bool isExternalSubtitle = false,
     String? externalSubtitleUrl,
   }) async {
-    final requestId = _subtitleRequestId = ++_nextSubtitleRequestId;
     await _invoke<void>('setSubtitleTrack', {
-      'requestId': requestId,
       'index': index,
       'isBitmapSubtitle': isBitmapSubtitle,
       'codec': subtitleCodec,
@@ -1300,13 +1272,11 @@ class Media3PlayerBackend extends PlayerBackend
 
   @override
   Future<void> setEmbeddedCaptionTrack(int id) async {
-    _subtitleRequestId = ++_nextSubtitleRequestId;
     await _invoke<void>('setClosedCaptionTrack', {'id': id});
   }
 
   @override
   Future<void> disableSubtitleTrack() async {
-    _subtitleRequestId = ++_nextSubtitleRequestId;
     await _invoke<void>('disableSubtitleTrack');
   }
 
@@ -1475,7 +1445,6 @@ class Media3PlayerBackend extends PlayerBackend
     _playingStream.close();
     _bufferingStream.close();
     _completedStream.close();
-    _subtitleFailures.close();
     _errorStream.close();
     _tracksChangedController.close();
   }
