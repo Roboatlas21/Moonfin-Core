@@ -1690,13 +1690,13 @@ class PlaybackManager implements AudioOwnable {
     if (_backend is PreloadsExternalSubtitles) {
       for (final subtitle in _effectiveExternalSubtitles) {
         final streamIndex = subtitle.streamIndex;
-        final isExtractionBacked =
+        final isKnownSidecar =
             streamIndex != null &&
             _currentMediaStreams.any(
               (stream) =>
                   stream['Type'] == 'Subtitle' &&
                   stream['Index'] == streamIndex &&
-                  stream['IsExternal'] != true,
+                  stream['IsExternal'] == true,
             );
 
         preloadedExternalSubtitles.add(<String, dynamic>{
@@ -1705,7 +1705,8 @@ class PlaybackManager implements AudioOwnable {
           if (subtitle.language != null) 'language': subtitle.language,
           'codec': subtitle.codec,
           if (streamIndex != null) 'streamIndex': streamIndex,
-          if (isExtractionBacked) 'isExtractionBacked': true,
+          // Unknown metadata is serialized conservatively, like runtime additions.
+          'isExtractionBacked': !isKnownSidecar,
         });
       }
     }

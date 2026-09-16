@@ -50,7 +50,6 @@ import androidx.media3.common.util.TimestampAdjuster
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
 import androidx.media3.datasource.DataSourceInputStream
-import androidx.media3.datasource.DataSourceException
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -99,7 +98,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.File
-import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.InterruptedIOException
 import java.io.IOException
@@ -2453,7 +2451,7 @@ class Media3VideoView(
             ) ?: return@forEach
 
             externalSubtitleConfigurations.add(configuration)
-            if (subtitle["isExtractionBacked"] == true) {
+            if (subtitle["isExtractionBacked"] != false) {
                 subtitle["url"]
                     ?.toString()
                     ?.takeIf { it.isNotBlank() }
@@ -4172,14 +4170,14 @@ class Media3VideoView(
         headers: Map<String, String>,
         request: SubtitleWarmRequest,
         onBytesRead: (Long) -> Unit,
-    ): Exception? {
+    ): SubtitleReadFailure? {
         var input: InputStream? = null
         var response: Response? = null
         var bytesRead = 0L
+        var readingBody = false
         return try {
             if (request.canceled) throw InterruptedIOException()
             val uri = parseUri(url)
-            val dataSpec = DataSpec.Builder().setUri(uri).build()
             input = if (uri.scheme.equals("http", true) || uri.scheme.equals("https", true)) {
                 // Coil already exposes OkHttp; no extra Media3 adapter is needed.
                 val builder = Request.Builder().url(url)
@@ -4187,13 +4185,12 @@ class Media3VideoView(
                 builder.header("Accept-Encoding", "identity")
                 response = request.newCall(builder.build()).execute()
                 if (!response.isSuccessful) {
-                    throw HttpDataSource.InvalidResponseCodeException(
-                        response.code, response.message, null, response.headers.toMultimap(),
-                        dataSpec, ByteArray(0),
-                    )
+                    return SubtitleReadFailure(httpStatus = response.code)
                 }
+                readingBody = true
                 response.body?.byteStream() ?: throw IOException("Missing subtitle response body")
             } else {
+                val dataSpec = DataSpec.Builder().setUri(uri).build()
                 DataSourceInputStream(DefaultDataSource.Factory(context).createDataSource(), dataSpec)
             }
             val buffer = ByteArray(64 * 1024)
@@ -4205,7 +4202,7 @@ class Media3VideoView(
             }
             null
         } catch (failure: Exception) {
-            failure
+            SubtitleReadFailure(readingBody = readingBody, cause = failure)
         } finally {
             onBytesRead(bytesRead)
             runCatching { input?.close() }
@@ -4225,38 +4222,7 @@ class Media3VideoView(
         val scheme = parseUri(url).scheme
         if (!scheme.equals("http", true) && !scheme.equals("https", true)) return false
 
-        val causes = generateSequence<Throwable>(failure) { it.cause }.take(16).toList()
-        if (causes.any {
-                it is FileNotFoundException || it is SecurityException ||
-                    it is java.net.MalformedURLException ||
-                    // OkHttp reports truncated response bodies as protocol errors.
-                    (it is java.net.ProtocolException &&
-                        it.message?.contains(
-                            "unexpected end of stream",
-                            ignoreCase = true,
-                        ) != true) ||
-                    it is java.net.UnknownServiceException ||
-                    it is java.security.cert.CertificateException ||
-                    it is javax.net.ssl.SSLPeerUnverifiedException ||
-                    it is HttpDataSource.CleartextNotPermittedException ||
-                    it is HttpDataSource.InvalidContentTypeException
-            }
-        ) return false
-        val response = causes.filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
-            .firstOrNull()
-        if (response != null) {
-            return response.responseCode == 408 || response.responseCode == 429 ||
-                response.responseCode in 500..599
-        }
-        if (causes.filterIsInstance<DataSourceException>().any {
-                it.reason == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND ||
-                    it.reason == PlaybackException.ERROR_CODE_IO_NO_PERMISSION ||
-                    it.reason == PlaybackException.ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED ||
-                    it.reason == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE ||
-                    it.reason == PlaybackException.ERROR_CODE_FAILED_RUNTIME_CHECK
-            }
-        ) return false
-        return failure is IOException
+        return (failure as? SubtitleReadFailure)?.isRetryable() == true
     }
 
     private fun scheduleSubtitleRetry(url: String) {
@@ -4409,26 +4375,26 @@ class Media3VideoView(
     private fun selectExternalSubtitleByUrl(url: String): Boolean {
         // Use the same URI parsing as the subtitle configuration.
         val target = parseUri(url)
-        val configuration = externalSubtitleConfigurations.firstOrNull {
+        val configuration = externalSubtitleConfigurations.singleOrNull {
             it.uri == target
         } ?: return false
         val targetId = configuration.id ?: return false
 
+        var match: TrackEntry? = null
         for (group in player.currentTracks.groups) {
             if (group.type != C.TRACK_TYPE_TEXT) continue
             val mediaTrackGroup = group.mediaTrackGroup
             for (index in 0 until group.length) {
-                val formatId = group.getTrackFormat(index).id ?: continue
-                // MergingMediaPeriod prefixes Format.id with the child source index.
-                if (formatId.substringAfterLast(':') != targetId) continue
-                if (!group.isTrackSupported(index)) return false
-                return applyTrackOverride(
-                    C.TRACK_TYPE_TEXT,
-                    TrackEntry(mediaTrackGroup, index, supported = true),
+                if (!matchesExternalSubtitleId(group.getTrackFormat(index).id, targetId)) continue
+                // Do not guess if two tracks resolve to the same configuration.
+                if (match != null) return false
+                match = TrackEntry(
+                    mediaTrackGroup, index, supported = group.isTrackSupported(index),
                 )
             }
         }
-        return false
+        val selected = match?.takeIf { it.supported } ?: return false
+        return applyTrackOverride(C.TRACK_TYPE_TEXT, selected)
     }
 
     private fun collectTracks(trackType: Int): List<TrackEntry> =
