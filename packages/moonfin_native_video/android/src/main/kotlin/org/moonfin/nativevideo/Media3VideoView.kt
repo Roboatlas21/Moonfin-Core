@@ -1987,6 +1987,9 @@ class Media3VideoView(
     // path that works around decoder-reuse hangs on some TVs.
     private fun releaseActivePlayer() {
         if (isDisposed) return
+        cancelSubtitlePreparation()
+        clearPendingSubtitle()
+        pendingClosedCaptionId = null
         cancelPendingSubtitleCue(clearView = true)
         cancelPendingAudioRekick()
         closeExternalAudioEffectSessionIfOpen()
@@ -4104,7 +4107,10 @@ class Media3VideoView(
         val needsExtraction = url in extractionBackedExternalSubtitleUrls
         if (needsExtraction && warmingExtractionSubtitleUrl != null) return
 
-        val request = SubtitleWarmRequest(subtitleSelectionGeneration, subtitleHttpClient)
+        val request = SubtitleWarmRequest(
+            subtitleSelectionGeneration,
+            InsecureTls.okHttpClient(subtitleHttpClient),
+        )
         warmingExternalSubtitleRequests[url] = request
         if (needsExtraction) warmingExtractionSubtitleUrl = url
         val headers = currentHeaders
@@ -4223,7 +4229,10 @@ class Media3VideoView(
                     it is java.net.MalformedURLException ||
                     // OkHttp reports truncated response bodies as protocol errors.
                     (it is java.net.ProtocolException &&
-                        it.message != "unexpected end of stream") ||
+                        it.message?.contains(
+                            "unexpected end of stream",
+                            ignoreCase = true,
+                        ) != true) ||
                     it is java.net.UnknownServiceException ||
                     it is java.security.cert.CertificateException ||
                     it is javax.net.ssl.SSLPeerUnverifiedException ||
