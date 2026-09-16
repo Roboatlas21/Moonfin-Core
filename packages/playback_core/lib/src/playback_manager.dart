@@ -743,7 +743,9 @@ class PlaybackManager implements AudioOwnable {
 
     if (backend is ReportsSubtitleSelectionFailures) {
       _streamSubs.add(
-        backend.subtitleSelectionFailures.listen(_onSubtitleSelectionFailure),
+        (backend as ReportsSubtitleSelectionFailures)
+            .subtitleSelectionFailures
+            .listen(_onSubtitleSelectionFailure),
       );
     }
     final errorStream = backend.errorStream;
