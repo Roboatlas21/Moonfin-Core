@@ -313,6 +313,8 @@ class Media3PlayerBackend extends PlayerBackend
           '${_toInt(map['elapsedMs'])}ms since last feed)',
           level: LogLevel.warning,
         );
+      case 'subtitleWarmDiagnostic':
+        _diag('Media3 subtitle warm: ${map['message'] ?? ''}');
       case 'subtitleSelection':
         final how = map['how']?.toString() ?? 'unknown';
         _diag(

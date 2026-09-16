@@ -829,6 +829,7 @@ class Media3VideoView(
     private var pendingExternalSubtitleUrl: String? = null
     private var deferExternalSubtitleSelection = false
     private var subtitleSelectionGeneration = 0L
+    private var subtitleWarmAttempt = 0L
     private val subtitleHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(120, TimeUnit.SECONDS)
@@ -4108,10 +4109,32 @@ class Media3VideoView(
         if (needsExtraction) warmingExtractionSubtitleUrl = url
         val headers = currentHeaders
 
+        val attempt = ++subtitleWarmAttempt
+        val track = pendingSubtitleIndex
+        val startedMs = SystemClock.elapsedRealtime()
+        subtitleWarmDiagnostic(
+            "attempt=$attempt generation=${request.generation} track=$track started extraction=$needsExtraction",
+        )
         Thread({
-            val failure = readSubtitle(url, headers, request)
+            var bytesRead = 0L
+            val failure = readSubtitle(url, headers, request) { bytesRead = it }
+            val elapsedMs = SystemClock.elapsedRealtime() - startedMs
             mainHandler.post {
                 if (warmingExternalSubtitleRequests[url] !== request) return@post
+                val status = generateSequence<Throwable>(failure) { it.cause }.take(16)
+                    .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+                    .firstOrNull()?.responseCode
+                val stillRequested = !isDisposed && !request.canceled &&
+                    request.generation == subtitleSelectionGeneration && pendingExternalSubtitleUrl == url
+                val outcome = if (failure == null) "downloaded" else "failed"
+                subtitleWarmDiagnostic(
+                    "attempt=$attempt generation=${request.generation} track=$track $outcome " +
+                        "elapsedMs=$elapsedMs bytes=$bytesRead http=$status " +
+                        "error=${failure?.javaClass?.simpleName} " +
+                        "cause=${failure?.cause?.javaClass?.simpleName} " +
+                        "canceled=${request.canceled} stillRequested=$stillRequested " +
+                        "retryable=${failure?.let { canRetrySubtitle(url, it) }}",
+                )
                 warmingExternalSubtitleRequests.remove(url)
                 if (warmingExtractionSubtitleUrl == url) warmingExtractionSubtitleUrl = null
                 if (isDisposed) return@post
@@ -4140,9 +4163,11 @@ class Media3VideoView(
         url: String,
         headers: Map<String, String>,
         request: SubtitleWarmRequest,
+        onBytesRead: (Long) -> Unit,
     ): Exception? {
         var input: InputStream? = null
         var response: Response? = null
+        var bytesRead = 0L
         return try {
             if (request.canceled) throw InterruptedIOException()
             val uri = parseUri(url)
@@ -4166,15 +4191,25 @@ class Media3VideoView(
             val buffer = ByteArray(64 * 1024)
             while (true) {
                 if (request.canceled) throw InterruptedIOException()
-                if (input.read(buffer) == C.RESULT_END_OF_INPUT) break
+                val count = input.read(buffer)
+                if (count == C.RESULT_END_OF_INPUT) break
+                bytesRead += count
             }
             null
         } catch (failure: Exception) {
             failure
         } finally {
+            onBytesRead(bytesRead)
             runCatching { input?.close() }
             runCatching { response?.close() }
         }
+    }
+
+    private fun subtitleWarmDiagnostic(message: String) {
+        // Constructed metadata only: no URL, headers, exception message or subtitle text.
+        Media3Bridge.emitEvent(
+            mapOf("event" to "subtitleWarmDiagnostic", "message" to "view=$platformViewId $message"),
+        )
     }
 
     private fun canRetrySubtitle(url: String, failure: Exception): Boolean {
@@ -4226,10 +4261,17 @@ class Media3VideoView(
             }
         }
         subtitleRetry = retry
+        subtitleWarmDiagnostic("generation=$generation track=$pendingSubtitleIndex retry scheduled delayMs=$delayMs")
         mainHandler.postDelayed(retry, delayMs)
     }
 
     private fun cancelSubtitlePreparation() {
+        val active = warmingExternalSubtitleRequests.values.count { !it.canceled }
+        if (active > 0 || subtitleRetry != null) {
+            subtitleWarmDiagnostic(
+                "generation=$subtitleSelectionGeneration cancel active=$active scheduledRetry=${subtitleRetry != null}",
+            )
+        }
         subtitleSelectionGeneration++
         subtitleRetry?.let { mainHandler.removeCallbacks(it) }
         subtitleRetry = null
