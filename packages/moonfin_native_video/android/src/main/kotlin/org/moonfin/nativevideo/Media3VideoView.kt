@@ -49,6 +49,8 @@ import androidx.media3.common.util.ExperimentalApi
 import androidx.media3.common.util.TimestampAdjuster
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.util.Util
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.decoder.av1.Dav1dLibrary
@@ -815,6 +817,12 @@ class Media3VideoView(
     private var pendingSubtitleIsBitmap: Boolean? = null
     private var pendingExternalSubtitleUrl: String? = null
     private var deferExternalSubtitleSelection = false
+    private var subtitleSelectionRequestId: Long? = null
+    private var subtitleWarmGeneration = 0
+    private var warmingExtractionSubtitleUrl: String? = null
+    private val warmingExternalSubtitleUrls = mutableSetOf<String>()
+    private val warmedExternalSubtitleUrls = mutableSetOf<String>()
+    private val extractionBackedExternalSubtitleUrls = mutableSetOf<String>()
     private var pendingAudioIndex: Int? = null
     private var zoomMode = ZoomMode.FIT
     private var videoWidthPx = 0
@@ -976,12 +984,13 @@ class Media3VideoView(
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (
-                playbackState == Player.STATE_READY &&
-                deferExternalSubtitleSelection &&
-                (pendingSubtitleIndex != null || pendingClosedCaptionId != null)
-            ) {
-                releaseDeferredExternalSubtitleSelection()
+            if (playbackState == Player.STATE_READY) {
+                val pendingUrl = pendingExternalSubtitleUrl?.takeIf { it.isNotBlank() }
+                if (pendingUrl != null) {
+                    warmPendingExternalSubtitle()
+                } else if (pendingSubtitleIndex != null || pendingClosedCaptionId != null) {
+                    restoreSubtitleSelection(subtitleSelectionForRestore())
+                }
             }
 
             if (
@@ -1075,10 +1084,23 @@ class Media3VideoView(
         }
 
         override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+            val pendingExternalUrl = pendingExternalSubtitleUrl?.takeIf { it.isNotBlank() }
+
+            if (
+                pendingSubtitleIndex != null &&
+                pendingExternalUrl != null &&
+                pendingExternalUrl in warmedExternalSubtitleUrls &&
+                player.playbackState == Player.STATE_READY
+            ) {
+                // The merged text track can appear after the warm-up finishes.
+                applyWarmedPendingSubtitle()
+            }
+
             pendingSubtitleIndex
-                ?.takeIf { !deferExternalSubtitleSelection }
+                ?.takeIf { pendingExternalUrl == null }
                 ?.let { index ->
-                if (selectTextTrack(index, pendingExternalSubtitleUrl)) {
+                if (selectTextTrack(index, null)) {
+                    clearDeferredExternalSubtitleSelection()
                     selectedSubtitleCodec = pendingSubtitleCodec?.trim()?.lowercase()
                     selectedSubtitleIsExternal = pendingSubtitleIsExternal ?: false
                     selectedSubtitleIsBitmap = pendingSubtitleIsBitmap ?: false
@@ -1104,7 +1126,6 @@ class Media3VideoView(
                 }
             }
             pendingClosedCaptionId
-                ?.takeIf { !deferExternalSubtitleSelection }
                 ?.let { id ->
                 if (selectClosedCaptionTrack(id)) {
                     applyClosedCaptionSelection()
@@ -1432,8 +1453,61 @@ class Media3VideoView(
 
     fun isAudioPlayback(): Boolean = currentMediaType == "audio"
 
+    private fun subtitleSelectionForRestore(): Map<String, Any?> {
+        pendingClosedCaptionId?.let { return mapOf("kind" to "caption", "id" to it) }
+        val pending = pendingSubtitleIndex != null
+        if (!pending) {
+            if (!subtitleTrackEnabled || deferExternalSubtitleSelection) {
+                return mapOf("kind" to "off")
+            }
+            val caption = selectedTrackIndex(collectClosedCaptionTracks())
+            if (caption > 0) return mapOf("kind" to "caption", "id" to caption)
+        }
+        val index = pendingSubtitleIndex ?: activeSubtitleIndex()
+        if (index <= 0) return mapOf("kind" to "off")
+        return mapOf(
+            "kind" to "subtitle",
+            "index" to index,
+            "codec" to if (pending) pendingSubtitleCodec else selectedSubtitleCodec,
+            "isExternalSubtitle" to if (pending) pendingSubtitleIsExternal else selectedSubtitleIsExternal,
+            "isBitmapSubtitle" to if (pending) pendingSubtitleIsBitmap else selectedSubtitleIsBitmap,
+            "externalSubtitleUrl" to if (pending) pendingExternalSubtitleUrl else selectedExternalSubtitleUrl,
+            "requestId" to subtitleSelectionRequestId,
+        )
+    }
+
+    private fun activeSubtitleIndex(): Int {
+        if (!subtitleTrackEnabled || deferExternalSubtitleSelection) return -1
+        return selectedTrackIndex(collectTracks(C.TRACK_TYPE_TEXT))
+    }
+
+    private fun selectedTrackIndex(entries: List<TrackEntry>): Int {
+        val index = entries.indexOfFirst { entry ->
+            player.currentTracks.groups.any { group ->
+                group.mediaTrackGroup == entry.group && group.isTrackSelected(entry.trackIndex)
+            }
+        }
+        return if (index >= 0) index + 1 else -1
+    }
+
+    private fun restoreSubtitleSelection(selection: Map<*, *>) {
+        when (selection["kind"]) {
+            "subtitle" -> handleSetSubtitleTrack(selection)
+            "caption" -> handleSetClosedCaptionTrack(selection)
+            "off" -> {
+                subtitleTrackEnabled = false
+                clearDeferredExternalSubtitleSelection()
+                applyTrackSelectorForCurrentSource()
+            }
+        }
+    }
+
     fun forceReleasePlayer() {
         if (isPlayerReleased) return
+        lastSourceArguments = lastSourceArguments?.toMutableMap()?.apply {
+            this["restoreSubtitleSelection"] = subtitleSelectionForRestore()
+        }
+        subtitleWarmGeneration++
         lastPlaybackPositionMs = player.currentPosition
         isPlayerReleased = true
         isDisposed = true
@@ -2088,6 +2162,7 @@ class Media3VideoView(
                     selectedSubtitleIsBitmap = false
                     selectedExternalSubtitleUrl = null
                     subtitleTrackEnabled = false
+                    clearDeferredExternalSubtitleSelection()
 
                     pendingSubtitleIndex = null
                     pendingSubtitleCodec = null
@@ -2248,6 +2323,12 @@ class Media3VideoView(
                     selectedSubtitleIsBitmap = false
                     selectedExternalSubtitleUrl = null
                     subtitleTrackEnabled = false
+                    clearDeferredExternalSubtitleSelection()
+                    pendingSubtitleIndex = null
+                    pendingSubtitleCodec = null
+                    pendingSubtitleIsExternal = null
+                    pendingSubtitleIsBitmap = null
+                    pendingExternalSubtitleUrl = null
                     pendingClosedCaptionId = null
                     applyTrackSelectorForCurrentSource()
                     clearAssSubtitleScript()
@@ -2351,6 +2432,12 @@ class Media3VideoView(
         subtitleEmbeddedStylesEnabled = args["subtitleEmbeddedStylesEnabled"] as? Boolean ?: true
         subtitleEmbeddedFontSizesEnabled = args["subtitleEmbeddedFontSizesEnabled"] as? Boolean ?: true
 
+        subtitleWarmGeneration++
+        warmingExtractionSubtitleUrl = null
+        warmingExternalSubtitleUrls.clear()
+        warmedExternalSubtitleUrls.clear()
+        extractionBackedExternalSubtitleUrls.clear()
+
         currentUrl = url
         currentHeaders = (args["headers"] as? Map<*, *>)
             ?.mapNotNull { (k, v) ->
@@ -2371,23 +2458,35 @@ class Media3VideoView(
             val subtitle = entry as? Map<*, *> ?: return@forEach
             val streamIndex = (subtitle["streamIndex"] as? Number)?.toInt()
             val idIndex = streamIndex ?: externalSubtitleConfigurations.size
+            val configurationId = (subtitle["configurationId"] as? Number)?.toInt()
+                ?: (EXTERNAL_SUBTITLE_ID_BASE + idIndex)
 
-            buildExternalSubtitleConfiguration(
+            val configuration = buildExternalSubtitleConfiguration(
                 subtitle,
-                EXTERNAL_SUBTITLE_ID_BASE + idIndex,
+                configurationId,
                 isDefault = false,
-            )?.let(externalSubtitleConfigurations::add)
+            ) ?: return@forEach
+
+            externalSubtitleConfigurations.add(configuration)
+            if (subtitle["isExtractionBacked"] == true) {
+                subtitle["url"]
+                    ?.toString()
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(extractionBackedExternalSubtitleUrls::add)
+            }
         }
 
         selectedSubtitleCodec = null
         selectedSubtitleIsExternal = false
         selectedSubtitleIsBitmap = false
         selectedExternalSubtitleUrl = null
-        val forceSubtitlesDisabledOnStart = args["forceSubtitlesDisabledOnStart"] as? Boolean ?: false
+        val restoredSubtitle = args["restoreSubtitleSelection"] as? Map<*, *>
+        val forceSubtitlesDisabledOnStart = restoredSubtitle?.get("kind") == "off" ||
+            args["forceSubtitlesDisabledOnStart"] == true
+        // Every source containing externals waits for an explicit selection;
+        // a language preference must not auto-select a cold external track.
         deferExternalSubtitleSelection =
-            !forceSubtitlesDisabledOnStart &&
-                args["deferExternalSubtitleSelection"] == true &&
-                externalSubtitleConfigurations.isNotEmpty()
+            !forceSubtitlesDisabledOnStart && externalSubtitleConfigurations.isNotEmpty()
         subtitleTrackEnabled = !forceSubtitlesDisabledOnStart
         pendingSubtitleIndex = null
         pendingSubtitleCodec = null
@@ -2416,6 +2515,7 @@ class Media3VideoView(
         emitSyncDelayState()
         emitVolumeBoostState()
         setMediaItem(startPositionMs, playWhenReady = autoPlay)
+        restoredSubtitle?.let(::restoreSubtitleSelection)
         playerHasLoadedSource = true
     }
 
@@ -2588,6 +2688,9 @@ class Media3VideoView(
         // A canonical stop ends ownership of this source. Clear it before
         // touching the player because appPaused may already have released it,
         // and an immediately queued appResumed must not restore stale media.
+        subtitleWarmGeneration++
+        pendingSubtitleIndex = null
+        pendingExternalSubtitleUrl = null
         lastSourceArguments = null
         lastPlaybackPositionMs = 0L
         player.stop()
@@ -3359,18 +3462,38 @@ class Media3VideoView(
 
     private fun addExternalSubtitle(args: Map<*, *>?) {
         val subtitle = args ?: return
+        var id = EXTERNAL_SUBTITLE_ID_BASE + externalSubtitleConfigurations.size
+        while (externalSubtitleConfigurations.any { it.id == id.toString() }) id++
         val configuration = buildExternalSubtitleConfiguration(
             subtitle,
-            EXTERNAL_SUBTITLE_ID_BASE + externalSubtitleConfigurations.size,
-            isDefault = true,
+            id,
+            isDefault = false,
         ) ?: return
+        if (externalSubtitleConfigurations.any { it.uri == configuration.uri }) return
 
+        val selection = subtitleSelectionForRestore()
         externalSubtitleConfigurations.add(configuration)
+        // Unknown runtime additions are serialized conservatively. Known
+        // sidecars can opt out when their metadata is available.
+        if (subtitle["isExtractionBacked"] != false) {
+            subtitle["url"]?.toString()?.let(extractionBackedExternalSubtitleUrls::add)
+        }
+        lastSourceArguments = lastSourceArguments?.toMutableMap()?.apply {
+            val subtitles = (this["externalSubtitles"] as? List<*>)?.toMutableList()
+                ?: mutableListOf<Any?>()
+            subtitles.add(subtitle.toMutableMap().apply {
+                this["configurationId"] = configuration.id?.toIntOrNull()
+                this["isExtractionBacked"] = subtitle["isExtractionBacked"] != false
+            })
+            this["externalSubtitles"] = subtitles
+        }
+        deferExternalSubtitleSelection = true
         applyTrackSelectorForCurrentSource()
 
         val playWhenReady = player.playWhenReady
         val currentPosition = player.currentPosition
         setMediaItem(currentPosition, playWhenReady = playWhenReady)
+        restoreSubtitleSelection(selection)
     }
 
     private fun configureSubtitleStyle(args: Map<*, *>?) {
@@ -3970,31 +4093,135 @@ class Media3VideoView(
         }
     }
 
-    private fun releaseDeferredExternalSubtitleSelection() {
+    private fun warmPendingExternalSubtitle(retry: Boolean = false) {
+        val url = pendingExternalSubtitleUrl?.takeIf { it.isNotBlank() } ?: return
+        if (url in warmedExternalSubtitleUrls) {
+            applyWarmedPendingSubtitle()
+            return
+        }
+        if (url in warmingExternalSubtitleUrls) return
+
+        val needsExtraction = url in extractionBackedExternalSubtitleUrls
+        if (needsExtraction && warmingExtractionSubtitleUrl != null) return
+
+        warmingExternalSubtitleUrls.add(url)
+        if (needsExtraction) warmingExtractionSubtitleUrl = url
+        val generation = subtitleWarmGeneration
+        val headers = currentHeaders
+
+        Thread({
+            val succeeded = readSubtitle(url, headers)
+            mainHandler.post {
+                if (generation != subtitleWarmGeneration) return@post
+                warmingExternalSubtitleUrls.remove(url)
+                if (warmingExtractionSubtitleUrl == url) warmingExtractionSubtitleUrl = null
+                if (isDisposed) return@post
+                if (succeeded) warmedExternalSubtitleUrls.add(url)
+
+                when {
+                    pendingExternalSubtitleUrl != url -> warmPendingExternalSubtitle()
+                    succeeded -> applyWarmedPendingSubtitle()
+                    !retry -> warmPendingExternalSubtitle(retry = true)
+                    else -> clearPendingExternalSubtitleSelection(url)
+                }
+            }
+        }, "MoonfinSubtitleWarm").start()
+    }
+
+    // Complete Jellyfin's extraction outside Media3's merged loader. Selecting
+    // the cold subtitle there can prevent the next HLS segment from loading.
+    private fun readSubtitle(url: String, headers: Map<String, String>): Boolean {
+        var dataSource: DataSource? = null
+        return try {
+            val httpFactory = DefaultHttpDataSource.Factory()
+                .setAllowCrossProtocolRedirects(true)
+                .setConnectTimeoutMs(120_000)
+                .setReadTimeoutMs(600_000)
+                .setDefaultRequestProperties(headers)
+            dataSource = DefaultDataSource.Factory(context, httpFactory).createDataSource()
+            dataSource.open(DataSpec.Builder().setUri(parseUri(url)).build())
+            val buffer = ByteArray(64 * 1024)
+            while (dataSource.read(buffer, 0, buffer.size) != C.RESULT_END_OF_INPUT) {
+                // Read to EOF before making this URL selectable.
+            }
+            true
+        } catch (_: Exception) {
+            // Report failure without logging URLs that may contain credentials.
+            false
+        } finally {
+            runCatching { dataSource?.close() }
+        }
+    }
+
+    private fun clearPendingExternalSubtitleSelection(url: String) {
+        if (pendingExternalSubtitleUrl != url) return
+
+        val failedIndex = pendingSubtitleIndex
+        val activeIndex = activeSubtitleIndex()
+        Media3Bridge.emitEvent(
+            mapOf(
+                "event" to "subtitleSelectionFailed",
+                "requestId" to subtitleSelectionRequestId,
+                "trackId" to failedIndex,
+                "activeTrackId" to activeIndex,
+                "reason" to "warmFailed",
+            ),
+        )
+        pendingSubtitleIndex = null
+        pendingSubtitleCodec = null
+        pendingSubtitleIsExternal = null
+        pendingSubtitleIsBitmap = null
+        pendingExternalSubtitleUrl = null
+
+        if (deferExternalSubtitleSelection) {
+            subtitleTrackEnabled = false
+            clearDeferredExternalSubtitleSelection()
+            applyTrackSelectorForCurrentSource()
+        }
+    }
+
+    private fun applyWarmedPendingSubtitle() {
+        val index = pendingSubtitleIndex ?: return
+        val url = pendingExternalSubtitleUrl?.takeIf { it.isNotBlank() } ?: return
+        if (url !in warmedExternalSubtitleUrls || player.playbackState != Player.STATE_READY) return
+
+        if (!selectTextTrack(index, url)) return
+
+        clearDeferredExternalSubtitleSelection()
+
+        selectedSubtitleCodec = pendingSubtitleCodec?.trim()?.lowercase()
+        selectedSubtitleIsExternal = pendingSubtitleIsExternal ?: false
+        selectedSubtitleIsBitmap = pendingSubtitleIsBitmap ?: false
+        selectedExternalSubtitleUrl = url
+        subtitleTrackEnabled = true
+        applyTrackSelectorForCurrentSource()
+        refreshSubtitleRendererMode()
+
+        pendingSubtitleIndex = null
+        pendingSubtitleCodec = null
+        pendingSubtitleIsExternal = null
+        pendingSubtitleIsBitmap = null
+        pendingExternalSubtitleUrl = null
+    }
+
+    private fun clearDeferredExternalSubtitleSelection() {
+        if (!deferExternalSubtitleSelection) return
+
         deferExternalSubtitleSelection = false
         lastSourceArguments = lastSourceArguments?.toMutableMap()?.apply {
             remove("deferExternalSubtitleSelection")
         }
-        applyTrackSelectorForCurrentSource()
     }
 
-    // Include unsupported tracks so 1-based positions stay aligned with the
-    // server's stream list (a track the decoder rejects must not shift every
-    // later position); selection of an unsupported entry is vetoed instead.
-    // Resolves an external file by the URL it was added from (through the
-    // deterministic SubtitleConfiguration id), which is immune to ExoPlayer
-    // group-ordering surprises, and falls back to positional selection.
-    // Applies a subtitle selection request from either the live channel
-    // (handleControlCall) or a replayed queued call (handleQueuedCall). Both
-    // must resolve externals through selectTextTrack (by SubtitleConfiguration
-    // id), and both keep the request pending so onTracksChanged retries once the
-    // tracks are ready.
+    // Keep server stream positions stable even when Media3 rejects a track.
+    // External subtitles are matched by the SubtitleConfiguration id instead.
     private fun handleSetSubtitleTrack(args: Map<*, *>?) {
         val index = (args?.get("index") as? Number)?.toInt() ?: 0
         val codec = args?.get("codec")?.toString()
         val isExternal = args?.get("isExternalSubtitle") as? Boolean ?: false
         val isBitmap = args?.get("isBitmapSubtitle") as? Boolean ?: false
         val externalUrl = args?.get("externalSubtitleUrl")?.toString()
+        subtitleSelectionRequestId = (args?.get("requestId") as? Number)?.toLong()
 
         pendingClosedCaptionId = null
         pendingSubtitleIndex = index
@@ -4003,15 +4230,14 @@ class Media3VideoView(
         pendingSubtitleIsBitmap = isBitmap
         pendingExternalSubtitleUrl = externalUrl
 
-        if (deferExternalSubtitleSelection) {
-            if (player.playbackState != Player.STATE_READY) return
-
-            releaseDeferredExternalSubtitleSelection()
+        if (!externalUrl.isNullOrBlank()) {
+            warmPendingExternalSubtitle()
             return
         }
 
         val selected = selectTextTrack(index, externalUrl)
         if (selected) {
+            clearDeferredExternalSubtitleSelection()
             selectedSubtitleCodec = codec?.trim()?.lowercase()
             selectedSubtitleIsExternal = isExternal
             selectedSubtitleIsBitmap = isBitmap
@@ -4041,13 +4267,6 @@ class Media3VideoView(
         pendingExternalSubtitleUrl = null
         pendingClosedCaptionId = id
 
-        if (deferExternalSubtitleSelection) {
-            if (player.playbackState != Player.STATE_READY) return
-
-            releaseDeferredExternalSubtitleSelection()
-            return
-        }
-
         if (selectClosedCaptionTrack(id)) {
             applyClosedCaptionSelection()
         }
@@ -4062,6 +4281,7 @@ class Media3VideoView(
     }
 
     private fun applyClosedCaptionSelection() {
+        clearDeferredExternalSubtitleSelection()
         pendingClosedCaptionId = null
         selectedSubtitleCodec = null
         selectedSubtitleIsExternal = false
@@ -4074,16 +4294,14 @@ class Media3VideoView(
 
     private fun selectTextTrack(oneBasedIndex: Int, externalUrl: String?): Boolean {
         val url = externalUrl?.takeIf { it.isNotBlank() }
-        if (url != null && selectExternalSubtitleByUrl(url)) {
-            emitSubtitleSelection(oneBasedIndex, "url", true)
-            return true
+        if (url != null) {
+            val selected = selectExternalSubtitleByUrl(url)
+            emitSubtitleSelection(oneBasedIndex, "url", selected)
+            return selected
         }
-        // Positional selection counts on the player seeing tracks in the same
-        // order the server listed them, which an external that failed to match
-        // by url has already disproved, so say which way the track was picked.
-        val how = if (url != null) "positionalAfterUrlMiss" else "positional"
+
         val selected = selectTrack(C.TRACK_TYPE_TEXT, oneBasedIndex)
-        emitSubtitleSelection(oneBasedIndex, how, selected)
+        emitSubtitleSelection(oneBasedIndex, "positional", selected)
         return selected
     }
 
@@ -4101,10 +4319,7 @@ class Media3VideoView(
     }
 
     private fun selectExternalSubtitleByUrl(url: String): Boolean {
-        // The configuration uri was built with Uri.parse at add time, so parse
-        // the request the same way. Comparing a parsed uri to the raw string
-        // misses whenever Android normalizes it, dropping us to positional
-        // selection which is off for externals.
+        // Use the same URI parsing as the subtitle configuration.
         val target = parseUri(url)
         val configuration = externalSubtitleConfigurations.firstOrNull {
             it.uri == target

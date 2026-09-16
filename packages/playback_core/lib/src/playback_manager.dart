@@ -741,12 +741,48 @@ class PlaybackManager implements AudioOwnable {
       backend.completedStream.listen(_onTrackCompleted),
     ]);
 
+    if (backend is ReportsSubtitleSelectionFailures) {
+      _streamSubs.add(
+        backend.subtitleSelectionFailures.listen(_onSubtitleSelectionFailure),
+      );
+    }
     final errorStream = backend.errorStream;
     if (errorStream != null) {
       _streamSubs.add(
         errorStream.listen(_onBackendErrorEvent, onError: (_) {}),
       );
     }
+  }
+
+  void _onSubtitleSelectionFailure(SubtitleSelectionFailure failure) {
+    final requested = _subtitleStreamIndex;
+    if (requested == null ||
+        requested < 0 ||
+        _mpvTrackIdForStream(requested, 'Subtitle') != failure.requestedTrackIndex) {
+      return;
+    }
+    final active = failure.activeTrackIndex > 0
+        ? _streamIndexForMpvTrackId(failure.activeTrackIndex, 'Subtitle')
+        : -1;
+    if (active == null) return;
+    _subtitleStreamIndex = active;
+    _lastExplicitSubtitleEnabled = active >= 0;
+    _lastExplicitSubtitleLanguage = null;
+    if (active >= 0) {
+      final stream = _currentMediaStreams.firstWhere(
+        (stream) => stream['Type'] == 'Subtitle' && stream['Index'] == active,
+        orElse: () => const <String, dynamic>{},
+      );
+      _lastExplicitSubtitleLanguage = _extractLanguage(stream);
+    }
+    final item = queueService.currentItem;
+    if (item != null) {
+      onSubtitleTrackChanged?.call(
+        MediaStreamResolver.extractItemId(item),
+        active >= 0 ? active : null,
+      );
+    }
+    _diagnosticLogger?.call('Subtitle selection failed; retained stream $active.');
   }
 
   void _disposeStreamSubs() {
@@ -1692,12 +1728,23 @@ class PlaybackManager implements AudioOwnable {
 
     if (_backend is PreloadsExternalSubtitles) {
       for (final subtitle in _effectiveExternalSubtitles) {
+        final streamIndex = subtitle.streamIndex;
+        final isExtractionBacked =
+            streamIndex != null &&
+            _currentMediaStreams.any(
+              (stream) =>
+                  stream['Type'] == 'Subtitle' &&
+                  stream['Index'] == streamIndex &&
+                  stream['IsExternal'] != true,
+            );
+
         preloadedExternalSubtitles.add(<String, dynamic>{
           'url': _ensureSubtitleApiKey(subtitle.deliveryUrl),
           if (subtitle.title != null) 'title': subtitle.title,
           if (subtitle.language != null) 'language': subtitle.language,
           'codec': subtitle.codec,
-          if (subtitle.streamIndex != null) 'streamIndex': subtitle.streamIndex,
+          if (streamIndex != null) 'streamIndex': streamIndex,
+          if (isExtractionBacked) 'isExtractionBacked': true,
         });
       }
     }

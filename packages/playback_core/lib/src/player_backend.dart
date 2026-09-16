@@ -50,6 +50,21 @@ class EmbeddedCaptionTrack {
 /// Backend receives effective external subtitles with the initial media source.
 abstract interface class PreloadsExternalSubtitles {}
 
+/// A requested subtitle could not replace the currently active track.
+class SubtitleSelectionFailure {
+  const SubtitleSelectionFailure({
+    required this.requestedTrackIndex,
+    required this.activeTrackIndex,
+  });
+
+  final int requestedTrackIndex;
+  final int activeTrackIndex;
+}
+
+abstract interface class ReportsSubtitleSelectionFailures {
+  Stream<SubtitleSelectionFailure> get subtitleSelectionFailures;
+}
+
 abstract class PlayerBackend {
   Future<void> play(
     dynamic mediaItem, {
