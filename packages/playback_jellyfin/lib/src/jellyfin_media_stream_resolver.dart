@@ -241,10 +241,33 @@ class JellyfinMediaStreamResolver implements MediaStreamResolver {
       selectedSubtitleStreamIndex: source.defaultSubtitleStreamIndex,
       transcodingReasons: reasons,
       hybridAudioUrl: hybridAudioUrl,
+      hlsTransportOffsetUs:
+          playMethod != StreamPlayMethod.directPlay &&
+              source.liveStreamId == null &&
+              _isServerUrl(url)
+          ? hlsTransportOffsetUsFor(url)
+          : 0,
       serverOfferedDirectPlay: source.supportsDirectPlay,
       directPlayRequested: enableDirectPlay,
       sourceBitrate: source.bitrate,
     );
+  }
+
+  static int hlsTransportOffsetUsFor(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        !RegExp(r'/videos/[^/]+/(master|main)\.m3u8$', caseSensitive: false)
+            .hasMatch(uri.path)) {
+      return 0;
+    }
+    final query = <String, String>{
+      for (final entry in uri.queryParameters.entries)
+        entry.key.toLowerCase(): entry.value.toLowerCase(),
+    };
+    final container = query['segmentcontainer'] ?? 'ts';
+    // Jellyfin uses -max_delay 5000000; FFmpeg's MPEG-TS muxer adds twice
+    // that to PTS/DTS. fMP4 does not add this padding.
+    return container == 'ts' ? 10 * Duration.microsecondsPerSecond : 0;
   }
 
   String? _buildHybridAudioRemuxUrl(

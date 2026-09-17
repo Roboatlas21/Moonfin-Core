@@ -13,15 +13,14 @@ import androidx.media3.extractor.ExtractorOutput
 import java.io.IOException
 
 /**
- * Watches the timestamp adjuster media3 uses for an HLS stream and reports
- * the offset it settled on.
+ * Reports the difference between source time and the HLS playback timeline.
  *
  * The adjuster pins the first sample it parses to the segment's nominal
  * start, so when a Jellyfin transcode pre-rolls copied audio from before the
- * seek point, the whole timeline lands that much later than source time. A
- * sideloaded subtitle never goes through the adjuster, so its cues run early
- * by exactly that amount. Nothing on the player reports the value, but the
- * extractor factory is handed the adjuster itself, which is enough.
+ * seek point, the whole timeline lands that much later than source time.
+ * The raw offset also removes any padding added by the server's muxer.
+ * Add that padding back before shifting external subtitles, since their
+ * timestamps never went through the muxer.
  *
  * [onOffsetUs] fires on the loader thread whenever the settled value changes,
  * which it does after a seek that leaves the buffer, since the adjuster is
@@ -31,6 +30,7 @@ import java.io.IOException
 internal class HlsTimestampOffsetObserver(
     private val delegate: HlsExtractorFactory,
     private val onOffsetUs: (Long) -> Unit,
+    private val transportOffsetUs: Long = 0L,
 ) : HlsExtractorFactory {
 
     @Volatile
@@ -69,7 +69,7 @@ internal class HlsTimestampOffsetObserver(
             armed = true
             return
         }
-        val offsetUs = adjuster.timestampOffsetUs
+        val offsetUs = adjuster.timestampOffsetUs + transportOffsetUs
         if (!armed && offsetUs == lastReportedUs) return
         armed = false
         lastReportedUs = offsetUs

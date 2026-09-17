@@ -31,6 +31,24 @@ JellyfinStreamRoute route({
 }
 
 void main() {
+  group('Jellyfin HLS transport timestamps', () {
+    const playlist = 'https://server/jellyfin/Videos/movie/master.m3u8';
+    final offset = JellyfinMediaStreamResolver.hlsTransportOffsetUsFor;
+
+    test('MPEG-TS has ten seconds of muxer padding, including the default', () {
+      expect(offset('$playlist?SegmentContainer=ts'), 10000000);
+      expect(offset('$playlist?segmentcontainer=TS'), 10000000);
+      expect(offset(playlist), 10000000);
+    });
+
+    test('fMP4, progressive and unrelated HLS URLs have no known padding', () {
+      expect(offset('$playlist?SegmentContainer=mp4'), 0);
+      expect(offset('https://server/Videos/movie/stream.mkv'), 0);
+      expect(offset('https://other/live/channel.m3u8'), 0);
+      expect(offset('https://server/Audio/song/main.m3u8'), 0);
+    });
+  });
+
   group('chooseStreamRoute', () {
     test('a plain direct-playable source still direct plays', () {
       expect(route(), JellyfinStreamRoute.directPlay);

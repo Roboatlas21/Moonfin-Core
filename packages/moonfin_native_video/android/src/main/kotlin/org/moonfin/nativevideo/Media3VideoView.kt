@@ -892,9 +892,10 @@ class Media3VideoView(
     private var skipSilenceEnabled = false
     // The delay the user set. Positive shows subtitles later.
     private var manualSubtitleDelayMs = 0L
-    // What the HLS timestamp adjuster moved the timeline by, so sideloaded
-    // subtitles can be moved with it. Only ever non zero on an HLS transcode.
+    // Shift external subtitles onto the HLS timeline, excluding padding
+    // added by the server's muxer.
     private var autoSubtitleOffsetUs = 0L
+    private var hlsTransportOffsetUs = 0L
     private var sidecarOffsetSources: List<TimeOffsetMediaSource> = emptyList()
     private var embeddedOffsetSource: TextStreamOffsetMediaSource? = null
     private var retimeRunnable: Runnable? = null
@@ -2410,6 +2411,7 @@ class Media3VideoView(
         skipSilenceEnabled = args["skipSilenceEnabled"] as? Boolean ?: false
         manualSubtitleDelayMs = clampManualDelayMs((args["subtitleDelayMs"] as? Number)?.toLong() ?: 0L)
         autoSubtitleOffsetUs = 0L
+        hlsTransportOffsetUs = (args["hlsTransportOffsetUs"] as? Number)?.toLong() ?: 0L
         sidecarOffsetSources = emptyList()
         embeddedOffsetSource = null
         cancelPendingRetime()
@@ -3725,7 +3727,11 @@ class Media3VideoView(
                 .setSubtitleParserFactory(assParserFactory)
                 .experimentalParseSubtitlesDuringExtraction(true)
                 .setExtractorFactory(
-                    HlsTimestampOffsetObserver(DefaultHlsExtractorFactory(), ::onHlsTimestampOffset),
+                    HlsTimestampOffsetObserver(
+                        DefaultHlsExtractorFactory(),
+                        ::onHlsTimestampOffset,
+                        hlsTransportOffsetUs,
+                    ),
                 )
                 .createMediaSource(contentItem)
         } else {

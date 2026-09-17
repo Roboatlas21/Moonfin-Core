@@ -38,6 +38,10 @@ class StreamResolutionResult {
   final List<String> transcodingReasons;
   final String? hybridAudioUrl;
 
+  /// Timestamp padding added by the server's HLS muxer, in microseconds.
+  /// External subtitle files do not carry this padding.
+  final int hlsTransportOffsetUs;
+
   /// Whether the server offered this source for direct play, and whether this
   /// resolve asked for it. A transcode that names no reason was declined by
   /// one of these two, and without them a report can't say which. Null where
@@ -70,6 +74,7 @@ class StreamResolutionResult {
     this.selectedSubtitleStreamIndex,
     this.transcodingReasons = const [],
     this.hybridAudioUrl,
+    this.hlsTransportOffsetUs = 0,
     this.serverOfferedDirectPlay,
     this.directPlayRequested,
     this.sourceBitrate,

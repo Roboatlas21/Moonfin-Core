@@ -4,6 +4,7 @@ import 'package:playback_core/playback_core.dart';
 class _TestBackend extends Fake implements PlayerBackend {
   final List<String> playedUrls = <String>[];
   final List<bool> autoPlayValues = <bool>[];
+  final List<int> transportOffsets = <int>[];
   int resumeCalls = 0;
   bool playing = false;
   Duration currentPosition = Duration.zero;
@@ -77,6 +78,7 @@ class _TestBackend extends Fake implements PlayerBackend {
     final autoPlay = payload['autoPlay'] != false;
     playedUrls.add(payload['url'] as String);
     autoPlayValues.add(autoPlay);
+    transportOffsets.add(payload['hlsTransportOffsetUs'] as int);
     currentPosition = startPosition;
     // The real backends load the source and only start it when asked, which
     // is the behaviour under test.
@@ -131,6 +133,7 @@ class _TestResolver extends MediaStreamResolver {
       mediaSourceId: 'source-$calls',
       playSessionId: 'session-$calls',
       playMethod: StreamPlayMethod.directStream,
+      hlsTransportOffsetUs: calls == 1 ? 10000000 : 0,
     );
   }
 }
@@ -219,5 +222,12 @@ void main() {
     expect(resolver.calls, 2);
     expect(backend.autoPlayValues, [true, true]);
     expect(backend.isPlaying, isTrue);
+  });
+
+  test('a new resolution replaces the previous transport offset', () async {
+    await startPlayback();
+    expect(backend.transportOffsets, [10000000]);
+    await manager.changeAudioTrack(3);
+    expect(backend.transportOffsets, [10000000, 0]);
   });
 }

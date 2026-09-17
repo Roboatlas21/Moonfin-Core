@@ -401,6 +401,7 @@ class PlaybackManager implements AudioOwnable {
     Map<String, String> headers = const {},
     double? normalizationGainDb,
     String? hybridAudioUrl,
+    int hlsTransportOffsetUs = 0,
     bool isLive = false,
     bool autoPlay = true,
   }) {
@@ -505,6 +506,7 @@ class PlaybackManager implements AudioOwnable {
       if (headers.isNotEmpty) 'headers': headers,
       if (hybridAudioUrl != null && hybridAudioUrl.isNotEmpty)
         'hybridAudioUrl': hybridAudioUrl,
+      'hlsTransportOffsetUs': hlsTransportOffsetUs,
       'isLive': isLive,
       'mediaType':
           (resolvedMediaType == 'audio' || resolvedMediaType == 'video')
@@ -1720,6 +1722,7 @@ class PlaybackManager implements AudioOwnable {
         headers: resolution.requestHeaders,
         normalizationGainDb: resolution.normalizationGainDb,
         hybridAudioUrl: resolution.hybridAudioUrl,
+        hlsTransportOffsetUs: resolution.hlsTransportOffsetUs,
         isLive: resolution.liveStreamId != null,
         autoPlay: autoPlay,
       );

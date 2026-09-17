@@ -74,6 +74,24 @@ void main() {
     });
   }
 
+  test('server transport padding reaches native playback and resets per source', () async {
+    final offsets = <int>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_control, (call) async {
+          if (call.method == 'setSource') {
+            offsets.add((call.arguments as Map)['hlsTransportOffsetUs'] as int);
+          }
+          return null;
+        });
+
+    await backend.play(<String, dynamic>{
+      'url': 'https://server/Videos/movie/master.m3u8?SegmentContainer=ts',
+      'hlsTransportOffsetUs': 10000000,
+    });
+    await backend.play('https://server/Videos/other/stream.mkv');
+    expect(offsets, [10000000, 0]);
+  });
+
   test('starts with no correction', () {
     expect(backend.subtitleAutoOffsetSeconds, 0.0);
   });

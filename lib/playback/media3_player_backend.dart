@@ -1039,6 +1039,7 @@ class Media3PlayerBackend extends PlayerBackend {
       'headers': headers,
       'autoPlay': autoPlay,
       'startPositionMs': startPosition.inMilliseconds,
+      'hlsTransportOffsetUs': payload['hlsTransportOffsetUs'] ?? 0,
       'container': container,
       'videoRangeType': videoRangeType,
       'mediaType': mediaType,

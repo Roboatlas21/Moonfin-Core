@@ -53,4 +53,43 @@ class HlsTimestampOffsetObserverTest {
         observer.reportIfSettled(adjuster)
         assertEquals(listOf(2_000_000L, 2_000_000L), reported)
     }
+
+    @Test
+    fun `MPEG TS padding does not advance external subtitles`() {
+        val observer = observerWithTransportPadding()
+        val adjuster = TimestampAdjuster(0L)
+        adjuster.adjustSampleTimestamp(10_000_000L)
+        observer.reportIfSettled(adjuster)
+        assertEquals(listOf(0L), reported)
+    }
+
+    @Test
+    fun `starting at a resume point preserves the preroll correction`() {
+        val observer = observerWithTransportPadding()
+        val adjuster = TimestampAdjuster(600_000_000L)
+        // Source audio starts 1.5 seconds before the requested segment.
+        adjuster.adjustSampleTimestamp(598_500_000L + 10_000_000L)
+        observer.reportIfSettled(adjuster)
+        assertEquals(listOf(1_500_000L), reported)
+
+        adjuster.reset(900_000_000L)
+        adjuster.adjustSampleTimestamp(900_000_000L + 10_000_000L)
+        observer.reportIfSettled(adjuster)
+        assertEquals(listOf(1_500_000L, 0L), reported)
+    }
+
+    @Test
+    fun `a real negative correction is preserved after removing padding`() {
+        val observer = observerWithTransportPadding()
+        val adjuster = TimestampAdjuster(600_000_000L)
+        adjuster.adjustSampleTimestamp(600_250_000L + 10_000_000L)
+        observer.reportIfSettled(adjuster)
+        assertEquals(listOf(-250_000L), reported)
+    }
+
+    private fun observerWithTransportPadding() = HlsTimestampOffsetObserver(
+        delegate = { _, _, _, _, _, _, _ -> throw UnsupportedOperationException() },
+        onOffsetUs = { reported.add(it) },
+        transportOffsetUs = 10_000_000L,
+    )
 }
