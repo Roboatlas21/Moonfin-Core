@@ -1,5 +1,6 @@
 package org.moonfin.nativevideo
 
+import okhttp3.OkHttpClient
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import javax.net.ssl.HostnameVerifier
@@ -22,6 +23,7 @@ object InsecureTls {
     private var allowed = false
     private var originalSocketFactory: SSLSocketFactory? = null
     private var originalHostnameVerifier: HostnameVerifier? = null
+    private var insecureSocketFactory: SSLSocketFactory? = null
 
     @Synchronized
     fun setAllowed(allow: Boolean) {
@@ -36,7 +38,9 @@ object InsecureTls {
 
         val context = SSLContext.getInstance("TLS")
         context.init(null, arrayOf<TrustManager>(AcceptEveryCertificate), SecureRandom())
-        HttpsURLConnection.setDefaultSSLSocketFactory(context.socketFactory)
+        val socketFactory = context.socketFactory
+        insecureSocketFactory = socketFactory
+        HttpsURLConnection.setDefaultSSLSocketFactory(socketFactory)
         HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
     }
 
@@ -45,12 +49,34 @@ object InsecureTls {
         originalHostnameVerifier?.let { HttpsURLConnection.setDefaultHostnameVerifier(it) }
         originalSocketFactory = null
         originalHostnameVerifier = null
+        insecureSocketFactory = null
     }
 
-    private object AcceptEveryCertificate : X509TrustManager {
+    // Use the current TLS setting for each request, including retries.
+    @Synchronized
+    fun okHttpClient(base: OkHttpClient): OkHttpClient {
+        val socketFactory = insecureSocketFactory
+        if (!allowed || socketFactory == null) return base
+
+        return base.newBuilder()
+            .sslSocketFactory(socketFactory, AcceptEveryCertificate)
+            .hostnameVerifier { _, _ -> true }
+            .build()
+    }
+
+    // Android calls the hostname-aware overload through reflection. Keep the
+    // class public; consumer-rules.pro preserves the class and method names.
+    object AcceptEveryCertificate : X509TrustManager {
         override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) = Unit
 
         override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) = Unit
+
+        @Suppress("unused", "UNUSED_PARAMETER")
+        fun checkServerTrusted(
+            chain: Array<X509Certificate>,
+            authType: String,
+            host: String,
+        ): List<X509Certificate> = chain.toList()
 
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
     }

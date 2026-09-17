@@ -401,6 +401,7 @@ class PlaybackManager implements AudioOwnable {
     Map<String, String> headers = const {},
     double? normalizationGainDb,
     String? hybridAudioUrl,
+    List<Map<String, dynamic>> externalSubtitles = const [],
     bool isLive = false,
     bool autoPlay = true,
   }) {
@@ -505,6 +506,7 @@ class PlaybackManager implements AudioOwnable {
       if (headers.isNotEmpty) 'headers': headers,
       if (hybridAudioUrl != null && hybridAudioUrl.isNotEmpty)
         'hybridAudioUrl': hybridAudioUrl,
+      if (externalSubtitles.isNotEmpty) 'externalSubtitles': externalSubtitles,
       'isLive': isLive,
       'mediaType':
           (resolvedMediaType == 'audio' || resolvedMediaType == 'video')
@@ -1708,6 +1710,31 @@ class PlaybackManager implements AudioOwnable {
     Object? startupError;
     StackTrace? startupStackTrace;
     final useNativeStart = startTicks != null;
+    final preloadedExternalSubtitles = <Map<String, dynamic>>[];
+
+    if (_backend is PreloadsExternalSubtitles) {
+      for (final subtitle in _effectiveExternalSubtitles) {
+        final streamIndex = subtitle.streamIndex;
+        final isKnownSidecar =
+            streamIndex != null &&
+            _currentMediaStreams.any(
+              (stream) =>
+                  stream['Type'] == 'Subtitle' &&
+                  stream['Index'] == streamIndex &&
+                  stream['IsExternal'] == true,
+            );
+
+        preloadedExternalSubtitles.add(<String, dynamic>{
+          'url': _ensureSubtitleApiKey(subtitle.deliveryUrl),
+          if (subtitle.title != null) 'title': subtitle.title,
+          if (subtitle.language != null) 'language': subtitle.language,
+          'codec': subtitle.codec,
+          // Assume extraction is needed unless the server identifies a sidecar file.
+          'isExtractionBacked': !isKnownSidecar,
+        });
+      }
+    }
+
     try {
       final backendMediaPayload = _buildBackendMediaPayload(
         url: resolution.streamUrl,
@@ -1720,6 +1747,7 @@ class PlaybackManager implements AudioOwnable {
         headers: resolution.requestHeaders,
         normalizationGainDb: resolution.normalizationGainDb,
         hybridAudioUrl: resolution.hybridAudioUrl,
+        externalSubtitles: preloadedExternalSubtitles,
         isLive: resolution.liveStreamId != null,
         autoPlay: autoPlay,
       );
@@ -1889,7 +1917,8 @@ class PlaybackManager implements AudioOwnable {
       );
     }
 
-    if (resolution.externalSubtitles.isNotEmpty) {
+    if (resolution.externalSubtitles.isNotEmpty &&
+        _backend is! PreloadsExternalSubtitles) {
       _waitAndAddExternalSubtitles(sessionToken, resolution);
     } else {
       _externalSubsLoaded = Future.value();
@@ -2909,7 +2938,7 @@ class PlaybackManager implements AudioOwnable {
   bool get _embeddedSubtitlesUnavailable =>
       _embeddedTracksStripped || !(_backend?.demuxesEmbeddedSubtitles ?? true);
 
-  /// The external subtitles that actually get sub-added, in add order.
+  /// The external subtitles exposed to the backend, in source order.
   List<ExternalSubtitle> get _effectiveExternalSubtitles {
     final resolution = _currentResolution;
     if (resolution == null) return const [];

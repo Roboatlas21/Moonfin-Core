@@ -15,7 +15,8 @@ import 'known_defects.dart';
 import 'media3_letterbox_crop.dart';
 import 'server_transcode_capabilities.dart';
 
-class Media3PlayerBackend extends PlayerBackend {
+class Media3PlayerBackend extends PlayerBackend
+    implements PreloadsExternalSubtitles {
   static const _discontinuityWindowMs = 15000;
   static const _discontinuityThreshold = 3;
   static const _audioSinkErrorThreshold = 2;
@@ -1050,6 +1051,8 @@ class Media3PlayerBackend extends PlayerBackend {
       'skipSilenceEnabled': _skipSilenceEnabled,
       'preferredAudioLanguage': preferredAudioLanguage,
       'preferredTextLanguage': preferredSubtitleLanguage,
+      if (payload['externalSubtitles'] is List)
+        'externalSubtitles': payload['externalSubtitles'],
       if (payload['audioTrackOrdinal'] is int)
         'audioTrackOrdinal': payload['audioTrackOrdinal'],
       'selectUndeterminedTextLanguage': false,
