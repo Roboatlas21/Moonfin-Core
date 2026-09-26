@@ -153,6 +153,8 @@ class PlaybackManager implements AudioOwnable {
   final List<StreamSubscription> _streamSubs = [];
   Timer? _progressTimer;
   _ProgressGeneration? _progressGeneration;
+  final _closedLiveStreams = Expando<bool>();
+  final _pendingLiveStreamCloses = <Future<void>>{};
   StreamResolutionResult? _currentResolution;
   dynamic _lastPlaybackItem;
   StreamResolutionResult? _lastPlaybackResolution;
@@ -2242,6 +2244,13 @@ class PlaybackManager implements AudioOwnable {
       }
     }
 
+    // A fresh resolve can reuse the same LiveStreamId. A timeout on a stop
+    // report must not leave an old close request racing that replacement.
+    while (_pendingLiveStreamCloses.isNotEmpty) {
+      await Future.wait(_pendingLiveStreamCloses.toList());
+      if (sessionToken != _playbackSessionToken) return;
+    }
+
     final resolution = await _resolver!.resolve(
       item,
       deviceProfile: profile,
@@ -2747,8 +2756,7 @@ class PlaybackManager implements AudioOwnable {
     if (resolution.playMethod == StreamPlayMethod.directPlay &&
         directLiveStreamId != null &&
         directLiveStreamId.isNotEmpty) {
-      final closeFuture = _service?.closeLiveStream(directLiveStreamId);
-      if (closeFuture != null) unawaited(closeFuture);
+      _closeLiveStreamOnce(resolution, _service);
     }
 
     _startProgressTimer();
@@ -2787,6 +2795,7 @@ class PlaybackManager implements AudioOwnable {
       if (generation != null && !generation.ended) {
         _retireProgressGeneration(generation, currentPlaybackPosition);
         _issuePlaybackStop(generation);
+        _closeLiveStreamOnce(generation.resolution, generation.service);
       }
       generation = _ProgressGeneration(
         item: item,
@@ -2866,6 +2875,32 @@ class PlaybackManager implements AudioOwnable {
             .catchError((_) {}),
       );
     } catch (_) {}
+  }
+
+  void _closeLiveStreamOnce(
+    StreamResolutionResult resolution,
+    PlayerService? service,
+  ) {
+    if (_closedLiveStreams[resolution] == true) return;
+    final liveStreamId = resolution.liveStreamId;
+    if (service == null || liveStreamId == null || liveStreamId.isEmpty) {
+      return;
+    }
+    _closedLiveStreams[resolution] = true;
+    // A preempted startup can unwind after its replacement has taken over
+    // the same live source. It no longer owns that source's cleanup.
+    final current = _currentResolution;
+    if (current != null &&
+        !identical(current, resolution) &&
+        identical(service, _service) &&
+        current.liveStreamId == liveStreamId) {
+      return;
+    }
+    late final Future<void> close;
+    close = Future<void>.sync(() => service.closeLiveStream(liveStreamId))
+        .catchError((Object _) {})
+        .whenComplete(() => _pendingLiveStreamCloses.remove(close));
+    _pendingLiveStreamCloses.add(close);
   }
 
   void _stopProgressTimer() {
@@ -3573,6 +3608,7 @@ class PlaybackManager implements AudioOwnable {
     } catch (_) {}
 
     if (item != null && resolution != null) {
+      _closeLiveStreamOnce(resolution, _service);
       final stopReport = _service?.onPlaybackStop(item, resolution, currentPos);
       if (resolution.playMethod == StreamPlayMethod.directPlay) {
         // No server-side job to tear down, so don't delay the restart.
@@ -3978,6 +4014,7 @@ class PlaybackManager implements AudioOwnable {
         _retireProgressGeneration(progressGeneration, pos);
       }
       if (reportItem != null && resolution != null) {
+        _closeLiveStreamOnce(resolution, _service);
         if (progressGeneration != null &&
             identical(progressGeneration.item, reportItem) &&
             identical(progressGeneration.resolution, resolution)) {
@@ -4028,6 +4065,7 @@ class PlaybackManager implements AudioOwnable {
 
   void _cleanupPreemptedSession(dynamic item, StreamResolutionResult? resolution) {
     if (item != null && resolution != null) {
+      _closeLiveStreamOnce(resolution, _service);
       unawaited(_service?.onPlaybackStop(item, resolution, Duration.zero).catchError((_) => null));
     }
   }

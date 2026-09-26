@@ -20,6 +20,9 @@ abstract class PlayerService {
     bool? isMuted,
   });
 
+  /// Reports the final position for this play session. May be repeated after
+  /// late progress replies; must not close live streams or release resources.
+  /// The manager owns that cleanup separately through [closeLiveStream].
   Future<void> onPlaybackStop(
     dynamic mediaItem,
     StreamResolutionResult resolution,

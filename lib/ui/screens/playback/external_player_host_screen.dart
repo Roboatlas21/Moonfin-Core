@@ -234,7 +234,12 @@ class _ExternalPlayerHostScreenState extends State<ExternalPlayerHostScreen> {
           currentItem,
           resolution,
           reportPosition,
-        );
+        ).whenComplete(() async {
+          final liveStreamId = resolution.liveStreamId;
+          if (liveStreamId != null && liveStreamId.isNotEmpty) {
+            await playService.closeLiveStream(liveStreamId);
+          }
+        });
 
         if (launchResult.hasError) {
           if (_shouldFallbackToInternalPlayer(launchResult.errorCode)) {

@@ -63,26 +63,8 @@ class EmbyPlaySessionService implements PlayerService {
       playSessionId: resolution.playSessionId,
       positionTicks: position.inMicroseconds * 10,
     );
-    Object? reportError;
-    StackTrace? reportStackTrace;
-    try {
-      if (!_isAudiobook(mediaItem)) {
-        await _client.playbackApi.reportPlaybackStopped(report.toJson());
-      }
-    } catch (error, stackTrace) {
-      reportError = error;
-      reportStackTrace = stackTrace;
-    }
-
-    final liveStreamId = resolution.liveStreamId;
-    if (liveStreamId != null && liveStreamId.isNotEmpty) {
-      try {
-        await _client.playbackApi.closeLiveStream(liveStreamId);
-      } catch (_) {}
-    }
-
-    if (reportError != null) {
-      Error.throwWithStackTrace(reportError, reportStackTrace!);
+    if (!_isAudiobook(mediaItem)) {
+      await _client.playbackApi.reportPlaybackStopped(report.toJson());
     }
   }
 
