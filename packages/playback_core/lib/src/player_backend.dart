@@ -49,6 +49,9 @@ class EmbeddedCaptionTrack {
   }
 }
 
+/// A backend that accepts external subtitles when playback starts.
+abstract interface class PreloadsExternalSubtitles {}
+
 abstract class PlayerBackend {
   Future<void> play(
     dynamic mediaItem, {

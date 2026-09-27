@@ -17,3 +17,8 @@
 -keep class androidx.media3.decoder.av1.Dav1dDecoder {
   *;
 }
+
+# Android finds this method by name, so keep it from being renamed or removed.
+-keep class org.moonfin.nativevideo.InsecureTls$AcceptEveryCertificate {
+  public java.util.List checkServerTrusted(java.security.cert.X509Certificate[], java.lang.String, java.lang.String);
+}
