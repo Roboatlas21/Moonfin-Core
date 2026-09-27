@@ -795,17 +795,18 @@ class PlaybackManager implements AudioOwnable {
     };
   }
 
-  /// Sidecars a backend can register while it opens the source, in the order
-  /// [TrackOrdinalMapper] counts them, so an ordinal derived from that list
-  /// still lands on the same track.
+  /// Keep subtitle files in the order used by [TrackOrdinalMapper], so each
+  /// track number selects the correct subtitle.
   ///
-  /// Only text formats go out. A bitmap sidecar has no text equivalent, so a
-  /// player asked to read one as text fails the decode instead of falling back.
+  /// Media3 gets the full subtitle list, but only loads a track when selected.
+  /// Keeping every entry makes sure the track numbers stay correct.
+  /// Other players keep their existing text-only list when playback starts.
   List<Map<String, dynamic>> _declarableSubtitles(
     List<Map<String, dynamic>> mediaStreams,
     List<ExternalSubtitle> externalSubtitles,
   ) {
     if (externalSubtitles.isEmpty) return const [];
+    final preloadAll = _backend is PreloadsExternalSubtitles;
     final effective = TrackOrdinalMapper.effectiveExternalSubtitles(
       mediaStreams: mediaStreams,
       externalSubtitles: externalSubtitles,
@@ -813,7 +814,7 @@ class PlaybackManager implements AudioOwnable {
     );
     return [
       for (final sub in effective)
-        if (_isDeclarableSubtitleCodec(sub.codec))
+        if (preloadAll || _isDeclarableSubtitleCodec(sub.codec))
           {
             'url': _ensureSubtitleApiKey(sub.deliveryUrl),
             if (sub.title != null) 'title': sub.title,
@@ -821,6 +822,17 @@ class PlaybackManager implements AudioOwnable {
             'codec': sub.codec,
             'isDefault': sub.isDefault,
             'isForced': sub.isForced,
+            if (preloadAll)
+              // Assume subtitles need extracting unless the server says
+              // they already exist as a separate subtitle file.
+              'isExtractionBacked':
+                  sub.streamIndex == null ||
+                  !mediaStreams.any(
+                    (stream) =>
+                        stream['Type'] == 'Subtitle' &&
+                        stream['Index'] == sub.streamIndex &&
+                        stream['IsExternal'] == true,
+                  ),
           },
     ];
   }
@@ -2693,7 +2705,8 @@ class PlaybackManager implements AudioOwnable {
       );
     }
 
-    if (resolution.externalSubtitles.isNotEmpty) {
+    if (resolution.externalSubtitles.isNotEmpty &&
+        _backend is! PreloadsExternalSubtitles) {
       _waitAndAddExternalSubtitles(sessionToken, resolution);
     } else {
       _externalSubsLoaded = Future.value();
@@ -3796,7 +3809,7 @@ class PlaybackManager implements AudioOwnable {
   bool get _embeddedSubtitlesUnavailable =>
       _embeddedTracksStripped || !(_backend?.demuxesEmbeddedSubtitles ?? true);
 
-  /// The external subtitles that actually get sub-added, in add order.
+  /// Subtitle files available to the player, in their original order.
   List<ExternalSubtitle> get _effectiveExternalSubtitles {
     final resolution = _currentResolution;
     if (resolution == null) return const [];
