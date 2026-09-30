@@ -238,7 +238,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
   final _externalSubtitles = <String, ({String? title, String? language})>{};
   final _externalSubtitleLoads = <String, Future<void>>{};
 
-  static const _externalSubtitleRetries = 5;
+  static const _externalSubtitleRetries = 15;
   static const _externalSubtitleRetryDelay = Duration(seconds: 10);
 
   void _resetSubtitleState() {

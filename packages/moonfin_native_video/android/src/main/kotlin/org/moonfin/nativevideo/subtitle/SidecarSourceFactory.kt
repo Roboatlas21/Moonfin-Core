@@ -9,6 +9,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.source.loadOnlyOnceSelected
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.extractor.Extractor
 import androidx.media3.extractor.ExtractorInput
 import androidx.media3.extractor.ExtractorOutput
@@ -65,6 +66,7 @@ internal object SidecarSourceFactory {
             format
         }
         return ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory)
+            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(10))
             .loadOnlyOnceSelected(SubtitleExtractor.TRACK_ID, announcedFormat)
             .createMediaSource(MediaItem.fromUri(configuration.uri))
     }
