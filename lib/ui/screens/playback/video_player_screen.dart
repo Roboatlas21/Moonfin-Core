@@ -1388,8 +1388,26 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     unawaited(_syncDesktopFullscreenState());
   }
 
+  void _logAndroidMpvSurface(String reason) {
+    if (!PlatformDetection.isAndroid || PlatformDetection.isTV) return;
+    final backend = _activeMediaKitBackend;
+    if (backend == null) return;
+    unawaited(backend.logAndroidVideoOutputSnapshot(reason));
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    _logAndroidMpvSurface('metricsChanged');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _logAndroidMpvSurface('metricsSettled');
+    });
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState lifecycleState) {
+    _logAndroidMpvSurface('lifecycle:${lifecycleState.name}');
     if (lifecycleState != AppLifecycleState.resumed) {
       _cancelTvTemporarySpeedHold();
     }
@@ -1482,6 +1500,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onScreenLock(bool locked) {
+    _logAndroidMpvSurface('screenLock:$locked');
     _lifecycleHandler.setScreenLocked(locked);
     if (locked) {
       // Android phones keep video on in the background so picture in picture
@@ -1558,6 +1577,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onPiPChanged(bool isInPiP) {
+    _logAndroidMpvSurface('pipChanged:$isInPiP');
     if (GetIt.instance.isRegistered<PlaybackArbiter>()) {
       GetIt.instance<PlaybackArbiter>().pipActive = isInPiP;
     }
@@ -1573,6 +1593,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         ]);
       }
       _showControls();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _logAndroidMpvSurface('pipExitSettled');
+      });
     }
   }
 
