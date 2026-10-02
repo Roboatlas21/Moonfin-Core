@@ -28,15 +28,17 @@ jobs:
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
 
-      - name: Build diagnostic Android APK
+      - name: Resolve packages
+        run: flutter pub get
+
+      - name: Build diagnostic mobile APK
         run: |
-          chmod +x build-android.sh
-          ./build-android.sh
+          flutter build apk --release \
+            --flavor mobile \
+            --dart-define=DISTRIBUTION_CHANNEL=apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: android-surface-diagnostic
-          path: |
-            Moonfin_Android_v*.apk
-            Moonfin_AndroidTV_v*.apk
+          path: build/app/outputs/flutter-apk/app-mobile-release.apk
           if-no-files-found: error
