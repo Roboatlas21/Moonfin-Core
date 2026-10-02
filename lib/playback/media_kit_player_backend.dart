@@ -4,11 +4,13 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:get_it/get_it.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:playback_core/playback_core.dart';
 
+import '../data/services/log_service.dart';
 import '../preference/preference_constants.dart';
 import '../preference/user_preferences.dart';
 import '../util/auto_hdr_switcher.dart';
@@ -193,6 +195,10 @@ class MediaKitPlayerBackend extends PlayerBackend {
   bool _audioPassthroughApplyInProgress = false;
   bool _audioPassthroughApplyQueued = false;
   bool _isDisposed = false;
+  VoidCallback? _androidVideoOutputChangedListener;
+  VoidCallback? _androidWidChangedListener;
+  dynamic _androidWidNotifier;
+  Timer? _androidVideoOutputHeartbeat;
   late final MpvLetterboxCropper _letterboxCropper;
   String? _appliedCustomMpvConfPath;
   DateTime? _appliedCustomMpvConfMtime;
@@ -453,6 +459,108 @@ class MediaKitPlayerBackend extends PlayerBackend {
       (_) => unawaited(_refreshEmbeddedCaptionTracks()),
     );
     _videoParamsSub = _player.stream.videoParams.listen(_onVideoParams);
+    if (PlatformDetection.isAndroid &&
+        !PlatformDetection.isTV &&
+        _videoController != null) {
+      unawaited(_installAndroidVideoOutputDiagnostics());
+    }
+  }
+
+  void _androidVideoOutputDiag(String message) {
+    if (!GetIt.instance.isRegistered<LogService>()) return;
+    GetIt.instance<LogService>().playback(
+      'Android mpv surface: $message',
+      level: LogLevel.info,
+    );
+  }
+
+  Future<void> _installAndroidVideoOutputDiagnostics() async {
+    final controller = _videoController;
+    if (controller == null) return;
+
+    void onTextureOutputChanged() {
+      unawaited(logAndroidVideoOutputSnapshot('textureChanged'));
+    }
+
+    _androidVideoOutputChangedListener = onTextureOutputChanged;
+    controller.id.addListener(onTextureOutputChanged);
+    controller.rect.addListener(onTextureOutputChanged);
+
+    try {
+      final platformController = await controller.platform.future;
+      if (_isDisposed) return;
+      final dynamic dynamicController = platformController;
+      final dynamic widNotifier = dynamicController.wid;
+      _androidWidNotifier = widNotifier;
+
+      void onWidChanged() {
+        unawaited(logAndroidVideoOutputSnapshot('widChanged'));
+      }
+
+      _androidWidChangedListener = onWidChanged;
+      widNotifier.addListener(onWidChanged);
+      await logAndroidVideoOutputSnapshot('controllerReady');
+
+      _androidVideoOutputHeartbeat?.cancel();
+      _androidVideoOutputHeartbeat = Timer.periodic(
+        const Duration(seconds: 5),
+        (_) => unawaited(logAndroidVideoOutputSnapshot('heartbeat')),
+      );
+    } catch (error) {
+      _androidVideoOutputDiag('controller inspection unavailable: $error');
+    }
+  }
+
+  Future<void> logAndroidVideoOutputSnapshot(String reason) async {
+    if (!PlatformDetection.isAndroid || PlatformDetection.isTV || _isDisposed) {
+      return;
+    }
+
+    final controller = _videoController;
+    final native = _player.platform;
+    Object? widNotifierValue;
+    try {
+      widNotifierValue = _androidWidNotifier?.value;
+    } catch (_) {}
+
+    String? mpvWid;
+    String? vo;
+    String? vid;
+    String? surfaceSize;
+    String? videoOutParams;
+    String? hwdecCurrent;
+    if (native is NativePlayer) {
+      final values = await Future.wait<String?>([
+        _tryNativeGetProperty(native, 'wid'),
+        _tryNativeGetProperty(native, 'vo'),
+        _tryNativeGetProperty(native, 'vid'),
+        _tryNativeGetProperty(native, 'android-surface-size'),
+        _tryNativeGetProperty(native, 'video-out-params'),
+        _tryNativeGetProperty(native, 'hwdec-current'),
+      ]);
+      mpvWid = values[0];
+      vo = values[1];
+      vid = values[2];
+      surfaceSize = values[3];
+      videoOutParams = values[4];
+      hwdecCurrent = values[5];
+    }
+
+    _androidVideoOutputDiag(
+      '$reason '
+      'textureId=${controller?.id.value} '
+      'rect=${controller?.rect.value} '
+      'widNotifier=$widNotifierValue '
+      'mpvWid=${mpvWid ?? '-'} '
+      'vo=${vo ?? '-'} '
+      'vid=${vid ?? '-'} '
+      'surfaceSize=${surfaceSize ?? '-'} '
+      'videoOutParams=${videoOutParams ?? '-'} '
+      'hwdec=${hwdecCurrent ?? '-'} '
+      'playing=${_player.state.playing} '
+      'buffering=${_player.state.buffering} '
+      'positionMs=${_player.state.position.inMilliseconds}',
+    );
   }
 
   factory MediaKitPlayerBackend(
@@ -2582,6 +2690,19 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   void dispose() {
     _isDisposed = true;
+    _androidVideoOutputHeartbeat?.cancel();
+    final outputListener = _androidVideoOutputChangedListener;
+    final controller = _videoController;
+    if (outputListener != null && controller != null) {
+      controller.id.removeListener(outputListener);
+      controller.rect.removeListener(outputListener);
+    }
+    final widListener = _androidWidChangedListener;
+    if (widListener != null) {
+      try {
+        _androidWidNotifier?.removeListener(widListener);
+      } catch (_) {}
+    }
     _letterboxCropper.cancel();
     _prefs.removeListener(_onPreferencesChanged);
     _ccTracksSub?.cancel();
