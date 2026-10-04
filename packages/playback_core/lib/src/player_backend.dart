@@ -29,11 +29,9 @@ class LiveRecoveryEvent {
   final bool tryInPlaceFirst;
 }
 
-/// Timing shared by backend-owned Live TV detectors.
-///
-/// Backends decide what counts as real progress. This class only turns those
-/// engine-specific progress signals into the common 30s startup, 15s in-place
-/// resume, and 8s mid-stream recovery windows.
+/// Turns backend-specific progress signals into the common Live TV recovery
+/// windows. Backends decide what proves useful playback; this class only owns
+/// the 30s startup, 15s resume, and 8s mid-stream clocks.
 class BackendLiveRecoveryMonitor {
   BackendLiveRecoveryMonitor({
     this.startupTimeout = const Duration(seconds: 30),
@@ -56,12 +54,10 @@ class BackendLiveRecoveryMonitor {
   bool _healthy = false;
   bool _everHealthy = false;
   bool _recoveryRequested = false;
-  bool _resumingInPlace = false;
   bool _stallArmed = true;
-  bool _suspendedAfterHealthy = false;
   bool _tryInPlaceFirst = false;
-  DateTime? _windowStartedAt;
-  DateTime? _lastProgressAt;
+  DateTime? _deadline;
+  LiveRecoveryTrigger? _deadlineTrigger;
   Duration? _lastPosition;
 
   Stream<LiveRecoveryEvent> get events => _events.stream;
@@ -72,67 +68,61 @@ class BackendLiveRecoveryMonitor {
     required bool tryInPlaceFirst,
   }) {
     _timer?.cancel();
-    _timer = null;
     _live = live;
     _wantsPlay = wantsPlay;
     _healthy = false;
     _everHealthy = false;
     _recoveryRequested = false;
-    _resumingInPlace = false;
     _stallArmed = true;
-    _suspendedAfterHealthy = false;
     _tryInPlaceFirst = tryInPlaceFirst;
-    _lastProgressAt = null;
     _lastPosition = null;
-    _windowStartedAt = live && wantsPlay ? _clock() : null;
+    _deadline = live && wantsPlay ? _clock().add(startupTimeout) : null;
+    _deadlineTrigger = live && wantsPlay
+        ? LiveRecoveryTrigger.startupTimeout
+        : null;
 
-    if (!live) return;
+    if (!live) {
+      _timer = null;
+      return;
+    }
     _emit(const LiveRecoveryEvent.inactive());
-    _timer = Timer.periodic(
-      pollInterval,
-      (_) => _check(),
-    );
+    _timer = Timer.periodic(pollInterval, (_) => _check());
   }
 
   void setPlayIntent(bool wantsPlay) {
     if (!_live || _wantsPlay == wantsPlay) return;
     _wantsPlay = wantsPlay;
-    _lastPosition = null;
-    _lastProgressAt = null;
     _healthy = false;
     _recoveryRequested = false;
-    _resumingInPlace = wantsPlay && _everHealthy;
     _stallArmed = wantsPlay;
-    _suspendedAfterHealthy = !wantsPlay && _everHealthy;
-    _windowStartedAt = wantsPlay ? _clock() : null;
+    _lastPosition = null;
+    if (wantsPlay) {
+      _armDeadline(
+        _everHealthy ? resumeTimeout : startupTimeout,
+        _everHealthy
+            ? LiveRecoveryTrigger.stalled
+            : LiveRecoveryTrigger.startupTimeout,
+      );
+    } else {
+      _clearDeadline();
+    }
     _emit(const LiveRecoveryEvent.inactive());
   }
 
-  /// Disarms mid-stream stall timing for a settled engine state that is
-  /// neither playing nor buffering. On engines without playWhenReady this is
-  /// the only safe way to distinguish an external/system pause from a stall.
-  /// Startup still times out until the source has proved healthy once.
+  /// Disarms mid-stream recovery for a settled engine state that is neither
+  /// playing nor buffering. Before the first healthy frame, startup timing
+  /// stays armed because "quiet" may simply mean the source never started.
   void setStallArmed(bool armed) {
-    if (!_live || _stallArmed == armed) return;
+    if (!_live || !_everHealthy || _stallArmed == armed) return;
     _stallArmed = armed;
-
+    _lastPosition = null;
     if (!armed) {
-      if (_everHealthy && _healthy) {
-        _healthy = false;
-        _lastProgressAt = null;
-        _lastPosition = null;
-        _windowStartedAt = null;
-        _suspendedAfterHealthy = true;
-        _emit(const LiveRecoveryEvent.inactive());
-      }
-      return;
-    }
-
-    if (_wantsPlay && _suspendedAfterHealthy) {
-      _resumingInPlace = true;
-      _windowStartedAt = _clock();
-      _lastPosition = null;
-      _suspendedAfterHealthy = false;
+      _healthy = false;
+      _clearDeadline();
+      _emit(const LiveRecoveryEvent.inactive());
+    } else if (_wantsPlay) {
+      _healthy = false;
+      _armDeadline(resumeTimeout, LiveRecoveryTrigger.stalled);
     }
   }
 
@@ -140,29 +130,29 @@ class BackendLiveRecoveryMonitor {
     if (!_live) return;
     _healthy = false;
     _recoveryRequested = false;
-    _resumingInPlace = true;
     _stallArmed = true;
-    _suspendedAfterHealthy = false;
-    _windowStartedAt = _wantsPlay ? _clock() : null;
-    _lastProgressAt = null;
     _lastPosition = null;
+    if (_wantsPlay) {
+      _armDeadline(resumeTimeout, LiveRecoveryTrigger.stalled);
+    } else {
+      _clearDeadline();
+    }
     _emit(const LiveRecoveryEvent.inactive());
   }
 
-  /// Records a backend-specific progress sample. The first eligible sample is
-  /// only a baseline; a changed sample proves that playback actually moved.
+  /// The first eligible sample establishes a baseline; movement from it proves
+  /// that playback is genuinely advancing.
   void observeProgress(Duration position, {bool eligible = true}) {
     if (!_live || !_wantsPlay || !eligible) return;
     final previous = _lastPosition;
     _lastPosition = position;
     if (previous == null || previous == position) return;
-    _markHealthyAt(_clock());
+    _markHealthy();
   }
 
   /// For engines with an authoritative first-frame/presentation callback.
   void markHealthy() {
-    if (!_live || !_wantsPlay) return;
-    _markHealthyAt(_clock());
+    if (_live && _wantsPlay) _markHealthy();
   }
 
   void requestRecovery(
@@ -172,6 +162,7 @@ class BackendLiveRecoveryMonitor {
     if (!_live || !_wantsPlay || _recoveryRequested) return;
     _healthy = false;
     _recoveryRequested = true;
+    _clearDeadline();
     _emit(
       LiveRecoveryEvent.recoveryRequired(
         trigger: trigger,
@@ -181,7 +172,7 @@ class BackendLiveRecoveryMonitor {
   }
 
   void stop() {
-    final wasLive = _live;
+    final notify = _live;
     _timer?.cancel();
     _timer = null;
     _live = false;
@@ -189,13 +180,10 @@ class BackendLiveRecoveryMonitor {
     _healthy = false;
     _everHealthy = false;
     _recoveryRequested = false;
-    _resumingInPlace = false;
     _stallArmed = false;
-    _suspendedAfterHealthy = false;
-    _windowStartedAt = null;
-    _lastProgressAt = null;
     _lastPosition = null;
-    if (wasLive) _emit(const LiveRecoveryEvent.inactive());
+    _clearDeadline();
+    if (notify) _emit(const LiveRecoveryEvent.inactive());
   }
 
   void dispose() {
@@ -203,43 +191,34 @@ class BackendLiveRecoveryMonitor {
     _events.close();
   }
 
-  void _markHealthyAt(DateTime now) {
-    _lastProgressAt = now;
-    _windowStartedAt = now;
-    _resumingInPlace = false;
-    _stallArmed = true;
-    _suspendedAfterHealthy = false;
+  void _markHealthy() {
     _recoveryRequested = false;
+    _stallArmed = true;
     _everHealthy = true;
+    _armDeadline(stallTimeout, LiveRecoveryTrigger.stalled);
     if (_healthy) return;
     _healthy = true;
     _emit(const LiveRecoveryEvent.healthy());
   }
 
+  void _armDeadline(Duration timeout, LiveRecoveryTrigger trigger) {
+    _deadline = _clock().add(timeout);
+    _deadlineTrigger = trigger;
+  }
+
+  void _clearDeadline() {
+    _deadline = null;
+    _deadlineTrigger = null;
+  }
+
   void _check() {
     if (!_live || !_wantsPlay || _recoveryRequested) return;
-    final now = _clock();
-
-    if (!_healthy) {
-      final startedAt = _windowStartedAt;
-      if (startedAt == null) return;
-      final timeout = _resumingInPlace ? resumeTimeout : startupTimeout;
-      if (now.difference(startedAt) < timeout) return;
-      requestRecovery(
-        _resumingInPlace
-            ? LiveRecoveryTrigger.stalled
-            : LiveRecoveryTrigger.startupTimeout,
-      );
+    final deadline = _deadline;
+    final trigger = _deadlineTrigger;
+    if (deadline == null || trigger == null || _clock().isBefore(deadline)) {
       return;
     }
-
-    if (!_stallArmed) return;
-    final lastProgressAt = _lastProgressAt;
-    if (lastProgressAt == null ||
-        now.difference(lastProgressAt) < stallTimeout) {
-      return;
-    }
-    requestRecovery(LiveRecoveryTrigger.stalled);
+    requestRecovery(trigger);
   }
 
   void _emit(LiveRecoveryEvent event) {
