@@ -231,8 +231,8 @@ class Media3PlayerBackend extends PlayerBackend {
         _playWhenReady = map.containsKey('playWhenReady')
             ? _toBool(map['playWhenReady'])
             : null;
-        _liveRecovery.setStallArmed(
-          _playWhenReady == true || _isPlaying || _isBuffering,
+        _liveRecovery.setActive(
+          _playWhenReady ?? (_isPlaying || _isBuffering),
         );
         // The rate the player actually settled on, which is not always the one
         // that was asked for: bitstreamed audio cannot be time stretched, so
@@ -381,7 +381,6 @@ class Media3PlayerBackend extends PlayerBackend {
         _onTunnelingDiscontinuity();
       case 'firstFrameRendered':
         _sawFirstFrame = true;
-        _liveRecovery.markHealthy();
         _diag('Media3: first frame rendered @ ${_toInt(map['positionMs'])}ms');
       case 'droppedFrames':
         _diag(
@@ -1154,7 +1153,6 @@ class Media3PlayerBackend extends PlayerBackend {
     _liveRecovery.start(
       live: _sourceIsLive,
       wantsPlay: autoPlay,
-      tryInPlaceFirst: true,
     );
   }
 

@@ -302,13 +302,13 @@ class PlaybackManager implements AudioOwnable {
   void _onLiveRecoveryEvent(LiveRecoveryEvent event) {
     if (!_currentItemIsLive || _isOfflinePlayback) return;
 
-    if (event.type == LiveRecoveryEventType.inactive) {
+    if (event == LiveRecoveryEvent.inactive) {
       _liveBackendHealthy = false;
       _cancelLiveRecoveryProven();
       return;
     }
 
-    if (event.type == LiveRecoveryEventType.healthy) {
+    if (event == LiveRecoveryEvent.healthy) {
       _liveBackendHealthy = true;
       _setLiveRecoveryStatus(null);
       if (_liveRecoveryRetry?.isActive ?? false) {
@@ -324,14 +324,7 @@ class PlaybackManager implements AudioOwnable {
 
     _liveBackendHealthy = false;
     _cancelLiveRecoveryProven();
-    final trigger = event.trigger;
-    if (trigger == null) return;
-    unawaited(
-      _recoverStalledStream(
-        trigger: trigger.name,
-        cheapResumeFirst: event.tryInPlaceFirst,
-      ),
-    );
+    unawaited(_recoverStalledStream(trigger: event.name));
   }
 
   /// Once a recovery has the channel playing again, gives the budget back

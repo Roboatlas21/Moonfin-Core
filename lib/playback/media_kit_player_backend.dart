@@ -273,7 +273,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _player.stream.playing,
     () {
       final playing = _isStale ? false : _player.state.playing;
-      _liveRecovery.setStallArmed(
+      _liveRecovery.setActive(
         playing || (!_isStale && _player.state.buffering),
       );
       return playing;
@@ -284,7 +284,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _player.stream.buffering,
     () {
       final buffering = _isStale ? false : _player.state.buffering;
-      _liveRecovery.setStallArmed(
+      _liveRecovery.setActive(
         buffering || (!_isStale && _player.state.playing),
       );
       return buffering;
@@ -738,7 +738,6 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _liveRecovery.start(
       live: _sourceIsLive,
       wantsPlay: autoPlay,
-      tryInPlaceFirst: false,
     );
     unawaited(() async {
       await _letterboxCropper.setEnabled(

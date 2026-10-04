@@ -118,19 +118,11 @@ class _TestBackend extends Fake implements PlayerBackend {
   @override
   Stream<LiveRecoveryEvent> get liveRecoveryEvents => _liveRecovery.stream;
 
-  void emitHealthy() => _liveRecovery.add(const LiveRecoveryEvent.healthy());
+  void emitHealthy() => _liveRecovery.add(LiveRecoveryEvent.healthy);
 
-  void emitInactive() => _liveRecovery.add(const LiveRecoveryEvent.inactive());
+  void emitInactive() => _liveRecovery.add(LiveRecoveryEvent.inactive);
 
-  void emitRecoveryRequired({
-    LiveRecoveryTrigger trigger = LiveRecoveryTrigger.stalled,
-    bool tryInPlaceFirst = true,
-  }) => _liveRecovery.add(
-    LiveRecoveryEvent.recoveryRequired(
-      trigger: trigger,
-      tryInPlaceFirst: tryInPlaceFirst,
-    ),
-  );
+  void emitStalled() => _liveRecovery.add(LiveRecoveryEvent.stalled);
 
   void emitCompleted() => _completed.add(true);
 
@@ -1639,7 +1631,7 @@ void main() {
           // stalled it emits the recovery request instead of the manager
           // inferring one from playing/buffering.
           async.elapse(const Duration(seconds: 8));
-          backend.emitRecoveryRequired();
+          backend.emitStalled();
           async.flushMicrotasks();
 
           expect(backend.resumeLiveEdgeCalls, 1);

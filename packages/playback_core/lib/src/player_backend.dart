@@ -4,30 +4,7 @@ import 'letterbox_crop.dart';
 
 enum SubtitleRendererMode { native, assOverlay }
 
-enum LiveRecoveryTrigger { startupTimeout, stalled, sourceReset }
-
-enum LiveRecoveryEventType { inactive, healthy, recoveryRequired }
-
-class LiveRecoveryEvent {
-  const LiveRecoveryEvent.inactive()
-    : type = LiveRecoveryEventType.inactive,
-      trigger = null,
-      tryInPlaceFirst = false;
-
-  const LiveRecoveryEvent.healthy()
-    : type = LiveRecoveryEventType.healthy,
-      trigger = null,
-      tryInPlaceFirst = false;
-
-  const LiveRecoveryEvent.recoveryRequired({
-    required this.trigger,
-    required this.tryInPlaceFirst,
-  }) : type = LiveRecoveryEventType.recoveryRequired;
-
-  final LiveRecoveryEventType type;
-  final LiveRecoveryTrigger? trigger;
-  final bool tryInPlaceFirst;
-}
+enum LiveRecoveryEvent { inactive, healthy, startupTimeout, stalled }
 
 /// Turns backend-specific progress signals into the common Live TV recovery
 /// windows. Backends decide what proves useful playback; this class only owns
@@ -49,32 +26,24 @@ class BackendLiveRecoveryMonitor {
   bool _wantsPlay = false;
   bool _healthy = false;
   bool _everHealthy = false;
-  bool _recoveryRequested = false;
-  bool _stallArmed = true;
-  bool _tryInPlaceFirst = false;
+  bool _active = false;
   Duration? _lastPosition;
 
   Stream<LiveRecoveryEvent> get events => _events.stream;
 
-  void start({
-    required bool live,
-    required bool wantsPlay,
-    required bool tryInPlaceFirst,
-  }) {
-    _timer?.cancel();
+  void start({required bool live, required bool wantsPlay}) {
+    _cancelTimer();
     _live = live;
     _wantsPlay = wantsPlay;
     _healthy = false;
     _everHealthy = false;
-    _recoveryRequested = false;
-    _stallArmed = true;
-    _tryInPlaceFirst = tryInPlaceFirst;
+    _active = wantsPlay;
     _lastPosition = null;
 
     if (!live) return;
-    _emit(const LiveRecoveryEvent.inactive());
+    _emit(LiveRecoveryEvent.inactive);
     if (wantsPlay) {
-      _arm(startupTimeout, LiveRecoveryTrigger.startupTimeout);
+      _arm(startupTimeout, LiveRecoveryEvent.startupTimeout);
     }
   }
 
@@ -82,100 +51,76 @@ class BackendLiveRecoveryMonitor {
     if (!_live || _wantsPlay == wantsPlay) return;
     _wantsPlay = wantsPlay;
     _healthy = false;
-    _recoveryRequested = false;
-    _stallArmed = wantsPlay;
+    _active = wantsPlay;
     _lastPosition = null;
-    _timer?.cancel();
-    _timer = null;
-    _emit(const LiveRecoveryEvent.inactive());
+    _cancelTimer();
+    _emit(LiveRecoveryEvent.inactive);
 
     if (wantsPlay) {
       _arm(
         _everHealthy ? resumeTimeout : startupTimeout,
         _everHealthy
-            ? LiveRecoveryTrigger.stalled
-            : LiveRecoveryTrigger.startupTimeout,
+            ? LiveRecoveryEvent.stalled
+            : LiveRecoveryEvent.startupTimeout,
       );
     }
   }
 
-  /// A settled engine state that is neither playing nor buffering is treated
-  /// as externally paused once the source has proved healthy. Startup remains
-  /// armed because a source that never starts can look equally quiet.
-  void setStallArmed(bool armed) {
-    if (!_live || !_everHealthy || _stallArmed == armed) return;
-    _stallArmed = armed;
+  void setActive(bool active) {
+    if (!_live || !_everHealthy || _active == active) return;
+    _active = active;
     _healthy = false;
     _lastPosition = null;
-    _timer?.cancel();
-    _timer = null;
-    _emit(const LiveRecoveryEvent.inactive());
-    if (armed && _wantsPlay) {
-      _arm(resumeTimeout, LiveRecoveryTrigger.stalled);
+    _cancelTimer();
+    _emit(LiveRecoveryEvent.inactive);
+
+    if (active && _wantsPlay) {
+      _arm(resumeTimeout, LiveRecoveryEvent.stalled);
     }
   }
 
   void beginInPlaceRecovery() {
     if (!_live) return;
     _healthy = false;
-    _recoveryRequested = false;
-    _stallArmed = true;
+    _active = true;
     _lastPosition = null;
-    _timer?.cancel();
-    _timer = null;
-    _emit(const LiveRecoveryEvent.inactive());
+    _cancelTimer();
+    _emit(LiveRecoveryEvent.inactive);
+
     if (_wantsPlay) {
-      _arm(resumeTimeout, LiveRecoveryTrigger.stalled);
+      _arm(resumeTimeout, LiveRecoveryEvent.stalled);
     }
   }
 
   /// The first eligible sample establishes a baseline; movement from it proves
   /// that playback is genuinely advancing.
-  void observeProgress(Duration position, {bool eligible = true}) {
+  void observeProgress(Duration position, {required bool eligible}) {
     if (!_live || !_wantsPlay || !eligible) return;
     final previous = _lastPosition;
     _lastPosition = position;
     if (previous == null || previous == position) return;
-    _markHealthy(refreshTimer: true);
-  }
 
-  /// A first-frame callback is a one-time health transition. Some engines
-  /// expose it as a latched flag, so repeated reports must not hide a stall.
-  void markHealthy() {
-    if (_live && _wantsPlay) {
-      _markHealthy(refreshTimer: false);
+    final becameHealthy = !_healthy;
+    _healthy = true;
+    _everHealthy = true;
+    _active = true;
+    _arm(stallTimeout, LiveRecoveryEvent.stalled);
+
+    if (becameHealthy) {
+      _emit(LiveRecoveryEvent.healthy);
     }
-  }
-
-  void requestRecovery(
-    LiveRecoveryTrigger trigger, {
-    bool? tryInPlaceFirst,
-  }) {
-    if (!_live || !_wantsPlay || _recoveryRequested) return;
-    _timer?.cancel();
-    _timer = null;
-    _healthy = false;
-    _recoveryRequested = true;
-    _emit(
-      LiveRecoveryEvent.recoveryRequired(
-        trigger: trigger,
-        tryInPlaceFirst: tryInPlaceFirst ?? _tryInPlaceFirst,
-      ),
-    );
   }
 
   void stop() {
     final notify = _live;
-    _timer?.cancel();
-    _timer = null;
+    _cancelTimer();
     _live = false;
     _wantsPlay = false;
     _healthy = false;
     _everHealthy = false;
-    _recoveryRequested = false;
-    _stallArmed = false;
+    _active = false;
     _lastPosition = null;
-    if (notify) _emit(const LiveRecoveryEvent.inactive());
+    if (notify) _emit(LiveRecoveryEvent.inactive);
   }
 
   void dispose() {
@@ -183,20 +128,19 @@ class BackendLiveRecoveryMonitor {
     _events.close();
   }
 
-  void _markHealthy({required bool refreshTimer}) {
-    if (_healthy && !refreshTimer) return;
-    _recoveryRequested = false;
-    _stallArmed = true;
-    _everHealthy = true;
-    _arm(stallTimeout, LiveRecoveryTrigger.stalled);
-    if (_healthy) return;
-    _healthy = true;
-    _emit(const LiveRecoveryEvent.healthy());
+  void _arm(Duration timeout, LiveRecoveryEvent failure) {
+    _cancelTimer();
+    _timer = Timer(timeout, () {
+      _timer = null;
+      if (!_live || !_wantsPlay) return;
+      _healthy = false;
+      _emit(failure);
+    });
   }
 
-  void _arm(Duration timeout, LiveRecoveryTrigger trigger) {
+  void _cancelTimer() {
     _timer?.cancel();
-    _timer = Timer(timeout, () => requestRecovery(trigger));
+    _timer = null;
   }
 
   void _emit(LiveRecoveryEvent event) {
@@ -278,8 +222,8 @@ abstract class PlayerBackend {
 
   /// Backend-owned Live TV health and recovery signals. The renderer decides
   /// what proves useful playback; PlaybackManager only orchestrates retries.
-  Stream<LiveRecoveryEvent> get liveRecoveryEvents => const Stream.empty();
-
+  Stream<LiveRecoveryEvent> get liveRecoveryEvents =>
+      const Stream<LiveRecoveryEvent>.empty();
 
   /// Whether the player has been told to play. Null on engines that don't
   /// expose their own intent, and callers then fall back to "not playing".

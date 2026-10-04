@@ -135,9 +135,8 @@ class AetherBackend implements PlayerBackend {
         _isPlaying = _toBool(map['isPlaying']);
         _isBuffering = _toBool(map['isBuffering']);
         final hasFirstFrame = _toBool(map['hasFirstFrame']);
-        _liveRecovery.setStallArmed(_isPlaying || _isBuffering);
+        _liveRecovery.setActive(_isPlaying || _isBuffering);
         if (_isPlaying) _stallSawPlayback = true;
-        if (hasFirstFrame && _isPlaying) _liveRecovery.markHealthy();
         _liveRecovery.observeProgress(
           _position,
           eligible:
@@ -300,7 +299,6 @@ class AetherBackend implements PlayerBackend {
     _liveRecovery.start(
       live: _sourceIsLive,
       wantsPlay: autoPlay,
-      tryInPlaceFirst: false,
     );
   }
 

@@ -163,7 +163,7 @@ class HtmlVideoBackend extends PlayerBackend {
         currentlyPlaying &&
         (_videoElement.readyState < web.HTMLMediaElement.HAVE_FUTURE_DATA);
     _setBuffering(bufferingNow);
-    _liveRecovery.setStallArmed(currentlyPlaying || bufferingNow);
+    _liveRecovery.setActive(currentlyPlaying || bufferingNow);
     _liveRecovery.observeProgress(
       position,
       eligible:
@@ -423,7 +423,6 @@ class HtmlVideoBackend extends PlayerBackend {
     _liveRecovery.start(
       live: _sourceIsLive,
       wantsPlay: autoPlay,
-      tryInPlaceFirst: false,
     );
   }
 
