@@ -1,6 +1,202 @@
+import 'dart:async';
+
 import 'letterbox_crop.dart';
 
 enum SubtitleRendererMode { native, assOverlay }
+
+enum LiveRecoveryTrigger { startupTimeout, stalled, sourceReset }
+
+enum LiveRecoveryEventType { inactive, healthy, recoveryRequired }
+
+class LiveRecoveryEvent {
+  const LiveRecoveryEvent.inactive()
+    : type = LiveRecoveryEventType.inactive,
+      trigger = null,
+      tryInPlaceFirst = false;
+
+  const LiveRecoveryEvent.healthy()
+    : type = LiveRecoveryEventType.healthy,
+      trigger = null,
+      tryInPlaceFirst = false;
+
+  const LiveRecoveryEvent.recoveryRequired({
+    required this.trigger,
+    required this.tryInPlaceFirst,
+  }) : type = LiveRecoveryEventType.recoveryRequired;
+
+  final LiveRecoveryEventType type;
+  final LiveRecoveryTrigger? trigger;
+  final bool tryInPlaceFirst;
+}
+
+/// Timing shared by backend-owned Live TV detectors.
+///
+/// Backends decide what counts as real progress. This class only turns those
+/// engine-specific progress signals into the common 30s startup, 15s in-place
+/// resume, and 8s mid-stream recovery windows.
+class BackendLiveRecoveryMonitor {
+  BackendLiveRecoveryMonitor({
+    this.startupTimeout = const Duration(seconds: 30),
+    this.resumeTimeout = const Duration(seconds: 15),
+    this.stallTimeout = const Duration(seconds: 8),
+  });
+
+  final Duration startupTimeout;
+  final Duration resumeTimeout;
+  final Duration stallTimeout;
+
+  final _events = StreamController<LiveRecoveryEvent>.broadcast();
+  Timer? _timer;
+  bool _live = false;
+  bool _wantsPlay = false;
+  bool _healthy = false;
+  bool _recoveryRequested = false;
+  bool _resumingInPlace = false;
+  bool _tryInPlaceFirst = false;
+  DateTime? _windowStartedAt;
+  DateTime? _lastProgressAt;
+  Duration? _lastPosition;
+
+  Stream<LiveRecoveryEvent> get events => _events.stream;
+
+  void start({
+    required bool live,
+    required bool wantsPlay,
+    required bool tryInPlaceFirst,
+  }) {
+    _timer?.cancel();
+    _timer = null;
+    _live = live;
+    _wantsPlay = wantsPlay;
+    _healthy = false;
+    _recoveryRequested = false;
+    _resumingInPlace = false;
+    _tryInPlaceFirst = tryInPlaceFirst;
+    _lastProgressAt = null;
+    _lastPosition = null;
+    _windowStartedAt = live && wantsPlay ? DateTime.now() : null;
+
+    if (!live) return;
+    _emit(const LiveRecoveryEvent.inactive());
+    _timer = Timer.periodic(
+      const Duration(seconds: 1),
+      (_) => _check(),
+    );
+  }
+
+  void setPlayIntent(bool wantsPlay) {
+    if (!_live || _wantsPlay == wantsPlay) return;
+    _wantsPlay = wantsPlay;
+    _lastPosition = null;
+    _lastProgressAt = null;
+    _healthy = false;
+    _recoveryRequested = false;
+    _resumingInPlace = false;
+    _windowStartedAt = wantsPlay ? DateTime.now() : null;
+    _emit(const LiveRecoveryEvent.inactive());
+  }
+
+  void beginInPlaceRecovery() {
+    if (!_live) return;
+    _healthy = false;
+    _recoveryRequested = false;
+    _resumingInPlace = true;
+    _windowStartedAt = _wantsPlay ? DateTime.now() : null;
+    _lastProgressAt = null;
+    _lastPosition = null;
+    _emit(const LiveRecoveryEvent.inactive());
+  }
+
+  /// Records a backend-specific progress sample. The first eligible sample is
+  /// only a baseline; a changed sample proves that playback actually moved.
+  void observeProgress(Duration position, {bool eligible = true}) {
+    if (!_live || !_wantsPlay || !eligible) return;
+    final previous = _lastPosition;
+    _lastPosition = position;
+    if (previous == null || previous == position) return;
+    _markHealthyAt(DateTime.now());
+  }
+
+  /// For engines with an authoritative first-frame/presentation callback.
+  void markHealthy() {
+    if (!_live || !_wantsPlay) return;
+    _markHealthyAt(DateTime.now());
+  }
+
+  void requestRecovery(
+    LiveRecoveryTrigger trigger, {
+    bool? tryInPlaceFirst,
+  }) {
+    if (!_live || !_wantsPlay || _recoveryRequested) return;
+    _healthy = false;
+    _recoveryRequested = true;
+    _emit(
+      LiveRecoveryEvent.recoveryRequired(
+        trigger: trigger,
+        tryInPlaceFirst: tryInPlaceFirst ?? _tryInPlaceFirst,
+      ),
+    );
+  }
+
+  void stop() {
+    final wasLive = _live;
+    _timer?.cancel();
+    _timer = null;
+    _live = false;
+    _wantsPlay = false;
+    _healthy = false;
+    _recoveryRequested = false;
+    _resumingInPlace = false;
+    _windowStartedAt = null;
+    _lastProgressAt = null;
+    _lastPosition = null;
+    if (wasLive) _emit(const LiveRecoveryEvent.inactive());
+  }
+
+  void dispose() {
+    stop();
+    _events.close();
+  }
+
+  void _markHealthyAt(DateTime now) {
+    _lastProgressAt = now;
+    _windowStartedAt = now;
+    _resumingInPlace = false;
+    _recoveryRequested = false;
+    if (_healthy) return;
+    _healthy = true;
+    _emit(const LiveRecoveryEvent.healthy());
+  }
+
+  void _check() {
+    if (!_live || !_wantsPlay || _recoveryRequested) return;
+    final now = DateTime.now();
+
+    if (!_healthy) {
+      final startedAt = _windowStartedAt;
+      if (startedAt == null) return;
+      final timeout = _resumingInPlace ? resumeTimeout : startupTimeout;
+      if (now.difference(startedAt) < timeout) return;
+      requestRecovery(
+        _resumingInPlace
+            ? LiveRecoveryTrigger.stalled
+            : LiveRecoveryTrigger.startupTimeout,
+      );
+      return;
+    }
+
+    final lastProgressAt = _lastProgressAt;
+    if (lastProgressAt == null ||
+        now.difference(lastProgressAt) < stallTimeout) {
+      return;
+    }
+    requestRecovery(LiveRecoveryTrigger.stalled);
+  }
+
+  void _emit(LiveRecoveryEvent event) {
+    if (!_events.isClosed) _events.add(event);
+  }
+}
 
 /// A caption track the player found inside the video itself, like the CEA-608
 /// captions broadcasters carry in H.264 SEI data.
@@ -73,6 +269,11 @@ abstract class PlayerBackend {
   Stream<bool> get bufferingStream;
   Stream<bool> get completedStream;
   Stream<Map<String, dynamic>>? get errorStream => null;
+
+  /// Backend-owned Live TV health and recovery signals. The renderer decides
+  /// what proves useful playback; PlaybackManager only orchestrates retries.
+  Stream<LiveRecoveryEvent> get liveRecoveryEvents => const Stream.empty();
+
 
   /// Whether the player has been told to play. Null on engines that don't
   /// expose their own intent, and callers then fall back to "not playing".
