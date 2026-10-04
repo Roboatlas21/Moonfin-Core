@@ -76,6 +76,8 @@ class HtmlVideoBackend extends PlayerBackend {
   double _volume = 100.0;
   bool _disposed = false;
   bool _tracksKnown = false;
+  bool _sourceIsLive = false;
+  int _playRequestGeneration = 0;
 
   Timer? _statePollTimer;
   Completer<void>? _tracksReadyCompleter;
@@ -361,6 +363,29 @@ class HtmlVideoBackend extends PlayerBackend {
     _subtitleOverlay?.clear();
   }
 
+  void _requestPlayback() {
+    final generation = ++_playRequestGeneration;
+    _setBuffering(true);
+    unawaited(() async {
+      try {
+        await _videoElement.play().toDart;
+        if (_disposed || generation != _playRequestGeneration) return;
+        _setPlaying(true);
+      } catch (error) {
+        if (_disposed || generation != _playRequestGeneration) return;
+        _setPlaying(false);
+        _errorStream.add(<String, dynamic>{
+          'event': _sourceIsLive ? 'error' : 'playerError',
+          'message': error.toString(),
+        });
+      } finally {
+        if (!_disposed && generation == _playRequestGeneration) {
+          _setBuffering(false);
+        }
+      }
+    }());
+  }
+
   @override
   Future<void> play(
     dynamic mediaItem, {
@@ -381,50 +406,30 @@ class HtmlVideoBackend extends PlayerBackend {
     _knownTextTrackCount = 0;
     _completed = false;
     _completedStream.add(false);
+    _sourceIsLive = payload['isLive'] == true;
 
     await _applySource(url, container: container, startPosition: startPosition);
+    _startStatePolling();
 
     if (autoPlay) {
-      _setBuffering(true);
-      try {
-        await _videoElement.play().toDart;
-        _setPlaying(true);
-      } catch (error) {
-        _setPlaying(false);
-        _errorStream.add(<String, dynamic>{
-          'event': 'playerError',
-          'message': error.toString(),
-        });
-      } finally {
-        _setBuffering(false);
-      }
+      _requestPlayback();
     } else {
       _setPlaying(false);
       _setBuffering(false);
     }
-
-    _startStatePolling();
   }
 
   @override
   Future<void> resume() async {
     if (_disposed) return;
-    try {
-      await _videoElement.play().toDart;
-      _setPlaying(true);
-    } catch (error) {
-      _errorStream.add(<String, dynamic>{
-        'event': 'playerError',
-        'message': error.toString(),
-      });
-      _setPlaying(false);
-    }
+    _requestPlayback();
     _startStatePolling();
   }
 
   @override
   Future<void> pause() async {
     if (_disposed) return;
+    ++_playRequestGeneration;
     _videoElement.pause();
     _setPlaying(false);
     _setBuffering(false);
@@ -433,6 +438,7 @@ class HtmlVideoBackend extends PlayerBackend {
   @override
   Future<void> stop() async {
     if (_disposed) return;
+    ++_playRequestGeneration;
     _videoElement.pause();
     _detachHlsJsSource();
     _videoElement.removeAttribute('src');
