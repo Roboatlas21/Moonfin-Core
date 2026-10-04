@@ -883,7 +883,8 @@ class Media3PlayerBackend extends PlayerBackend {
 
       // A wedge that outlasts the seek has stopped for good, so turn it into
       // the failure the manager can surface instead of an eternal spinner.
-      if (!_bufferingFailed &&
+      if (!_sourceIsLive &&
+          !_bufferingFailed &&
           bufferingHasWedged(
             stuckMs: stuckMs,
             bufferedAheadMs: _bufferedAheadMs,
