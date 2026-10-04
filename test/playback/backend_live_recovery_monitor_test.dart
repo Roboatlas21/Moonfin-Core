@@ -72,6 +72,37 @@ void main() {
     });
   });
 
+  test('a latched first-frame signal does not mask a later stall', () {
+    fakeAsync((async) {
+      final monitor = monitorFor(async);
+      final events = <LiveRecoveryEvent>[];
+      monitor.events.listen(events.add);
+
+      monitor.start(
+        live: true,
+        wantsPlay: true,
+        tryInPlaceFirst: false,
+      );
+      monitor.markHealthy();
+      async.flushMicrotasks();
+
+      // Aether exposes first-frame readiness as a latched value, so the same
+      // true value can appear on every state sample after the first frame.
+      for (var i = 0; i < 7; i++) {
+        async.elapse(const Duration(seconds: 1));
+        monitor.markHealthy();
+        async.flushMicrotasks();
+      }
+      expect(recoveryEvents(events), isEmpty);
+
+      async.elapse(const Duration(seconds: 1));
+      async.flushMicrotasks();
+
+      expect(recoveryEvents(events).single.trigger, LiveRecoveryTrigger.stalled);
+      monitor.dispose();
+    });
+  });
+
   test('a viewer pause never consumes the live recovery budget', () {
     fakeAsync((async) {
       final monitor = monitorFor(async);
