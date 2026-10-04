@@ -61,6 +61,19 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                 }
                 return
             }
+            if call.method == "setSource" {
+                let args = call.arguments as? [String: Any] ?? [:]
+                Task { @MainActor in
+                    guard let self else {
+                        result(nil)
+                        return
+                    }
+                    Self.lastCommand = call.method
+                    await self.setSource(args)
+                    result(nil)
+                }
+                return
+            }
             result(nil)
             Task { @MainActor in self?.handle(call) }
         }
@@ -385,7 +398,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         send(["event": "engineLog", "line": "[AppleTvVideoChannel] \(line)"])
     }
 
-    private func setSource(_ args: [String: Any]) {
+    private func setSource(_ args: [String: Any]) async {
         guard let player = player, let url = args["url"] as? String else { return }
         didComplete = false
         didReportTerminalError = false
@@ -417,23 +430,21 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             player.setUserVolume(Float(min(max(volume, 0), 100) / 100))
         }
 
-        Task {
-            let started = Date()
-            await player.play(
-                streamUrl: url, startPosition: startMs / 1000.0, audioOnly: audioOnly)
-            let elapsed = Int(Date().timeIntervalSince(started) * 1000)
-            hostLog(
-                "play returned after \(elapsed)ms state=\(player.state) "
-                    + "duration=\(Int(player.duration))s audioTracks=\(player.audioTracks.count) "
-                    + "subtitleTracks=\(player.subtitleTracks.count)")
-            if let speed = (args["speed"] as? NSNumber)?.floatValue, speed != 1.0 {
-                player.setRate(speed)
-            }
-            if let delayMs = (args["subtitleDelayMs"] as? NSNumber)?.doubleValue,
-                delayMs != 0
-            {
-                player.setSubtitleDelay(delayMs / 1000.0)
-            }
+        let started = Date()
+        await player.play(
+            streamUrl: url, startPosition: startMs / 1000.0, audioOnly: audioOnly)
+        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
+        hostLog(
+            "play returned after \(elapsed)ms state=\(player.state) "
+                + "duration=\(Int(player.duration))s audioTracks=\(player.audioTracks.count) "
+                + "subtitleTracks=\(player.subtitleTracks.count)")
+        if let speed = (args["speed"] as? NSNumber)?.floatValue, speed != 1.0 {
+            player.setRate(speed)
+        }
+        if let delayMs = (args["subtitleDelayMs"] as? NSNumber)?.doubleValue,
+            delayMs != 0
+        {
+            player.setSubtitleDelay(delayMs / 1000.0)
         }
     }
 

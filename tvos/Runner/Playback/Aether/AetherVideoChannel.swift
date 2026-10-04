@@ -54,6 +54,18 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
                 result(AetherVideoCapabilities.deviceProfileCapabilities())
                 return
             }
+            if call.method == "setSource" {
+                let args = call.arguments as? [String: Any] ?? [:]
+                Task { @MainActor in
+                    guard let self else {
+                        result(nil)
+                        return
+                    }
+                    await self.setSource(args)
+                    result(nil)
+                }
+                return
+            }
             result(nil)
             Task { @MainActor in self?.handle(call) }
         }
@@ -170,7 +182,7 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
         string.hasPrefix("/") ? URL(fileURLWithPath: string) : URL(string: string)
     }
 
-    private func setSource(_ args: [String: Any]) {
+    private func setSource(_ args: [String: Any]) async {
         guard let url = args["url"] as? String else { return }
         didComplete = false
         didReportTerminalError = false
@@ -199,12 +211,10 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
         let audioOnly = (args["mediaType"] as? String) == "audio"
         let startMs = (args["startPositionMs"] as? NSNumber)?.doubleValue ?? 0
         startStateTimer()
-        Task {
-            await player.play(
-                streamUrl: url, startPosition: startMs / 1000.0, audioOnly: audioOnly)
-            if let speed = (args["speed"] as? NSNumber)?.floatValue, speed != 1.0 {
-                player.setRate(speed)
-            }
+        await player.play(
+            streamUrl: url, startPosition: startMs / 1000.0, audioOnly: audioOnly)
+        if let speed = (args["speed"] as? NSNumber)?.floatValue, speed != 1.0 {
+            player.setRate(speed)
         }
     }
 
