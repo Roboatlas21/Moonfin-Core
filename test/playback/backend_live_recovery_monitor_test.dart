@@ -3,13 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:playback_core/playback_core.dart';
 
 void main() {
-  BackendLiveRecoveryMonitor monitorFor(FakeAsync async) {
-    final base = DateTime(2026, 10, 4, 12);
-    return BackendLiveRecoveryMonitor(
-      clock: () => base.add(async.elapsed),
-      pollInterval: const Duration(seconds: 1),
-    );
-  }
+  BackendLiveRecoveryMonitor monitorFor(FakeAsync _) =>
+      BackendLiveRecoveryMonitor();
 
   List<LiveRecoveryEvent> recoveryEvents(List<LiveRecoveryEvent> events) =>
       events
