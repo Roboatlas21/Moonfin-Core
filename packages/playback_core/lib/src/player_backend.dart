@@ -147,12 +147,14 @@ class BackendLiveRecoveryMonitor {
     final previous = _lastPosition;
     _lastPosition = position;
     if (previous == null || previous == position) return;
-    _markHealthy();
+    _markHealthy(refreshDeadline: true);
   }
 
   /// For engines with an authoritative first-frame/presentation callback.
+  /// A latched first-frame flag may be reported on every state sample, so it
+  /// marks the transition healthy without refreshing the stall deadline.
   void markHealthy() {
-    if (_live && _wantsPlay) _markHealthy();
+    if (_live && _wantsPlay) _markHealthy(refreshDeadline: false);
   }
 
   void requestRecovery(
@@ -191,7 +193,8 @@ class BackendLiveRecoveryMonitor {
     _events.close();
   }
 
-  void _markHealthy() {
+  void _markHealthy({required bool refreshDeadline}) {
+    if (_healthy && !refreshDeadline) return;
     _recoveryRequested = false;
     _stallArmed = true;
     _everHealthy = true;
