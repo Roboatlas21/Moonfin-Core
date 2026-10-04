@@ -168,11 +168,15 @@ class Media3PlayerBackend extends PlayerBackend {
   final _bufferingStream = StreamController<bool>.broadcast();
   final _completedStream = StreamController<bool>.broadcast();
   final _errorStream = StreamController<Map<String, dynamic>>.broadcast();
+  final _liveRecovery = BackendLiveRecoveryMonitor();
 
   int get volumeBoostLevel => _volumeBoostLevel;
 
   @override
   Stream<Map<String, dynamic>> get errorStream => _errorStream.stream;
+
+  @override
+  Stream<LiveRecoveryEvent> get liveRecoveryEvents => _liveRecovery.events;
 
   @override
   bool? get playWhenReady => _playWhenReady;
@@ -227,6 +231,9 @@ class Media3PlayerBackend extends PlayerBackend {
         _playWhenReady = map.containsKey('playWhenReady')
             ? _toBool(map['playWhenReady'])
             : null;
+        _liveRecovery.setStallArmed(
+          _playWhenReady == true || _isPlaying || _isBuffering,
+        );
         // The rate the player actually settled on, which is not always the one
         // that was asked for: bitstreamed audio cannot be time stretched, so
         // the audio sink resets a non-1.0 speed back to 1.0 within a frame or
@@ -250,6 +257,13 @@ class Media3PlayerBackend extends PlayerBackend {
           _completedStream.add(_completed);
         }
 
+        _liveRecovery.observeProgress(
+          _position,
+          eligible:
+              _isPlaying &&
+              !_isBuffering &&
+              (_watchdogItemIsAudio || _sawFirstFrame),
+        );
         _positionStream.add(_position);
         _durationStream.add(_duration);
         _bufferStream.add(_buffer);
@@ -367,6 +381,7 @@ class Media3PlayerBackend extends PlayerBackend {
         _onTunnelingDiscontinuity();
       case 'firstFrameRendered':
         _sawFirstFrame = true;
+        _liveRecovery.markHealthy();
         _diag('Media3: first frame rendered @ ${_toInt(map['positionMs'])}ms');
       case 'droppedFrames':
         _diag(
@@ -1072,6 +1087,11 @@ class Media3PlayerBackend extends PlayerBackend {
     });
     _lastFrameRateLine = null;
     _sourceIsLive = payload['isLive'] == true;
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: true,
+    );
     // Reset for a new viewing session, but keep the adjustment when the
     // same session changes quality or restores playback after backgrounding.
     final subtitleDelaySessionId = payload['subtitleDelaySessionId'] as int?;
@@ -1138,18 +1158,21 @@ class Media3PlayerBackend extends PlayerBackend {
 
   @override
   Future<void> resume() async {
+    _liveRecovery.setPlayIntent(true);
     await _ensureActivityStarted();
     await _invoke<void>('play');
   }
 
   @override
   Future<void> pause() async {
+    _liveRecovery.setPlayIntent(false);
     await _invoke<void>('pause');
   }
 
   @override
   Future<bool> resumeLiveEdge() async {
     if (!_sourceIsLive) return false;
+    _liveRecovery.beginInPlaceRecovery();
     _diag('Media3: resuming the live edge after the source ran out');
     await _invoke<void>('resumeLive');
     return true;
@@ -1169,6 +1192,7 @@ class Media3PlayerBackend extends PlayerBackend {
   }
 
   Future<void> _teardown(String command) async {
+    _liveRecovery.stop();
     // The watchdogs guard a single item's bring-up, so stopping has to stop
     // the timer too or it keeps warning about a player that was told to stop.
     _watchdogTimer?.cancel();
@@ -1561,6 +1585,7 @@ class Media3PlayerBackend extends PlayerBackend {
     _audioDelayDebounce = null;
     _watchdogTimer?.cancel();
     _watchdogTimer = null;
+    _liveRecovery.dispose();
     unawaited(_stopActivity());
     unawaited(_eventSub?.cancel());
     _positionStream.close();

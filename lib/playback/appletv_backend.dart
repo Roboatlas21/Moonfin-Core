@@ -59,7 +59,10 @@ class AppleTvBackend implements PlayerBackend {
   EngineTrust? _trust;
   bool _playerPresented = false;
   bool _audioOnly = false;
+  bool _sourceIsLive = false;
+  bool _sourceIsAudio = false;
   Timer? _audioDelayDebounce;
+  final _liveRecovery = BackendLiveRecoveryMonitor();
 
   final _positionStream = StreamController<Duration>.broadcast();
   final _durationStream = StreamController<Duration>.broadcast();
@@ -73,6 +76,9 @@ class AppleTvBackend implements PlayerBackend {
 
   @override
   Stream<Map<String, dynamic>> get errorStream => _errorStream.stream;
+
+  @override
+  Stream<LiveRecoveryEvent> get liveRecoveryEvents => _liveRecovery.events;
 
   Stream<void> get userExitStream => _userExitStream.stream;
 
@@ -132,6 +138,16 @@ class AppleTvBackend implements PlayerBackend {
         _buffer = Duration(milliseconds: _toInt(map['bufferedMs']));
         _isPlaying = _toBool(map['isPlaying']);
         _isBuffering = _toBool(map['isBuffering']);
+        final hasFirstFrame = _toBool(map['hasFirstFrame']);
+        _liveRecovery.setStallArmed(_isPlaying || _isBuffering);
+        if (hasFirstFrame) _liveRecovery.markHealthy();
+        _liveRecovery.observeProgress(
+          _position,
+          eligible:
+              _isPlaying &&
+              !_isBuffering &&
+              (_sourceIsAudio || hasFirstFrame),
+        );
 
         final completedNow =
             _duration > Duration.zero && _position >= _duration && !_isPlaying;
@@ -305,6 +321,13 @@ class AppleTvBackend implements PlayerBackend {
 
     final audioOnly =
         (payload['mediaType']?.toString() ?? 'video') == 'audio';
+    _sourceIsLive = payload['isLive'] == true;
+    _sourceIsAudio = audioOnly;
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: false,
+    );
     _log(
       'play ${loggableUrl(url)} live=${payload['isLive'] == true} '
       'audioOnly=$audioOnly startMs=${startPosition.inMilliseconds} '
@@ -356,12 +379,14 @@ class AppleTvBackend implements PlayerBackend {
 
   @override
   Future<void> resume() async {
+    _liveRecovery.setPlayIntent(true);
     await _ensurePlayerPresented();
     await _invoke<void>('play');
   }
 
   @override
   Future<void> pause() async {
+    _liveRecovery.setPlayIntent(false);
     await _invoke<void>('pause');
   }
 
@@ -375,6 +400,7 @@ class AppleTvBackend implements PlayerBackend {
 
   @override
   Future<void> stop() async {
+    _liveRecovery.stop();
     await _invoke<void>('stop');
     if (_isPlaying) {
       _isPlaying = false;
@@ -881,6 +907,7 @@ class AppleTvBackend implements PlayerBackend {
     _prefs.removeListener(_syncNativePreferences);
     _audioDelayDebounce?.cancel();
     _audioDelayDebounce = null;
+    _liveRecovery.dispose();
     unawaited(_dismissPlayer());
     unawaited(_eventSub?.cancel());
     _positionStream.close();

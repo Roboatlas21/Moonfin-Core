@@ -63,6 +63,9 @@ class AetherBackend implements PlayerBackend {
   bool _disposed = false;
   EngineTrust? _trust;
   Timer? _audioDelayDebounce;
+  bool _sourceIsLive = false;
+  bool _sourceIsAudio = false;
+  final _liveRecovery = BackendLiveRecoveryMonitor();
 
   // A torn down session stops pushing state, so the last buffering value the
   // channel sent stays latched and the player keeps its loading overlay with
@@ -86,6 +89,9 @@ class AetherBackend implements PlayerBackend {
 
   @override
   Stream<Map<String, dynamic>> get errorStream => _errorStream.stream;
+
+  @override
+  Stream<LiveRecoveryEvent> get liveRecoveryEvents => _liveRecovery.events;
 
   /// Transport presses from the system controls while music plays on the
   /// engine's own Now Playing session, which audio_service never sees.
@@ -128,7 +134,17 @@ class AetherBackend implements PlayerBackend {
         _buffer = Duration(milliseconds: _toInt(map['bufferedMs']));
         _isPlaying = _toBool(map['isPlaying']);
         _isBuffering = _toBool(map['isBuffering']);
+        final hasFirstFrame = _toBool(map['hasFirstFrame']);
+        _liveRecovery.setStallArmed(_isPlaying || _isBuffering);
         if (_isPlaying) _stallSawPlayback = true;
+        if (hasFirstFrame) _liveRecovery.markHealthy();
+        _liveRecovery.observeProgress(
+          _position,
+          eligible:
+              _isPlaying &&
+              !_isBuffering &&
+              (_sourceIsAudio || hasFirstFrame),
+        );
 
         _positionStream.add(_position);
         _durationStream.add(_duration);
@@ -254,6 +270,14 @@ class AetherBackend implements PlayerBackend {
     _activeSubtitleTrackIndex = null;
     _tracksReadyCompleter = null;
     _embeddedCaptionTracks = const [];
+    _sourceIsLive = payload['isLive'] == true;
+    _sourceIsAudio =
+        (payload['mediaType']?.toString() ?? 'video') == 'audio';
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: false,
+    );
     _startStallWatchdog();
 
     await _invoke<void>('setSource', {
@@ -277,11 +301,13 @@ class AetherBackend implements PlayerBackend {
 
   @override
   Future<void> resume() async {
+    _liveRecovery.setPlayIntent(true);
     await _invoke<void>('play');
   }
 
   @override
   Future<void> pause() async {
+    _liveRecovery.setPlayIntent(false);
     await _invoke<void>('pause');
   }
 
@@ -295,6 +321,7 @@ class AetherBackend implements PlayerBackend {
 
   @override
   Future<void> stop() async {
+    _liveRecovery.stop();
     await _invoke<void>('stop');
     _stopStallWatchdog();
     if (_isPlaying) {
@@ -325,6 +352,9 @@ class AetherBackend implements PlayerBackend {
   }
 
   void _checkStall() {
+    // Live TV has its own backend-owned recovery monitor. Keep this older
+    // watchdog for non-live playback diagnostics/failure handling only.
+    if (_sourceIsLive) return;
     // Only a session that reached playback can stall. A slow open is a slow
     // server, which this must not fail.
     if (_disposed || !_stallSawPlayback) return;
@@ -675,6 +705,7 @@ class AetherBackend implements PlayerBackend {
     _prefs.removeListener(_syncEngineLogForwarding);
     _audioDelayDebounce?.cancel();
     _stopStallWatchdog();
+    _liveRecovery.dispose();
     _eventSub?.cancel();
     _positionStream.close();
     _durationStream.close();

@@ -29,6 +29,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     @Published var currentTime: TimeInterval = 0
     @Published var duration: TimeInterval = 0
     @Published var bufferProgress: Float = 0
+    @Published var hasFirstFrameReadyForDisplay = false
     @Published var audioTracks: [PlayerTrack] = []
     @Published var subtitleTracks: [PlayerTrack] = []
     /// Broadcast captions the engine found inside the video, offered
@@ -219,6 +220,11 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         engine.$playbackPhase
             .receive(on: DispatchQueue.main)
             .sink { [weak self] phase in self?.applyPhase(phase) }
+            .store(in: &cancellables)
+
+        engine.$hasFirstFrameReadyForDisplay
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] ready in self?.hasFirstFrameReadyForDisplay = ready }
             .store(in: &cancellables)
 
         // A stall reports nothing new while the buffer drains under it, so

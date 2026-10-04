@@ -50,8 +50,11 @@ class BackendLiveRecoveryMonitor {
   bool _live = false;
   bool _wantsPlay = false;
   bool _healthy = false;
+  bool _everHealthy = false;
   bool _recoveryRequested = false;
   bool _resumingInPlace = false;
+  bool _stallArmed = true;
+  bool _suspendedAfterHealthy = false;
   bool _tryInPlaceFirst = false;
   DateTime? _windowStartedAt;
   DateTime? _lastProgressAt;
@@ -69,8 +72,11 @@ class BackendLiveRecoveryMonitor {
     _live = live;
     _wantsPlay = wantsPlay;
     _healthy = false;
+    _everHealthy = false;
     _recoveryRequested = false;
     _resumingInPlace = false;
+    _stallArmed = true;
+    _suspendedAfterHealthy = false;
     _tryInPlaceFirst = tryInPlaceFirst;
     _lastProgressAt = null;
     _lastPosition = null;
@@ -91,9 +97,39 @@ class BackendLiveRecoveryMonitor {
     _lastProgressAt = null;
     _healthy = false;
     _recoveryRequested = false;
-    _resumingInPlace = false;
+    _resumingInPlace = wantsPlay && _everHealthy;
+    _stallArmed = wantsPlay;
+    _suspendedAfterHealthy = !wantsPlay && _everHealthy;
     _windowStartedAt = wantsPlay ? DateTime.now() : null;
     _emit(const LiveRecoveryEvent.inactive());
+  }
+
+  /// Disarms mid-stream stall timing for a settled engine state that is
+  /// neither playing nor buffering. On engines without playWhenReady this is
+  /// the only safe way to distinguish an external/system pause from a stall.
+  /// Startup still times out until the source has proved healthy once.
+  void setStallArmed(bool armed) {
+    if (!_live || _stallArmed == armed) return;
+    _stallArmed = armed;
+
+    if (!armed) {
+      if (_everHealthy && _healthy) {
+        _healthy = false;
+        _lastProgressAt = null;
+        _lastPosition = null;
+        _windowStartedAt = null;
+        _suspendedAfterHealthy = true;
+        _emit(const LiveRecoveryEvent.inactive());
+      }
+      return;
+    }
+
+    if (_wantsPlay && _suspendedAfterHealthy) {
+      _resumingInPlace = true;
+      _windowStartedAt = DateTime.now();
+      _lastPosition = null;
+      _suspendedAfterHealthy = false;
+    }
   }
 
   void beginInPlaceRecovery() {
@@ -101,6 +137,8 @@ class BackendLiveRecoveryMonitor {
     _healthy = false;
     _recoveryRequested = false;
     _resumingInPlace = true;
+    _stallArmed = true;
+    _suspendedAfterHealthy = false;
     _windowStartedAt = _wantsPlay ? DateTime.now() : null;
     _lastProgressAt = null;
     _lastPosition = null;
@@ -145,8 +183,11 @@ class BackendLiveRecoveryMonitor {
     _live = false;
     _wantsPlay = false;
     _healthy = false;
+    _everHealthy = false;
     _recoveryRequested = false;
     _resumingInPlace = false;
+    _stallArmed = false;
+    _suspendedAfterHealthy = false;
     _windowStartedAt = null;
     _lastProgressAt = null;
     _lastPosition = null;
@@ -162,7 +203,10 @@ class BackendLiveRecoveryMonitor {
     _lastProgressAt = now;
     _windowStartedAt = now;
     _resumingInPlace = false;
+    _stallArmed = true;
+    _suspendedAfterHealthy = false;
     _recoveryRequested = false;
+    _everHealthy = true;
     if (_healthy) return;
     _healthy = true;
     _emit(const LiveRecoveryEvent.healthy());
@@ -185,6 +229,7 @@ class BackendLiveRecoveryMonitor {
       return;
     }
 
+    if (!_stallArmed) return;
     final lastProgressAt = _lastProgressAt;
     if (lastProgressAt == null ||
         now.difference(lastProgressAt) < stallTimeout) {

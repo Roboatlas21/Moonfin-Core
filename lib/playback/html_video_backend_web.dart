@@ -76,6 +76,9 @@ class HtmlVideoBackend extends PlayerBackend {
   double _volume = 100.0;
   bool _disposed = false;
   bool _tracksKnown = false;
+  bool _sourceIsLive = false;
+  bool _sourceIsAudio = false;
+  final _liveRecovery = BackendLiveRecoveryMonitor();
 
   Timer? _statePollTimer;
   Completer<void>? _tracksReadyCompleter;
@@ -160,6 +163,15 @@ class HtmlVideoBackend extends PlayerBackend {
         currentlyPlaying &&
         (_videoElement.readyState < web.HTMLMediaElement.HAVE_FUTURE_DATA);
     _setBuffering(bufferingNow);
+    _liveRecovery.setStallArmed(currentlyPlaying || bufferingNow);
+    _liveRecovery.observeProgress(
+      position,
+      eligible:
+          currentlyPlaying &&
+          !bufferingNow &&
+          (_sourceIsAudio ||
+              _videoElement.readyState >= web.HTMLMediaElement.HAVE_CURRENT_DATA),
+    );
 
     if (!_tracksKnown &&
         _videoElement.readyState > web.HTMLMediaElement.HAVE_NOTHING) {
@@ -381,6 +393,14 @@ class HtmlVideoBackend extends PlayerBackend {
     _knownTextTrackCount = 0;
     _completed = false;
     _completedStream.add(false);
+    _sourceIsLive = payload['isLive'] == true;
+    _sourceIsAudio =
+        (payload['mediaType']?.toString() ?? 'video') == 'audio';
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: false,
+    );
 
     await _applySource(url, container: container, startPosition: startPosition);
 
@@ -409,6 +429,7 @@ class HtmlVideoBackend extends PlayerBackend {
   @override
   Future<void> resume() async {
     if (_disposed) return;
+    _liveRecovery.setPlayIntent(true);
     try {
       await _videoElement.play().toDart;
       _setPlaying(true);
@@ -425,6 +446,7 @@ class HtmlVideoBackend extends PlayerBackend {
   @override
   Future<void> pause() async {
     if (_disposed) return;
+    _liveRecovery.setPlayIntent(false);
     _videoElement.pause();
     _setPlaying(false);
     _setBuffering(false);
@@ -433,6 +455,7 @@ class HtmlVideoBackend extends PlayerBackend {
   @override
   Future<void> stop() async {
     if (_disposed) return;
+    _liveRecovery.stop();
     _videoElement.pause();
     _detachHlsJsSource();
     _videoElement.removeAttribute('src');
@@ -499,6 +522,9 @@ class HtmlVideoBackend extends PlayerBackend {
 
   @override
   Stream<Map<String, dynamic>> get errorStream => _errorStream.stream;
+
+  @override
+  Stream<LiveRecoveryEvent> get liveRecoveryEvents => _liveRecovery.events;
 
   @override
   Map<String, dynamic> getDeviceProfile({
@@ -845,6 +871,7 @@ class HtmlVideoBackend extends PlayerBackend {
     if (_disposed) return;
     _disposed = true;
     _stopStatePolling();
+    _liveRecovery.dispose();
     _clearExternalTracks();
     _subtitleOverlay?.dispose();
     _subtitleOverlay = null;

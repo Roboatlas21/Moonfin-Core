@@ -467,6 +467,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             "bufferedMs": Int((p.duration * Double(p.bufferProgress) * 1000).rounded()),
             "isPlaying": isPlaying,
             "isBuffering": isBuffering,
+            "hasFirstFrame": p.hasFirstFrameReadyForDisplay,
         ]
     }
 

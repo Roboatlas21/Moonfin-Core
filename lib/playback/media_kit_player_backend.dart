@@ -264,15 +264,31 @@ class MediaKitPlayerBackend extends PlayerBackend {
   /// state still describes the previous one.
   VideoParams? _decodedVideoParams;
   StreamSubscription<VideoParams>? _videoParamsSub;
+  bool _sourceIsLive = false;
+  bool _sourceIsAudio = false;
+  bool _liveVideoReady = false;
+  final _liveRecovery = BackendLiveRecoveryMonitor();
 
   late final Stream<bool> _playingStream = _mergeWithStale<bool>(
     _player.stream.playing,
-    () => _isStale ? false : _player.state.playing,
+    () {
+      final playing = _isStale ? false : _player.state.playing;
+      _liveRecovery.setStallArmed(
+        playing || (!_isStale && _player.state.buffering),
+      );
+      return playing;
+    },
   );
 
   late final Stream<bool> _bufferingStream = _mergeWithStale<bool>(
     _player.stream.buffering,
-    () => _isStale ? false : _player.state.buffering,
+    () {
+      final buffering = _isStale ? false : _player.state.buffering;
+      _liveRecovery.setStallArmed(
+        buffering || (!_isStale && _player.state.playing),
+      );
+      return buffering;
+    },
   );
 
   void _updateStaleState() {
@@ -685,6 +701,15 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _isStale = true;
     _embeddedCaptionTracks = const [];
     _ccTrackSids = const [];
+    _sourceIsLive = payload['isLive'] == true;
+    _sourceIsAudio =
+        (payload['mediaType']?.toString() ?? 'video') == 'audio';
+    _liveVideoReady = _sourceIsAudio;
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: false,
+    );
 
     await _notifyNativeHandleReady();
     await _configureAppleMobileLibassFont();
@@ -757,6 +782,12 @@ class MediaKitPlayerBackend extends PlayerBackend {
   /// nothing changed: the controller refuses without a presenter, and an
   /// engaged, failed or disabled session is not revisited.
   void _onVideoParams(VideoParams params) {
+    final width = params.w ?? params.dw ?? 0;
+    final height = params.h ?? params.dh ?? 0;
+    if (_sourceIsLive && width > 0 && height > 0) {
+      _liveVideoReady = true;
+    }
+
     final loaded = params.gamma != null || params.primaries != null;
     _decodedVideoParams = loaded ? params : null;
     if (!loaded || !PlatformDetection.supportsNativeHdrWindow) return;
@@ -1865,16 +1896,19 @@ class MediaKitPlayerBackend extends PlayerBackend {
 
   @override
   Future<void> resume() async {
+    _liveRecovery.setPlayIntent(true);
     await _player.play();
   }
 
   @override
   Future<void> pause() async {
+    _liveRecovery.setPlayIntent(false);
     await _player.pause();
   }
 
   @override
   Future<void> stop() async {
+    _liveRecovery.stop();
     _resetSubtitleState();
     _isStale = true;
     await _player.stop();
@@ -1928,7 +1962,16 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   Stream<Duration> get positionStream => _player.stream.position.map((pos) {
     _updateStaleState();
-    return _isStale ? Duration.zero : pos;
+    final current = _isStale ? Duration.zero : pos;
+    _liveRecovery.observeProgress(
+      current,
+      eligible:
+          !_isStale &&
+          _player.state.playing &&
+          !_player.state.buffering &&
+          (_sourceIsAudio || _liveVideoReady),
+    );
+    return current;
   });
 
   @override
@@ -2019,6 +2062,9 @@ class MediaKitPlayerBackend extends PlayerBackend {
   Stream<Map<String, dynamic>>? get errorStream => _player.stream.error
       .where((err) => !_isTransientReconnectError(err))
       .map(_errorEvent);
+
+  @override
+  Stream<LiveRecoveryEvent> get liveRecoveryEvents => _liveRecovery.events;
 
   @override
   Future<void> setPlaybackSpeed(double speed) async {
@@ -2586,6 +2632,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _prefs.removeListener(_onPreferencesChanged);
     _ccTracksSub?.cancel();
     _videoParamsSub?.cancel();
+    _liveRecovery.dispose();
     _tracksChangedController.close();
     _player.dispose();
   }
