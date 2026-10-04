@@ -777,9 +777,14 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             self.didEmitLoadError = true
             self.state = .error
             Self.sharedEngine()?.stop(resetDisplayCriteria: false)
-            self.emitError(
-                kind: "startup_timeout", recoverable: false,
-                message: "The stream did not start in time")
+            // Live TV's channel state poll emits the resulting .error as the
+            // generic source error PlaybackManager already recovers with its
+            // bounded live ladder. Keep the explicit terminal error for VOD.
+            if !self.isLiveSession {
+                self.emitError(
+                    kind: "startup_timeout", recoverable: false,
+                    message: "The stream did not start in time")
+            }
         }
         defer { watchdog.cancel() }
 
