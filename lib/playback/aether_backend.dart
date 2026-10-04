@@ -278,7 +278,11 @@ class AetherBackend implements PlayerBackend {
       wantsPlay: autoPlay,
       tryInPlaceFirst: false,
     );
-    _startStallWatchdog();
+    if (_sourceIsLive) {
+      _stopStallWatchdog();
+    } else {
+      _startStallWatchdog();
+    }
 
     await _invoke<void>('setSource', {
       'url': url,
