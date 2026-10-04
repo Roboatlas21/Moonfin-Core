@@ -265,9 +265,111 @@ class MediaKitPlayerBackend extends PlayerBackend {
   VideoParams? _decodedVideoParams;
   StreamSubscription<VideoParams>? _videoParamsSub;
 
+  /// MediaKit can report playing=true / buffering=false before a Live TV
+  /// source has produced video output. PlaybackManager treats that pair as
+  /// proof startup finished and switches its watchdog from the 30s first-frame
+  /// window to the 8s mid-stream window.
+  ///
+  /// Gate every MediaKit Live TV video session until mpv reports video
+  /// parameters for the newly opened source. This is shared across Android
+  /// phone/tablet, Android TV, Windows, and Linux rather than being a
+  /// device-specific workaround.
+  bool _gateLivePlayingUntilVideoReady = false;
+  bool _liveVideoReadyForSource = false;
+  int _liveVideoGeneration = 0;
+  bool _liveFrameCheckInFlight = false;
+  final _playingGateChangedController = StreamController<void>.broadcast();
+
+  @visibleForTesting
+  static bool shouldGateLiveVideoStartup({
+    required bool isLive,
+    required String? mediaType,
+  }) =>
+      isLive && mediaType?.trim().toLowerCase() == 'video';
+
+  @visibleForTesting
+  static bool reportedPlayingForLiveStartup({
+    required bool stale,
+    required bool gateEnabled,
+    required bool videoReady,
+    required bool playerPlaying,
+  }) {
+    if (stale) return false;
+    if (gateEnabled && !videoReady) return false;
+    return playerPlaying;
+  }
+
+  @visibleForTesting
+  static bool mpvFrameOutputReady({
+    required bool sourceCurrent,
+    required String? frameInfo,
+    required String? voConfigured,
+  }) {
+    final frame = frameInfo?.trim();
+    final vo = voConfigured?.trim().toLowerCase();
+    return sourceCurrent &&
+        frame != null &&
+        frame.isNotEmpty &&
+        frame != 'null' &&
+        (vo == 'yes' || vo == 'true' || vo == '1');
+  }
+
+  Future<void> _checkLiveFrameOutput(int generation) async {
+    if (_isDisposed ||
+        generation != _liveVideoGeneration ||
+        !_gateLivePlayingUntilVideoReady ||
+        _liveVideoReadyForSource ||
+        _liveFrameCheckInFlight) {
+      return;
+    }
+
+    _updateStaleState();
+    if (_isStale) return;
+
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+
+    _liveFrameCheckInFlight = true;
+    try {
+      final frameInfo = await _tryNativeGetProperty(
+        native,
+        'video-frame-info/interlaced',
+      );
+      final voConfigured = await _tryNativeGetProperty(native, 'vo-configured');
+      if (_isDisposed || generation != _liveVideoGeneration) return;
+
+      _updateStaleState();
+      if (!mpvFrameOutputReady(
+        sourceCurrent: !_isStale,
+        frameInfo: frameInfo,
+        voConfigured: voConfigured,
+      )) {
+        return;
+      }
+
+      _liveVideoReadyForSource = true;
+      await _cancelLiveFrameProbe();
+      if (!_playingGateChangedController.isClosed) {
+        // mpv may already have reported playing=true and will not necessarily
+        // emit another transition after the first usable frame appears.
+        _playingGateChangedController.add(null);
+      }
+    } finally {
+      _liveFrameCheckInFlight = false;
+    }
+  }
+
+  bool _reportedPlaying() => reportedPlayingForLiveStartup(
+    stale: _isStale,
+    gateEnabled: _gateLivePlayingUntilVideoReady,
+    videoReady: _liveVideoReadyForSource,
+    playerPlaying: _player.state.playing,
+  );
+
   late final Stream<bool> _playingStream = _mergeWithStale<bool>(
     _player.stream.playing,
-    () => _isStale ? false : _player.state.playing,
+    _reportedPlaying,
+    extraTrigger: _playingGateChangedController.stream,
   );
 
   late final Stream<bool> _bufferingStream = _mergeWithStale<bool>(
@@ -685,6 +787,19 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _isStale = true;
     _embeddedCaptionTracks = const [];
     _ccTrackSids = const [];
+
+    ++_liveVideoGeneration;
+    _liveFrameCheckInFlight = false;
+    _gateLivePlayingUntilVideoReady = shouldGateLiveVideoStartup(
+      isLive: payload['isLive'] == true,
+      mediaType: payload['mediaType']?.toString(),
+    );
+    _liveVideoReadyForSource = !_gateLivePlayingUntilVideoReady;
+    if (!_playingGateChangedController.isClosed) {
+      // Suppress an outgoing source's optimistic playing state before the
+      // newly opened live source has produced video output.
+      _playingGateChangedController.add(null);
+    }
 
     await _notifyNativeHandleReady();
     await _configureAppleMobileLibassFont();
@@ -1876,7 +1991,10 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   Future<void> stop() async {
     _resetSubtitleState();
+    ++_liveVideoGeneration;
     _isStale = true;
+    _gateLivePlayingUntilVideoReady = false;
+    _liveVideoReadyForSource = false;
     await _player.stop();
   }
 
@@ -1913,7 +2031,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   bool get isPlaying {
     _updateStaleState();
-    return _isStale ? false : _player.state.playing;
+    return _reportedPlaying();
   }
 
   @override
@@ -1928,6 +2046,9 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   Stream<Duration> get positionStream => _player.stream.position.map((pos) {
     _updateStaleState();
+    if (_gateLivePlayingUntilVideoReady && !_liveVideoReadyForSource) {
+      unawaited(_checkLiveFrameOutput(_liveVideoGeneration));
+    }
     return _isStale ? Duration.zero : pos;
   });
 
@@ -2553,10 +2674,15 @@ class MediaKitPlayerBackend extends PlayerBackend {
         '${b.toRadixString(16).padLeft(2, '0')}';
   }
 
-  Stream<T> _mergeWithStale<T>(Stream<T> source, T Function() getValue) {
+  Stream<T> _mergeWithStale<T>(
+    Stream<T> source,
+    T Function() getValue, {
+    Stream<void>? extraTrigger,
+  }) {
     late StreamController<T> controller;
     StreamSubscription<T>? sourceSub;
     StreamSubscription<Playlist>? playlistSub;
+    StreamSubscription<void>? extraSub;
 
     controller = StreamController<T>.broadcast(
       onListen: () {
@@ -2569,11 +2695,13 @@ class MediaKitPlayerBackend extends PlayerBackend {
 
         sourceSub = source.listen((_) => checkAndPush());
         playlistSub = _player.stream.playlist.listen((_) => checkAndPush());
+        extraSub = extraTrigger?.listen((_) => checkAndPush());
         checkAndPush();
       },
       onCancel: () {
         sourceSub?.cancel();
         playlistSub?.cancel();
+        extraSub?.cancel();
       },
     );
     return controller.stream;
@@ -2582,11 +2710,13 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   void dispose() {
     _isDisposed = true;
+    ++_liveVideoGeneration;
     _letterboxCropper.cancel();
     _prefs.removeListener(_onPreferencesChanged);
     _ccTracksSub?.cancel();
     _videoParamsSub?.cancel();
     _tracksChangedController.close();
+    _playingGateChangedController.close();
     _player.dispose();
   }
 }
