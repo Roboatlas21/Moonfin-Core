@@ -39,11 +39,15 @@ class BackendLiveRecoveryMonitor {
     this.startupTimeout = const Duration(seconds: 30),
     this.resumeTimeout = const Duration(seconds: 15),
     this.stallTimeout = const Duration(seconds: 8),
-  });
+    this.pollInterval = const Duration(seconds: 1),
+    DateTime Function()? clock,
+  }) : _clock = clock ?? DateTime.now;
 
   final Duration startupTimeout;
   final Duration resumeTimeout;
   final Duration stallTimeout;
+  final Duration pollInterval;
+  final DateTime Function() _clock;
 
   final _events = StreamController<LiveRecoveryEvent>.broadcast();
   Timer? _timer;
@@ -80,12 +84,12 @@ class BackendLiveRecoveryMonitor {
     _tryInPlaceFirst = tryInPlaceFirst;
     _lastProgressAt = null;
     _lastPosition = null;
-    _windowStartedAt = live && wantsPlay ? DateTime.now() : null;
+    _windowStartedAt = live && wantsPlay ? _clock() : null;
 
     if (!live) return;
     _emit(const LiveRecoveryEvent.inactive());
     _timer = Timer.periodic(
-      const Duration(seconds: 1),
+      pollInterval,
       (_) => _check(),
     );
   }
@@ -100,7 +104,7 @@ class BackendLiveRecoveryMonitor {
     _resumingInPlace = wantsPlay && _everHealthy;
     _stallArmed = wantsPlay;
     _suspendedAfterHealthy = !wantsPlay && _everHealthy;
-    _windowStartedAt = wantsPlay ? DateTime.now() : null;
+    _windowStartedAt = wantsPlay ? _clock() : null;
     _emit(const LiveRecoveryEvent.inactive());
   }
 
@@ -126,7 +130,7 @@ class BackendLiveRecoveryMonitor {
 
     if (_wantsPlay && _suspendedAfterHealthy) {
       _resumingInPlace = true;
-      _windowStartedAt = DateTime.now();
+      _windowStartedAt = _clock();
       _lastPosition = null;
       _suspendedAfterHealthy = false;
     }
@@ -139,7 +143,7 @@ class BackendLiveRecoveryMonitor {
     _resumingInPlace = true;
     _stallArmed = true;
     _suspendedAfterHealthy = false;
-    _windowStartedAt = _wantsPlay ? DateTime.now() : null;
+    _windowStartedAt = _wantsPlay ? _clock() : null;
     _lastProgressAt = null;
     _lastPosition = null;
     _emit(const LiveRecoveryEvent.inactive());
@@ -152,13 +156,13 @@ class BackendLiveRecoveryMonitor {
     final previous = _lastPosition;
     _lastPosition = position;
     if (previous == null || previous == position) return;
-    _markHealthyAt(DateTime.now());
+    _markHealthyAt(_clock());
   }
 
   /// For engines with an authoritative first-frame/presentation callback.
   void markHealthy() {
     if (!_live || !_wantsPlay) return;
-    _markHealthyAt(DateTime.now());
+    _markHealthyAt(_clock());
   }
 
   void requestRecovery(
@@ -214,7 +218,7 @@ class BackendLiveRecoveryMonitor {
 
   void _check() {
     if (!_live || !_wantsPlay || _recoveryRequested) return;
-    final now = DateTime.now();
+    final now = _clock();
 
     if (!_healthy) {
       final startedAt = _windowStartedAt;
