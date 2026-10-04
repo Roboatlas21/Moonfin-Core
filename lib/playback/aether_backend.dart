@@ -270,14 +270,10 @@ class AetherBackend implements PlayerBackend {
     _activeSubtitleTrackIndex = null;
     _tracksReadyCompleter = null;
     _embeddedCaptionTracks = const [];
+    _liveRecovery.stop();
     _sourceIsLive = payload['isLive'] == true;
     _sourceIsAudio =
         (payload['mediaType']?.toString() ?? 'video') == 'audio';
-    _liveRecovery.start(
-      live: _sourceIsLive,
-      wantsPlay: autoPlay,
-      tryInPlaceFirst: false,
-    );
     if (_sourceIsLive) {
       _stopStallWatchdog();
     } else {
@@ -301,6 +297,11 @@ class AetherBackend implements PlayerBackend {
       'dolbyVisionBaseLayerOnly': needsBaseLayerOnlyForDolbyVisionAv1(payload),
       'externalSubtitles': payload['externalSubtitles'] ?? const [],
     });
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: false,
+    );
   }
 
   @override

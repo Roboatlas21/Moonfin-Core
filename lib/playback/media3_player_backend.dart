@@ -1087,12 +1087,8 @@ class Media3PlayerBackend extends PlayerBackend {
       ...audioDecoderPreferencesPayload(_prefs),
     });
     _lastFrameRateLine = null;
+    _liveRecovery.stop();
     _sourceIsLive = payload['isLive'] == true;
-    _liveRecovery.start(
-      live: _sourceIsLive,
-      wantsPlay: autoPlay,
-      tryInPlaceFirst: true,
-    );
     // Reset for a new viewing session, but keep the adjustment when the
     // same session changes quality or restores playback after backgrounding.
     final subtitleDelaySessionId = payload['subtitleDelaySessionId'] as int?;
@@ -1155,6 +1151,11 @@ class Media3PlayerBackend extends PlayerBackend {
         await _letterboxCropper.onSourceOpened(url);
       }());
     }
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: true,
+    );
   }
 
   @override

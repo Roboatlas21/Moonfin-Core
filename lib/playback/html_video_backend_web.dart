@@ -393,14 +393,10 @@ class HtmlVideoBackend extends PlayerBackend {
     _knownTextTrackCount = 0;
     _completed = false;
     _completedStream.add(false);
+    _liveRecovery.stop();
     _sourceIsLive = payload['isLive'] == true;
     _sourceIsAudio =
         (payload['mediaType']?.toString() ?? 'video') == 'audio';
-    _liveRecovery.start(
-      live: _sourceIsLive,
-      wantsPlay: autoPlay,
-      tryInPlaceFirst: false,
-    );
 
     await _applySource(url, container: container, startPosition: startPosition);
 
@@ -424,6 +420,11 @@ class HtmlVideoBackend extends PlayerBackend {
     }
 
     _startStatePolling();
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: false,
+    );
   }
 
   @override

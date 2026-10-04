@@ -701,15 +701,11 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _isStale = true;
     _embeddedCaptionTracks = const [];
     _ccTrackSids = const [];
+    _liveRecovery.stop();
     _sourceIsLive = payload['isLive'] == true;
     _sourceIsAudio =
         (payload['mediaType']?.toString() ?? 'video') == 'audio';
     _liveVideoReady = _sourceIsAudio;
-    _liveRecovery.start(
-      live: _sourceIsLive,
-      wantsPlay: autoPlay,
-      tryInPlaceFirst: false,
-    );
 
     await _notifyNativeHandleReady();
     await _configureAppleMobileLibassFont();
@@ -739,6 +735,11 @@ class MediaKitPlayerBackend extends PlayerBackend {
       _enableNativeSubtitleRendering();
     }
     await _maybeEngageNativeHdr();
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: false,
+    );
     unawaited(() async {
       await _letterboxCropper.setEnabled(
         _prefs.get(UserPreferences.cropBlackBars),

@@ -11,6 +11,36 @@ void main() {
           .where((event) => event.type == LiveRecoveryEventType.recoveryRequired)
           .toList();
 
+  test('source setup time is not charged to the startup window', () {
+    fakeAsync((async) {
+      final monitor = monitorFor(async);
+      final events = <LiveRecoveryEvent>[];
+      monitor.events.listen(events.add);
+
+      // Backend source/open setup can itself be slow. Recovery is deliberately
+      // not armed until play() has finished that work.
+      async.elapse(const Duration(seconds: 45));
+      monitor.start(
+        live: true,
+        wantsPlay: true,
+        tryInPlaceFirst: false,
+      );
+      async.flushMicrotasks();
+
+      async.elapse(const Duration(seconds: 29));
+      async.flushMicrotasks();
+      expect(recoveryEvents(events), isEmpty);
+
+      async.elapse(const Duration(seconds: 1));
+      async.flushMicrotasks();
+      expect(
+        recoveryEvents(events).single.trigger,
+        LiveRecoveryTrigger.startupTimeout,
+      );
+      monitor.dispose();
+    });
+  });
+
   test('a live source gets the full 30s startup window', () {
     fakeAsync((async) {
       final monitor = monitorFor(async);

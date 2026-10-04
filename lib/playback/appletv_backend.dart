@@ -321,13 +321,9 @@ class AppleTvBackend implements PlayerBackend {
 
     final audioOnly =
         (payload['mediaType']?.toString() ?? 'video') == 'audio';
+    _liveRecovery.stop();
     _sourceIsLive = payload['isLive'] == true;
     _sourceIsAudio = audioOnly;
-    _liveRecovery.start(
-      live: _sourceIsLive,
-      wantsPlay: autoPlay,
-      tryInPlaceFirst: false,
-    );
     _log(
       'play ${loggableUrl(url)} live=${payload['isLive'] == true} '
       'audioOnly=$audioOnly startMs=${startPosition.inMilliseconds} '
@@ -375,6 +371,11 @@ class AppleTvBackend implements PlayerBackend {
       'forceSubtitlesDisabledOnStart':
           !audioOnly && _prefs.get(UserPreferences.subtitleMode) == SubtitleMode.none,
     });
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+      tryInPlaceFirst: false,
+    );
   }
 
   @override
