@@ -331,7 +331,7 @@ class AppleTvBackend implements PlayerBackend {
     );
     await _ensurePlayerPresented(audioOnly: audioOnly);
 
-    await _invoke<void>('setSource', {
+    final opened = await _invoke<bool>('setSource', {
       'url': url,
       'headers': headers,
       'autoPlay': autoPlay,
@@ -370,10 +370,12 @@ class AppleTvBackend implements PlayerBackend {
       'forceSubtitlesDisabledOnStart':
           !audioOnly && _prefs.get(UserPreferences.subtitleMode) == SubtitleMode.none,
     });
-    _liveRecovery.start(
-      live: _sourceIsLive,
-      wantsPlay: autoPlay,
-    );
+    if (opened == true) {
+      _liveRecovery.start(
+        live: _sourceIsLive,
+        wantsPlay: autoPlay,
+      );
+    }
   }
 
   @override

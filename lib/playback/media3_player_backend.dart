@@ -231,6 +231,9 @@ class Media3PlayerBackend extends PlayerBackend {
         _playWhenReady = map.containsKey('playWhenReady')
             ? _toBool(map['playWhenReady'])
             : null;
+        if (_toBool(map['actualFirstFrameRendered'])) {
+          _sawFirstFrame = true;
+        }
         _liveRecovery.setActive(
           _playWhenReady ?? (_isPlaying || _isBuffering),
         );

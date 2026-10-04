@@ -279,7 +279,7 @@ class AetherBackend implements PlayerBackend {
       _startStallWatchdog();
     }
 
-    await _invoke<void>('setSource', {
+    final opened = await _invoke<bool>('setSource', {
       'url': url,
       'headers': headers,
       'autoPlay': autoPlay,
@@ -296,10 +296,12 @@ class AetherBackend implements PlayerBackend {
       'dolbyVisionBaseLayerOnly': needsBaseLayerOnlyForDolbyVisionAv1(payload),
       'externalSubtitles': payload['externalSubtitles'] ?? const [],
     });
-    _liveRecovery.start(
-      live: _sourceIsLive,
-      wantsPlay: autoPlay,
-    );
+    if (opened == true) {
+      _liveRecovery.start(
+        live: _sourceIsLive,
+        wantsPlay: autoPlay,
+      );
+    }
   }
 
   @override

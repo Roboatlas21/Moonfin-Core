@@ -991,6 +991,9 @@ class Media3VideoView(
     private val audioClockListener: (Long) -> Unit = { maybeRecoverAudioClock(it) }
     private var isPlayerReleased = false
     private var firstFrameRendered = false
+    // Kept separate from the cover fallback: only ExoPlayer's real
+    // onRenderedFirstFrame callback may set this.
+    private var actualFirstFrameRendered = false
 
     private val externalSubtitleConfigurations = mutableListOf<MediaItem.SubtitleConfiguration>()
 
@@ -1309,6 +1312,7 @@ class Media3VideoView(
         }
 
         override fun onRenderedFirstFrame() {
+            actualFirstFrameRendered = true
             Media3Bridge.emitEvent(
                 mapOf(
                     "event" to "firstFrameRendered",
@@ -1530,6 +1534,7 @@ class Media3VideoView(
         isPlayerReleased = false
         isDisposed = false
         firstFrameRendered = false
+        actualFirstFrameRendered = false
         firstFrameCover.visibility = View.VISIBLE
         recreateVideoView()
         player = createPlayer()
@@ -2610,6 +2615,7 @@ class Media3VideoView(
             ?.takeIf { it > 0 }
         pendingClosedCaptionId = null
         firstFrameRendered = false
+        actualFirstFrameRendered = false
         firstFrameCover.visibility = View.VISIBLE
         if (letterboxCrop != null) {
             letterboxCrop = null
@@ -5119,6 +5125,7 @@ class Media3VideoView(
             "playWhenReady" to (player.playWhenReady &&
                 player.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE),
             "playbackSpeed" to player.playbackParameters.speed.toDouble(),
+            "actualFirstFrameRendered" to actualFirstFrameRendered,
             "videoWidth" to videoSize.width,
             "videoHeight" to videoSize.height,
             "repeatMode" to repeatModeToWire(player.repeatMode),

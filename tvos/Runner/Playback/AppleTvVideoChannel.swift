@@ -65,12 +65,11 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                 let args = call.arguments as? [String: Any] ?? [:]
                 Task { @MainActor in
                     guard let self else {
-                        result(nil)
+                        result(false)
                         return
                     }
                     Self.lastCommand = call.method
-                    await self.setSource(args)
-                    result(nil)
+                    result(await self.setSource(args))
                 }
                 return
             }
@@ -108,8 +107,6 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             if let command = args["command"] as? String {
                 playerVC?.handleRemoteNavigation(command)
             }
-        case "setSource":
-            setSource(args)
         case "setEngineLogForwarding":
             setEngineLogForwarding((args["enabled"] as? Bool) == true)
         case "setAllowUntrustedTls":
@@ -398,8 +395,8 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         send(["event": "engineLog", "line": "[AppleTvVideoChannel] \(line)"])
     }
 
-    private func setSource(_ args: [String: Any]) async {
-        guard let player = player, let url = args["url"] as? String else { return }
+    private func setSource(_ args: [String: Any]) async -> Bool {
+        guard let player = player, let url = args["url"] as? String else { return false }
         didComplete = false
         didReportTerminalError = false
         lastTextTrackCount = -1
@@ -446,6 +443,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         {
             player.setSubtitleDelay(delayMs / 1000.0)
         }
+        return player.state != .error
     }
 
     private func startStateTimer() {

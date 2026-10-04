@@ -58,11 +58,10 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
                 let args = call.arguments as? [String: Any] ?? [:]
                 Task { @MainActor in
                     guard let self else {
-                        result(nil)
+                        result(false)
                         return
                     }
-                    await self.setSource(args)
-                    result(nil)
+                    result(await self.setSource(args))
                 }
                 return
             }
@@ -91,8 +90,6 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
     private func handle(_ call: FlutterMethodCall) {
         let args = call.arguments as? [String: Any] ?? [:]
         switch call.method {
-        case "setSource":
-            setSource(args)
         case "play":
             player.resume()
         case "pause":
@@ -182,8 +179,8 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
         string.hasPrefix("/") ? URL(fileURLWithPath: string) : URL(string: string)
     }
 
-    private func setSource(_ args: [String: Any]) async {
-        guard let url = args["url"] as? String else { return }
+    private func setSource(_ args: [String: Any]) async -> Bool {
+        guard let url = args["url"] as? String else { return false }
         didComplete = false
         didReportTerminalError = false
         lastTextTrackCount = -1
@@ -216,6 +213,7 @@ final class AetherVideoChannel: NSObject, FlutterStreamHandler {
         if let speed = (args["speed"] as? NSNumber)?.floatValue, speed != 1.0 {
             player.setRate(speed)
         }
+        return player.state != .error
     }
 
     private func startStateTimer() {

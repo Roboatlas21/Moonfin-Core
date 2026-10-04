@@ -399,6 +399,11 @@ class HtmlVideoBackend extends PlayerBackend {
         (payload['mediaType']?.toString() ?? 'video') == 'audio';
 
     await _applySource(url, container: container, startPosition: startPosition);
+    _startStatePolling();
+    _liveRecovery.start(
+      live: _sourceIsLive,
+      wantsPlay: autoPlay,
+    );
 
     if (autoPlay) {
       _setBuffering(true);
@@ -408,7 +413,7 @@ class HtmlVideoBackend extends PlayerBackend {
       } catch (error) {
         _setPlaying(false);
         _errorStream.add(<String, dynamic>{
-          'event': 'playerError',
+          'event': _sourceIsLive ? 'error' : 'playerError',
           'message': error.toString(),
         });
       } finally {
@@ -419,11 +424,6 @@ class HtmlVideoBackend extends PlayerBackend {
       _setBuffering(false);
     }
 
-    _startStatePolling();
-    _liveRecovery.start(
-      live: _sourceIsLive,
-      wantsPlay: autoPlay,
-    );
   }
 
   @override
@@ -435,7 +435,7 @@ class HtmlVideoBackend extends PlayerBackend {
       _setPlaying(true);
     } catch (error) {
       _errorStream.add(<String, dynamic>{
-        'event': 'playerError',
+        'event': _sourceIsLive ? 'error' : 'playerError',
         'message': error.toString(),
       });
       _setPlaying(false);

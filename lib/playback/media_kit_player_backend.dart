@@ -264,9 +264,13 @@ class MediaKitPlayerBackend extends PlayerBackend {
   /// state still describes the previous one.
   VideoParams? _decodedVideoParams;
   StreamSubscription<VideoParams>? _videoParamsSub;
+  static const _liveFrameInfoProperty = 'video-frame-info/interlaced';
+
   bool _sourceIsLive = false;
   bool _sourceIsAudio = false;
   bool _liveVideoReady = false;
+  bool _liveFrameInfoObserved = false;
+  int _liveSourceGeneration = 0;
   final _liveRecovery = BackendLiveRecoveryMonitor();
 
   late final Stream<bool> _playingStream = _mergeWithStale<bool>(
@@ -301,6 +305,64 @@ class MediaKitPlayerBackend extends PlayerBackend {
           _isStale = false;
         }
       }
+    } catch (_) {}
+  }
+
+  @visibleForTesting
+  static bool liveVideoFrameReady({
+    required bool sourceCurrent,
+    required String? voConfigured,
+    required String? frameInfo,
+  }) {
+    final vo = voConfigured?.trim().toLowerCase();
+    final frame = frameInfo?.trim();
+    return sourceCurrent &&
+        (vo == 'yes' || vo == 'true' || vo == '1') &&
+        frame != null &&
+        frame.isNotEmpty;
+  }
+
+  Future<void> _clearLiveFrameProbe() async {
+    if (!_liveFrameInfoObserved) return;
+    _liveFrameInfoObserved = false;
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    try {
+      await native.unobserveProperty(_liveFrameInfoProperty);
+    } catch (_) {}
+  }
+
+  Future<void> _armLiveFrameProbe(int generation) async {
+    if (!_sourceIsLive || _sourceIsAudio || _liveVideoReady) return;
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+
+    Future<void> onFrame(String frameInfo) async {
+      if (_isDisposed || generation != _liveSourceGeneration) return;
+      _updateStaleState();
+      final voConfigured = await _tryNativeGetProperty(native, 'vo-configured');
+      if (_isDisposed || generation != _liveSourceGeneration) return;
+      if (!liveVideoFrameReady(
+        sourceCurrent: !_isStale,
+        voConfigured: voConfigured,
+        frameInfo: frameInfo,
+      )) {
+        return;
+      }
+
+      _liveVideoReady = true;
+      await _clearLiveFrameProbe();
+    }
+
+    try {
+      await native.observeProperty(_liveFrameInfoProperty, onFrame);
+      if (generation != _liveSourceGeneration) {
+        try {
+          await native.unobserveProperty(_liveFrameInfoProperty);
+        } catch (_) {}
+        return;
+      }
+      _liveFrameInfoObserved = true;
     } catch (_) {}
   }
 
@@ -702,6 +764,8 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _embeddedCaptionTracks = const [];
     _ccTrackSids = const [];
     _liveRecovery.stop();
+    await _clearLiveFrameProbe();
+    final liveGeneration = ++_liveSourceGeneration;
     _sourceIsLive = payload['isLive'] == true;
     _sourceIsAudio =
         (payload['mediaType']?.toString() ?? 'video') == 'audio';
@@ -735,6 +799,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
       _enableNativeSubtitleRendering();
     }
     await _maybeEngageNativeHdr();
+    await _armLiveFrameProbe(liveGeneration);
     _liveRecovery.start(
       live: _sourceIsLive,
       wantsPlay: autoPlay,
@@ -782,12 +847,6 @@ class MediaKitPlayerBackend extends PlayerBackend {
   /// nothing changed: the controller refuses without a presenter, and an
   /// engaged, failed or disabled session is not revisited.
   void _onVideoParams(VideoParams params) {
-    final width = params.w ?? params.dw ?? 0;
-    final height = params.h ?? params.dh ?? 0;
-    if (_sourceIsLive && width > 0 && height > 0) {
-      _liveVideoReady = true;
-    }
-
     final loaded = params.gamma != null || params.primaries != null;
     _decodedVideoParams = loaded ? params : null;
     if (!loaded || !PlatformDetection.supportsNativeHdrWindow) return;
@@ -1909,6 +1968,8 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   Future<void> stop() async {
     _liveRecovery.stop();
+    ++_liveSourceGeneration;
+    await _clearLiveFrameProbe();
     _resetSubtitleState();
     _isStale = true;
     await _player.stop();
@@ -2628,6 +2689,8 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   void dispose() {
     _isDisposed = true;
+    ++_liveSourceGeneration;
+    _liveFrameInfoObserved = false;
     _letterboxCropper.cancel();
     _prefs.removeListener(_onPreferencesChanged);
     _ccTracksSub?.cancel();
