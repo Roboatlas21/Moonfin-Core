@@ -302,33 +302,36 @@ class PlaybackManager implements AudioOwnable {
   void _onLiveRecoveryEvent(LiveRecoveryEvent event) {
     if (!_currentItemIsLive || _isOfflinePlayback) return;
 
-    switch (event.type) {
-      case LiveRecoveryEventType.inactive:
-        _liveBackendHealthy = false;
-        _cancelLiveRecoveryProven();
-      case LiveRecoveryEventType.healthy:
-        _liveBackendHealthy = true;
-        _setLiveRecoveryStatus(null);
-        if (_liveRecoveryRetry?.isActive ?? false) {
-          _diagnosticLogger?.call(
-            'Live recovery: backend healthy, dropping a held retry',
-          );
-          _liveRecoveryRetry!.cancel();
-          _liveRecoveryRetry = null;
-        }
-        _armLiveRecoveryProven();
-      case LiveRecoveryEventType.recoveryRequired:
-        _liveBackendHealthy = false;
-        _cancelLiveRecoveryProven();
-        final trigger = event.trigger;
-        if (trigger == null) return;
-        unawaited(
-          _recoverStalledStream(
-            trigger: trigger.name,
-            cheapResumeFirst: event.tryInPlaceFirst,
-          ),
-        );
+    if (event.type == LiveRecoveryEventType.inactive) {
+      _liveBackendHealthy = false;
+      _cancelLiveRecoveryProven();
+      return;
     }
+
+    if (event.type == LiveRecoveryEventType.healthy) {
+      _liveBackendHealthy = true;
+      _setLiveRecoveryStatus(null);
+      if (_liveRecoveryRetry?.isActive ?? false) {
+        _diagnosticLogger?.call(
+          'Live recovery: backend healthy, dropping a held retry',
+        );
+        _liveRecoveryRetry!.cancel();
+        _liveRecoveryRetry = null;
+      }
+      _armLiveRecoveryProven();
+      return;
+    }
+
+    _liveBackendHealthy = false;
+    _cancelLiveRecoveryProven();
+    final trigger = event.trigger;
+    if (trigger == null) return;
+    unawaited(
+      _recoverStalledStream(
+        trigger: trigger.name,
+        cheapResumeFirst: event.tryInPlaceFirst,
+      ),
+    );
   }
 
   /// Once a recovery has the channel playing again, gives the budget back
