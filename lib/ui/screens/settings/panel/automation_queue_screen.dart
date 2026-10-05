@@ -54,7 +54,8 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final cinemaModeEnabled = _prefs.get(UserPreferences.cinemaModeEnabled);
+    final cinemaModeEnabled = _prefs.get(UserPreferences.cinemaModeEnabled) ||
+        _prefs.get(UserPreferences.cinemaModeEpisodesEnabled);
     final nextUpBehavior = _prefs.get(UserPreferences.nextUpBehavior);
     final mediaSegmentActions = _prefs.get(UserPreferences.mediaSegmentActions);
     final segmentActions = parseMediaSegmentActions(mediaSegmentActions);
@@ -112,6 +113,18 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                   labelOf: (v) => switch (v) {
                     MediaSegmentAutoHide.off => l10n.off,
                     _ => l10n.secondsValue(v.seconds),
+                  },
+                ),
+              if (cinemaModeEnabled)
+                IntPickerPreferenceTile(
+                  preference: UserPreferences.cinemaModeSkipMinDurationSeconds,
+                  title: l10n.cinemaMinimumIntroLength,
+                  description: l10n.cinemaMinimumIntroLengthDescription,
+                  icon: Icons.timelapse,
+                  options: {
+                    0: l10n.cinemaAlwaysShow,
+                    for (var seconds = 5; seconds <= 60; seconds += 5)
+                      seconds: l10n.secondsValue(seconds),
                   },
                 ),
               // Every type writes to the one preference, so each tile is

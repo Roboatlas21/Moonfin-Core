@@ -163,9 +163,30 @@ class SeerrRepository {
   }
 
   Future<T> _withClient<T>(
-    Future<T> Function(SeerrHttpClient client) fn,
-  ) async {
+    Future<T> Function(SeerrHttpClient client) fn, {
+    bool requireSameSession = false,
+  }) async {
+    final account = requireSameSession
+        ? (
+            _session.activeServerId,
+            _session.activeUserId,
+            _client.baseUrl,
+            _client.userId,
+            _client.accessToken,
+          )
+        : null;
     await ensureInitialized();
+    if (requireSameSession &&
+        account !=
+            (
+              _session.activeServerId,
+              _session.activeUserId,
+              _client.baseUrl,
+              _client.userId,
+              _client.accessToken,
+            )) {
+      throw StateError('Seerr account changed before request submission');
+    }
     final client = _httpClient;
     if (client == null) throw StateError('Seerr HTTP client not initialized');
     return fn(client);
@@ -647,6 +668,7 @@ class SeerrRepository {
         serverId: serverId,
       ),
     ),
+    requireSameSession: true,
   );
 
   Future<void> deleteRequest(int requestId) =>

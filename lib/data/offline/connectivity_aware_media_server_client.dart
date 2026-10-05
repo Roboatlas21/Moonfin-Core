@@ -111,6 +111,10 @@ class ConnectivityAwareMediaServerClient implements MediaServerClient {
   set userId(String? id) => _online.userId = id;
 
   @override
+  Future<int?> resolveCinemaMovie(String itemId) =>
+      _useOffline() ? Future.value() : _online.resolveCinemaMovie(itemId);
+
+  @override
   AuthApi get authApi => _online.authApi;
 
   @override

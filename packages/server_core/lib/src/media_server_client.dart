@@ -79,5 +79,9 @@ abstract class MediaServerClient {
   /// Returns null on servers without the plugin.
   GamesApi? get gamesApi => null;
 
+  /// Optional Moonbase movie identity lookup for a Cinema Mode intro.
+  /// Servers without this endpoint leave the action labelled Skip.
+  Future<int?> resolveCinemaMovie(String itemId) async => null;
+
   void dispose();
 }

@@ -37,6 +37,11 @@ import '../../../playback/playback_lifecycle_handler.dart';
 import '../../../playback/playback_profile_diagnostics.dart';
 import '../../../playback/hdr_stream_capability.dart';
 import '../../../auth/repositories/user_repository.dart';
+import '../../../auth/repositories/session_repository.dart';
+import '../../../data/repositories/seerr_repository.dart';
+import '../../../data/services/cinema_movie_resolver.dart';
+import '../../../playback/cinema_mode_controller.dart';
+import '../../widgets/playback/cinema_mode_actions_overlay.dart';
 import '../../../data/models/aggregated_item.dart';
 import '../../../data/repositories/item_mutation_repository.dart';
 import '../../../data/models/media_segment.dart';
@@ -307,9 +312,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   MediaSegment? _skipSegment;
   Duration? _skipTo;
-  bool _prerollSkipVisible = false;
-  bool _prerollSkipAwaitingPlayback = false;
-  Timer? _prerollSkipAutoHideTimer;
+  late final CinemaModeController _cinema;
+  final _cinemaResolver = CinemaMovieResolver();
+  final _cinemaRequestFocus = FocusNode(debugLabel: 'cinema-request');
+  StreamSubscription<Duration>? _cinemaDurationSub;
+  bool _cinemaWasVisible = false;
+  CinemaAction _cinemaLastFocus = CinemaAction.skip;
+  int? _cinemaPreviousSourceToken;
+  Object? _cinemaQueueItem;
+  int _cinemaQueueIndex = -1;
 
   /// True when the auto-hide setting is on for the current segment.
   bool _skipSegmentAutoHideEnabled = false;
@@ -456,66 +467,95 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   bool get _isCurrentPreroll => _isPrerollQueueItem(_queue.currentItem);
 
-  bool get _isPrerollSkipButtonVisible =>
-      _isCurrentPreroll && _prerollSkipVisible;
+  bool get _isPrerollSkipButtonVisible => _isCurrentPreroll && _cinema.visible;
 
-  void _schedulePrerollSkipAutoHide() {
-    _prerollSkipAutoHideTimer?.cancel();
-    _prerollSkipAutoHideTimer = null;
-    if (!_isPrerollSkipButtonVisible) return;
-    final seconds = _prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds;
-    if (seconds <= 0) return;
-    _prerollSkipAutoHideTimer = Timer(Duration(seconds: seconds), () {
-      _prerollSkipAutoHideTimer = null;
-      if (!mounted || !_isCurrentPreroll || !_prerollSkipVisible) return;
-      setState(() => _prerollSkipVisible = false);
-      if (PlatformDetection.isTV) {
-        _restoreOverlayFocus();
+  Object _cinemaAccountKey() {
+    final session = GetIt.instance<SessionRepository>();
+    final client = _clientForQueueItem(_queue.currentItem);
+    return (session.activeServerId, session.activeUserId,
+      client.baseUrl, client.userId, client.accessToken);
+  }
+
+  void _configureCinema() => _cinema.configure(
+    minimumSeconds: _prefs.get(UserPreferences.cinemaModeSkipMinDurationSeconds),
+    autoHideSeconds: _prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds,
+  );
+
+  void _startCinemaItem({bool initial = false}) {
+    if (!initial && identical(_cinemaQueueItem, _queue.currentItem) &&
+        _cinemaQueueIndex == _queue.currentIndex) {
+      return;
+    }
+    _cinemaQueueItem = _queue.currentItem;
+    _cinemaQueueIndex = _queue.currentIndex;
+    final source = _manager.bringupState;
+    // Queue notifications are asynchronous: the next source may already be
+    // resolving when this runs. Only exclude a completed outgoing source.
+    _cinemaPreviousSourceToken = !initial && source.phase == PlaybackBringupPhase.ready
+        ? source.sessionToken : null;
+    final item = _queue.currentItem;
+    final raw = _isCurrentPreroll ? _rawDataForQueueItem(item) : null;
+    final client = _clientForQueueItem(item);
+    final id = _itemIdForQueueItem(item) ?? '';
+    final session = GetIt.instance<SessionRepository>();
+    final serverId = _serverIdForQueueItem(item);
+    _cinema.enter(item: raw,
+      allowSeerr: serverId == null || serverId == session.activeServerId,
+      resolveMovie: () => _cinemaResolver.resolve(client: client, itemId: id, item: raw ?? const {}),
+    );
+    _armPrerollSkipAfterPlaybackStarts();
+  }
+
+  void _onCinemaChanged() {
+    if (!mounted) return;
+    final visible = _isPrerollSkipButtonVisible;
+    final focusChanged = _cinemaLastFocus != _cinema.focusedAction;
+    final shown = visible && !_cinemaWasVisible;
+    final hidden = !visible && _cinemaWasVisible;
+    _cinemaWasVisible = visible;
+    _cinemaLastFocus = _cinema.focusedAction;
+    setState(() {});
+    if (PlatformDetection.isTV) {
+      if (shown || (visible && focusChanged)) _focusCinemaAction();
+      if (hidden) _restoreOverlayFocus();
+    }
+  }
+
+  void _focusCinemaAction() {
+    if (!PlatformDetection.isTV || !_isPrerollSkipButtonVisible) return;
+    final generation = _cinema.generation;
+    final action = _cinema.focusedAction;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_isPrerollSkipButtonVisible || generation != _cinema.generation ||
+          action != _cinema.focusedAction) {
+        return;
       }
+      (action == CinemaAction.request ? _cinemaRequestFocus : _tvSkipSegmentFocus).requestFocus();
     });
   }
 
-  void _showPrerollSkip() {
-    if (!_isCurrentPreroll) return;
-    _prerollSkipAwaitingPlayback = false;
-    _prerollSkipAutoHideTimer?.cancel();
-    if (!_prerollSkipVisible) {
-      setState(() => _prerollSkipVisible = true);
-    }
-    _schedulePrerollSkipAutoHide();
-    _focusTvSkipSegment();
-  }
+  void _showPrerollSkip() => _cinema.reveal();
 
   void _hidePrerollSkip({bool suppressBack = false}) {
     if (suppressBack) {
       _suppressBackNavigation(duration: const Duration(milliseconds: 500));
     }
-    _prerollSkipAwaitingPlayback = false;
-    _prerollSkipAutoHideTimer?.cancel();
-    _prerollSkipAutoHideTimer = null;
-    if (_prerollSkipVisible) {
-      setState(() => _prerollSkipVisible = false);
-    }
-    if (PlatformDetection.isTV) {
-      _restoreOverlayFocus();
-    }
+    _cinema.hide();
   }
 
-  void _skipPreroll() {
-    _prerollSkipAutoHideTimer?.cancel();
-    _prerollSkipAutoHideTimer = null;
-    unawaited(_manager.next());
-  }
+  void _skipPreroll() => _cinema.skip();
 
   void _armPrerollSkipAfterPlaybackStarts() {
-    if (!_prerollSkipAwaitingPlayback ||
-        !_isPrerollSkipButtonVisible ||
-        !_state.isPlaying) {
+    final source = _manager.bringupState;
+    if (!_isCurrentPreroll || source.phase != PlaybackBringupPhase.ready ||
+        source.itemId != _itemIdForQueueItem(_queue.currentItem) ||
+        source.sessionToken == _cinemaPreviousSourceToken) {
       return;
     }
-    _prerollSkipAwaitingPlayback = false;
-    _schedulePrerollSkipAutoHide();
-    _focusTvSkipSegment();
+    // PlayerState can still contain the outgoing file's duration during a
+    // transition. Read the backend only after this item's open has completed.
+    _cinema.updatePlayback(duration: _manager.backend?.duration ?? Duration.zero,
+      playing: _state.isPlaying);
   }
 
   bool _queueItemIsFavorite(dynamic item) {
@@ -867,8 +907,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   @override
   void initState() {
     super.initState();
-    _prerollSkipVisible = _isCurrentPreroll;
-    _prerollSkipAwaitingPlayback = _isCurrentPreroll;
+    _cinema = CinemaModeController(
+      seerr: () => GetIt.instance.getAsync<SeerrRepository>(), accountKey: _cinemaAccountKey,
+      onSkip: _manager.nextInQueue,
+      onError: (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(AppLocalizations.of(context).cinemaActionFailed),
+        ));
+      },
+    )..addListener(_onCinemaChanged);
+    _configureCinema();
+    _startCinemaItem(initial: true);
+    _cinemaDurationSub = _state.durationStream.listen((_) => _armPrerollSkipAfterPlaybackStarts());
     FocusManager.instance.addListener(_restoreOverlayFocus);
     if (PlatformDetection.isTV || PlatformDetection.isMobile) {
       // The decoder wants every megabyte a constrained box has, and a stale
@@ -912,6 +963,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       setState(() {
         _bringupState = state;
       });
+      _armPrerollSkipAfterPlaybackStarts();
       _showBringupFailureIfAny(state);
       unawaited(_syncAutoHdrSwitching());
       unawaited(_syncMedia3ZoomMode());
@@ -1017,11 +1069,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       unawaited(_syncAutoHdrSwitching());
       final isPreroll = _isCurrentPreroll;
       _resetSkipSegmentAutoHide();
-      _prerollSkipAutoHideTimer?.cancel();
-      _prerollSkipAutoHideTimer = null;
+      _startCinemaItem();
       setState(() {
-        _prerollSkipVisible = isPreroll;
-        _prerollSkipAwaitingPlayback = isPreroll;
         _nextUpDismissed = false;
         _showNextUp = false;
         _skipSegment = null;
@@ -1052,9 +1101,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _displayPlaying = _state.isPlaying;
     _playingSub = _state.playingStream.listen((playing) {
       _updateDisplayPlaying(playing);
-      if (playing) {
-        _armPrerollSkipAfterPlaybackStarts();
-      }
+      _armPrerollSkipAfterPlaybackStarts();
       // The hide timer passes over a player that hasn't started yet, so a
       // start or resume slower than its delay needs it armed again here.
       if (playing && _controlsVisible && !_isSeeking) {
@@ -1131,7 +1178,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _cancelTvTemporarySpeedHold();
     _hideTimer?.cancel();
     _skipSegmentAutoHideTimer?.cancel();
-    _prerollSkipAutoHideTimer?.cancel();
+    _cinemaDurationSub?.cancel();
+    _cinema.removeListener(_onCinemaChanged);
+    _cinema.dispose();
+    _cinemaRequestFocus.dispose();
     _displayPlayingDebounce?.cancel();
     _endsAtTicker?.cancel();
     _volumeOverlayTimer?.cancel();
@@ -2563,6 +2613,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onPlaybackPrefsChanged() {
+    _configureCinema();
     _syncMediaQueuingPreference();
     if (!mounted) return;
     _applySubtitleStyle();
@@ -2934,6 +2985,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// runs it stays up on its own; afterwards it rides along with the OSD.
   /// With auto-hide off it stays up until the segment ends.
   bool get _isSkipSegmentButtonVisible =>
+      !_isCurrentPreroll &&
       _skipSegment != null &&
       (!_skipSegmentAutoHideEnabled ||
           _skipSegmentAutoHidePending ||
@@ -3097,6 +3149,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _focusTvSkipSegment({int attempt = 0}) {
+    if (_isCurrentPreroll) { _focusCinemaAction(); return; }
     if (!PlatformDetection.isTV ||
         (_skipSegment == null && !_isPrerollSkipButtonVisible)) {
       return;
@@ -3665,11 +3718,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             return KeyEventResult.handled;
           case LogicalKeyboardKey.enter:
           case LogicalKeyboardKey.select:
-            if (_isPrerollSkipButtonVisible) {
-              _skipPreroll();
-            } else {
-              _showPrerollSkip();
-            }
+            _cinema.activate();
+            return KeyEventResult.handled;
+          case LogicalKeyboardKey.arrowLeft:
+            _cinema.moveLeft();
+            return KeyEventResult.handled;
+          case LogicalKeyboardKey.arrowRight:
+            _cinema.moveRight();
             return KeyEventResult.handled;
 
           case LogicalKeyboardKey.mediaFastForward:
@@ -4246,26 +4301,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                               AppSpacing.spaceXs,
                         ),
                       if (_isPrerollSkipButtonVisible)
-                        SkipSegmentOverlay(
-                          segment: MediaSegment(
-                            id: '__preroll__',
-                            itemId:
-                                _itemIdForQueueItem(_queue.currentItem) ?? '',
-                            type: MediaSegmentType.preview,
-                            start: Duration.zero,
-                            end: _state.duration,
-                          ),
-                          segmentLabel: AppLocalizations.of(context).trailer,
-                          countdownStyle: _prefs.get(
-                            UserPreferences.cinemaModeSkipCountdown,
-                          ),
-                          onSkip: _skipPreroll,
-                          onDismiss: _hidePrerollSkip,
-                          focusNode: _tvSkipSegmentFocus,
+                        CinemaModeActionsOverlay(
+                          controller: _cinema,
+                          skipFocus: _tvSkipSegmentFocus,
+                          requestFocus: _cinemaRequestFocus,
                           positionStream: _state.positionStream,
-                          initialPosition: _state.position,
-                          bottomInset:
-                              MediaQuery.viewPaddingOf(context).bottom + 24.0,
+                          position: _state.position,
+                          countdownStyle: _prefs.get(UserPreferences.cinemaModeSkipCountdown),
+                          onDismiss: _hidePrerollSkip,
                         ),
                       if (_showNextUp && _nextUpItem != null)
                         NextUpOverlay(
