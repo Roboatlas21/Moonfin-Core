@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:get_it/get_it.dart';
 
 import '../data/repositories/seerr_repository.dart';
 import '../data/services/cinema_movie_resolver.dart';
+import '../data/services/log_service.dart';
 import '../data/services/seerr/seerr_api_models.dart';
 
 enum CinemaAction { skip, request }
@@ -137,38 +140,118 @@ class CinemaModeController extends ChangeNotifier {
     Future<int?> Function() resolveMovie,
     bool allowSeerr,
   ) async {
+    // TEMP: trace the missing Seerr action without changing lookup behavior.
+    final clock = Stopwatch()..start();
+    var stage = 'resolve_movie';
+    void trace(String message) {
+      if (!GetIt.instance.isRegistered<LogService>()) return;
+      GetIt.instance<LogService>().seerr(
+        '[CinemaSeerr] lookup=$ticket stage=$stage '
+        'elapsedMs=${clock.elapsedMilliseconds} $message',
+        level: LogLevel.info,
+      );
+    }
+
+    bool current() {
+      if (_current(ticket)) return true;
+      final reason = _disposed
+          ? 'disposed'
+          : ticket != _generation
+          ? 'trailer_changed'
+          : !_active
+          ? 'inactive'
+          : 'account_changed';
+      trace('result=discarded reason=$reason');
+      return false;
+    }
+
     try {
+      trace(
+        'start directTmdb=${movieId ?? 'none'} allowSeerr=$allowSeerr '
+        'durationSeconds=${duration.inSeconds} minimumSeconds=$_minimumSeconds',
+      );
       final id =
           movieId ?? await resolveMovie().timeout(const Duration(seconds: 10));
-      if (!_current(ticket) || id == null || id <= 0) return;
+      if (!current()) return;
+      if (id == null || id <= 0) {
+        trace('result=hidden reason=no_movie_id');
+        return;
+      }
+      trace('resolvedTmdb=$id');
       movieId = id;
       notifyListeners();
-      if (!allowSeerr) return;
+      if (!allowSeerr) {
+        trace('result=hidden reason=same_server_check_denied');
+        return;
+      }
+      stage = 'repository';
+      trace('start');
       final repository = await _seerr().timeout(const Duration(seconds: 10));
-      if (!_current(ticket)) return;
+      if (!current()) return;
+      stage = 'initialize';
+      trace('start');
       await repository.ensureInitialized().timeout(const Duration(seconds: 10));
-      if (!_current(ticket) || !repository.isAvailable) return;
+      if (!current()) return;
+      final serviceAvailable = repository.isAvailable;
+      trace('serviceAvailable=$serviceAvailable');
+      if (!serviceAvailable) {
+        trace('result=hidden reason=service_unavailable');
+        return;
+      }
+      stage = 'current_user';
+      trace('start');
       final user = await repository.getCurrentUser().timeout(
         const Duration(seconds: 10),
       );
-      if (!_current(ticket)) return;
+      if (!current()) return;
       final permitted =
           user.hasPermission(SeerrPermission.request) ||
           user.hasPermission(SeerrPermission.requestMovie);
-      if (!permitted) return;
+      trace('success canRequestMovie=$permitted');
+      if (!permitted) {
+        trace('result=hidden reason=movie_permission_denied');
+        return;
+      }
+      stage = 'movie_details';
+      trace('start tmdb=$id');
       final details = await repository
           .getMovieDetails(id)
           .timeout(const Duration(seconds: 10));
-      if (!_current(ticket)) return;
+      if (!current()) return;
       _requestRepository = repository;
       seerrState = cinemaSeerrState(
         mediaStatus: details.mediaInfo?.status,
         requests: details.mediaInfo?.requests,
         canRequest: permitted,
       );
+      final requestStatuses =
+          details.mediaInfo?.requests
+              ?.where((r) => !r.is4k && r.type == 'movie')
+              .map((r) => r.status)
+              .join(',') ??
+          '';
+      final reason = seerrState == CinemaSeerrState.hidden
+          ? 'blocked_or_unsupported_media_status'
+          : 'status_mapped';
+      trace(
+        'success mediaStatus=${details.mediaInfo?.status ?? 'none'} '
+        'standardMovieRequestStatuses=[$requestStatuses] '
+        'result=${seerrState.name} overlayVisible=$visible '
+        'eligible=$eligible wanted=$_wanted skipping=$_skipping '
+        'reason=$reason',
+      );
       notifyListeners();
-    } catch (_) {
+    } catch (error) {
       // Optional identity/status lookup failures leave playback and Skip alone.
+      // Never stringify errors: URLs, headers and response bodies may be private.
+      final httpError = error is DioException
+          ? ' dioType=${error.type.name} '
+                'httpStatus=${error.response?.statusCode ?? 'none'}'
+          : '';
+      trace(
+        'result=lookup_failed errorType=${error.runtimeType} '
+        'timeout=${error is TimeoutException}$httpError',
+      );
     }
   }
 
