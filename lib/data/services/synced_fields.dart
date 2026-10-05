@@ -214,6 +214,8 @@ final List<SyncedField> syncedFields = <SyncedField>[
   SyncedField('autoplayNextEpisode', UserPreferences.autoplayNextEpisode, SyncCodec.boolean),
   SyncedField('cinemaModeEnabled', UserPreferences.cinemaModeEnabled, SyncCodec.boolean),
   SyncedField('cinemaModeEpisodesEnabled', UserPreferences.cinemaModeEpisodesEnabled, SyncCodec.boolean),
+  SyncedField('cinemaModeSkipAutoHide', UserPreferences.cinemaModeSkipAutoHide, SyncCodec.enumName, enumValues: prefs.MediaSegmentAutoHide.values),
+  SyncedField('cinemaModeSkipCountdown', UserPreferences.cinemaModeSkipCountdown, SyncCodec.enumName, enumValues: prefs.MediaSegmentCountdown.values),
   SyncedField('clockBehavior', UserPreferences.clockBehavior, SyncCodec.enumName, enumValues: prefs.ClockBehavior.values),
   SyncedField('confirmExit', UserPreferences.confirmExit, SyncCodec.boolean),
   SyncedField('crashReportsEnabled', UserPreferences.crashReportsEnabled, SyncCodec.boolean),
