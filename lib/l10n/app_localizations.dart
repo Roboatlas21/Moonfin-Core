@@ -23914,6 +23914,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'You'**
   String get navYou;
+
+  /// No description provided for @cinemaMinimumIntroLength.
+  ///
+  /// In en, this message translates to:
+  /// **'Minimum intro length for Skip button'**
+  String get cinemaMinimumIntroLength;
+
+  /// No description provided for @cinemaMinimumIntroLengthDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide Cinema Mode actions for intros shorter than this. Auto hide still applies.'**
+  String get cinemaMinimumIntroLengthDescription;
+
+  /// No description provided for @cinemaAlwaysShow.
+  ///
+  /// In en, this message translates to:
+  /// **'Always show'**
+  String get cinemaAlwaysShow;
+
+  /// No description provided for @cinemaSkip.
+  ///
+  /// In en, this message translates to:
+  /// **'Skip'**
+  String get cinemaSkip;
+
+  /// No description provided for @cinemaRequestMovie.
+  ///
+  /// In en, this message translates to:
+  /// **'Request Movie'**
+  String get cinemaRequestMovie;
+
+  /// No description provided for @cinemaRequesting.
+  ///
+  /// In en, this message translates to:
+  /// **'Requesting...'**
+  String get cinemaRequesting;
+
+  /// No description provided for @cinemaActionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not complete this action. Please try again later.'**
+  String get cinemaActionFailed;
 }
 
 class _AppLocalizationsDelegate
