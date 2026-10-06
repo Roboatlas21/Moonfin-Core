@@ -48,12 +48,16 @@ Contradictory filename/name matches are rejected.
 ## Request behavior
 
 `Request Movie` keeps its existing standard-quality one-tap request.
-`Request Series` pauses the trailer and opens the existing Seerr season picker.
+`Request Series` opens the existing Seerr season picker while playback continues.
 It preselects an identified season only if Seerr reports it as requestable.
 Otherwise the selection starts empty. The user can explicitly select seasons or
 all seasons; merely opening the picker never submits a request.
 
-The trailer resumes when the picker closes only if it was playing and the same
-trailer/account is still active. Late results and stale dialogs cannot submit for
-a different account or trailer. Request lookups do not delay playback or Skip.
+When the trailer ends, an open picker remains available for 10 seconds before it
+and its advanced-options dialogs close. Submitting within that window cancels
+the grace timer and keeps the picker open until submission finishes. Back cannot
+close it during submission. Skip and leaving playback invalidate the picker;
+changing accounts prevents it from submitting. Request lookups do not delay
+playback or Skip. Continuing shows can request missing seasons even when their
+aired seasons are marked available.
 Movie-only Moonbase responses are never used as typed identity fallbacks.

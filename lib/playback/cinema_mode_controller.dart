@@ -79,14 +79,21 @@ Set<int> cinemaRequestableSeasons(SeerrTvDetails details) {
   return seasons.difference(quality.unavailableOrRequestedSeasons);
 }
 
+bool cinemaSeriesIsContinuing(SeerrTvDetails details) {
+  final status = (details.status ?? '').toLowerCase();
+  return status.isNotEmpty && status != 'ended' && status != 'canceled';
+}
+
 CinemaSeerrState cinemaTvSeerrState(SeerrTvDetails details) {
   final status = details.mediaInfo?.status;
   if (status == SeerrMediaStatus.blocklisted ||
       (status != null && !{0, 1, 2, 3, 4, 5, 7}.contains(status))) {
     return CinemaSeerrState.hidden;
   }
-  // An in-flight or partly available series can still have other seasons to ask for.
-  if (status != SeerrMediaStatus.available &&
+  // Full availability covers aired seasons; a continuing show can have a new
+  // season to request. Keep completed shows and fully covered seasons as status.
+  if ((status != SeerrMediaStatus.available ||
+          cinemaSeriesIsContinuing(details)) &&
       cinemaRequestableSeasons(details).isNotEmpty) {
     return CinemaSeerrState.request;
   }

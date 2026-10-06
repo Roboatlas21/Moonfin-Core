@@ -118,6 +118,7 @@ class _CinemaSeriesPickerSession {
   final int ownerGeneration;
   final Object accountKey;
   Timer? graceTimer;
+  VoidCallback? dismissDialog;
   bool submitting = false;
 }
 
@@ -565,8 +566,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     session.graceTimer?.cancel();
     session.graceTimer = null;
     _seriesPickerSession = null;
-    if (dismiss && mounted && _routeCovered) {
-      unawaited(Navigator.of(context, rootNavigator: true).maybePop());
+    if (dismiss && mounted) {
+      session.dismissDialog?.call();
     }
   }
 
@@ -636,8 +637,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         vm: vm,
         is4k: false,
         season: season,
+        isContinuing: cinemaSeriesIsContinuing(details),
         selectAllSeasons: false,
         waitForSubmission: true,
+        onDismissReady: (dismiss) => session.dismissDialog = dismiss,
       );
       if (vm.state.requestError != null) {
         if (isCurrent()) {

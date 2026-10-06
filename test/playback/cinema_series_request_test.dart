@@ -12,6 +12,7 @@ import 'package:server_core/server_core.dart';
 class CinemaTvRepository extends Fake implements SeerrRepository {
   int permissions = SeerrPermission.requestTv;
   int lookups = 0;
+  Completer<SeerrRequest>? submission;
   SeerrTvDetails details = const SeerrTvDetails(id: 42, numberOfSeasons: 5);
   final submissions = <({int id, String type, List<int>? seasons, bool all})>[];
   @override
@@ -46,7 +47,8 @@ class CinemaTvRepository extends Fake implements SeerrRepository {
       seasons: seasons,
       all: allSeasons,
     ));
-    return const SeerrRequest(id: 1, status: 2, type: 'tv');
+    return submission?.future ??
+        Future.value(const SeerrRequest(id: 1, status: 2, type: 'tv'));
   }
 }
 
@@ -220,4 +222,63 @@ void main() {
     await vm.submitRequest(seasons: [4]);
     expect(repository.submissions.length, 1);
   });
+
+  for (final status in [
+    'Returning Series',
+    'In Production',
+    'Ended',
+    'Canceled',
+    null,
+  ]) {
+    test(
+      'available $status series only offers a new season when continuing',
+      () {
+        final details = SeerrTvDetails(
+          id: 42,
+          status: status,
+          numberOfSeasons: 5,
+          mediaInfo: SeerrMediaInfo(
+            status: SeerrMediaStatus.available,
+            seasons: [
+              for (var season = 1; season <= 4; season++)
+                SeerrSeasonAvailability(
+                  seasonNumber: season,
+                  status: SeerrMediaStatus.available,
+                ),
+            ],
+          ),
+        );
+        expect(cinemaRequestableSeasons(details), {5});
+        expect(
+          cinemaTvSeerrState(details),
+          status == 'Returning Series' || status == 'In Production'
+              ? CinemaSeerrState.request
+              : CinemaSeerrState.available,
+        );
+      },
+    );
+  }
+
+  test(
+    'continuing series with every season available has no request action',
+    () {
+      final details = SeerrTvDetails(
+        id: 42,
+        status: 'Returning Series',
+        numberOfSeasons: 5,
+        mediaInfo: SeerrMediaInfo(
+          status: SeerrMediaStatus.available,
+          seasons: [
+            for (var season = 1; season <= 5; season++)
+              SeerrSeasonAvailability(
+                seasonNumber: season,
+                status: SeerrMediaStatus.available,
+              ),
+          ],
+        ),
+      );
+      expect(cinemaRequestableSeasons(details), isEmpty);
+      expect(cinemaTvSeerrState(details), CinemaSeerrState.available);
+    },
+  );
 }

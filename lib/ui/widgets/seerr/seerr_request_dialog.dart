@@ -32,6 +32,7 @@ Future<void> showSeerrRequestDialog({
   bool isContinuing = false,
   bool selectAllSeasons = true,
   bool waitForSubmission = false,
+  ValueChanged<VoidCallback>? onDismissReady,
 }) async {
   final s = vm.state;
   final l10n = AppLocalizations.of(context);
@@ -43,18 +44,29 @@ Future<void> showSeerrRequestDialog({
     title: is4k && !_hasQualityToggle(vm, qualityToggle)
         ? l10n.requestSeriesOrMovie4k(type)
         : l10n.requestSeriesOrMovie(type),
-    builder: (_) => SeerrRequestDialog(
-      vm: vm,
-      isTv: s.isTv,
-      is4k: is4k,
-      qualityToggle: qualityToggle,
-      seasons: s.tv?.seasons ?? const [],
-      numberOfSeasons: s.numberOfSeasons ?? 0,
-      season: season,
-      isContinuing: isContinuing,
-      selectAllSeasons: selectAllSeasons,
-      waitForSubmission: waitForSubmission,
-    ),
+    builder: (dialogContext) {
+      final route = ModalRoute.of(dialogContext)!;
+      onDismissReady?.call(() {
+        final navigator = route.navigator;
+        if (navigator == null || !route.isActive) return;
+        // Advanced options open child dialogs. Close them before this exact
+        // request dialog, and never pop a later dialog using a stale handle.
+        navigator.popUntil((candidate) => identical(candidate, route));
+        navigator.pop();
+      });
+      return SeerrRequestDialog(
+        vm: vm,
+        isTv: s.isTv,
+        is4k: is4k,
+        qualityToggle: qualityToggle,
+        seasons: s.tv?.seasons ?? const [],
+        numberOfSeasons: s.numberOfSeasons ?? 0,
+        season: season,
+        isContinuing: isContinuing,
+        selectAllSeasons: selectAllSeasons,
+        waitForSubmission: waitForSubmission,
+      );
+    },
   );
 }
 
@@ -263,7 +275,15 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     }
     if (widget.vm.canRequestAdvanced) {
       children.add(const Divider(color: Colors.white12));
-      children.add(SeerrAdvancedRequestOptions(controller: _advanced));
+      children.add(
+        ExcludeFocus(
+          excluding: _submitting,
+          child: IgnorePointer(
+            ignoring: _submitting,
+            child: SeerrAdvancedRequestOptions(controller: _advanced),
+          ),
+        ),
+      );
     }
     if (quotaRow != null) {
       children.add(const SizedBox(height: 12));

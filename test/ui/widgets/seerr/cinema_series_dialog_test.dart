@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
@@ -6,6 +9,7 @@ import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
 import 'package:moonfin/data/viewmodels/seerr_media_detail_view_model.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/preference/user_preferences.dart';
+import 'package:moonfin/ui/widgets/overlay_sheet.dart';
 import 'package:moonfin/ui/widgets/seerr/seerr_request_dialog.dart';
 import 'package:moonfin/ui/widgets/seerr/seerr_tv_controls.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,6 +20,7 @@ import '../../../playback/cinema_series_request_test.dart'
 void main() {
   late CinemaTvRepository repo;
   late SeerrMediaDetailViewModel vm;
+  late VoidCallback dismissDialog;
   var current = true;
   var closed = false;
   setUp(() async {
@@ -36,6 +41,7 @@ void main() {
     );
   });
   tearDown(() async {
+    DialogBackSuppressor.newBackPress();
     vm.dispose();
     await GetIt.instance.reset();
   });
@@ -56,6 +62,7 @@ void main() {
                   season: season,
                   selectAllSeasons: false,
                   waitForSubmission: true,
+                  onDismissReady: (dismiss) => dismissDialog = dismiss,
                 );
                 closed = true;
               },
@@ -122,5 +129,93 @@ void main() {
     await tester.pumpAndSettle();
     expect(repo.submissions, isEmpty);
     expect(closed, true);
+  });
+
+  testWidgets(
+    'expiry closes the season dialog and its advanced-options picker',
+    (tester) async {
+      await open(tester, season: 5);
+      final childClosed = showSeerrOptionPicker(
+        tester.element(find.byType(SeerrRequestDialog)),
+        title: 'Quality profile',
+        labels: ['Default profile'],
+        selectedIndex: 0,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Quality profile'), findsOneWidget);
+
+      current = false;
+      dismissDialog();
+      await tester.pumpAndSettle();
+
+      expect(await childClosed, isNull);
+      expect(find.text('Quality profile'), findsNothing);
+      expect(find.byType(SeerrRequestDialog), findsNothing);
+      expect(find.text('Open'), findsOneWidget);
+      expect(closed, true);
+      expect(repo.submissions, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('an old dismissal handle cannot close a newer dialog', (
+    tester,
+  ) async {
+    await open(tester, season: 5);
+    final oldDismiss = dismissDialog;
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    closed = false;
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+
+    oldDismiss();
+    await tester.pumpAndSettle();
+    expect(find.byType(SeerrRequestDialog), findsOneWidget);
+    expect(closed, false);
+    dismissDialog();
+    await tester.pumpAndSettle();
+    expect(find.byType(SeerrRequestDialog), findsNothing);
+    expect(closed, true);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('remote Back waits for a pending submission to finish', (
+    tester,
+  ) async {
+    repo.submission = Completer<SeerrRequest>();
+    await open(tester, season: 5);
+    await tester.tap(find.text('Submit Request'));
+    await tester.pump();
+    expect(repo.submissions, hasLength(1));
+    expect(vm.state.isRequesting, true);
+
+    await tester.sendKeyEvent(
+      LogicalKeyboardKey.goBack,
+      physicalKey: PhysicalKeyboardKey.escape,
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(SeerrRequestDialog), findsOneWidget);
+    expect(closed, false);
+
+    repo.submission!.complete(const SeerrRequest(id: 1, status: 2, type: 'tv'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SeerrRequestDialog), findsNothing);
+    expect(closed, true);
+    expect(repo.submissions, hasLength(1));
+    expect(vm.state.requestError, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('remote Back still cancels before submission', (tester) async {
+    await open(tester, season: 5);
+    await tester.sendKeyEvent(
+      LogicalKeyboardKey.goBack,
+      physicalKey: PhysicalKeyboardKey.escape,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(SeerrRequestDialog), findsNothing);
+    expect(closed, true);
+    expect(repo.submissions, isEmpty);
   });
 }
