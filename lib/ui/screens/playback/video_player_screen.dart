@@ -3514,6 +3514,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (_isCurrentPreroll) {
+      // Let the OS handle hardware volume keys, including held-key repeats.
+      // The Cinema Mode catch-all below otherwise swallows them on phones.
+      final key = event.logicalKey;
+      if (key == LogicalKeyboardKey.audioVolumeUp ||
+          key == LogicalKeyboardKey.audioVolumeDown ||
+          key == LogicalKeyboardKey.audioVolumeMute) {
+        return KeyEventResult.ignored;
+      }
+
       if (event is KeyUpEvent) {
         final isBackKey = event.logicalKey.isBackKey;
         if (isBackKey) {
