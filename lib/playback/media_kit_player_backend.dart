@@ -4,11 +4,13 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:get_it/get_it.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:playback_core/playback_core.dart';
 
+import '../data/services/log_service.dart';
 import '../preference/preference_constants.dart';
 import '../preference/user_preferences.dart';
 import '../util/auto_hdr_switcher.dart';
@@ -2162,6 +2164,20 @@ class MediaKitPlayerBackend extends PlayerBackend {
     }
   }
 
+  static void _subtitleRetryDiag(
+    String message, {
+    LogLevel level = LogLevel.debug,
+  }) {
+    if (GetIt.instance.isRegistered<LogService>()) {
+      GetIt.instance<LogService>().media(
+        'mpv subtitle retry: $message',
+        level: level,
+      );
+    } else if (kDebugMode) {
+      debugPrint('[subtitle_mpv_retry] $message');
+    }
+  }
+
   @override
   Future<void> setSubtitleTrack(
     int mpvTrackId, {
@@ -2297,20 +2313,44 @@ class MediaKitPlayerBackend extends PlayerBackend {
       return;
     }
     final native = _player.platform as NativePlayer;
+    final elapsed = Stopwatch()..start();
     var retries = 0;
+    _subtitleRetryDiag(
+      'start stock_retries=$_externalSubtitleRetries '
+      'retry_delay_ms=${_externalSubtitleRetryDelay.inMilliseconds} '
+      'total_attempt_budget=${_externalSubtitleRetries + 1}',
+    );
     while (true) {
       await _externalSubtitleLoads[url];
       if (!isCurrentSelection()) return;
       final tracks = await _tryNativeGetProperty(native, 'track-list');
       if (!isCurrentSelection()) return;
       if (_externalSubtitleSid(tracks, url) != null) {
+        _subtitleRetryDiag(
+          'recovered retries_used=$retries total_attempts=${retries + 1} '
+          'elapsed_ms=${elapsed.elapsedMilliseconds}',
+        );
         await selectTrack();
         return;
       }
-      if (retries++ == _externalSubtitleRetries) return;
+      if (retries++ == _externalSubtitleRetries) {
+        _subtitleRetryDiag(
+          'STOCK_RETRY_BUDGET_EXHAUSTED retries_used=$_externalSubtitleRetries '
+          'total_attempts=${_externalSubtitleRetries + 1} '
+          'elapsed_ms=${elapsed.elapsedMilliseconds} subtitle_still_missing=true',
+          level: LogLevel.warning,
+        );
+        return;
+      }
       await Future<void>.delayed(_externalSubtitleRetryDelay);
       if (!isCurrentSelection()) return;
+      final attempt = Stopwatch()..start();
       await _addExternalSubtitle(url);
+      _subtitleRetryDiag(
+        'retry=$retries/$_externalSubtitleRetries attempt=${retries + 1} '
+        'command_ms=${attempt.elapsedMilliseconds} '
+        'elapsed_ms=${elapsed.elapsedMilliseconds}',
+      );
     }
   }
 
@@ -2459,7 +2499,18 @@ class MediaKitPlayerBackend extends PlayerBackend {
     String? codec,
   }) async {
     _externalSubtitles[url] = (title: title, language: language);
+    final scheme = Uri.tryParse(url)?.scheme;
+    final attempt = (scheme == 'http' || scheme == 'https')
+        ? (Stopwatch()..start())
+        : null;
     await _addExternalSubtitle(url);
+    if (attempt != null) {
+      _subtitleRetryDiag(
+        'initial attempt=1 command_ms=${attempt.elapsedMilliseconds} '
+        'stock_retries=$_externalSubtitleRetries '
+        'retry_delay_ms=${_externalSubtitleRetryDelay.inMilliseconds}',
+      );
+    }
     _subtitleDebug(
       'sub-add title=$title lang=$language codec=$codec '
       'mpv_sub_tracks=${_realSubtitleTrackCount(_player.state.tracks.subtitle)}',

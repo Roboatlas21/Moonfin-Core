@@ -329,6 +329,23 @@ class Media3PlayerBackend extends PlayerBackend {
         _bufferingStream.add(false);
       case 'activityAction':
         _activityActionController.add(map.cast<String, dynamic>());
+      case 'subtitleRetryDiagnostic':
+        final outcome = map['outcome']?.toString() ?? 'unknown';
+        final retryDelayMs = _toInt(map['retryDelayMs']);
+        final httpStatus = _toInt(map['httpStatus']);
+        _diag(
+          'Media3 subtitle retry: error_count=${_toInt(map['errorCount'])} '
+          'stock_min_retries=${_toInt(map['stockMinRetries'])} '
+          'total_attempts=${_toInt(map['totalAttempts'])} '
+          'attempt_ms=${_toInt(map['attemptMs'])} '
+          'total_ms=${_toInt(map['totalMs'])} '
+          'retry_delay_ms=${retryDelayMs < 0 ? 'none' : retryDelayMs} '
+          'http_status=${httpStatus < 0 ? 'none' : httpStatus} '
+          'outcome=$outcome exception=${map['exception'] ?? 'unknown'}',
+          level: outcome == 'RETRY_ALLOWED'
+              ? LogLevel.debug
+              : LogLevel.warning,
+        );
       case 'playerError':
         final cause = map['cause']?.toString();
         _diag(
