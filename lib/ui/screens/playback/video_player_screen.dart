@@ -110,12 +110,8 @@ import 'osd_buttons.dart';
 import 'trickplay_housing_inset.dart';
 
 class _CinemaSeriesPickerSession {
-  _CinemaSeriesPickerSession({
-    required this.ownerGeneration,
-    required this.accountKey,
-  });
+  _CinemaSeriesPickerSession({required this.accountKey});
 
-  final int ownerGeneration;
   final Object accountKey;
   Timer? graceTimer;
   VoidCallback? dismissDialog;
@@ -571,10 +567,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
   }
 
-  void _beginSeriesPickerGrace(int ownerGeneration) {
+  void _beginSeriesPickerGrace() {
     final session = _seriesPickerSession;
     if (session == null ||
-        session.ownerGeneration != ownerGeneration ||
         session.submitting ||
         session.graceTimer != null ||
         !_seriesPickerIsCurrent(session)) {
@@ -608,7 +603,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _invalidateSeriesPicker(previousSession, dismiss: true);
     }
     final session = _CinemaSeriesPickerSession(
-      ownerGeneration: _cinema.generation,
       accountKey: _cinemaUserAccountKey(),
     );
     _seriesPickerSession = session;
@@ -1216,13 +1210,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _syncMedia3VolumeBoostLevel();
       unawaited(_syncAutoHdrSwitching());
       final isPreroll = _isCurrentPreroll;
-      final outgoingCinemaGeneration = _cinema.generation;
       final currentItemChanged =
           !identical(_cinemaQueueItem, _queue.currentItem) ||
           _cinemaQueueIndex != _queue.currentIndex;
       _resetSkipSegmentAutoHide();
       if (currentItemChanged) {
-        _beginSeriesPickerGrace(outgoingCinemaGeneration);
+        _beginSeriesPickerGrace();
       }
       _startCinemaItem();
       setState(() {

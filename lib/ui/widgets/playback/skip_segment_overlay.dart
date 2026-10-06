@@ -21,7 +21,6 @@ class SkipSegmentOverlay extends StatefulWidget {
   final MediaSegment segment;
   final VoidCallback onSkip;
   final VoidCallback onDismiss;
-  final String? segmentLabel;
   final MediaSegmentCountdown? countdownStyle;
   final FocusNode? focusNode;
   final Stream<Duration>? positionStream;
@@ -38,7 +37,6 @@ class SkipSegmentOverlay extends StatefulWidget {
   final List<String> labelAlternatives;
   final bool isFocused;
   final bool handleActivationKeys;
-  final bool showDismiss;
   final Color? outlineColor;
   final Color? countdownColor;
   final Color? focusRingColor;
@@ -50,7 +48,6 @@ class SkipSegmentOverlay extends StatefulWidget {
     required this.segment,
     required this.onSkip,
     required this.onDismiss,
-    this.segmentLabel,
     this.countdownStyle,
     this.focusNode,
     this.positionStream,
@@ -60,7 +57,6 @@ class SkipSegmentOverlay extends StatefulWidget {
     this.labelAlternatives = const [],
     this.isFocused = true,
     this.handleActivationKeys = true,
-    this.showDismiss = true,
     this.outlineColor,
     this.countdownColor,
     this.focusRingColor,
@@ -164,8 +160,7 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
     final bool showInlineTimer = showTimer && !numberInRing;
 
     // TV dismisses with the back button, so this is for touch and desktop.
-    final bool showDismissButton =
-        widget.showDismiss && !PlatformDetection.isTV;
+    final bool showDismissButton = !PlatformDetection.isTV;
 
     final effectiveRadius = AppColorScheme.isPixel ? 0.0 : _capsuleRadius;
     final borders = ThemeRegistry.active.borders;
@@ -253,8 +248,7 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
                                 _label(
                                   widget.actionLabel ??
                                       l10n.skipSegment(
-                                        widget.segmentLabel ??
-                                            widget.segment.type.displayName,
+                                        widget.segment.type.displayName,
                                       ),
                                 ),
                               ],
