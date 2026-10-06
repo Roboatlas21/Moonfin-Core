@@ -46,17 +46,6 @@ class JellyfinMediaServerClient extends MediaServerClient {
   final Dio _dio;
 
   @override
-  Future<int?> resolveCinemaMovie(String itemId) async {
-    final response = await _dio.get('/Moonfin/Cinema/ResolveMovie',
-      queryParameters: {'itemId': itemId},
-      options: Options(receiveTimeout: const Duration(seconds: 10)),
-    );
-    final data = response.data;
-    final id = data is Map ? int.tryParse(data['tmdbId']?.toString() ?? '') : null;
-    return id != null && id > 0 ? id : null;
-  }
-
-  @override
   final DeviceInfo deviceInfo;
 
   JellyfinMediaServerClient({

@@ -205,131 +205,62 @@ class CinemaModeController extends ChangeNotifier {
     int ticket,
     Future<CinemaMedia?> Function() resolveMedia,
   ) async {
-    // TEMP: trace the missing Seerr action without changing lookup behavior.
-    final clock = Stopwatch()..start();
-    var stage = 'resolve_media';
-    void trace(String message) {
-      if (!GetIt.instance.isRegistered<LogService>()) return;
-      GetIt.instance<LogService>().seerr(
-        '[CinemaSeerr] lookup=$ticket stage=$stage '
-        'elapsedMs=${clock.elapsedMilliseconds} $message',
-        level: LogLevel.info,
-      );
-    }
-
-    bool current() {
-      if (_current(ticket)) return true;
-      final reason = _disposed
-          ? 'disposed'
-          : ticket != _generation
-          ? 'trailer_changed'
-          : !_active
-          ? 'inactive'
-          : 'account_changed';
-      trace('result=discarded reason=$reason');
-      return false;
-    }
-
     try {
-      trace(
-        'start directTmdb=${media?.tmdbId ?? 'none'} '
-        'durationSeconds=${duration.inSeconds} minimumSeconds=$_minimumSeconds',
-      );
       final resolved =
           media ?? await resolveMedia().timeout(const Duration(seconds: 10));
-      if (!current()) return;
-      if (resolved == null || resolved.tmdbId <= 0) {
-        trace('result=hidden reason=no_typed_id');
-        return;
-      }
+      if (!_current(ticket) || resolved == null || resolved.tmdbId <= 0) return;
       final id = resolved.tmdbId;
-      trace('resolvedTmdb=$id type=${resolved.type.name}');
       media = resolved;
       notifyListeners();
-      stage = 'repository';
-      trace('start');
       final repository = await _seerr().timeout(const Duration(seconds: 10));
-      if (!current()) return;
-      stage = 'initialize';
-      trace('start');
+      if (!_current(ticket)) return;
       await repository.ensureInitialized().timeout(const Duration(seconds: 10));
-      if (!current()) return;
-      final serviceAvailable = repository.isAvailable;
-      trace('serviceAvailable=$serviceAvailable');
-      if (!serviceAvailable) {
-        trace('result=hidden reason=service_unavailable');
-        return;
-      }
-      stage = 'current_user';
-      trace('start');
+      if (!_current(ticket) || !repository.isAvailable) return;
       final user = await repository.getCurrentUser().timeout(
         const Duration(seconds: 10),
       );
-      if (!current()) return;
+      if (!_current(ticket)) return;
       final permitted =
           user.hasPermission(SeerrPermission.request) ||
           user.hasPermission(
             isSeries ? SeerrPermission.requestTv : SeerrPermission.requestMovie,
           );
-      trace('success canRequest=$permitted');
-      if (!permitted) {
-        trace('result=hidden reason=media_permission_denied');
-        return;
-      }
+      if (!permitted) return;
       _user = user;
       if (isSeries) {
         if (onRequestSeries == null) return;
-        stage = 'tv_details';
         final details = await repository
             .getTvDetails(id)
             .timeout(const Duration(seconds: 10));
-        if (!current() || details.id != id) return;
+        if (!_current(ticket) || details.id != id) return;
         _tvDetails = details;
         _requestRepository = repository;
         seerrState = cinemaTvSeerrState(details);
-        trace('success result=${seerrState.name}');
         notifyListeners();
         return;
       }
-      stage = 'movie_details';
-      trace('start tmdb=$id');
       final details = await repository
           .getMovieDetails(id)
           .timeout(const Duration(seconds: 10));
-      if (!current()) return;
+      if (!_current(ticket)) return;
       _requestRepository = repository;
       seerrState = cinemaSeerrState(
         mediaStatus: details.mediaInfo?.status,
         requests: details.mediaInfo?.requests,
         canRequest: permitted,
       );
-      final requestStatuses =
-          details.mediaInfo?.requests
-              ?.where((r) => !r.is4k && r.type == 'movie')
-              .map((r) => r.status)
-              .join(',') ??
-          '';
-      final reason = seerrState == CinemaSeerrState.hidden
-          ? 'blocked_or_unsupported_media_status'
-          : 'status_mapped';
-      trace(
-        'success mediaStatus=${details.mediaInfo?.status ?? 'none'} '
-        'standardMovieRequestStatuses=[$requestStatuses] '
-        'result=${seerrState.name} overlayVisible=$visible '
-        'eligible=$eligible wanted=$_wanted skipping=$_skipping '
-        'reason=$reason',
-      );
       notifyListeners();
     } catch (error) {
       // Optional identity/status lookup failures leave playback and Skip alone.
       // Never stringify errors: URLs, headers and response bodies may be private.
+      if (!GetIt.instance.isRegistered<LogService>()) return;
       final httpError = error is DioException
           ? ' dioType=${error.type.name} '
                 'httpStatus=${error.response?.statusCode ?? 'none'}'
           : '';
-      trace(
-        'result=lookup_failed errorType=${error.runtimeType} '
-        'timeout=${error is TimeoutException}$httpError',
+      GetIt.instance<LogService>().seerr(
+        '[CinemaSeerr] lookup failed errorType=${error.runtimeType}$httpError',
+        level: LogLevel.info,
       );
     }
   }
@@ -426,6 +357,13 @@ class CinemaModeController extends ChangeNotifier {
     );
   }
 
+  void _setSending(bool sending) {
+    _sending = sending;
+    if (sending) focusedAction = CinemaAction.skip;
+    _restartTimer();
+    notifyListeners();
+  }
+
   Future<void> request() async {
     final repository = _requestRepository;
     if (!canRequest || media == null || repository == null) return;
@@ -435,11 +373,8 @@ class CinemaModeController extends ChangeNotifier {
       await _requestSeries(repository, ticket, id);
       return;
     }
-    _sending = true;
     seerrState = CinemaSeerrState.requesting;
-    focusedAction = CinemaAction.skip;
-    _restartTimer();
-    notifyListeners();
+    _setSending(true);
     try {
       final response = await repository
           .createRequest(mediaId: id, mediaType: 'movie', is4k: false)
@@ -470,11 +405,7 @@ class CinemaModeController extends ChangeNotifier {
       }
       if (_current(ticket)) _onError(error);
     } finally {
-      if (_current(ticket)) {
-        _sending = false;
-        _restartTimer();
-        notifyListeners();
-      }
+      if (_current(ticket)) _setSending(false);
     }
   }
 
@@ -486,10 +417,7 @@ class CinemaModeController extends ChangeNotifier {
     final details = _tvDetails;
     final user = _user;
     if (details == null || user == null || onRequestSeries == null) return;
-    _sending = true;
-    focusedAction = CinemaAction.skip;
-    _restartTimer();
-    notifyListeners();
+    _setSending(true);
     try {
       final seasons = cinemaRequestableSeasons(details);
       final season = seasons.contains(media?.season) ? media?.season : null;
@@ -514,11 +442,7 @@ class CinemaModeController extends ChangeNotifier {
       seerrState = CinemaSeerrState.hidden;
       _onError(error);
     } finally {
-      if (_current(ticket)) {
-        _sending = false;
-        _restartTimer();
-        notifyListeners();
-      }
+      if (_current(ticket)) _setSending(false);
     }
   }
 

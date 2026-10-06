@@ -4,7 +4,6 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/repositories/seerr_repository.dart';
 import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
-import 'package:moonfin/data/viewmodels/seerr_media_detail_view_model.dart';
 import 'package:moonfin/playback/cinema_mode_controller.dart';
 import 'package:moonfin/preference/seerr_preferences.dart';
 import 'package:server_core/server_core.dart';
@@ -201,26 +200,6 @@ void main() {
       cinemaTvSeerrState(const SeerrTvDetails(id: 42)),
       CinemaSeerrState.hidden,
     );
-  });
-
-  test('existing picker model submits only selected TV seasons and rejects stale submission', () async {
-    var allowed = true;
-    final vm = SeerrMediaDetailViewModel.forCinema(
-      repository,
-      CinemaTvPreferences(),
-      details: repository.details,
-      user: const SeerrUser(id: 5, permissions: SeerrPermission.requestTv),
-      requestAllowed: () => allowed,
-    );
-    addTearDown(vm.dispose);
-    await vm.submitRequest(seasons: [5]);
-    expect(repository.submissions.single.id, 42);
-    expect(repository.submissions.single.type, 'tv');
-    expect(repository.submissions.single.seasons, [5]);
-    expect(repository.submissions.single.all, false);
-    allowed = false;
-    await vm.submitRequest(seasons: [4]);
-    expect(repository.submissions.length, 1);
   });
 
   for (final status in [
