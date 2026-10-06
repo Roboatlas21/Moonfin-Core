@@ -97,7 +97,13 @@ class CinemaModeActionsOverlay extends StatelessWidget {
               countdownStyle: countdownStyle,
               focusNode: skipFocus,
               handleActivationKeys: false,
-              isFocused: !isTv || controller.focusedAction == CinemaAction.skip,
+              isFocused:
+                  isTv && controller.focusedAction == CinemaAction.skip,
+              outlineColor: isTv
+                  ? AppColorScheme.onSurface
+                  : AppColorScheme.accent,
+              countdownColor: AppColorScheme.onSurface,
+              focusRingColor: isTv ? AppColorScheme.accent : null,
               onSkip: () {
                 if (controller.visible) controller.skip();
               },
@@ -129,6 +135,14 @@ class _SeerrAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = AppColorScheme.isPixel ? 0.0 : 28.0;
+    final isTv = PlatformDetection.isTV;
+    final focusRingInset = isTv ? FocusTheme.borderWidth + 2 : 0.0;
+    final focusRadius = AppColorScheme.isPixel
+        ? 0.0
+        : radius + focusRingInset;
+    final outlineColor = enabled
+        ? (isTv ? AppColorScheme.onSurface : AppColorScheme.accent)
+        : AppColorScheme.onSurface.withValues(alpha: 0.4);
     return Focus(
       focusNode: focusNode,
       canRequestFocus: enabled,
@@ -142,36 +156,59 @@ class _SeerrAction extends StatelessWidget {
           child: InkWell(
             canRequestFocus: false,
             onTap: enabled ? onPressed : null,
-            borderRadius: AppRadius.circular(radius),
+            borderRadius: AppRadius.circular(focusRadius),
             child: Container(
+              key: const ValueKey('cinema-request-focus-ring'),
               decoration: FocusTheme.focusDecoration(
                 isFocused: focused,
-                radius: radius,
+                radius: focusRadius,
+                color: isTv ? AppColorScheme.accent : null,
               ),
-              child: adaptiveGlass(
-                context: context,
-                cornerRadius: radius,
-                blur: 24,
-                fallbackColor: AppColorScheme.surface.withValues(alpha: 0.55),
-                tint: AppColorScheme.surface.withValues(alpha: 0.18),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 18,
-                  ),
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppColorScheme.onSurface.withValues(
-                        alpha: enabled ? 1 : 0.65,
+              padding: EdgeInsets.all(focusRingInset),
+              child: Stack(
+                fit: StackFit.passthrough,
+                children: [
+                  adaptiveGlass(
+                    context: context,
+                    cornerRadius: radius,
+                    blur: 24,
+                    fallbackColor: AppColorScheme.surface.withValues(alpha: 0.55),
+                    tint: AppColorScheme.surface.withValues(alpha: 0.18),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 18,
                       ),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppColorScheme.onSurface.withValues(
+                            alpha: enabled ? 1 : 0.65,
+                          ),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        key: const ValueKey('cinema-request-outline'),
+                        decoration: BoxDecoration(
+                          borderRadius: AppRadius.circular(radius),
+                          border: Border.fromBorderSide(
+                            ThemeRegistry.active.borders.focusBorder.copyWith(
+                              color: outlineColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

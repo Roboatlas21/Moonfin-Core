@@ -82,6 +82,9 @@ class SkipSegmentButton extends StatefulWidget {
   final bool isFocused;
   final bool handleActivationKeys;
   final bool showDismiss;
+  final Color? outlineColor;
+  final Color? countdownColor;
+  final Color? focusRingColor;
 
   const SkipSegmentButton({
     super.key,
@@ -99,6 +102,9 @@ class SkipSegmentButton extends StatefulWidget {
     this.isFocused = true,
     this.handleActivationKeys = true,
     this.showDismiss = true,
+    this.outlineColor,
+    this.countdownColor,
+    this.focusRingColor,
   });
 
   @override
@@ -202,6 +208,15 @@ class _SkipSegmentButtonState extends State<SkipSegmentButton> {
 
     final effectiveRadius = AppColorScheme.isPixel ? 0.0 : _capsuleRadius;
     final borders = ThemeRegistry.active.borders;
+    final focusRingInset = widget.focusRingColor == null
+        ? 0.0
+        : FocusTheme.borderWidth + 2;
+    final focusRadius = AppColorScheme.isPixel
+        ? 0.0
+        : effectiveRadius + focusRingInset;
+    final outlineColor =
+        widget.outlineColor ??
+        AppColorScheme.accent.withValues(alpha: widget.isFocused ? 1 : 0.4);
 
     return Material(
       color: Colors.transparent,
@@ -233,13 +248,14 @@ class _SkipSegmentButtonState extends State<SkipSegmentButton> {
             InkWell(
               key: const ValueKey('skip-segment-capsule'),
               onTap: widget.onSkip,
-              borderRadius: AppRadius.circular(effectiveRadius),
+              borderRadius: AppRadius.circular(focusRadius),
               child: Container(
                 decoration: FocusTheme.focusDecoration(
                   isFocused: widget.isFocused,
-                  radius: effectiveRadius,
-                  color: null,
+                  radius: focusRadius,
+                  color: widget.focusRingColor,
                 ),
+                padding: EdgeInsets.all(focusRingInset),
                 child: Stack(
                   clipBehavior: Clip.none,
                   fit: StackFit.passthrough,
@@ -309,6 +325,7 @@ class _SkipSegmentButtonState extends State<SkipSegmentButton> {
                               const SizedBox(width: 13),
                               _CountdownRing(
                                 progress: progress,
+                                color: widget.countdownColor,
                                 center: numberInRing
                                     ? Text(
                                         '$remainingSec',
@@ -335,14 +352,11 @@ class _SkipSegmentButtonState extends State<SkipSegmentButton> {
                     Positioned.fill(
                       child: IgnorePointer(
                         child: Container(
+                          key: const ValueKey('skip-segment-outline'),
                           decoration: BoxDecoration(
                             borderRadius: AppRadius.circular(effectiveRadius),
                             border: Border.fromBorderSide(
-                              borders.focusBorder.copyWith(
-                                color: AppColorScheme.accent.withValues(
-                                  alpha: widget.isFocused ? 1 : 0.4,
-                                ),
-                              ),
+                              borders.focusBorder.copyWith(color: outlineColor),
                             ),
                           ),
                         ),
@@ -369,10 +383,11 @@ class _SkipSegmentButtonState extends State<SkipSegmentButton> {
 }
 
 class _CountdownRing extends StatelessWidget {
-  const _CountdownRing({required this.progress, this.center});
+  const _CountdownRing({required this.progress, this.center, this.color});
 
   final double progress;
   final Widget? center;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -387,7 +402,9 @@ class _CountdownRing extends StatelessWidget {
               value: progress.clamp(0.0, 1.0),
               strokeWidth: 3,
               backgroundColor: AppColorScheme.onSurface.withValues(alpha: 0.16),
-              valueColor: AlwaysStoppedAnimation<Color>(AppColorScheme.accent),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                color ?? AppColorScheme.accent,
+              ),
             ),
           ),
           ?center,

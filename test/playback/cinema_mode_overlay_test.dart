@@ -7,12 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
+import 'package:moonfin_design/moonfin_design.dart';
 import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/playback/cinema_mode_controller.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/widgets/playback/cinema_mode_actions_overlay.dart';
+import 'package:moonfin/ui/widgets/playback/skip_segment_overlay.dart';
 import 'package:moonfin/util/platform_detection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -144,9 +146,32 @@ void main() {
       await pump(tester, size: const Size(1024, 768));
       expect(tester.getBottomRight(capsule), const Offset(1000, 752));
       expect(dismiss, findsOneWidget);
+      var skip = tester.widget<SkipSegmentButton>(
+        find.byType(SkipSegmentButton),
+      );
+      expect(skip.isFocused, false);
+      expect(skip.outlineColor, AppColorScheme.accent);
+      expect(skip.countdownColor, AppColorScheme.onSurface);
+      expect(skip.focusRingColor, isNull);
+      final requestOutline = tester.widget<Container>(
+        find.byKey(const ValueKey('cinema-request-outline')),
+      );
+      final requestBorder = (requestOutline.decoration! as BoxDecoration).border;
+      expect((requestBorder! as Border).top.color, AppColorScheme.accent);
       await tester.tap(find.text('Request Movie'));
       await tester.pump();
       expect(seerr.submitted, [42]);
+      skip = tester.widget<SkipSegmentButton>(find.byType(SkipSegmentButton));
+      expect(skip.outlineColor, AppColorScheme.accent);
+      final requestedOutline = tester.widget<Container>(
+        find.byKey(const ValueKey('cinema-request-outline')),
+      );
+      final requestedBorder =
+          (requestedOutline.decoration! as BoxDecoration).border;
+      expect(
+        (requestedBorder! as Border).top.color,
+        isNot(AppColorScheme.accent),
+      );
       expect(skipped, 0);
       debugDefaultTargetPlatformOverride = null;
     },
@@ -158,6 +183,21 @@ void main() {
     expect(tester.getBottomRight(capsule), const Offset(776, 426));
     expect(dismiss, findsNothing);
     expect(controller.focusedAction, CinemaAction.skip);
+    var skip = tester.widget<SkipSegmentButton>(find.byType(SkipSegmentButton));
+    expect(skip.isFocused, true);
+    expect(skip.outlineColor, AppColorScheme.onSurface);
+    expect(skip.countdownColor, AppColorScheme.onSurface);
+    expect(skip.focusRingColor, AppColorScheme.accent);
+    controller.moveLeft();
+    await tester.pump();
+    expect(controller.focusedAction, CinemaAction.request);
+    skip = tester.widget<SkipSegmentButton>(find.byType(SkipSegmentButton));
+    expect(skip.isFocused, false);
+    final requestFocusRing = tester.widget<Container>(
+      find.byKey(const ValueKey('cinema-request-focus-ring')),
+    );
+    final focusDecoration = requestFocusRing.decoration! as BoxDecoration;
+    expect((focusDecoration.border! as Border).top.color, AppColorScheme.accent);
   });
   testWidgets(
     'narrow viewport stays in one row without moving Skip or overflowing',
