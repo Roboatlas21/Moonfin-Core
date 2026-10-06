@@ -41,7 +41,10 @@ class CinemaModeActionsOverlay extends StatelessWidget {
     final skipLabel = l10n.skipSegment(l10n.trailer);
     final status = switch (controller.seerrState) {
       CinemaSeerrState.hidden => null,
-      CinemaSeerrState.request => l10n.cinemaRequestMovie,
+      CinemaSeerrState.request =>
+        controller.isSeries
+            ? l10n.requestSeriesOrMovie(l10n.series)
+            : l10n.cinemaRequestMovie,
       CinemaSeerrState.requesting => l10n.cinemaRequesting,
       CinemaSeerrState.requested => l10n.seerrRequestedStatus,
       CinemaSeerrState.pending => l10n.pendingStatus,
@@ -87,7 +90,7 @@ class CinemaModeActionsOverlay extends StatelessWidget {
                 start: Duration.zero,
                 end: controller.duration,
               ),
-              actionLabel: controller.movieId == null
+              actionLabel: controller.media == null
                   ? l10n.cinemaSkip
                   : skipLabel,
               labelAlternatives: [l10n.cinemaSkip, skipLabel],

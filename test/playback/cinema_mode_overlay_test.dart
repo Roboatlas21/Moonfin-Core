@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:server_core/server_core.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -96,11 +98,11 @@ void main() {
     'phone anchors Skip and its single X across asynchronous labels/status',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
-      final lookup = Completer<int?>();
+      final lookup = Completer<CinemaMedia?>();
       seerr.details = Completer();
       controller.enter(
         item: cinemaItem(tmdb: null),
-        resolveMovie: () => lookup.future,
+        resolveMedia: () => lookup.future,
       );
       await pump(tester);
       final anchor = tester.getRect(capsule);
@@ -109,7 +111,7 @@ void main() {
       expect(anchor.right, 800 - 24);
       expect(closeAnchor.dx, anchor.center.dx);
       expect(dismiss, findsOneWidget);
-      lookup.complete(42);
+      lookup.complete(const CinemaMedia(42, CinemaMediaType.movie));
       await tester.pump();
       expect(tester.getRect(capsule), anchor);
       expect(tester.getCenter(dismiss), closeAnchor);
@@ -138,7 +140,7 @@ void main() {
     'tablet uses the same bottom placement and direct Request action',
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      controller.enter(item: cinemaItem(), resolveMovie: () async => null);
+      controller.enter(item: cinemaItem(), resolveMedia: () async => null);
       await pump(tester, size: const Size(1024, 768));
       expect(tester.getBottomRight(capsule), const Offset(1000, 752));
       expect(dismiss, findsOneWidget);
@@ -151,7 +153,7 @@ void main() {
   );
   testWidgets('TV keeps placement and has no dismiss X', (tester) async {
     PlatformDetection.setTvMode(true);
-    controller.enter(item: cinemaItem(), resolveMovie: () async => null);
+    controller.enter(item: cinemaItem(), resolveMedia: () async => null);
     await pump(tester);
     expect(tester.getBottomRight(capsule), const Offset(776, 426));
     expect(dismiss, findsNothing);
@@ -162,7 +164,7 @@ void main() {
     (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
       seerr.info = const SeerrMediaInfo(status: 4);
-      controller.enter(item: cinemaItem(), resolveMovie: () async => null);
+      controller.enter(item: cinemaItem(), resolveMedia: () async => null);
       await pump(tester, size: const Size(360, 740));
       expect(tester.getBottomRight(capsule), const Offset(336, 724));
       expect(tester.takeException(), isNull);

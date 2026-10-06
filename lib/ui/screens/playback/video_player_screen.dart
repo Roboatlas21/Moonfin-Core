@@ -40,6 +40,10 @@ import '../../../auth/repositories/user_repository.dart';
 import '../../../auth/repositories/session_repository.dart';
 import '../../../data/repositories/seerr_repository.dart';
 import '../../../data/services/cinema_movie_resolver.dart';
+import '../../../data/services/seerr/seerr_api_models.dart';
+import '../../../data/viewmodels/seerr_media_detail_view_model.dart';
+import '../../../preference/seerr_preferences.dart';
+import '../../widgets/seerr/seerr_request_dialog.dart';
 import '../../../playback/cinema_mode_controller.dart';
 import '../../widgets/playback/cinema_mode_actions_overlay.dart';
 import '../../../data/models/aggregated_item.dart';
@@ -498,8 +502,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final client = _clientForQueueItem(item);
     final id = _itemIdForQueueItem(item) ?? '';
     // Resolve the trailer on its source server; use the active account's Seerr.
-    _cinema.enter(item: raw,
-      resolveMovie: () => _cinemaResolver.resolve(client: client, itemId: id, item: raw ?? const {}),
+    _cinema.enter(
+      item: raw,
+      resolveMedia: () => _cinemaResolver.resolve(
+        client: client,
+        itemId: id,
+        item: raw ?? const {},
+        expectedMediaType: switch (raw?['__moonfinCinemaFeatureType']) {
+          'Movie' => CinemaMediaType.movie,
+          'Episode' => CinemaMediaType.tv,
+          _ => null,
+        },
+      ),
     );
     _armPrerollSkipAfterPlaybackStarts();
   }
@@ -519,12 +533,52 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
   }
 
+  Future<void> _showCinemaSeriesRequest(
+    SeerrRepository repository,
+    SeerrTvDetails details,
+    SeerrUser user,
+    int? season,
+    bool Function() isCurrent,
+  ) async {
+    if (!mounted || !isCurrent()) return;
+    final wasPlaying = _state.isPlaying;
+    SeerrMediaDetailViewModel? vm;
+    try {
+      await _manager.pause();
+      if (!mounted || !isCurrent()) return;
+      vm = SeerrMediaDetailViewModel.forCinema(
+        repository,
+        GetIt.instance<SeerrPreferences>(),
+        details: details,
+        user: user,
+        requestAllowed: () => mounted && isCurrent(),
+      );
+      await showSeerrRequestDialog(
+        context: context,
+        vm: vm,
+        is4k: false,
+        season: season,
+        selectAllSeasons: false,
+        waitForSubmission: true,
+      );
+      if (vm.state.requestError != null) {
+        throw StateError('Cinema series request failed');
+      }
+    } finally {
+      vm?.dispose();
+      if (mounted && isCurrent()) {
+        if (wasPlaying) await _manager.resume();
+        _focusCinemaAction();
+      }
+    }
+  }
+
   void _focusCinemaAction() {
     if (!PlatformDetection.isTV || !_isPrerollSkipButtonVisible) return;
     final generation = _cinema.generation;
     final action = _cinema.focusedAction;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_isPrerollSkipButtonVisible || generation != _cinema.generation ||
+      if (!mounted || _routeCovered || !_isPrerollSkipButtonVisible || generation != _cinema.generation ||
           action != _cinema.focusedAction) {
         return;
       }
@@ -908,6 +962,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _cinema = CinemaModeController(
       seerr: () => GetIt.instance.getAsync<SeerrRepository>(), accountKey: _cinemaAccountKey,
       onSkip: _manager.nextInQueue,
+      onRequestSeries: _showCinemaSeriesRequest,
       onError: (_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -3678,6 +3733,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (_routeCovered) return KeyEventResult.ignored;
     if (_isCurrentPreroll) {
       if (event is KeyUpEvent) {
         final isBackKey = event.logicalKey.isBackKey;

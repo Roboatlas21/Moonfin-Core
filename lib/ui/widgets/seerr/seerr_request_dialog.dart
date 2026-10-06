@@ -23,18 +23,20 @@ bool _hasQualityToggle(SeerrMediaDetailViewModel vm, bool qualityToggle) =>
 /// With [qualityToggle] the sheet carries a quality switch, and [is4k] is only
 /// where it starts. A title already in the library gets a button per track
 /// instead, so it has no use for the switch.
-void showSeerrRequestDialog({
+Future<void> showSeerrRequestDialog({
   required BuildContext context,
   required SeerrMediaDetailViewModel vm,
   required bool is4k,
   bool qualityToggle = false,
   int? season,
   bool isContinuing = false,
-}) {
+  bool selectAllSeasons = true,
+  bool waitForSubmission = false,
+}) async {
   final s = vm.state;
   final l10n = AppLocalizations.of(context);
   final type = s.isTv ? l10n.series : l10n.movie;
-  showStyledPlayerDialog<void>(
+  await showStyledPlayerDialog<void>(
     context,
     // With a switch on the sheet the title stays neutral, since either track
     // can end up being the one asked for. Without one it has to say which.
@@ -50,6 +52,8 @@ void showSeerrRequestDialog({
       numberOfSeasons: s.numberOfSeasons ?? 0,
       season: season,
       isContinuing: isContinuing,
+      selectAllSeasons: selectAllSeasons,
+      waitForSubmission: waitForSubmission,
     ),
   );
 }
@@ -64,6 +68,8 @@ class SeerrRequestDialog extends StatefulWidget {
   final List<SeerrSeason> seasons;
   final int numberOfSeasons;
   final bool isContinuing;
+  final bool selectAllSeasons;
+  final bool waitForSubmission;
 
   /// Opens with just this season ticked, for a viewer who asked for one rather
   /// than for the whole run.
@@ -79,6 +85,8 @@ class SeerrRequestDialog extends StatefulWidget {
     required this.numberOfSeasons,
     this.season,
     this.isContinuing = false,
+    this.selectAllSeasons = true,
+    this.waitForSubmission = false,
   });
 
   @override
@@ -86,7 +94,7 @@ class SeerrRequestDialog extends StatefulWidget {
 }
 
 class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
-  late bool _allSeasons = widget.season == null;
+  late bool _allSeasons = widget.selectAllSeasons && widget.season == null;
   late bool _is4k = widget.is4k;
   bool _submitting = false;
   late final Set<int> _selectedSeasons = {?widget.season};
@@ -145,15 +153,19 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     return widget.isTv ? quota.tv : quota.movie;
   }
 
-  late final List<int> _seasonNumbers =
-      seerrSeasonNumbersOf(widget.seasons, widget.numberOfSeasons);
+  late final List<int> _seasonNumbers = seerrSeasonNumbersOf(
+    widget.seasons,
+    widget.numberOfSeasons,
+  );
 
   int get _seasonsNeeded {
     if (!widget.isTv) return 0;
     if (_allSeasons) {
       final total = _seasonNumbers.length;
-      return (total - _quality.unavailableOrRequestedSeasons.length)
-          .clamp(1, total);
+      return (total - _quality.unavailableOrRequestedSeasons.length).clamp(
+        1,
+        total,
+      );
     }
     return _selectedSeasons.length;
   }
@@ -169,7 +181,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     return needed > remaining;
   }
 
-  void _submit() {
+  void _submit() async {
     if (_submitting || _quotaBlocked) {
       return;
     }
@@ -180,9 +192,9 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
       if (seasons.isEmpty) return;
     }
 
-    _submitting = true;
+    setState(() => _submitting = true);
 
-    widget.vm.submitRequest(
+    final submission = widget.vm.submitRequest(
       is4k: _is4k,
       seasons: seasons,
       allSeasons: widget.isTv && _allSeasons,
@@ -191,7 +203,8 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
       serverId: _advanced.effectiveServerId,
     );
 
-    Navigator.of(context).pop();
+    if (widget.waitForSubmission) await submission;
+    if (mounted) Navigator.of(context).pop();
   }
 
   @override
@@ -280,12 +293,15 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
       ),
     );
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: children,
+    return PopScope(
+      canPop: !widget.waitForSubmission || !_submitting,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
       ),
     );
   }

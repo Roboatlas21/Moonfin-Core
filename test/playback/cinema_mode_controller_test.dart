@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:fake_async/fake_async.dart';
+import 'package:server_core/server_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/repositories/seerr_repository.dart';
 import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
@@ -59,7 +60,7 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
 }
 
 Map<String, dynamic> cinemaItem({int? seconds = 90, int? tmdb = 42}) => {
-  'Type': 'Video',
+  'Type': 'Movie',
   if (seconds != null) 'RunTimeTicks': seconds * 10000000,
   if (tmdb != null) 'ProviderIds': {'Tmdb': '$tmdb'},
 };
@@ -149,7 +150,10 @@ void main() {
   void enter({int? seconds = 90, int? tmdb = 42, Future<int?>? resolve}) =>
       controller.enter(
         item: cinemaItem(seconds: seconds, tmdb: tmdb),
-        resolveMovie: () => resolve ?? Future.value(),
+        resolveMedia: () async {
+          final id = await resolve;
+          return id == null ? null : CinemaMedia(id, CinemaMediaType.movie);
+        },
       );
 
   test(
@@ -197,11 +201,11 @@ void main() {
       fakeAsync((time) {
         final lookup = Completer<int?>();
         enter(tmdb: null, resolve: lookup.future);
-        expect(controller.movieId, null);
+        expect(controller.media?.tmdbId, null);
         controller.hide();
         lookup.complete(42);
         time.flushMicrotasks();
-        expect(controller.movieId, 42);
+        expect(controller.media?.tmdbId, 42);
         expect(controller.visible, false);
         expect(controller.canRequest, false);
         controller.activate();
@@ -317,7 +321,7 @@ void main() {
       enter();
       time.flushMicrotasks();
       expect(controller.seerrState, CinemaSeerrState.hidden);
-      expect(controller.movieId, 42);
+      expect(controller.media?.tmdbId, 42);
     });
   });
 
@@ -329,7 +333,7 @@ void main() {
       enter(tmdb: null);
       old.complete(42);
       time.flushMicrotasks();
-      expect(controller.movieId, null);
+      expect(controller.media?.tmdbId, null);
       expect(controller.seerrState, CinemaSeerrState.hidden);
     });
   });
@@ -369,7 +373,7 @@ void main() {
         const SeerrRequest(id: 1, status: 2, type: 'movie'),
       );
       time.flushMicrotasks();
-      expect(controller.movieId, 99);
+      expect(controller.media?.tmdbId, 99);
       expect(controller.seerrState, CinemaSeerrState.request);
       expect(seerr.submitted, [42]);
     });

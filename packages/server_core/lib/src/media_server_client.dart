@@ -1,4 +1,5 @@
 import 'models/server_type.dart';
+import 'models/cinema_media.dart';
 import 'models/device_info.dart';
 import 'api/auth_api.dart';
 import 'api/items_api.dart';
@@ -78,6 +79,12 @@ abstract class MediaServerClient {
   /// Optional client for the Moonbase plugin retro-games (EmulatorJS) API.
   /// Returns null on servers without the plugin.
   GamesApi? get gamesApi => null;
+
+  /// Optional typed Moonbase lookup. Context restricts filename searches only.
+  Future<CinemaMedia?> resolveCinemaMedia(
+    String itemId, {
+    CinemaMediaType? expectedMediaType,
+  }) async => null;
 
   /// Optional Moonbase movie identity lookup for a Cinema Mode intro.
   /// Servers without this endpoint leave the action labelled Skip.
