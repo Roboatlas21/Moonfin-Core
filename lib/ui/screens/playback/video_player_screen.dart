@@ -499,8 +499,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final id = _itemIdForQueueItem(item) ?? '';
     final session = GetIt.instance<SessionRepository>();
     final serverId = _serverIdForQueueItem(item);
+    // Detail items can carry a URL alias instead of the saved server ID.
+    // Resolve known aliases without letting unknown IDs fall back to active.
+    final itemServerClient = serverId == null
+        ? null
+        : _clientFactory.getClientIfExists(serverId);
+    final canonicalServerId = itemServerClient == null
+        ? serverId
+        : _clientFactory.serverIdOf(itemServerClient);
     _cinema.enter(item: raw,
-      allowSeerr: serverId == null || serverId == session.activeServerId,
+      allowSeerr: canonicalServerId == null ||
+          canonicalServerId == session.activeServerId,
       resolveMovie: () => _cinemaResolver.resolve(client: client, itemId: id, item: raw ?? const {}),
     );
     _armPrerollSkipAfterPlaybackStarts();
