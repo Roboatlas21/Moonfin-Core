@@ -13260,29 +13260,6 @@ class AppLocalizationsYue extends AppLocalizations {
 
   @override
   String get navYou => 'You';
-
-  @override
-  String get cinemaMinimumIntroLength => 'Minimum intro length for Skip button';
-
-  @override
-  String get cinemaMinimumIntroLengthDescription =>
-      'Hide Cinema Mode actions for intros shorter than this. Auto hide still applies.';
-
-  @override
-  String get cinemaAlwaysShow => 'Always show';
-
-  @override
-  String get cinemaSkip => 'Skip';
-
-  @override
-  String get cinemaRequestMovie => 'Request Movie';
-
-  @override
-  String get cinemaRequesting => 'Requesting...';
-
-  @override
-  String get cinemaActionFailed =>
-      'Could not complete this action. Please try again later.';
 }
 
 /// The translations for Yue Chinese Cantonese, as used in China (`yue_CN`).
