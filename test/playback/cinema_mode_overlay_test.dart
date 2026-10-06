@@ -146,8 +146,8 @@ void main() {
       await pump(tester, size: const Size(1024, 768));
       expect(tester.getBottomRight(capsule), const Offset(1000, 752));
       expect(dismiss, findsOneWidget);
-      var skip = tester.widget<SkipSegmentButton>(
-        find.byType(SkipSegmentButton),
+      var skip = tester.widget<SkipSegmentOverlay>(
+        find.byType(SkipSegmentOverlay),
       );
       expect(skip.isFocused, false);
       expect(skip.outlineColor, AppColorScheme.accent);
@@ -161,7 +161,7 @@ void main() {
       await tester.tap(find.text('Request Movie'));
       await tester.pump();
       expect(seerr.submitted, [42]);
-      skip = tester.widget<SkipSegmentButton>(find.byType(SkipSegmentButton));
+      skip = tester.widget<SkipSegmentOverlay>(find.byType(SkipSegmentOverlay));
       expect(skip.outlineColor, AppColorScheme.accent);
       final requestedOutline = tester.widget<Container>(
         find.byKey(const ValueKey('cinema-request-outline')),
@@ -183,7 +183,7 @@ void main() {
     expect(tester.getBottomRight(capsule), const Offset(776, 426));
     expect(dismiss, findsNothing);
     expect(controller.focusedAction, CinemaAction.skip);
-    var skip = tester.widget<SkipSegmentButton>(find.byType(SkipSegmentButton));
+    var skip = tester.widget<SkipSegmentOverlay>(find.byType(SkipSegmentOverlay));
     expect(skip.isFocused, true);
     expect(skip.outlineColor, AppColorScheme.onSurface);
     expect(skip.countdownColor, AppColorScheme.onSurface);
@@ -191,7 +191,7 @@ void main() {
     controller.moveLeft();
     await tester.pump();
     expect(controller.focusedAction, CinemaAction.request);
-    skip = tester.widget<SkipSegmentButton>(find.byType(SkipSegmentButton));
+    skip = tester.widget<SkipSegmentOverlay>(find.byType(SkipSegmentOverlay));
     expect(skip.isFocused, false);
     final requestFocusRing = tester.widget<Container>(
       find.byKey(const ValueKey('cinema-request-focus-ring')),

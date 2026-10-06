@@ -72,17 +72,16 @@ class CinemaModeActionsOverlay extends StatelessWidget {
                   enabled: controller.canRequest,
                   focused:
                       isTv && controller.focusedAction == CinemaAction.request,
-                  onPressed: () {
-                    controller.request();
-                  },
+                  onPressed: () => controller.request(),
                 ),
               ),
               const SizedBox(width: 12),
             ],
             // The shared dismiss chip lives inside this column, directly above
             // Skip. Neither a Seerr label nor a resolved title changes its anchor.
-            SkipSegmentButton(
+            SkipSegmentOverlay(
               key: const ValueKey('cinema-skip'),
+              inline: true,
               segment: MediaSegment(
                 id: '__preroll__',
                 itemId: '',
@@ -104,9 +103,7 @@ class CinemaModeActionsOverlay extends StatelessWidget {
                   : AppColorScheme.accent,
               countdownColor: AppColorScheme.onSurface,
               focusRingColor: isTv ? AppColorScheme.accent : null,
-              onSkip: () {
-                if (controller.visible) controller.skip();
-              },
+              onSkip: controller.skip,
               onDismiss: onDismiss,
               positionStream: positionStream,
               initialPosition: position,

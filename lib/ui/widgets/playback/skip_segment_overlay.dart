@@ -15,52 +15,9 @@ import '../adaptive/adaptive_glass.dart';
 import '../anime_marker_badge.dart';
 import '../focus/focus_theme.dart';
 
-class SkipSegmentOverlay extends StatelessWidget {
-  final MediaSegment segment;
-  final VoidCallback onSkip;
-  final VoidCallback onDismiss;
-  final String? segmentLabel;
-  final MediaSegmentCountdown? countdownStyle;
-  final FocusNode? focusNode;
-  final Stream<Duration>? positionStream;
-  final Duration? initialPosition;
-  final AggregatedItem? nextItem;
-  final double bottomInset;
-
-  const SkipSegmentOverlay({
-    super.key,
-    required this.segment,
-    required this.onSkip,
-    required this.onDismiss,
-    this.segmentLabel,
-    this.countdownStyle,
-    this.focusNode,
-    this.positionStream,
-    this.initialPosition,
-    this.nextItem,
-    this.bottomInset = _fallbackBottomInset,
-  });
-
-  @override
-  Widget build(BuildContext context) => Positioned(
-    right: 24,
-    bottom: bottomInset,
-    child: SkipSegmentButton(
-      segment: segment,
-      onSkip: onSkip,
-      onDismiss: onDismiss,
-      segmentLabel: segmentLabel,
-      countdownStyle: countdownStyle,
-      focusNode: focusNode,
-      positionStream: positionStream,
-      initialPosition: initialPosition,
-      nextItem: nextItem,
-    ),
-  );
-}
-
-/// The shared capsule/countdown/dismiss presentation; placement belongs to the overlay.
-class SkipSegmentButton extends StatefulWidget {
+/// Skip-segment presentation. By default it positions itself over playback;
+/// Cinema Mode uses [inline] to place the same capsule in its action row.
+class SkipSegmentOverlay extends StatefulWidget {
   final MediaSegment segment;
   final VoidCallback onSkip;
   final VoidCallback onDismiss;
@@ -85,8 +42,10 @@ class SkipSegmentButton extends StatefulWidget {
   final Color? outlineColor;
   final Color? countdownColor;
   final Color? focusRingColor;
+  final bool inline;
+  final double bottomInset;
 
-  const SkipSegmentButton({
+  const SkipSegmentOverlay({
     super.key,
     required this.segment,
     required this.onSkip,
@@ -105,13 +64,15 @@ class SkipSegmentButton extends StatefulWidget {
     this.outlineColor,
     this.countdownColor,
     this.focusRingColor,
+    this.inline = false,
+    this.bottomInset = _fallbackBottomInset,
   });
 
   @override
-  State<SkipSegmentButton> createState() => _SkipSegmentButtonState();
+  State<SkipSegmentOverlay> createState() => _SkipSegmentOverlayState();
 }
 
-class _SkipSegmentButtonState extends State<SkipSegmentButton> {
+class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
   StreamSubscription<Duration>? _positionSubscription;
   Duration _currentPosition = Duration.zero;
 
@@ -123,7 +84,7 @@ class _SkipSegmentButtonState extends State<SkipSegmentButton> {
   }
 
   @override
-  void didUpdateWidget(SkipSegmentButton oldWidget) {
+  void didUpdateWidget(SkipSegmentOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.positionStream != widget.positionStream ||
         oldWidget.segment != widget.segment) {
@@ -218,7 +179,7 @@ class _SkipSegmentButtonState extends State<SkipSegmentButton> {
         widget.outlineColor ??
         AppColorScheme.accent.withValues(alpha: widget.isFocused ? 1 : 0.4);
 
-    return Material(
+    final button = Material(
       color: Colors.transparent,
       child: Focus(
         focusNode: widget.focusNode,
@@ -370,6 +331,9 @@ class _SkipSegmentButtonState extends State<SkipSegmentButton> {
         ),
       ),
     );
+    return widget.inline
+        ? button
+        : Positioned(right: 24, bottom: widget.bottomInset, child: button);
   }
 
   Widget _label(String value) => Text(
