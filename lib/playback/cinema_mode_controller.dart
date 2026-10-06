@@ -107,7 +107,6 @@ class CinemaModeController extends ChangeNotifier {
   void enter({
     required Map<String, dynamic>? item,
     required Future<int?> Function() resolveMovie,
-    bool allowSeerr = true,
   }) {
     final ticket = ++_generation;
     _hideTimer?.cancel();
@@ -126,7 +125,7 @@ class CinemaModeController extends ChangeNotifier {
       _metadataDuration = Duration(microseconds: ticks ~/ 10);
     }
     notifyListeners();
-    if (_active) unawaited(_load(ticket, resolveMovie, allowSeerr));
+    if (_active) unawaited(_load(ticket, resolveMovie));
   }
 
   bool _current(int ticket) =>
@@ -138,7 +137,6 @@ class CinemaModeController extends ChangeNotifier {
   Future<void> _load(
     int ticket,
     Future<int?> Function() resolveMovie,
-    bool allowSeerr,
   ) async {
     // TEMP: trace the missing Seerr action without changing lookup behavior.
     final clock = Stopwatch()..start();
@@ -167,7 +165,7 @@ class CinemaModeController extends ChangeNotifier {
 
     try {
       trace(
-        'start directTmdb=${movieId ?? 'none'} allowSeerr=$allowSeerr '
+        'start directTmdb=${movieId ?? 'none'} '
         'durationSeconds=${duration.inSeconds} minimumSeconds=$_minimumSeconds',
       );
       final id =
@@ -180,10 +178,6 @@ class CinemaModeController extends ChangeNotifier {
       trace('resolvedTmdb=$id');
       movieId = id;
       notifyListeners();
-      if (!allowSeerr) {
-        trace('result=hidden reason=same_server_check_denied');
-        return;
-      }
       stage = 'repository';
       trace('start');
       final repository = await _seerr().timeout(const Duration(seconds: 10));

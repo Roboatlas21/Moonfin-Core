@@ -497,19 +497,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final raw = _isCurrentPreroll ? _rawDataForQueueItem(item) : null;
     final client = _clientForQueueItem(item);
     final id = _itemIdForQueueItem(item) ?? '';
-    final session = GetIt.instance<SessionRepository>();
-    final serverId = _serverIdForQueueItem(item);
-    // Detail items can carry a URL alias instead of the saved server ID.
-    // Resolve known aliases without letting unknown IDs fall back to active.
-    final itemServerClient = serverId == null
-        ? null
-        : _clientFactory.getClientIfExists(serverId);
-    final canonicalServerId = itemServerClient == null
-        ? serverId
-        : _clientFactory.serverIdOf(itemServerClient);
+    // Resolve the trailer on its source server; use the active account's Seerr.
     _cinema.enter(item: raw,
-      allowSeerr: canonicalServerId == null ||
-          canonicalServerId == session.activeServerId,
       resolveMovie: () => _cinemaResolver.resolve(client: client, itemId: id, item: raw ?? const {}),
     );
     _armPrerollSkipAfterPlaybackStarts();
