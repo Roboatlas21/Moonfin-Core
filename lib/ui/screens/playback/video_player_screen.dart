@@ -109,6 +109,18 @@ import 'playback_takeover.dart';
 import 'osd_buttons.dart';
 import 'trickplay_housing_inset.dart';
 
+class _CinemaSeriesPickerSession {
+  _CinemaSeriesPickerSession({
+    required this.ownerGeneration,
+    required this.accountKey,
+  });
+
+  final int ownerGeneration;
+  final Object accountKey;
+  Timer? graceTimer;
+  bool submitting = false;
+}
+
 class VideoPlayerScreen extends StatefulWidget {
   const VideoPlayerScreen({super.key});
 
@@ -129,6 +141,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   static const _seekDragPromptSuppressionDuration = Duration(seconds: 4);
   static const _scrubSeekConvergeTolerance = Duration(milliseconds: 800);
   static const _scrubSeekConvergeTimeout = Duration(seconds: 2);
+  static const _cinemaSeriesPickerGrace = Duration(seconds: 10);
 
   final _manager = GetIt.instance<PlaybackManager>();
   // media_kit isn't registered on platforms that run a different backend, so
@@ -325,6 +338,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   int? _cinemaPreviousSourceToken;
   Object? _cinemaQueueItem;
   int _cinemaQueueIndex = -1;
+  _CinemaSeriesPickerSession? _seriesPickerSession;
 
   /// True when the auto-hide setting is on for the current segment.
   bool _skipSegmentAutoHideEnabled = false;
@@ -480,6 +494,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       client.baseUrl, client.userId, client.accessToken);
   }
 
+  Object _cinemaUserAccountKey() {
+    final session = GetIt.instance<SessionRepository>();
+    return (session.activeServerId, session.activeUserId);
+  }
+
   void _configureCinema() => _cinema.configure(
     minimumSeconds: _prefs.get(UserPreferences.cinemaModeSkipMinDurationSeconds),
     autoHideSeconds: _prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds,
@@ -533,6 +552,48 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
   }
 
+  bool _seriesPickerIsCurrent(_CinemaSeriesPickerSession session) =>
+      mounted &&
+      identical(_seriesPickerSession, session) &&
+      session.accountKey == _cinemaUserAccountKey();
+
+  void _invalidateSeriesPicker(
+    _CinemaSeriesPickerSession session, {
+    bool dismiss = false,
+  }) {
+    if (!identical(_seriesPickerSession, session)) return;
+    session.graceTimer?.cancel();
+    session.graceTimer = null;
+    _seriesPickerSession = null;
+    if (dismiss && mounted && _routeCovered) {
+      unawaited(Navigator.of(context, rootNavigator: true).maybePop());
+    }
+  }
+
+  void _beginSeriesPickerGrace(int ownerGeneration) {
+    final session = _seriesPickerSession;
+    if (session == null ||
+        session.ownerGeneration != ownerGeneration ||
+        session.submitting ||
+        session.graceTimer != null ||
+        !_seriesPickerIsCurrent(session)) {
+      return;
+    }
+    session.graceTimer = Timer(_cinemaSeriesPickerGrace, () {
+      if (_seriesPickerIsCurrent(session) && !session.submitting) {
+        _invalidateSeriesPicker(session, dismiss: true);
+      }
+    });
+  }
+
+  Future<void> _skipCinemaPreroll() {
+    final session = _seriesPickerSession;
+    if (session != null) {
+      _invalidateSeriesPicker(session, dismiss: true);
+    }
+    return _manager.nextInQueue();
+  }
+
   Future<void> _showCinemaSeriesRequest(
     SeerrRepository repository,
     SeerrTvDetails details,
@@ -541,18 +602,35 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     bool Function() isCurrent,
   ) async {
     if (!mounted || !isCurrent()) return;
-    final wasPlaying = _state.isPlaying;
+    final previousSession = _seriesPickerSession;
+    if (previousSession != null) {
+      _invalidateSeriesPicker(previousSession, dismiss: true);
+    }
+    final session = _CinemaSeriesPickerSession(
+      ownerGeneration: _cinema.generation,
+      accountKey: _cinemaUserAccountKey(),
+    );
+    _seriesPickerSession = session;
     SeerrMediaDetailViewModel? vm;
+    VoidCallback? requestListener;
     try {
-      await _manager.pause();
-      if (!mounted || !isCurrent()) return;
       vm = SeerrMediaDetailViewModel.forCinema(
         repository,
         GetIt.instance<SeerrPreferences>(),
         details: details,
         user: user,
-        requestAllowed: () => mounted && isCurrent(),
+        requestAllowed: () => _seriesPickerIsCurrent(session),
       );
+      requestListener = () {
+        if (vm!.state.isRequesting &&
+            _seriesPickerIsCurrent(session) &&
+            !session.submitting) {
+          session.submitting = true;
+          session.graceTimer?.cancel();
+          session.graceTimer = null;
+        }
+      };
+      vm.addListener(requestListener);
       await showSeerrRequestDialog(
         context: context,
         vm: vm,
@@ -562,12 +640,26 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         waitForSubmission: true,
       );
       if (vm.state.requestError != null) {
-        throw StateError('Cinema series request failed');
+        if (isCurrent()) {
+          throw StateError('Cinema series request failed');
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(AppLocalizations.of(context).cinemaActionFailed),
+            ),
+          );
+        }
       }
     } finally {
+      if (requestListener != null) {
+        vm?.removeListener(requestListener);
+      }
       vm?.dispose();
+      if (identical(_seriesPickerSession, session)) {
+        _invalidateSeriesPicker(session);
+      }
       if (mounted && isCurrent()) {
-        if (wasPlaying) await _manager.resume();
         _focusCinemaAction();
       }
     }
@@ -961,7 +1053,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     super.initState();
     _cinema = CinemaModeController(
       seerr: () => GetIt.instance.getAsync<SeerrRepository>(), accountKey: _cinemaAccountKey,
-      onSkip: _manager.nextInQueue,
+      onSkip: _skipCinemaPreroll,
       onRequestSeries: _showCinemaSeriesRequest,
       onError: (_) {
         if (!mounted) return;
@@ -1121,7 +1213,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _syncMedia3VolumeBoostLevel();
       unawaited(_syncAutoHdrSwitching());
       final isPreroll = _isCurrentPreroll;
+      final outgoingCinemaGeneration = _cinema.generation;
+      final currentItemChanged =
+          !identical(_cinemaQueueItem, _queue.currentItem) ||
+          _cinemaQueueIndex != _queue.currentIndex;
       _resetSkipSegmentAutoHide();
+      if (currentItemChanged) {
+        _beginSeriesPickerGrace(outgoingCinemaGeneration);
+      }
       _startCinemaItem();
       setState(() {
         _nextUpDismissed = false;
@@ -1231,6 +1330,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _cancelTvTemporarySpeedHold();
     _hideTimer?.cancel();
     _skipSegmentAutoHideTimer?.cancel();
+    _seriesPickerSession?.graceTimer?.cancel();
+    _seriesPickerSession = null;
     _cinemaDurationSub?.cancel();
     _cinema.removeListener(_onCinemaChanged);
     _cinema.dispose();
@@ -3068,6 +3169,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   Future<void> _exitPlayback() async {
     if (_isStopping) return;
+    final pickerSession = _seriesPickerSession;
+    if (pickerSession != null) {
+      _invalidateSeriesPicker(pickerSession);
+    }
     setState(() {
       _isStopping = true;
     });
