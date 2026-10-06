@@ -1,13 +1,10 @@
 import 'dart:async';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:get_it/get_it.dart';
 import 'package:server_core/server_core.dart';
 
 import '../data/repositories/seerr_repository.dart';
 import '../data/services/cinema_movie_resolver.dart';
-import '../data/services/log_service.dart';
 import '../data/services/seerr/seerr_api_models.dart';
 import '../data/viewmodels/seerr_media_detail_view_model.dart';
 
@@ -141,7 +138,6 @@ class CinemaModeController extends ChangeNotifier {
   SeerrUser? _user;
   int _generation = 0;
   Object? _account;
-  bool _disposed = false;
   bool _active = false;
   bool _wanted = false;
   bool _playing = false;
@@ -196,7 +192,6 @@ class CinemaModeController extends ChangeNotifier {
   }
 
   bool _current(int ticket) =>
-      !_disposed &&
       ticket == _generation &&
       _active &&
       _account == _accountKey();
@@ -250,18 +245,8 @@ class CinemaModeController extends ChangeNotifier {
         canRequest: permitted,
       );
       notifyListeners();
-    } catch (error) {
+    } catch (_) {
       // Optional identity/status lookup failures leave playback and Skip alone.
-      // Never stringify errors: URLs, headers and response bodies may be private.
-      if (!GetIt.instance.isRegistered<LogService>()) return;
-      final httpError = error is DioException
-          ? ' dioType=${error.type.name} '
-                'httpStatus=${error.response?.statusCode ?? 'none'}'
-          : '';
-      GetIt.instance<LogService>().seerr(
-        '[CinemaSeerr] lookup failed errorType=${error.runtimeType}$httpError',
-        level: LogLevel.info,
-      );
     }
   }
 
@@ -455,7 +440,6 @@ class CinemaModeController extends ChangeNotifier {
 
   @override
   void dispose() {
-    _disposed = true;
     ++_generation;
     _hideTimer?.cancel();
     super.dispose();

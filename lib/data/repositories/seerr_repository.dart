@@ -162,29 +162,21 @@ class SeerrRepository {
     _cachedPublicSettings = null;
   }
 
+  Object get _sessionKey => (
+    _session.activeServerId,
+    _session.activeUserId,
+    _client.baseUrl,
+    _client.userId,
+    _client.accessToken,
+  );
+
   Future<T> _withClient<T>(
     Future<T> Function(SeerrHttpClient client) fn, {
     bool requireSameSession = false,
   }) async {
-    final account = requireSameSession
-        ? (
-            _session.activeServerId,
-            _session.activeUserId,
-            _client.baseUrl,
-            _client.userId,
-            _client.accessToken,
-          )
-        : null;
+    final account = _sessionKey;
     await ensureInitialized();
-    if (requireSameSession &&
-        account !=
-            (
-              _session.activeServerId,
-              _session.activeUserId,
-              _client.baseUrl,
-              _client.userId,
-              _client.accessToken,
-            )) {
+    if (requireSameSession && account != _sessionKey) {
       throw StateError('Seerr account changed before request submission');
     }
     final client = _httpClient;
