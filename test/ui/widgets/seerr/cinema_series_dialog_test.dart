@@ -238,6 +238,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(SeerrRequestDialog), findsOneWidget);
     expect(closed, false);
+    // PopScope rejected this Back: don't suppress a follow-up system Back.
+    expect(DialogBackSuppressor.consume(), isFalse);
 
     repo.submission!.complete(const SeerrRequest(id: 1, status: 2, type: 'tv'));
     await tester.pumpAndSettle();
@@ -246,6 +248,18 @@ void main() {
     expect(repo.submissions, hasLength(1));
     expect(vm.state.requestError, isNull);
     expect(tester.takeException(), isNull);
+
+    // A later, ordinary Back still dismisses exactly one dialog.
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(
+      LogicalKeyboardKey.goBack,
+      physicalKey: PhysicalKeyboardKey.escape,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(SeerrRequestDialog), findsNothing);
+    expect(DialogBackSuppressor.consume(), isTrue);
+    expect(DialogBackSuppressor.consume(), isFalse);
   });
 
   testWidgets('remote Back still cancels before submission', (tester) async {
@@ -258,5 +272,7 @@ void main() {
     expect(find.byType(SeerrRequestDialog), findsNothing);
     expect(closed, true);
     expect(repo.submissions, isEmpty);
+    expect(DialogBackSuppressor.consume(), isTrue);
+    expect(DialogBackSuppressor.consume(), isFalse);
   });
 }
