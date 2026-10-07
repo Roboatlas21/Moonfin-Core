@@ -418,7 +418,12 @@ class CinemaModeController extends ChangeNotifier {
       } catch (_) {
         /* Uncertain outcome: don't offer another request. */
       }
-      if (_current(ticket)) _onError(error);
+      // A confirmed request is not a failure just because its POST timed out.
+      if (_current(ticket) &&
+          (seerrState == CinemaSeerrState.hidden ||
+              seerrState == CinemaSeerrState.request)) {
+        _onError(error);
+      }
     } finally {
       if (_current(ticket)) _setSending(false);
     }
@@ -446,12 +451,17 @@ class CinemaModeController extends ChangeNotifier {
       if (!_current(ticket)) return;
       // Cancel and submit both refresh; another user may have requested a season.
       seerrState = CinemaSeerrState.hidden;
-      final refreshed = await repository
-          .getTvDetails(id)
-          .timeout(const Duration(seconds: 10));
-      if (!_current(ticket) || refreshed.id != id) return;
-      _tvDetails = refreshed;
-      seerrState = cinemaTvSeerrState(refreshed);
+      try {
+        final refreshed = await repository
+            .getTvDetails(id)
+            .timeout(const Duration(seconds: 10));
+        if (!_current(ticket) || refreshed.id != id) return;
+        _tvDetails = refreshed;
+        seerrState = cinemaTvSeerrState(refreshed);
+      } catch (_) {
+        // The picker already handled submission. A failed status refresh
+        // must not be reported as a failed request.
+      }
     } catch (error) {
       if (!_current(ticket)) return;
       seerrState = CinemaSeerrState.hidden;

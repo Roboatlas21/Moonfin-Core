@@ -33,6 +33,8 @@ class CinemaMediaResolver {
       'series' => 'tv',
       _ => null,
     };
+    // Enhanced downloaded movie trailers carry TMDB + this provider marker,
+    // so they work even without the optional Moonbase identity endpoint.
     final legacy =
         explicit == null && ids.containsKey('trailers4jellyfin.trailer')
         ? 'movie'
