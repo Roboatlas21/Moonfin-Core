@@ -415,6 +415,12 @@ class CinemaModeController extends ChangeNotifier {
           mediaStatus: details.mediaInfo?.status,
           requests: details.mediaInfo?.requests,
         );
+        // Unknown/deleted status after a POST timeout does not prove that
+        // Seerr rejected it. Don't offer a second request for this trailer.
+        if (error is TimeoutException &&
+            seerrState == CinemaSeerrState.request) {
+          seerrState = CinemaSeerrState.hidden;
+        }
       } catch (_) {
         /* Uncertain outcome: don't offer another request. */
       }
