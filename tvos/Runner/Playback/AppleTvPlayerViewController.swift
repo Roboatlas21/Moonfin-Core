@@ -4198,6 +4198,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     private var quotaRestricted = false
     private var focusedRow = 0
     private var answered = false
+    private var dismissAfterPresentation = false
 
     init(options: [String: Any], completion: @escaping ([String: Any]?) -> Void) {
         requestId = Self.intValue(options["requestId"]) ?? -1
@@ -4215,6 +4216,13 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard dismissAfterPresentation else { return }
+        dismissAfterPresentation = false
+        dismiss(animated: false) { [weak self] in self?.onDismissed?() }
+    }
 
     private var submitRow: Int { seasons.count + 1 }
     private var cancelRow: Int { submitRow + 1 }
@@ -4352,11 +4360,11 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         completion(value)
         if isBeingDismissed {
             notifyAfterDismissal()
-        } else if viewIfLoaded?.window == nil {
-            onDismissed?()
+        } else if isBeingPresented || viewIfLoaded?.window == nil {
+            // Finish presenting before dismissing, or UIKit may ignore it.
+            dismissAfterPresentation = true
         } else {
-            // Immediate dismissal also lets a fast POST failure present its alert.
-            dismiss(animated: false) { self.onDismissed?() }
+            dismiss(animated: false) { [weak self] in self?.onDismissed?() }
         }
     }
 

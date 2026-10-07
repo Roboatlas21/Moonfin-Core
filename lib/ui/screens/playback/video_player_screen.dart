@@ -560,10 +560,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     bool Function() isCurrent,
   ) async {
     if (!mounted || !isCurrent()) return null;
-    _seriesPickerSession?.close();
+    // Like Skip, opening a new picker must preserve an in-flight request.
+    _seriesPickerSession?.closeForSkip();
     final session = CinemaSeriesPickerSession(
       accountKey: _cinemaUserAccountKey,
-      isMounted: () => mounted,
+      isMounted: () => mounted && !_isStopping,
     );
     _seriesPickerSession = session;
     SeerrMediaDetailViewModel? vm;

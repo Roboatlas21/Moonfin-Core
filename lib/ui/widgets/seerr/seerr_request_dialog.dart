@@ -187,11 +187,23 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
           : _selectedSeasons.isNotEmpty &&
               _requestableSeasons.containsAll(_selectedSeasons));
 
-  int get _seasonsNeeded => seerrTvQuotaNeeded(
-    allSeasons: _allSeasons,
-    requestableSeasons: _requestableSeasons,
-    selectedSeasons: _selectedSeasons,
-  );
+  int get _seasonsNeeded {
+    // Keep upstream's minimum-one quota for ordinary All Seasons requests
+    // when season metadata exists. Cinema counts actual requestable seasons.
+    if (!widget.waitForSubmission &&
+        widget.isTv &&
+        _allSeasons &&
+        _seasonNumbers.isNotEmpty) {
+      return (_seasonNumbers.length -
+              _quality.unavailableOrRequestedSeasons.length)
+          .clamp(1, _seasonNumbers.length);
+    }
+    return seerrTvQuotaNeeded(
+      allSeasons: _allSeasons,
+      requestableSeasons: _requestableSeasons,
+      selectedSeasons: _selectedSeasons,
+    );
+  }
 
   bool get _quotaBlocked =>
       seerrQuotaBlocked(_quotaDetail, widget.isTv ? _seasonsNeeded : 1);
@@ -223,7 +235,14 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     );
 
     if (widget.waitForSubmission) await submission;
-    if (mounted) Navigator.of(context).pop();
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    if (widget.waitForSubmission && route != null && !route.isCurrent) {
+      // An older submission must not pop a newer Cinema picker.
+      route.navigator?.removeRoute(route);
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
