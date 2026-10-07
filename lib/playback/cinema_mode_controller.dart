@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:server_core/server_core.dart';
 
 import '../data/repositories/seerr_repository.dart';
-import '../data/services/cinema_movie_resolver.dart';
+import '../data/services/cinema_media_resolver.dart';
 import '../data/services/seerr/seerr_api_models.dart';
 import '../data/viewmodels/seerr_media_detail_view_model.dart';
 
@@ -175,7 +175,7 @@ class CinemaModeController extends ChangeNotifier {
     _wanted = _active;
     _playing = _skipping = _sending = false;
     _metadataDuration = _playerDuration = null;
-    media = item == null ? null : CinemaMovieResolver.directMedia(item);
+    media = item == null ? null : CinemaMediaResolver.directMedia(item);
     _tvDetails = null;
     _user = null;
     seerrState = CinemaSeerrState.hidden;

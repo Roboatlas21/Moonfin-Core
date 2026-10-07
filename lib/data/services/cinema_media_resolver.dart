@@ -1,7 +1,7 @@
 import 'package:server_core/server_core.dart';
 
 /// Resolves typed identities without retaining completed results.
-class CinemaMovieResolver {
+class CinemaMediaResolver {
   final _inFlight =
       <
         (String, String?, String?, String, CinemaMediaType?),

@@ -39,7 +39,7 @@ import '../../../playback/hdr_stream_capability.dart';
 import '../../../auth/repositories/user_repository.dart';
 import '../../../auth/repositories/session_repository.dart';
 import '../../../data/repositories/seerr_repository.dart';
-import '../../../data/services/cinema_movie_resolver.dart';
+import '../../../data/services/cinema_media_resolver.dart';
 import '../../../data/services/seerr/seerr_api_models.dart';
 import '../../../data/viewmodels/seerr_media_detail_view_model.dart';
 import '../../../preference/seerr_preferences.dart';
@@ -327,7 +327,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   MediaSegment? _skipSegment;
   Duration? _skipTo;
   late final CinemaModeController _cinema;
-  final _cinemaResolver = CinemaMovieResolver();
+  final _cinemaResolver = CinemaMediaResolver();
   final _cinemaRequestFocus = FocusNode(debugLabel: 'cinema-request');
   StreamSubscription<Duration>? _cinemaDurationSub;
   bool _cinemaWasVisible = false;

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:moonfin/data/services/cinema_movie_resolver.dart';
+import 'package:moonfin/data/services/cinema_media_resolver.dart';
 import 'package:server_core/server_core.dart';
 
 class _Client extends Fake implements MediaServerClient {
@@ -28,7 +28,7 @@ void main() {
     'IDs require a trustworthy type; overlapping namespaces stay distinct',
     () {
       CinemaMedia? direct(String type, Map<String, String> ids) =>
-          CinemaMovieResolver.directMedia({'Type': type, 'ProviderIds': ids});
+          CinemaMediaResolver.directMedia({'Type': type, 'ProviderIds': ids});
       expect(direct('Movie', {'Tmdb': '42'})?.type, CinemaMediaType.movie);
       expect(direct('Series', {'Tmdb': '42'})?.type, CinemaMediaType.tv);
       expect(direct('Video', {'Tmdb': '42'}), isNull);
@@ -61,7 +61,7 @@ void main() {
     'typed trailers work before either feature category without lookup',
     () async {
       final client = _Client();
-      final resolver = CinemaMovieResolver();
+      final resolver = CinemaMediaResolver();
       for (final type in CinemaMediaType.values) {
         final result = await resolver.resolve(
           client: client,
@@ -82,7 +82,7 @@ void main() {
 
   test('deduplication includes source, account, token, and search category; no completed cache', () async {
     final client = _Client();
-    final resolver = CinemaMovieResolver();
+    final resolver = CinemaMediaResolver();
     Future<CinemaMedia?> resolve([
       CinemaMediaType type = CinemaMediaType.movie,
     ]) => resolver.resolve(
@@ -113,7 +113,7 @@ void main() {
 
   test('endpoint failures and old plugins hide the action and clear in-flight work', () async {
     final client = _Client();
-    final resolver = CinemaMovieResolver();
+    final resolver = CinemaMediaResolver();
     final a = resolver.resolve(client: client, itemId: 'intro', item: {});
     client.reply.completeError(StateError('404'));
     expect(await a, isNull);
