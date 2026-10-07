@@ -46,7 +46,11 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  Future<void> open(WidgetTester tester, {int? season}) async {
+  Future<void> open(
+    WidgetTester tester, {
+    int? season,
+    bool showAdvancedOptions = false,
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -61,6 +65,7 @@ void main() {
                   is4k: false,
                   season: season,
                   selectAllSeasons: false,
+                  showAdvancedOptions: showAdvancedOptions,
                   waitForSubmission: true,
                   onDismissReady: (dismiss) => dismissDialog = dismiss,
                 );
@@ -75,6 +80,53 @@ void main() {
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'Cinema hides advanced options even for users with advanced permission',
+    (tester) async {
+      vm.dispose();
+      vm = SeerrMediaDetailViewModel.forCinema(
+        repo,
+        CinemaTvPreferences(),
+        details: repo.details,
+        user: const SeerrUser(
+          id: 5,
+          permissions:
+              SeerrPermission.requestTv | SeerrPermission.requestAdvanced,
+        ),
+        requestAllowed: () => current,
+      );
+      expect(vm.canRequestAdvanced, true);
+      await open(tester, season: 5);
+      expect(find.text('Advanced Options'), findsNothing);
+      await tester.tap(find.text('Submit Request'));
+      await tester.pumpAndSettle();
+      expect(repo.submissions.single.seasons, [5]);
+      expect(repo.submissions.single.all, false);
+      expect(closed, true);
+    },
+  );
+
+  testWidgets('normal Seerr dialog still offers advanced options', (
+    tester,
+  ) async {
+    vm.dispose();
+    vm = SeerrMediaDetailViewModel.forCinema(
+      repo,
+      CinemaTvPreferences(),
+      details: repo.details,
+      user: const SeerrUser(
+        id: 5,
+        permissions: SeerrPermission.requestTv | SeerrPermission.requestAdvanced,
+      ),
+      requestAllowed: () => current,
+    );
+    await open(tester, season: 5, showAdvancedOptions: true);
+    expect(find.text('Advanced Options'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(repo.submissions, isEmpty);
+  });
 
   testWidgets(
     'unidentified season starts empty and cannot submit the whole series',

@@ -1,8 +1,4 @@
-import 'dart:async';
-
-import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:moonfin/data/repositories/seerr_repository.dart';
 import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
 import 'package:moonfin/data/services/seerr/seerr_request_options.dart';
 
@@ -32,24 +28,6 @@ SeerrServiceServerDetails server({
   rootFolders: roots,
 );
 
-class _DelayedSeerrRepository extends Fake implements SeerrRepository {
-  final listing = Completer<List<SeerrServiceServer>>();
-
-  @override
-  Future<List<SeerrServiceServer>> getSonarrServers() => listing.future;
-
-  @override
-  Future<SeerrServiceServerDetails> getSonarrServerDetails(int serverId) async =>
-      server(
-        id: serverId,
-        name: 'Sonarr',
-        activeProfileId: 11,
-        activeDirectory: '/tv',
-        profiles: const [SeerrQualityProfile(id: 11, name: 'Default')],
-        roots: const [SeerrRootFolder(id: 101, path: '/tv')],
-      );
-}
-
 void main() {
   const p1 = SeerrQualityProfile(id: 11, name: 'Default');
   const p2 = SeerrQualityProfile(id: 12, name: 'High');
@@ -57,62 +35,6 @@ void main() {
   const r1 = SeerrRootFolder(id: 101, path: '/tv');
   const r2 = SeerrRootFolder(id: 102, path: '/anime');
   const r3 = SeerrRootFolder(id: 201, path: '/other');
-
-  test('bounded options loader returns without waiting for Seerr', () {
-    fakeAsync((clock) {
-      final repository = _DelayedSeerrRepository();
-      final options = SeerrRequestOptions(isTv: true);
-      var completed = false;
-      SeerrRequestOptions? published;
-
-      loadCinemaSeerrOptions(
-        repository,
-        options,
-        timeout: const Duration(seconds: 5),
-      ).then((value) {
-        completed = true;
-        published = value;
-      });
-      clock.flushMicrotasks();
-      expect(completed, isFalse);
-      clock.elapse(const Duration(seconds: 5));
-      clock.flushMicrotasks();
-      expect(completed, isTrue);
-      expect(published, isNull);
-
-      // The late reply can finish its private fetch, but must not publish a
-      // stale options instance back into a newer native picker.
-      repository.listing.complete([
-        const SeerrServiceServer(
-          id: 1,
-          name: 'Sonarr',
-          activeProfileId: 11,
-          activeDirectory: '/tv',
-        ),
-      ]);
-      clock.flushMicrotasks();
-      expect(completed, isTrue);
-      expect(published, isNull);
-    });
-  });
-
-  test('bounded options loader exposes fast valid server defaults', () async {
-    final repository = _DelayedSeerrRepository();
-    repository.listing.complete([
-      const SeerrServiceServer(
-        id: 1,
-        name: 'Sonarr',
-        activeProfileId: 11,
-        activeDirectory: '/tv',
-      ),
-    ]);
-    final options = SeerrRequestOptions(isTv: true);
-    final result = await loadCinemaSeerrOptions(repository, options);
-    expect(identical(result, options), isTrue);
-    expect(result?.effectiveServerId, 1);
-    expect(result?.effectiveProfileId, 11);
-    expect(result?.effectiveRootFolderPath, '/tv');
-  });
 
   test('saved ids are used only when they belong to the selected server', () {
     final options = SeerrRequestOptions(isTv: true)

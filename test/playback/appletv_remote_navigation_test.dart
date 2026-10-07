@@ -31,14 +31,13 @@ void main() {
 
   tearDown(() => backend.dispose());
 
-  test('native request picker returns options and preserves cancellation', () async {
+  test('native season picker returns choices and preserves cancellation', () async {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     Object? reply = {
-      'seasons': [2, 5],
-      'serverId': 1,
-      'profileId': 11,
-      'rootFolderId': 101,
+      'requestId': 42,
+      'allSeasons': false,
+      'seasons': [5],
     };
     messenger.setMockMethodCallHandler(control, (call) async {
       calls.add(call);
@@ -46,52 +45,58 @@ void main() {
     });
     expect(
       await backend.showCinemaRequestOptions({
+        'requestId': 42,
         'seasons': [2, 5],
+        'selected': [5],
       }),
-      {
-        'seasons': [2, 5],
-        'serverId': 1,
-        'profileId': 11,
-        'rootFolderId': 101,
-      },
+      reply,
     );
     reply = null;
     expect(
       await backend.showCinemaRequestOptions({
+        'requestId': 43,
         'seasons': [2, 5],
       }),
       isNull,
     );
-    await backend.dismissCinemaRequestOptions();
+    await backend.dismissCinemaRequestOptions(requestId: 42);
     expect(calls.last.method, 'dismissCinemaRequestOptions');
+    expect(calls.last.arguments, {'requestId': 42});
   });
 
-  test('tvOS bridge preserves quota and All Seasons request semantics', () async {
+  test('TV picker can return All Seasons with no advanced overrides', () async {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(control, (call) async {
       calls.add(call);
-      return call.method == 'showCinemaRequestOptions'
-          ? {'allSeasons': true, 'seasons': <int>[]}
-          : null;
+      if (call.method == 'showCinemaRequestOptions') {
+        return {
+          'requestId': 42,
+          'allSeasons': true,
+          'seasons': <int>[],
+        };
+      }
+      return null;
     });
-
-    final result = await backend.showCinemaRequestOptions({
+    final answer = await backend.showCinemaRequestOptions({
+      'requestId': 42,
       'seasons': [2, 5],
-      'quotaLabel': '1 of 3 seasons remaining',
-      'quotaRemaining': 1,
-      'quotaRestricted': false,
-      'quotaBlockedLabel': 'Quota exceeded',
+      'selected': <int>[],
+      'allLabel': 'All Seasons',
     });
-    expect(result, {'allSeasons': true, 'seasons': <int>[]});
-    final args = calls.last.arguments as Map;
-    expect(args['quotaRemaining'], 1);
-    expect(args['quotaRestricted'], false);
-    expect(args['quotaLabel'], '1 of 3 seasons remaining');
-    expect(args['quotaBlockedLabel'], 'Quota exceeded');
+    expect(answer, {
+      'requestId': 42,
+      'allSeasons': true,
+      'seasons': <int>[],
+    });
+    final payload = calls.single.arguments as Map;
+    expect(payload.containsKey('servers'), false);
+    expect(payload.containsKey('profiles'), false);
+    expect(payload.containsKey('optionsLoading'), false);
+    expect(payload.containsKey('advancedEnabled'), false);
   });
 
-  test('native options update can arrive while the picker is still open', () async {
+  test('quota update does not block a pending TV picker', () async {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     final completed = Completer<Map<String, dynamic>?>();
@@ -100,7 +105,7 @@ void main() {
       if (call.method == 'showCinemaRequestOptions') {
         return completed.future;
       }
-      if (call.method == 'updateCinemaRequestOptions') {
+      if (call.method == 'updateCinemaRequestQuota') {
         return true;
       }
       return null;
@@ -109,56 +114,37 @@ void main() {
     final picker = backend.showCinemaRequestOptions({
       'requestId': 123,
       'seasons': [2, 5],
-      'optionsLoading': true,
     });
-    final updated = await backend.updateCinemaRequestOptions({
+    final updated = await backend.updateCinemaRequestQuota({
       'requestId': 123,
-      'optionsLoading': false,
-      'advancedEnabled': true,
-      'selectedServerId': 1,
-      'selectedProfileId': 11,
-      'selectedRootFolderId': 101,
-      'servers': [
-        {
-          'id': 1,
-          'label': 'Sonarr',
-          'defaultProfileId': 11,
-          'defaultRootFolderId': 101,
-          'profiles': [
-            {'id': 11, 'label': 'Default'},
-          ],
-          'rootFolders': [
-            {'id': 101, 'label': '/tv'},
-          ],
-        },
-      ],
+      'quotaLabel': '1 of 3 season requests remaining',
+      'quotaRemaining': 1,
+      'quotaRestricted': false,
     });
     expect(updated, isTrue);
-    expect(calls.map((c) => c.method).toList(), [
+    expect(calls.map((call) => call.method), [
       'showCinemaRequestOptions',
-      'updateCinemaRequestOptions',
+      'updateCinemaRequestQuota',
     ]);
-    expect((calls.first.arguments as Map)['optionsLoading'], true);
+    final payload = calls.first.arguments as Map;
+    expect(payload.containsKey('serverLabel'), false);
+    expect(payload.containsKey('optionsLoading'), false);
 
     completed.complete({
       'requestId': 123,
       'allSeasons': false,
       'seasons': [5],
-      'serverId': 1,
-      'profileId': 11,
-      'rootFolderId': 101,
     });
-    expect((await picker)?['requestId'], 123);
+    expect((await picker)?['seasons'], [5]);
     await backend.dismissCinemaRequestOptions(requestId: 123);
-    expect(calls.last.method, 'dismissCinemaRequestOptions');
     expect(calls.last.arguments, {'requestId': 123});
   });
 
-  test('unsupported native picker update is reported to Dart', () async {
+  test('unsupported native quota update is optional', () async {
     expect(
-      await backend.updateCinemaRequestOptions({
+      await backend.updateCinemaRequestQuota({
         'requestId': 123,
-        'optionsLoading': false,
+        'quotaRemaining': 1,
       }),
       isFalse,
     );
