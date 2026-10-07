@@ -416,6 +416,101 @@ void main() {
     });
   });
 
+  for (final status in [
+    SeerrMediaStatus.unknown,
+    SeerrMediaStatus.deleted,
+  ]) {
+    test('movie POST timeout with stale status $status never offers retry', () {
+      fakeAsync((time) {
+        seerr.submission = Completer<SeerrRequest>();
+        seerr.info = SeerrMediaInfo(status: status);
+        enter();
+        time.flushMicrotasks();
+        expect(controller.canRequest, isTrue);
+
+        controller.request();
+        time.flushMicrotasks();
+        expect(seerr.submitted, [42]);
+        time.elapse(const Duration(seconds: 20));
+        time.flushMicrotasks();
+
+        expect(seerr.lookups, 2);
+        expect(controller.seerrState, CinemaSeerrState.hidden);
+        expect(controller.canRequest, isFalse);
+        expect(errors, hasLength(1));
+
+        controller.request();
+        time.flushMicrotasks();
+        expect(seerr.submitted, [42]);
+
+        // A late POST response cannot restore the stale Request action.
+        seerr.submission!.complete(
+          const SeerrRequest(id: 1, status: 2, type: 'movie'),
+        );
+        time.flushMicrotasks();
+        expect(controller.seerrState, CinemaSeerrState.hidden);
+      });
+    });
+  }
+
+  test('movie POST timeout still displays a confirmed pending status', () {
+    fakeAsync((time) {
+      seerr.submission = Completer<SeerrRequest>();
+      enter();
+      time.flushMicrotasks();
+      expect(controller.canRequest, isTrue);
+      controller.request();
+      time.flushMicrotasks();
+
+      seerr.info = const SeerrMediaInfo(status: SeerrMediaStatus.pending);
+      time.elapse(const Duration(seconds: 20));
+      time.flushMicrotasks();
+
+      expect(seerr.submitted, [42]);
+      expect(seerr.lookups, 2);
+      expect(controller.seerrState, CinemaSeerrState.pending);
+      expect(controller.canRequest, isFalse);
+      expect(errors, isEmpty);
+
+      seerr.submission!.complete(
+        const SeerrRequest(id: 1, status: 2, type: 'movie'),
+      );
+      time.flushMicrotasks();
+    });
+  });
+
+  test('timed-out movie POST accepts an active request despite unknown status', () {
+    fakeAsync((time) {
+      seerr.submission = Completer<SeerrRequest>();
+      enter();
+      time.flushMicrotasks();
+      controller.request();
+      time.flushMicrotasks();
+
+      seerr.info = const SeerrMediaInfo(
+        status: SeerrMediaStatus.unknown,
+        requests: [
+          SeerrRequest(
+            id: 8,
+            status: SeerrRequest.statusPending,
+            type: 'movie',
+          ),
+        ],
+      );
+      time.elapse(const Duration(seconds: 20));
+      time.flushMicrotasks();
+
+      expect(seerr.submitted, [42]);
+      expect(controller.seerrState, CinemaSeerrState.requested);
+      expect(controller.canRequest, isFalse);
+      expect(errors, isEmpty);
+      seerr.submission!.complete(
+        const SeerrRequest(id: 8, status: 1, type: 'movie'),
+      );
+      time.flushMicrotasks();
+    });
+  });
+
   test(
     'repeat presses and rapid double taps skip only once across a transition',
     () {
