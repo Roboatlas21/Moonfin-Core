@@ -1631,6 +1631,12 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     @objc private func handleMenuTap() {
+        // The parent Menu recognizer can win over the presented picker.
+        // Back belongs to the picker, not the Cinema rail beneath it.
+        if let picker = presentedViewController as? CinemaRequestPicker {
+            picker.handleRemoteNavigation("back")
+            return
+        }
         if cinemaActive {
             if cinemaVisible {
                 onCinemaAction?("hide", cinemaGeneration)

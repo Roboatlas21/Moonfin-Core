@@ -111,8 +111,12 @@ Future<T?> showFocusRestoringDialog<T>({
                   null) {
             return KeyEventResult.ignored;
           }
-          DialogBackSuppressor.markDismissed();
-          // Respect a dialog's PopScope while it is submitting a request.
+          // A PopScope can veto Back while a Cinema request is submitting.
+          // Don't leave a dismissal mark if the route remains on screen.
+          if (ModalRoute.of(dialogContext)?.popDisposition ==
+              RoutePopDisposition.pop) {
+            DialogBackSuppressor.markDismissed();
+          }
           unawaited(Navigator.of(dialogContext).maybePop());
           return KeyEventResult.handled;
         }
