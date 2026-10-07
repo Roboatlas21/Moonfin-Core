@@ -172,6 +172,7 @@ class AppleTvBackend implements PlayerBackend {
       case 'nextUpPlay':
       case 'nextUpCancel':
       case 'nextUpDismiss':
+      case 'cinemaAction':
       case 'skipSegment':
       case 'userSeeked':
       case 'searchSubtitles':
@@ -593,6 +594,19 @@ class AppleTvBackend implements PlayerBackend {
     final presented = await _invoke<bool>('showStillWatching');
     return presented ?? false;
   }
+
+  Future<void> setCinemaActions(Map<String, Object?> state) =>
+      _invoke<void>('setCinemaActions', state);
+
+  Future<List<int>?> showCinemaSeasons(Map<String, Object?> options) async {
+    final selected = await _invoke<List<dynamic>>('showCinemaSeasons', options);
+    return selected?.whereType<int>().toList();
+  }
+
+  Future<void> dismissCinemaSeasons() => _invoke<void>('dismissCinemaSeasons');
+
+  Future<void> showCinemaError(String message) =>
+      _invoke<void>('showCinemaError', {'message': message});
 
   Future<void> showSkipSegment(
     String label, {

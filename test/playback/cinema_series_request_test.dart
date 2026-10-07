@@ -12,6 +12,7 @@ class CinemaTvRepository extends Fake implements SeerrRepository {
   int permissions = SeerrPermission.requestTv;
   int lookups = 0;
   Completer<SeerrRequest>? submission;
+  Completer<SeerrTvDetails>? detailsResponse;
   SeerrTvDetails details = const SeerrTvDetails(id: 42, numberOfSeasons: 5);
   final submissions = <({int id, String type, List<int>? seasons, bool all})>[];
   @override
@@ -25,6 +26,7 @@ class CinemaTvRepository extends Fake implements SeerrRepository {
   Future<SeerrTvDetails> getTvDetails(int tmdbId) async {
     lookups++;
     expect(tmdbId, 42);
+    if (detailsResponse != null) return detailsResponse!.future;
     return details;
   }
 

@@ -11,6 +11,7 @@ import '../../widgets/media_badge.dart';
 import 'detail_admin_actions.dart';
 
 import 'package:flutter/foundation.dart';
+import 'package:moonfin/data/services/seerr/seerr_seasons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
@@ -8345,7 +8346,7 @@ class DetailActionButtonsState extends State<DetailActionButtons> {
           continue;
         }
         final prerollRaw = Map<String, dynamic>.from(raw)
-          ..['__moonfinIsPreroll'] = true;
+          ..['__moonfinIsPreroll'] = true
           ..['__moonfinCinemaFeatureType'] = item.type;
         prerolls.add(
           AggregatedItem(id: id, serverId: item.serverId, rawData: prerollRaw),

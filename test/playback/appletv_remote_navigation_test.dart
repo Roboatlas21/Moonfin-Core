@@ -29,6 +29,54 @@ void main() {
 
   tearDown(() => backend.dispose());
 
+  test('native season selection returns explicit seasons and preserves cancellation', () async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    Object? reply = [2, 5];
+    messenger.setMockMethodCallHandler(control, (call) async {
+      calls.add(call);
+      return call.method == 'showCinemaSeasons' ? reply : null;
+    });
+    expect(
+      await backend.showCinemaSeasons({
+        'seasons': [2, 5],
+      }),
+      [2, 5],
+    );
+    reply = null;
+    expect(
+      await backend.showCinemaSeasons({
+        'seasons': [2, 5],
+      }),
+      isNull,
+    );
+    await backend.dismissCinemaSeasons();
+    expect(calls.last.method, 'dismissCinemaSeasons');
+  });
+
+  test(
+    'native cinema input retains the generation that owned the press',
+    () async {
+      final action = backend.uiActionStream.first;
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      await messenger.handlePlatformMessage(
+        'moonfin/appletv_video_events',
+        const StandardMethodCodec().encodeSuccessEnvelope({
+          'event': 'cinemaAction',
+          'action': 'select',
+          'generation': 7,
+        }),
+        (_) {},
+      );
+      expect(await action, {
+        'event': 'cinemaAction',
+        'action': 'select',
+        'generation': 7,
+      });
+    },
+  );
+
   test('the session navigation bridge preserves each command', () async {
     for (final command in [
       'moveup',

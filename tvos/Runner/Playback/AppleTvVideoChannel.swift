@@ -22,6 +22,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
     private var lastThemeConfig: [String: Any]?
     private var lastPromptStrings: [String: Any]?
     private var lastTimeSlots: [String: Any]?
+    private var lastCinemaActions: [String: Any]?
     static var lastCommand = "-"
 
     init(messenger: FlutterBinaryMessenger, rootViewController: UIViewController) {
@@ -41,6 +42,15 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                 // the modal is actually on screen before it starts waiting.
                 Task { @MainActor in
                     result(self?.playerVC?.presentStillWatching() ?? false)
+                }
+                return
+            }
+            if call.method == "showCinemaSeasons" {
+                Task { @MainActor in
+                    guard let vc = self?.playerVC else { result(nil); return }
+                    vc.presentCinemaSeasons(call.arguments as? [String: Any] ?? [:]) {
+                        result($0)
+                    }
                 }
                 return
             }
@@ -105,6 +115,13 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             lastMetadata = args
             playerVC?.applyUiMetadata(args)
             player?.applyNowPlayingMetadata(args)
+        case "setCinemaActions":
+            lastCinemaActions = args
+            playerVC?.applyCinemaActions(args)
+        case "dismissCinemaSeasons":
+            playerVC?.dismissCinemaSeasons()
+        case "showCinemaError":
+            playerVC?.showCinemaError((args["message"] as? String) ?? "")
         case "showNextUp":
             playerVC?.showNextUpCard(
                 title: (args["title"] as? String) ?? "",
@@ -301,6 +318,9 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         vc.onNextUpDismiss = { [weak self] in
             self?.send(["event": "nextUpDismiss"])
         }
+        vc.onCinemaAction = { [weak self] action, generation in
+            self?.send(["event": "cinemaAction", "action": action, "generation": generation])
+        }
         vc.onSkipSegmentSelect = { [weak self] in
             self?.send(["event": "skipSegment"])
         }
@@ -337,6 +357,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         if let slots = lastTimeSlots {
             vc.applyTimeSlots(slots)
         }
+        if let cinema = lastCinemaActions { vc.applyCinemaActions(cinema) }
         playerVC = vc
         rootViewController?.present(vc, animated: false) { [weak self] in
             Task { @MainActor in
@@ -347,6 +368,8 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
     }
 
     private func dismiss() {
+        playerVC?.dismissCinemaSeasons()
+        lastCinemaActions = nil
         stopStateTimer()
         player?.shutdown()
         let vc = playerVC

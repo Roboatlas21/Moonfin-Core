@@ -66,6 +66,18 @@ Map<String, dynamic> cinemaItem({int? seconds = 90, int? tmdb = 42}) => {
 };
 
 void main() {
+  test('inactive cinema does not require an account or network services', () {
+    final controller = CinemaModeController(
+      seerr: () => throw StateError('unavailable'),
+      accountKey: () => throw StateError('unavailable'),
+      onSkip: () async {},
+      onError: (_) {},
+    );
+    controller.enter(item: null, resolveMedia: () => throw StateError('unused'));
+    expect(controller.visible, isFalse);
+    controller.dispose();
+  });
+
   test(
     'media statuses stay distinct; blocked and unknown codes are hidden',
     () {
@@ -81,7 +93,7 @@ void main() {
       };
       for (final entry in expected.entries) {
         expect(
-          cinemaSeerrState(mediaStatus: entry.key, canRequest: true),
+          cinemaSeerrState(mediaStatus: entry.key),
           entry.value,
         );
       }

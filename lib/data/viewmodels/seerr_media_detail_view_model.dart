@@ -664,7 +664,15 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
           ? request
           : request.timeout(const Duration(seconds: 20)));
       if (_requestAllowed?.call() == false) return;
-      await _reloadDetails('Request submitted');
+      if (_requestAllowed == null) {
+        await _reloadDetails('Request submitted');
+      } else {
+        // Cinema owns the bounded status refresh after its sheet closes.
+        _state = _state.copyWith(
+          isRequesting: false,
+          requestSuccess: 'Request submitted',
+        );
+      }
     } catch (e) {
       _setRequestFailure(e);
     }

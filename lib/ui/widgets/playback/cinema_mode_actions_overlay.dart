@@ -10,6 +10,23 @@ import '../adaptive/adaptive_glass.dart';
 import '../focus/focus_theme.dart';
 import 'skip_segment_overlay.dart';
 
+String? cinemaRequestLabel(
+  CinemaModeController controller,
+  AppLocalizations l10n,
+) => switch (controller.seerrState) {
+  CinemaSeerrState.hidden => null,
+  CinemaSeerrState.request =>
+    controller.isSeries
+        ? l10n.requestSeriesOrMovie(l10n.series)
+        : l10n.cinemaRequestMovie,
+  CinemaSeerrState.requesting => l10n.cinemaRequesting,
+  CinemaSeerrState.requested => l10n.seerrRequestedStatus,
+  CinemaSeerrState.pending => l10n.pendingStatus,
+  CinemaSeerrState.processing => l10n.processing,
+  CinemaSeerrState.partiallyAvailable => l10n.partiallyAvailable,
+  CinemaSeerrState.available => l10n.seerrAvailableStatus,
+};
+
 /// The same action rail on every device. Only placement and focus presentation
 /// differ; the controller owns requests, visibility, navigation and timing.
 class CinemaModeActionsOverlay extends StatelessWidget {
@@ -39,19 +56,7 @@ class CinemaModeActionsOverlay extends StatelessWidget {
     final isTv = PlatformDetection.isTV;
     final mobile = PlatformDetection.isMobile && !isTv;
     final skipLabel = l10n.skipSegment(l10n.trailer);
-    final status = switch (controller.seerrState) {
-      CinemaSeerrState.hidden => null,
-      CinemaSeerrState.request =>
-        controller.isSeries
-            ? l10n.requestSeriesOrMovie(l10n.series)
-            : l10n.cinemaRequestMovie,
-      CinemaSeerrState.requesting => l10n.cinemaRequesting,
-      CinemaSeerrState.requested => l10n.seerrRequestedStatus,
-      CinemaSeerrState.pending => l10n.pendingStatus,
-      CinemaSeerrState.processing => l10n.processing,
-      CinemaSeerrState.partiallyAvailable => l10n.partiallyAvailable,
-      CinemaSeerrState.available => l10n.seerrAvailableStatus,
-    };
+    final status = cinemaRequestLabel(controller, l10n);
     final right = 24.0 + (mobile ? safe.right : 0);
     return Positioned(
       right: right,

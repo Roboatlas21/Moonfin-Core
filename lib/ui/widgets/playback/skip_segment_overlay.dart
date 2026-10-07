@@ -195,7 +195,7 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             if (showDismissButton) ...[
-              SkipDismissButton(
+              _SkipDismissButton(
                 onPressed: widget.onDismiss,
                 label: l10n.dismiss,
               ),
@@ -374,9 +374,8 @@ class _CountdownRing extends StatelessWidget {
 
 /// The close chip above the skip capsule. The padding widens the tap target
 /// without making the chip itself any bigger.
-class SkipDismissButton extends StatelessWidget {
-  const SkipDismissButton({
-    super.key,
+class _SkipDismissButton extends StatelessWidget {
+  const _SkipDismissButton({
     required this.onPressed,
     required this.label,
   });

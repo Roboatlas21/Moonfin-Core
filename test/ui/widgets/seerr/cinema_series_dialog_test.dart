@@ -120,6 +120,20 @@ void main() {
     },
   );
 
+  testWidgets(
+    'successful submission closes without waiting for another details read',
+    (tester) async {
+      repo.detailsResponse = Completer<SeerrTvDetails>();
+      await open(tester, season: 5);
+      await tester.tap(find.text('Submit Request'));
+      await tester.pumpAndSettle();
+      expect(repo.submissions, hasLength(1));
+      expect(repo.lookups, 0);
+      expect(closed, isTrue);
+      expect(find.byType(SeerrRequestDialog), findsNothing);
+    },
+  );
+
   testWidgets('stale dialog cannot submit to a newly active account', (
     tester,
   ) async {

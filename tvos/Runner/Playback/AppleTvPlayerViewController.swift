@@ -54,6 +54,7 @@ private func makeClockFormatter(use24Hour: Bool) -> DateFormatter {
 
 final class AppleTvPlayerViewController: UIViewController {
     private let player: AetherPlayerWrapper
+    var onCinemaAction: ((String, Int) -> Void)?
     var onExit: (() -> Void)?
     var onNext: (() -> Void)?
     var onPrevious: (() -> Void)?
@@ -141,6 +142,14 @@ final class AppleTvPlayerViewController: UIViewController {
     private var nextUpCountdownStyle = "both"
 
     private var pauseMeta: (overview: String, imageUrl: String)?
+
+    private var cinemaActive = false
+    private var cinemaVisible = false
+    private var cinemaGeneration = 0
+    private let cinemaRequest = UILabel()
+    private let cinemaRequestPanel = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+    private var skipBottomConstraint: NSLayoutConstraint?
+    private weak var cinemaPicker: CinemaSeasonPicker?
 
     private var skipSegmentActive = false
     private let skipSegmentButton = UIView()
@@ -558,6 +567,7 @@ final class AppleTvPlayerViewController: UIViewController {
         setupPauseOverlay()
         setupLiveOverlays()
         setupSkipSegment()
+        setupCinemaRequest()
         setupLoadingOverlay()
     }
 
@@ -658,11 +668,12 @@ final class AppleTvPlayerViewController: UIViewController {
         skipSegmentRow.setCustomSpacing(16, after: skipSegmentLabel)
         skipSegmentRow.setCustomSpacing(26, after: skipSegmentTimerLabel)
 
+        let bottom = skipSegmentButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -240)
+        skipBottomConstraint = bottom
         NSLayoutConstraint.activate([
             skipSegmentButton.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor, constant: -48),
-            skipSegmentButton.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor, constant: -240),
+            bottom,
             skipSegmentGlass.topAnchor.constraint(equalTo: skipSegmentButton.topAnchor),
             skipSegmentGlass.bottomAnchor.constraint(equalTo: skipSegmentButton.bottomAnchor),
             skipSegmentGlass.leadingAnchor.constraint(equalTo: skipSegmentButton.leadingAnchor),
@@ -686,6 +697,83 @@ final class AppleTvPlayerViewController: UIViewController {
             skipSegmentRingIcon.centerYAnchor.constraint(
                 equalTo: skipSegmentRingContainer.centerYAnchor),
         ])
+    }
+
+    private func setupCinemaRequest() {
+        cinemaRequestPanel.translatesAutoresizingMaskIntoConstraints = false
+        cinemaRequestPanel.layer.cornerRadius = 56
+        cinemaRequestPanel.layer.borderWidth = 4
+        cinemaRequestPanel.clipsToBounds = true
+        cinemaRequestPanel.isHidden = true
+        view.addSubview(cinemaRequestPanel)
+        cinemaRequest.translatesAutoresizingMaskIntoConstraints = false
+        cinemaRequest.font = .systemFont(ofSize: 30, weight: .semibold)
+        cinemaRequest.textColor = .white
+        cinemaRequest.lineBreakMode = .byTruncatingTail
+        cinemaRequestPanel.contentView.addSubview(cinemaRequest)
+        NSLayoutConstraint.activate([
+            cinemaRequestPanel.trailingAnchor.constraint(equalTo: skipSegmentButton.leadingAnchor, constant: -24),
+            cinemaRequestPanel.bottomAnchor.constraint(equalTo: skipSegmentButton.bottomAnchor),
+            cinemaRequestPanel.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 48),
+            cinemaRequest.leadingAnchor.constraint(equalTo: cinemaRequestPanel.contentView.leadingAnchor, constant: 40),
+            cinemaRequest.trailingAnchor.constraint(equalTo: cinemaRequestPanel.contentView.trailingAnchor, constant: -40),
+            cinemaRequest.topAnchor.constraint(equalTo: cinemaRequestPanel.contentView.topAnchor, constant: 32),
+            cinemaRequest.bottomAnchor.constraint(equalTo: cinemaRequestPanel.contentView.bottomAnchor, constant: -32),
+        ])
+    }
+
+    func applyCinemaActions(_ args: [String: Any]) {
+        loadViewIfNeeded()
+        let wasActive = cinemaActive
+        cinemaActive = args["active"] as? Bool ?? false
+        cinemaVisible = cinemaActive && (args["visible"] as? Bool ?? false)
+        cinemaGeneration = (args["generation"] as? NSNumber)?.intValue ?? 0
+        skipBottomConstraint?.constant = cinemaActive ? -48 : -240
+        guard cinemaActive else {
+            cinemaRequestPanel.isHidden = true
+            if wasActive { hideSkipSegment() }
+            skipSegmentButton.layer.borderColor = themeAccent.cgColor
+            skipSegmentRing.strokeColor = themeAccent.cgColor
+            return
+        }
+        hideOsd()
+        let requestFocused = args["requestFocused"] as? Bool ?? false
+        let requestEnabled = args["canRequest"] as? Bool ?? false
+        let label = args["requestLabel"] as? String
+        cinemaRequest.text = label
+        cinemaRequest.alpha = requestEnabled ? 1 : 0.65
+        cinemaRequestPanel.isHidden = !cinemaVisible || label == nil
+        cinemaRequestPanel.layer.borderColor = (requestFocused ? themeAccent : UIColor.white).cgColor
+        skipSegmentButton.layer.borderColor = (requestFocused ? UIColor.white : themeAccent).cgColor
+        skipSegmentRing.strokeColor = UIColor.white.cgColor
+        if cinemaVisible {
+            showSkipSegment(
+                label: args["skipLabel"] as? String ?? "Skip",
+                countdownStyle: args["countdownStyle"] as? String ?? "none",
+                segmentStartMs: 0,
+                segmentEndMs: (args["durationMs"] as? NSNumber)?.intValue ?? 0)
+        } else {
+            hideSkipSegment()
+        }
+    }
+
+    func presentCinemaSeasons(_ args: [String: Any], completion: @escaping ([Int]?) -> Void) {
+        guard !isBeingDismissed, presentedViewController == nil, viewIfLoaded?.window != nil else {
+            completion(nil)
+            return
+        }
+        let picker = CinemaSeasonPicker(options: args, completion: completion)
+        cinemaPicker = picker
+        present(picker, animated: true)
+    }
+
+    func dismissCinemaSeasons() { cinemaPicker?.finish(nil) }
+
+    func showCinemaError(_ message: String) {
+        guard presentedViewController == nil else { return }
+        let alert = makePlayerMenu(title: nil, message: message, preferredStyle: .alert)
+        alert.addAction(makePlayerAction(title: "OK", style: .cancel))
+        present(alert, animated: true)
     }
 
     private func setupLiveOverlays() {
@@ -1347,7 +1435,8 @@ final class AppleTvPlayerViewController: UIViewController {
         skipSegmentStartMs = segmentStartMs
         skipSegmentEndMs = segmentEndMs
         updateSkipSegmentCountdown()
-        guard skipSegmentButton.isHidden else { return }
+        guard skipSegmentButton.isHidden || skipSegmentButton.alpha < 1 else { return }
+        skipSegmentButton.layer.removeAllAnimations()
         skipSegmentButton.alpha = 0
         skipSegmentButton.isHidden = false
         UIView.animate(withDuration: 0.2) { self.skipSegmentButton.alpha = 1 }
@@ -1397,7 +1486,7 @@ final class AppleTvPlayerViewController: UIViewController {
         UIView.animate(withDuration: 0.15) {
             self.skipSegmentButton.alpha = 0
         } completion: { _ in
-            self.skipSegmentButton.isHidden = true
+            self.skipSegmentButton.isHidden = !self.skipSegmentActive
         }
     }
 
@@ -1530,6 +1619,14 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     @objc private func handleMenuTap() {
+        if cinemaActive {
+            if cinemaVisible {
+                onCinemaAction?("hide", cinemaGeneration)
+            } else {
+                dismiss(animated: true)
+            }
+            return
+        }
         if nextUpVisible {
             hideNextUpCard()
             onNextUpDismiss?()
@@ -1562,6 +1659,11 @@ final class AppleTvPlayerViewController: UIViewController {
 
     @objc private func handleSwipe(_ recognizer: UISwipeGestureRecognizer) {
         guard presentedViewController == nil, !nextUpVisible else { return }
+        if cinemaActive {
+            if recognizer.direction == .left { onCinemaAction?("left", cinemaGeneration) }
+            if recognizer.direction == .right { onCinemaAction?("right", cinemaGeneration) }
+            return
+        }
         switch recognizer.direction {
         case .up:
             if isLive {
@@ -1596,7 +1698,7 @@ final class AppleTvPlayerViewController: UIViewController {
         default:
             break
         }
-        guard presentedViewController == nil, !nextUpVisible, !isLive else { return }
+        guard presentedViewController == nil, !nextUpVisible, !isLive, !cinemaActive else { return }
         switch recognizer.state {
         case .began:
             panScrubEngaged = false
@@ -1667,6 +1769,16 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     private func handleNavigationPress(_ type: UIPress.PressType) -> Bool {
+        if cinemaActive {
+            switch type {
+            case .select: onCinemaAction?("select", cinemaGeneration)
+            case .leftArrow: onCinemaAction?("left", cinemaGeneration)
+            case .rightArrow: onCinemaAction?("right", cinemaGeneration)
+            case .playPause: togglePlayPause()
+            default: break
+            }
+            return true
+        }
         // While the Next Up card is up it owns the remote. Every press is
         // consumed here so nothing falls through to scrubbing, OSD handling,
         // or the default menu behavior underneath the card.
@@ -2932,7 +3044,7 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     private func updatePauseOverlay() {
-        let shouldShow = isPaused() && pauseMeta != nil
+        let shouldShow = !cinemaActive && isPaused() && pauseMeta != nil
         let visible = pauseOverlay.alpha > 0.5
         if shouldShow && !visible, let meta = pauseMeta {
             pauseTitleLabel.text = hasLogo ? headerPrimary : (headerPrimary.isEmpty ? headerSecondary : headerPrimary)
@@ -2948,6 +3060,7 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     private func showOsd() {
+        guard !cinemaActive else { return }
         lastShowAt = CACurrentMediaTime()
         osdDismissed = false
         setSubtitlesRaised(true)
@@ -4031,6 +4144,135 @@ private final class RemotePlayerMenu: UITableViewController, RemotePlayerNavigab
             handleRemoteNavigation("back")
             return
         }
+        super.pressesBegan(presses, with: event)
+    }
+}
+
+/// Native season selection; identity, permission, submission, and expiry stay in Dart.
+private final class CinemaSeasonPicker: UITableViewController, RemotePlayerNavigable {
+    private let seasons: [Int]
+    private let labels: [String]
+    private let allLabel: String
+    private let submitLabel: String
+    private let cancelLabel: String
+    private let completion: ([Int]?) -> Void
+    private var selected: Set<Int>
+    private var focusedRow = 0
+    private var answered = false
+
+    init(options: [String: Any], completion: @escaping ([Int]?) -> Void) {
+        let availableSeasons = options["seasons"] as? [Int] ?? []
+        seasons = availableSeasons
+        labels = options["labels"] as? [String] ?? []
+        selected = Set(options["selected"] as? [Int] ?? []).intersection(availableSeasons)
+        allLabel = options["allLabel"] as? String ?? ""
+        submitLabel = options["submitLabel"] as? String ?? ""
+        cancelLabel = options["cancelLabel"] as? String ?? ""
+        self.completion = completion
+        super.init(style: .grouped)
+        title = options["title"] as? String
+        modalPresentationStyle = .overFullScreen
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        tableView.backgroundColor = UIColor(white: 0.08, alpha: 0.98)
+        tableView.contentInset = UIEdgeInsets(top: 60, left: 240, bottom: 60, right: 240)
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "season")
+        tableView.remembersLastFocusedIndexPath = true
+    }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { title }
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { seasons.count + 3 }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "season", for: indexPath)
+        let row = indexPath.row
+        var content = cell.defaultContentConfiguration()
+        var checked = false
+        if row == 0 {
+            content.text = allLabel
+            checked = !seasons.isEmpty && selected.count == seasons.count
+        } else if row <= seasons.count {
+            content.text = labels.indices.contains(row - 1) ? labels[row - 1] : String(seasons[row - 1])
+            checked = selected.contains(seasons[row - 1])
+        } else {
+            content.text = row == seasons.count + 1 ? submitLabel : cancelLabel
+        }
+        content.textProperties.color = row == seasons.count + 1 && selected.isEmpty ? .gray : .white
+        cell.contentConfiguration = content
+        cell.accessoryType = checked ? .checkmark : .none
+        return cell
+    }
+
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { activate(indexPath.row) }
+
+    override func tableView(_ tableView: UITableView, didUpdateFocusIn context: UITableViewFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
+        if let next = context.nextFocusedIndexPath { focusedRow = next.row }
+    }
+
+    override func indexPathForPreferredFocusedView(in tableView: UITableView) -> IndexPath? {
+        IndexPath(row: focusedRow, section: 0)
+    }
+
+    private func activate(_ row: Int) {
+        guard !answered else { return }
+        if row == seasons.count + 2 { finish(nil); return }
+        if row == seasons.count + 1 {
+            if !selected.isEmpty { finish(selected.sorted()) }
+            return
+        }
+        if row == 0 {
+            selected = selected.count == seasons.count ? [] : Set(seasons)
+        } else if seasons.indices.contains(row - 1) {
+            let number = seasons[row - 1]
+            if selected.contains(number) { selected.remove(number) } else { selected.insert(number) }
+        }
+        tableView.reloadData()
+    }
+
+    func finish(_ seasons: [Int]?) {
+        guard !answered else { return }
+        answered = true
+        // Finish dismissal before Dart can display a submission failure.
+        if isBeingDismissed || viewIfLoaded?.window == nil {
+            completion(seasons)
+        } else {
+            dismiss(animated: true) { self.completion(seasons) }
+        }
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        if !answered {
+            answered = true
+            completion(nil)
+        }
+    }
+
+    func handleRemoteNavigation(_ command: String) {
+        guard !answered else { return }
+        if command == "back" { finish(nil); return }
+        if command == "select" { activate(focusedRow); return }
+        switch command {
+        case "moveup", "moveleft": focusedRow = max(0, focusedRow - 1)
+        case "movedown", "moveright": focusedRow = min(seasons.count + 2, focusedRow + 1)
+        default: return
+        }
+        let path = IndexPath(row: focusedRow, section: 0)
+        tableView.scrollToRow(at: path, at: .middle, animated: false)
+        tableView.layoutIfNeeded()
+        if let cell = tableView.cellForRow(at: path) {
+            let system = UIFocusSystem.focusSystem(for: view)
+            system?.requestFocusUpdate(to: cell)
+            system?.updateFocusIfNeeded()
+        }
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        if presses.contains(where: { $0.type == .menu }) { finish(nil); return }
         super.pressesBegan(presses, with: event)
     }
 }

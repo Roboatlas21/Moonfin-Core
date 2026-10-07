@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:moonfin/data/services/seerr/seerr_seasons.dart';
 import 'package:server_core/server_core.dart';
 
 import '../data/repositories/seerr_repository.dart';
@@ -65,13 +66,10 @@ Set<int> cinemaRequestableSeasons(SeerrTvDetails details) {
     canManageRequests: false,
     currentUserId: null,
   );
-  final reported = details.seasons
-      .where((s) => s.seasonNumber > 0)
-      .map((s) => s.seasonNumber)
-      .toSet();
-  final seasons = reported.isNotEmpty
-      ? reported
-      : {for (var i = 1; i <= (details.numberOfSeasons ?? 0); i++) i};
+  final seasons = seerrSeasonNumbersOf(
+    details.seasons,
+    details.numberOfSeasons ?? 0,
+  ).toSet();
   return seasons.difference(quality.unavailableOrRequestedSeasons);
 }
 
@@ -170,8 +168,8 @@ class CinemaModeController extends ChangeNotifier {
     final ticket = ++_generation;
     _hideTimer?.cancel();
     _hideTimer = null;
-    _account = _accountKey();
     _active = item != null;
+    _account = _active ? _accountKey() : null;
     _wanted = _active;
     _playing = _skipping = _sending = false;
     _metadataDuration = _playerDuration = null;
@@ -273,7 +271,10 @@ class CinemaModeController extends ChangeNotifier {
 
   void reveal() {
     if (!eligible || _skipping || _account != _accountKey()) return;
-    if (visible) return;
+    if (visible) {
+      _restartTimer();
+      return;
+    }
     _wanted = true;
     focusedAction = CinemaAction.skip;
     _restartTimer();

@@ -1,3 +1,5 @@
+import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +9,9 @@ import 'package:playback_core/playback_core.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:moonfin/auth/repositories/session_repository.dart';
+import 'package:moonfin/ui/widgets/playback/cinema_mode_actions_overlay.dart';
+import 'package:moonfin/util/platform_detection.dart';
 import 'package:moonfin/data/services/cast/cast_service.dart';
 import 'package:moonfin/data/services/cast/cast_target.dart';
 import 'package:moonfin/data/services/cast/native_airplay_channel.dart';
@@ -23,7 +28,46 @@ import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
 
 class _Client extends Fake implements MediaServerClient {
   @override
+  String get baseUrl => 'https://server';
+  @override
+  String? get userId => 'user';
+  @override
+  String? get accessToken => 'token';
+  @override
+  Future<CinemaMedia?> resolveCinemaMedia(
+    String id, {
+    CinemaMediaType? expectedMediaType,
+  }) async => null;
+  @override
   ServerType get serverType => ServerType.jellyfin;
+}
+
+class _CinemaAccount extends Fake implements SessionRepository {
+  @override
+  String? get activeServerId => 'server';
+  @override
+  String? get activeUserId => 'user';
+}
+
+class _Manager extends PlaybackManager {
+  int advances = 0;
+  @override
+  PlaybackBringupState get bringupState {
+    final item = queueService.currentItem;
+    return item is Map
+        ? PlaybackBringupState(
+            phase: PlaybackBringupPhase.ready,
+            sessionToken: queueService.currentIndex + 1,
+            itemId: item['Id'] as String,
+          )
+        : super.bringupState;
+  }
+
+  @override
+  Future<void> nextInQueue() async {
+    advances++;
+    queueService.next();
+  }
 }
 
 class _Factory extends Fake implements MediaServerClientFactory {
@@ -51,14 +95,14 @@ class _Screensaver extends Fake implements ScreensaverController {
 class _Lifecycle extends Fake implements PlaybackLifecycleHandler {}
 
 void main() {
-  late PlaybackManager manager;
+  late _Manager manager;
   late PipService pip;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     final store = PreferenceStore();
     await store.init();
-    manager = PlaybackManager();
+    manager = _Manager();
     GetIt.instance.registerSingleton<PlaybackManager>(manager);
     GetIt.instance.registerSingleton<UserPreferences>(UserPreferences(store));
     GetIt.instance.registerSingleton<MediaServerClient>(_Client());
@@ -80,6 +124,70 @@ void main() {
     manager.dispose();
     pip.dispose();
     await GetIt.instance.reset();
+  });
+
+  Future<void> openCinema(WidgetTester tester) async {
+    GetIt.instance.registerSingleton<SessionRepository>(_CinemaAccount());
+    manager.queueService.setQueue([
+      for (var i = 0; i < 2; i++)
+        {
+          'Id': 'intro-$i',
+          'Type': 'Video',
+          '__moonfinIsPreroll': true,
+          'RunTimeTicks': 900000000,
+        },
+      {'Id': 'movie', 'Type': 'Movie'},
+    ]);
+    manager.state.setPlaying(true);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const VideoPlayerScreen(),
+      ),
+    );
+    await tester.pump();
+  }
+
+  testWidgets('desktop hover restores cinema actions after auto hide', (
+    tester,
+  ) async {
+    await openCinema(tester);
+    expect(find.byType(CinemaModeActionsOverlay), findsOneWidget);
+    await tester.pump(const Duration(seconds: 11));
+    expect(find.byType(CinemaModeActionsOverlay), findsNothing);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: const Offset(20, 20));
+    await mouse.moveTo(const Offset(80, 80));
+    await tester.pump();
+    expect(find.byType(CinemaModeActionsOverlay), findsOneWidget);
+    expect(manager.advances, 0);
+    await mouse.removePointer();
+    await tester.pumpWidget(const SizedBox());
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+  testWidgets('a held Select skips one trailer across the queue transition', (
+    tester,
+  ) async {
+    PlatformDetection.setTvMode(true);
+    addTearDown(() => PlatformDetection.setTvMode(false));
+    await openCinema(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.select);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    expect(manager.advances, 1);
+    expect(manager.queueService.currentIndex, 1);
+    expect(find.byType(CinemaModeActionsOverlay), findsOneWidget);
+    await tester.pump(const Duration(seconds: 11));
+    expect(
+      find.byType(CinemaModeActionsOverlay),
+      findsNothing,
+      reason: 'a source already ready at queue notification still arms auto hide',
+    );
+    await tester.pumpWidget(const SizedBox());
   });
 
   // Issue #1688: a resume that takes longer than the hide delay to start
