@@ -40,6 +40,54 @@ void main() {
     });
   });
 
+  test('Skip closes an unsubmitted picker without blocking playback', () {
+    var dismissals = 0;
+    final session = CinemaSeriesPickerSession(
+      accountKey: () => 'account',
+      isMounted: () => true,
+    )..dismissDialog = () => dismissals++;
+    expect(session.closeForSkip(), isTrue);
+    expect(session.isCurrent, isFalse);
+    expect(dismissals, 1);
+    session.close();
+    expect(dismissals, 1);
+  });
+
+  test('Skip preserves a submitting request; player exit still closes it', () {
+    fakeAsync((time) {
+      var dismissals = 0;
+      final session = CinemaSeriesPickerSession(
+        accountKey: () => 'account',
+        isMounted: () => true,
+      )..dismissDialog = () => dismissals++;
+      session.beginGrace();
+      session.markSubmitting();
+      expect(session.closeForSkip(), isFalse);
+      session.beginGrace();
+      time.elapse(const Duration(seconds: 30));
+      expect(session.isCurrent, isTrue);
+      expect(dismissals, 0);
+
+      session.close(); // Player exit or explicit cancellation still wins.
+      expect(session.isCurrent, isFalse);
+      expect(dismissals, 1);
+    });
+  });
+
+  test('Skip does not preserve a submission after the account changes', () {
+    var account = 'first';
+    var dismissals = 0;
+    final session = CinemaSeriesPickerSession(
+      accountKey: () => account,
+      isMounted: () => true,
+    )..dismissDialog = () => dismissals++;
+    session.markSubmitting();
+    account = 'second';
+    expect(session.closeForSkip(), isTrue);
+    expect(session.isCurrent, isFalse);
+    expect(dismissals, 1);
+  });
+
   test('account changes and disposal prevent submission', () {
     var account = 'a';
     final session = CinemaSeriesPickerSession(
