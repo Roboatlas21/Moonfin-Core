@@ -143,6 +143,12 @@ void main() {
             .where((c) => c.selected),
         isEmpty,
       );
+      expect(
+        tester.widget<SeerrDialogButton>(
+          find.widgetWithText(SeerrDialogButton, 'Submit Request'),
+        ).onPressed,
+        isNull,
+      );
       await tester.tap(find.text('Submit Request'));
       await tester.pumpAndSettle();
       expect(repo.submissions, isEmpty);
@@ -161,6 +167,12 @@ void main() {
           .widgetList<SeerrChoiceChip>(find.byType(SeerrChoiceChip))
           .where((c) => c.selected);
       expect(selected.length, 1);
+      expect(
+        tester.widget<SeerrDialogButton>(
+          find.widgetWithText(SeerrDialogButton, 'Submit Request'),
+        ).onPressed,
+        isNotNull,
+      );
       await tester.tap(find.text('Submit Request'));
       await tester.pumpAndSettle();
       expect(repo.submissions.single.id, 42);

@@ -91,6 +91,87 @@ void main() {
     expect(options.isValid, isTrue);
   });
 
+  test('saved profile and root ids cannot migrate to a fallback server', () {
+    // Profile/root IDs may match on two Sonarr instances but have different
+    // meanings. The old server is gone; do not trust its child preferences.
+    final options = SeerrRequestOptions(isTv: true)
+      ..applyDefaults(
+        const SeerrRequestDefaults(
+          serverId: '999',
+          profileId: '12',
+          rootFolderId: '102',
+        ),
+      )
+      ..setServers([
+        server(
+          id: 1,
+          name: 'Replacement',
+          isDefault: true,
+          activeProfileId: 11,
+          activeDirectory: '/tv',
+          profiles: const [p1, p2],
+          roots: const [r1, r2],
+        ),
+      ]);
+
+    expect(options.effectiveServerId, 1);
+    expect(options.effectiveProfileId, 11);
+    expect(options.effectiveRootFolderId, 101);
+    expect(options.submission?.rootFolder, '/tv');
+  });
+
+  test('server removal clears in-memory selections even when IDs collide', () {
+    final options = SeerrRequestOptions(isTv: true)
+      ..setServers([
+        server(
+          id: 1,
+          name: 'Old',
+          activeProfileId: 11,
+          activeDirectory: '/tv',
+          profiles: const [p1, p2],
+          roots: const [r1, r2],
+        ),
+      ]);
+    expect(options.selectProfile(12), isTrue);
+    expect(options.selectRootFolder(102), isTrue);
+
+    options.setServers([
+      server(
+        id: 2,
+        name: 'Replacement',
+        activeProfileId: 11,
+        activeDirectory: '/tv',
+        profiles: const [p1, p2],
+        roots: const [r1, r2],
+      ),
+    ]);
+    expect(options.effectiveServerId, 2);
+    expect(options.effectiveProfileId, 11);
+    expect(options.effectiveRootFolderId, 101);
+  });
+
+  test('defaults without a saved server use the replacement server policy', () {
+    final options = SeerrRequestOptions(isTv: true)
+      ..applyDefaults(
+        const SeerrRequestDefaults(
+          profileId: '12',
+          rootFolderId: '102',
+        ),
+      )
+      ..setServers([
+        server(
+          id: 1,
+          name: 'Default',
+          activeProfileId: 11,
+          activeDirectory: '/tv',
+          profiles: const [p1, p2],
+          roots: const [r1, r2],
+        ),
+      ]);
+    expect(options.effectiveProfileId, 11);
+    expect(options.effectiveRootFolderId, 101);
+  });
+
   test('changing servers resets profile and root folder to that server', () {
     final options = SeerrRequestOptions(isTv: true)
       ..setServers([
