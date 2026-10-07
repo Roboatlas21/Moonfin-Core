@@ -4221,7 +4221,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         super.viewDidAppear(animated)
         guard dismissAfterPresentation else { return }
         dismissAfterPresentation = false
-        dismiss(animated: false) { [weak self] in self?.onDismissed?() }
+        dismiss(animated: false, completion: onDismissed)
     }
 
     private var submitRow: Int { seasons.count + 1 }
@@ -4343,13 +4343,15 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     // Otherwise a deferred request error can be handed back to this picker
     // while it is still presented and never get another dismissal callback.
     private func notifyAfterDismissal() {
+        // Capture the callback, not the picker, until UIKit finishes dismissal.
+        let didDismiss = onDismissed
         if let coordinator = transitionCoordinator {
-            let registered = coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-                self?.onDismissed?()
+            let registered = coordinator.animate(alongsideTransition: nil) { _ in
+                didDismiss?()
             }
             if registered { return }
         }
-        DispatchQueue.main.async { [weak self] in self?.onDismissed?() }
+        DispatchQueue.main.async { didDismiss?() }
     }
 
     func finish(_ value: [String: Any]?) {
@@ -4364,7 +4366,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
             // Finish presenting before dismissing, or UIKit may ignore it.
             dismissAfterPresentation = true
         } else {
-            dismiss(animated: false) { [weak self] in self?.onDismissed?() }
+            dismiss(animated: false, completion: onDismissed)
         }
     }
 
