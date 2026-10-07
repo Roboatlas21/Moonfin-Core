@@ -8,6 +8,7 @@ import '../repositories/seerr_repository.dart';
 import '../services/seerr/seerr_api_models.dart';
 import '../services/seerr/seerr_download_progress.dart';
 import '../services/seerr/seerr_error.dart';
+import '../services/seerr/seerr_seasons.dart';
 
 /// Reads one flag out of Seerr's public settings.
 ///
@@ -645,6 +646,19 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
       return;
     }
 
+    // Only Cinema TV needs a snapshot to reconcile an uncertain timeout.
+    // Never infer success from a title-wide status; check the exact seasons.
+    final expectedSeasons = _requestAllowed != null && _state.isTv
+        ? (allSeasons
+              ? seerrSeasonNumbersOf(
+                  _state.tv?.seasons ?? const <SeerrSeason>[],
+                  _state.numberOfSeasons ?? 0,
+                ).toSet().difference(
+                  _state.quality(is4k: is4k).unavailableOrRequestedSeasons,
+                )
+              : (seasons ?? const <int>[]).toSet())
+        : <int>{};
+
     _state = _state.copyWith(isRequesting: true, requestError: null, requestSuccess: null);
     notifyListeners();
 
@@ -673,10 +687,60 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
           requestSuccess: 'Request submitted',
         );
       }
+    } on TimeoutException catch (error) {
+      if (!await _confirmTimedOutCinemaTvRequest(
+        _state.tmdbId,
+        expectedSeasons,
+        is4k: is4k,
+      )) {
+        _setRequestFailure(error);
+      }
     } catch (e) {
       _setRequestFailure(e);
     }
     notifyListeners();
+  }
+
+  /// A timed-out POST might already have reached Seerr. Check once; never
+  /// send another POST or declare success from an unrelated series status.
+  Future<bool> _confirmTimedOutCinemaTvRequest(
+    int tmdbId,
+    Set<int> expectedSeasons, {
+    required bool is4k,
+  }) async {
+    if (_requestAllowed == null ||
+        !_state.isTv ||
+        expectedSeasons.isEmpty ||
+        _isDisposed ||
+        _requestAllowed.call() == false) {
+      return false;
+    }
+
+    try {
+      final details = await _repo.getTvDetails(tmdbId)
+          .timeout(const Duration(seconds: 10));
+      if (_isDisposed || _requestAllowed.call() == false ||
+          details.id != tmdbId) {
+        return false;
+      }
+      final status = SeerrQualityStatus.of(
+        is4k: is4k,
+        mediaInfo: details.mediaInfo,
+        canManageRequests: false,
+        currentUserId: _state.currentUser?.id,
+      );
+      if (!status.unavailableOrRequestedSeasons.containsAll(expectedSeasons)) {
+        return false;
+      }
+      _state = _state.copyWith(
+        tv: details,
+        isRequesting: false,
+        requestSuccess: 'Request submitted',
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> loadQuota() async {

@@ -23,6 +23,7 @@ class SeerrAdvancedRequestController extends ChangeNotifier {
 
   final SeerrRequestOptions _options;
   bool loading = false;
+  bool _disposed = false;
 
   bool get isTv => _options.isTv;
   bool get isAnime => _options.isAnime;
@@ -39,17 +40,25 @@ class SeerrAdvancedRequestController extends ChangeNotifier {
   String? get effectiveRootFolderPath => _options.effectiveRootFolderPath;
 
   Future<void> load() async {
+    if (_disposed) return;
     loading = true;
     notifyListeners();
     try {
       final repo = await GetIt.instance.getAsync<SeerrRepository>();
+      if (_disposed) return;
       await _options.load(repo);
     } catch (_) {
       // Advanced overrides are optional; the request can use Seerr defaults.
     } finally {
       loading = false;
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   void applySavedPreferences({
@@ -59,6 +68,7 @@ class SeerrAdvancedRequestController extends ChangeNotifier {
     bool resetSelection = false,
     bool? is4k,
   }) {
+    if (_disposed) return;
     _options.applyDefaults(
       SeerrRequestDefaults(
         serverId: serverId,
@@ -72,15 +82,15 @@ class SeerrAdvancedRequestController extends ChangeNotifier {
   }
 
   void onServerChanged(int? value) {
-    if (_options.selectServer(value)) notifyListeners();
+    if (!_disposed && _options.selectServer(value)) notifyListeners();
   }
 
   void onProfileChanged(int? value) {
-    if (_options.selectProfile(value)) notifyListeners();
+    if (!_disposed && _options.selectProfile(value)) notifyListeners();
   }
 
   void onRootFolderChanged(int? value) {
-    if (_options.selectRootFolder(value)) notifyListeners();
+    if (!_disposed && _options.selectRootFolder(value)) notifyListeners();
   }
 }
 

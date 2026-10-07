@@ -178,11 +178,20 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     widget.numberOfSeasons,
   );
 
+  Set<int> get _requestableSeasons => _seasonNumbers.toSet().difference(
+    _quality.unavailableOrRequestedSeasons,
+  );
+
+  bool get _hasSeasonSelection =>
+      !widget.isTv ||
+      (_allSeasons
+          ? _requestableSeasons.isNotEmpty
+          : _selectedSeasons.isNotEmpty &&
+              _requestableSeasons.containsAll(_selectedSeasons));
+
   int get _seasonsNeeded => seerrTvQuotaNeeded(
     allSeasons: _allSeasons,
-    requestableSeasons: _seasonNumbers.toSet().difference(
-      _quality.unavailableOrRequestedSeasons,
-    ),
+    requestableSeasons: _requestableSeasons,
     selectedSeasons: _selectedSeasons,
   );
 
@@ -196,6 +205,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
         ? _advanced.submission
         : const SeerrRequestSubmissionOptions();
     if (_submitting ||
+        !_hasSeasonSelection ||
         _quotaBlocked ||
         (advancedEnabled && _advanced.loading) ||
         requestOptions == null) {
@@ -314,7 +324,8 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
               primary: true,
               primaryColor: const Color(0xFF6366F1),
               busy: _submitting,
-              onPressed: _quotaBlocked || _submitting || !advancedReady
+              onPressed:
+                  !_hasSeasonSelection || _quotaBlocked || _submitting || !advancedReady
                   ? null
                   : _submit,
             ),

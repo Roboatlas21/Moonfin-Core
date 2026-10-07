@@ -306,6 +306,7 @@ class SeerrRequestOptions {
       return;
     }
 
+    final previousServerId = _selectedServerId;
     if (_selectedServerId == null ||
         !eligible.any((server) => server.server.id == _selectedServerId)) {
       final saved = _defaults.parsedServerId;
@@ -314,14 +315,22 @@ class SeerrRequestOptions {
           ? saved
           : _defaultServer?.server.id;
     }
+    if (previousServerId != _selectedServerId) {
+      _selectedProfileId = null;
+      _selectedRootFolderId = null;
+    }
 
     final server = activeServer;
     if (server == null) return;
+    // Saved profile/root IDs only have meaning within their saved server.
+    // A replacement server may coincidentally reuse the same numeric IDs.
+    final savedServerIsActive = _defaults.parsedServerId == server.server.id;
 
     if (_selectedProfileId == null ||
         !server.profiles.any((profile) => profile.id == _selectedProfileId)) {
       final saved = _defaults.parsedProfileId;
-      _selectedProfileId = saved != null &&
+      _selectedProfileId = savedServerIsActive &&
+              saved != null &&
               server.profiles.any((profile) => profile.id == saved)
           ? saved
           : defaultProfileIdFor(server);
@@ -332,7 +341,8 @@ class SeerrRequestOptions {
           (folder) => folder.id == _selectedRootFolderId,
         )) {
       final saved = _defaults.parsedRootFolderId;
-      _selectedRootFolderId = saved != null &&
+      _selectedRootFolderId = savedServerIsActive &&
+              saved != null &&
               server.rootFolders.any((folder) => folder.id == saved)
           ? saved
           : defaultRootFolderIdFor(server);
