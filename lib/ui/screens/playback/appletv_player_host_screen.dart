@@ -262,7 +262,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         'allLabel': l10n.allSeasons,
         'submitLabel': l10n.submitRequest,
         'cancelLabel': l10n.cancel,
-        'advancedEnabled': vm.canRequestAdvanced && options.servers.isNotEmpty,
+        'advancedEnabled': vm.canRequestAdvanced && options.eligibleServers.isNotEmpty,
         'serverLabel': l10n.server,
         'profileLabel': l10n.qualityProfile,
         'rootFolderLabel': l10n.rootFolder,
@@ -270,7 +270,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         'selectedProfileId': options.effectiveProfileId,
         'selectedRootFolderId': options.effectiveRootFolderId,
         'servers': [
-          for (final server in options.servers)
+          for (final server in options.eligibleServers)
             {
               'id': server.server.id,
               'label':
@@ -291,8 +291,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       if (!session.isCurrent || !isCurrent() || selected == null) return;
 
       final selectedSeasons = (selected['seasons'] as List?)
-              ?.whereType<num>()
-              .map((value) => value.toInt())
+              ?.whereType<int>()
               .toSet()
               .toList() ??
           <int>[];
@@ -302,18 +301,25 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         return;
       }
 
-      if (vm.canRequestAdvanced && options.servers.isNotEmpty) {
-        final serverId = (selected['serverId'] as num?)?.toInt();
-        final profileId = (selected['profileId'] as num?)?.toInt();
-        final rootFolderId = (selected['rootFolderId'] as num?)?.toInt();
-        if (!options.selectServer(serverId) ||
-            !options.selectProfile(profileId) ||
-            !options.selectRootFolder(rootFolderId)) {
+      SeerrRequestSubmissionOptions? submission = options.submission;
+      if (vm.canRequestAdvanced && options.eligibleServers.isNotEmpty) {
+        final serverId = selected['serverId'];
+        final profileId = selected['profileId'];
+        final rootFolderId = selected['rootFolderId'];
+        if (serverId is! int ||
+            (profileId != null && profileId is! int) ||
+            (rootFolderId != null && rootFolderId is! int)) {
           throw StateError('Invalid Seerr request option returned by tvOS');
         }
+        submission = options.resolveForSubmission(
+          SeerrRequestSelection(
+            serverId: serverId,
+            profileId: profileId as int?,
+            rootFolderId: rootFolderId as int?,
+          ),
+        );
       }
 
-      final submission = options.submission;
       if (submission == null) {
         throw StateError('Invalid Seerr request option selection');
       }

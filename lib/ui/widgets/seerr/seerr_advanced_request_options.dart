@@ -28,7 +28,8 @@ class SeerrAdvancedRequestController extends ChangeNotifier {
   bool get isAnime => _options.isAnime;
   bool get is4k => _options.is4k;
   List<SeerrServiceServerDetails>? get servers =>
-      _options.loaded ? _options.servers : null;
+      _options.loaded ? _options.eligibleServers : null;
+  SeerrRequestSubmissionOptions? get submission => _options.submission;
   int? get selectedServerId => _options.selectedServerId;
   int? get selectedProfileId => _options.selectedProfileId;
   int? get selectedRootFolderId => _options.selectedRootFolderId;

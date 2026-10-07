@@ -129,6 +129,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     if (widget.vm.canRequestAdvanced) {
       _advanced.load();
     }
+    _advanced.addListener(_onVmChanged);
     widget.vm.loadQuota();
     widget.vm.addListener(_onVmChanged);
   }
@@ -136,6 +137,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   @override
   void dispose() {
     widget.vm.removeListener(_onVmChanged);
+    _advanced.removeListener(_onVmChanged);
     _advanced.dispose();
     super.dispose();
   }
@@ -195,7 +197,13 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   }
 
   void _submit() async {
-    if (_submitting || _quotaBlocked) {
+    final requestOptions = widget.vm.canRequestAdvanced
+        ? _advanced.submission
+        : const SeerrRequestSubmissionOptions();
+    if (_submitting ||
+        _quotaBlocked ||
+        (widget.vm.canRequestAdvanced && _advanced.loading) ||
+        requestOptions == null) {
       return;
     }
 
@@ -211,9 +219,9 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
       is4k: _is4k,
       seasons: seasons,
       allSeasons: widget.isTv && _allSeasons,
-      profileId: _advanced.effectiveProfileId,
-      rootFolder: _advanced.effectiveRootFolderPath,
-      serverId: _advanced.effectiveServerId,
+      profileId: requestOptions.profileId,
+      rootFolder: requestOptions.rootFolder,
+      serverId: requestOptions.serverId,
     );
 
     if (widget.waitForSubmission) await submission;
@@ -224,6 +232,8 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final quotaRow = _buildQuotaRow(l10n);
+    final advancedReady = !widget.vm.canRequestAdvanced ||
+        (!_advanced.loading && _advanced.submission != null);
 
     final showToggle = _hasQualityToggle(widget.vm, widget.qualityToggle);
     final children = <Widget>[];
@@ -307,7 +317,9 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
               primary: true,
               primaryColor: const Color(0xFF6366F1),
               busy: _submitting,
-              onPressed: _quotaBlocked || _submitting ? null : _submit,
+              onPressed: _quotaBlocked || _submitting || !advancedReady
+                  ? null
+                  : _submit,
             ),
           ),
         ],
