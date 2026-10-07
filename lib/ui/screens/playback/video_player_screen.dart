@@ -309,6 +309,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   MediaSegment? _skipSegment;
   Duration? _skipTo;
+  bool _prerollSkipVisible = false;
+  bool _prerollSkipAwaitingPlayback = false;
+  Timer? _prerollSkipAutoHideTimer;
 
   /// True when the auto-hide setting is on for the current segment.
   bool _skipSegmentAutoHideEnabled = false;
@@ -458,6 +461,68 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   bool get _isCurrentPreroll => _isPrerollQueueItem(_queue.currentItem);
+
+  bool get _isPrerollSkipButtonVisible =>
+      _isCurrentPreroll && _prerollSkipVisible;
+
+  void _schedulePrerollSkipAutoHide() {
+    _prerollSkipAutoHideTimer?.cancel();
+    _prerollSkipAutoHideTimer = null;
+    if (!_isPrerollSkipButtonVisible) return;
+    final seconds = _prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds;
+    if (seconds <= 0) return;
+    _prerollSkipAutoHideTimer = Timer(Duration(seconds: seconds), () {
+      _prerollSkipAutoHideTimer = null;
+      if (!mounted || !_isCurrentPreroll || !_prerollSkipVisible) return;
+      setState(() => _prerollSkipVisible = false);
+      if (PlatformDetection.isTV) {
+        _restoreOverlayFocus();
+      }
+    });
+  }
+
+  void _showPrerollSkip() {
+    if (!_isCurrentPreroll) return;
+    _prerollSkipAwaitingPlayback = false;
+    _prerollSkipAutoHideTimer?.cancel();
+    if (!_prerollSkipVisible) {
+      setState(() => _prerollSkipVisible = true);
+    }
+    _schedulePrerollSkipAutoHide();
+    _focusTvSkipSegment();
+  }
+
+  void _hidePrerollSkip({bool suppressBack = false}) {
+    if (suppressBack) {
+      _suppressBackNavigation(duration: const Duration(milliseconds: 500));
+    }
+    _prerollSkipAwaitingPlayback = false;
+    _prerollSkipAutoHideTimer?.cancel();
+    _prerollSkipAutoHideTimer = null;
+    if (_prerollSkipVisible) {
+      setState(() => _prerollSkipVisible = false);
+    }
+    if (PlatformDetection.isTV) {
+      _restoreOverlayFocus();
+    }
+  }
+
+  void _skipPreroll() {
+    _prerollSkipAutoHideTimer?.cancel();
+    _prerollSkipAutoHideTimer = null;
+    unawaited(_manager.nextInQueue());
+  }
+
+  void _armPrerollSkipAfterPlaybackStarts() {
+    if (!_prerollSkipAwaitingPlayback ||
+        !_isPrerollSkipButtonVisible ||
+        !_state.isPlaying) {
+      return;
+    }
+    _prerollSkipAwaitingPlayback = false;
+    _schedulePrerollSkipAutoHide();
+    _focusTvSkipSegment();
+  }
 
   bool _queueItemIsFavorite(dynamic item) {
     if (item is AggregatedItem) {
@@ -808,6 +873,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   @override
   void initState() {
     super.initState();
+    _prerollSkipVisible = _isCurrentPreroll;
+    _prerollSkipAwaitingPlayback = _isCurrentPreroll;
     FocusManager.instance.addListener(_restoreOverlayFocus);
     if (PlatformDetection.isTV || PlatformDetection.isMobile) {
       // The decoder wants every megabyte a constrained box has, and a stale
@@ -914,6 +981,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _showControls(focusSeekbar: true);
+      if (_isCurrentPreroll) {
+        _focusTvSkipSegment();
+        _armPrerollSkipAfterPlaybackStarts();
+      }
       if (PlatformDetection.useNativeVideoSurface) {
         _syncSubtitleActive();
       }
@@ -954,7 +1025,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       unawaited(_syncAutoHdrSwitching());
       final isPreroll = _isCurrentPreroll;
       _resetSkipSegmentAutoHide();
+      _prerollSkipAutoHideTimer?.cancel();
+      _prerollSkipAutoHideTimer = null;
       setState(() {
+        _prerollSkipVisible = isPreroll;
+        _prerollSkipAwaitingPlayback = isPreroll;
         _nextUpDismissed = false;
         _showNextUp = false;
         _skipSegment = null;
@@ -968,6 +1043,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       });
       if (isPreroll) {
         _hideTimer?.cancel();
+        _focusTvSkipSegment();
+        _armPrerollSkipAfterPlaybackStarts();
       }
     });
 
@@ -983,6 +1060,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _displayPlaying = _state.isPlaying;
     _playingSub = _state.playingStream.listen((playing) {
       _updateDisplayPlaying(playing);
+      if (playing) {
+        _armPrerollSkipAfterPlaybackStarts();
+      }
       // The hide timer passes over a player that hasn't started yet, so a
       // start or resume slower than its delay needs it armed again here.
       if (playing && _controlsVisible && !_isSeeking) {
@@ -1059,6 +1139,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _cancelTvTemporarySpeedHold();
     _hideTimer?.cancel();
     _skipSegmentAutoHideTimer?.cancel();
+    _prerollSkipAutoHideTimer?.cancel();
     _displayPlayingDebounce?.cancel();
     _endsAtTicker?.cancel();
     _volumeOverlayTimer?.cancel();
@@ -3036,9 +3117,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _focusTvSkipSegment({int attempt = 0}) {
-    if (!PlatformDetection.isTV || _skipSegment == null) return;
+    if (!PlatformDetection.isTV ||
+        (_skipSegment == null && !_isPrerollSkipButtonVisible)) {
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _skipSegment == null) return;
+      if (!mounted ||
+          (_skipSegment == null && !_isPrerollSkipButtonVisible)) {
+        return;
+      }
       _tvSkipSegmentFocus.requestFocus();
 
       if (!_tvSkipSegmentFocus.hasFocus && attempt < 8) {
@@ -3082,6 +3169,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   void _toggleControls() {
     if (_isCurrentPreroll) {
       _syncPrerollOsdState();
+      if (!_isPrerollSkipButtonVisible) {
+        _showPrerollSkip();
+      }
       return;
     }
     if (_isOsdLocked) {
@@ -3530,7 +3620,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         final isBackKey = event.logicalKey.isBackKey;
 
         if (isBackKey) {
-          if (!_isBackNavigationSuppressed()) {
+          if (_isPrerollSkipButtonVisible) {
+            _hidePrerollSkip(suppressBack: true);
+          } else if (!_isBackNavigationSuppressed()) {
             _exitPlayback();
           }
           return KeyEventResult.handled;
@@ -3545,13 +3637,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             return KeyEventResult.handled;
           case LogicalKeyboardKey.mediaPlayPause:
           case LogicalKeyboardKey.space:
+            _togglePlayPause();
+            return KeyEventResult.handled;
           case LogicalKeyboardKey.enter:
           case LogicalKeyboardKey.select:
-            _togglePlayPause();
+            if (_isPrerollSkipButtonVisible) {
+              _skipPreroll();
+            } else {
+              _showPrerollSkip();
+            }
             return KeyEventResult.handled;
 
           case LogicalKeyboardKey.mediaFastForward:
-            unawaited(_manager.next());
+            _skipPreroll();
             return KeyEventResult.handled;
 
           case LogicalKeyboardKey.mediaRewind:
@@ -3979,6 +4077,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         if (_isBackNavigationSuppressed()) {
           return;
         }
+        if (_isPrerollSkipButtonVisible) {
+          _hidePrerollSkip(suppressBack: true);
+          return;
+        }
         if (_showNextUp) {
           _handleNextUpDismiss();
           return;
@@ -4123,6 +4225,28 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                   TrickplayPreviewLayout
                                       .verticalTravelBottomMargin) +
                               AppSpacing.spaceXs,
+                        ),
+                      if (_isPrerollSkipButtonVisible)
+                        SkipSegmentOverlay(
+                          segment: MediaSegment(
+                            id: '__preroll__',
+                            itemId:
+                                _itemIdForQueueItem(_queue.currentItem) ?? '',
+                            type: MediaSegmentType.preview,
+                            start: Duration.zero,
+                            end: _state.duration,
+                          ),
+                          segmentLabel: AppLocalizations.of(context).trailer,
+                          countdownStyle: _prefs.get(
+                            UserPreferences.cinemaModeSkipCountdown,
+                          ),
+                          onSkip: _skipPreroll,
+                          onDismiss: _hidePrerollSkip,
+                          focusNode: _tvSkipSegmentFocus,
+                          positionStream: _state.positionStream,
+                          initialPosition: _state.position,
+                          bottomInset:
+                              MediaQuery.viewPaddingOf(context).bottom + 24.0,
                         ),
                       if (_showNextUp && _nextUpItem != null)
                         NextUpOverlay(
