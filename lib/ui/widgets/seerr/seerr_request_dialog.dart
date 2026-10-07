@@ -3,6 +3,7 @@ import 'package:moonfin/data/services/seerr/seerr_seasons.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 
 import '../../../data/services/seerr/seerr_api_models.dart';
+import '../../../data/services/seerr/seerr_request_options.dart';
 import '../../../data/viewmodels/seerr_media_detail_view_model.dart';
 import '../../../l10n/app_localizations.dart';
 import 'seerr_advanced_request_options.dart';

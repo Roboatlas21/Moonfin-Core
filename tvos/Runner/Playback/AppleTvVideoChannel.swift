@@ -23,6 +23,8 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
     private var lastPromptStrings: [String: Any]?
     private var lastTimeSlots: [String: Any]?
     private var lastCinemaActions: [String: Any]?
+    private var pendingCinemaRequestUpdate: [String: Any]?
+    private var pendingCinemaRequestDismissId: Int?
     static var lastCommand = "-"
 
     init(messenger: FlutterBinaryMessenger, rootViewController: UIViewController) {
@@ -48,8 +50,38 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             if call.method == "showCinemaRequestOptions" {
                 Task { @MainActor in
                     guard let vc = self?.playerVC else { result(nil); return }
-                    vc.presentCinemaRequestOptions(call.arguments as? [String: Any] ?? [:]) {
+                    let options = call.arguments as? [String: Any] ?? [:]
+                    let requestId = (options["requestId"] as? NSNumber)?.intValue
+                    if requestId != nil && self?.pendingCinemaRequestDismissId == requestId {
+                        self?.pendingCinemaRequestDismissId = nil
+                        result(nil)
+                        return
+                    }
+                    vc.presentCinemaRequestOptions(options) {
                         result($0)
+                    }
+                    if let pending = self?.pendingCinemaRequestUpdate {
+                        _ = vc.updateCinemaRequestOptions(pending)
+                        self?.pendingCinemaRequestUpdate = nil
+                    }
+                }
+                return
+            }
+            if call.method == "updateCinemaRequestOptions" {
+                Task { @MainActor in
+                    guard let self,
+                          let args = call.arguments as? [String: Any],
+                          args["requestId"] is NSNumber else {
+                        result(false)
+                        return
+                    }
+                    if self.playerVC?.updateCinemaRequestOptions(args) == true {
+                        result(true)
+                    } else {
+                        // An update can reach the main actor just before its
+                        // show call. The request ID prevents stale application.
+                        self.pendingCinemaRequestUpdate = args
+                        result(true)
                     }
                 }
                 return
@@ -119,7 +151,15 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             lastCinemaActions = args
             playerVC?.applyCinemaActions(args)
         case "dismissCinemaRequestOptions":
-            playerVC?.dismissCinemaRequestOptions()
+            let id = (args["requestId"] as? NSNumber)?.intValue
+            if id == nil ||
+                (pendingCinemaRequestUpdate?["requestId"] as? NSNumber)?.intValue == id {
+                pendingCinemaRequestUpdate = nil
+            }
+            if playerVC?.dismissCinemaRequestOptions(requestId: id) != true,
+               let id {
+                pendingCinemaRequestDismissId = id
+            }
         case "showCinemaError":
             playerVC?.showCinemaError((args["message"] as? String) ?? "")
         case "showNextUp":
@@ -368,6 +408,8 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
     }
 
     private func dismiss() {
+        pendingCinemaRequestUpdate = nil
+        pendingCinemaRequestDismissId = nil
         playerVC?.dismissCinemaRequestOptions()
         lastCinemaActions = nil
         stopStateTimer()

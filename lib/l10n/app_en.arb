@@ -7276,6 +7276,10 @@
     "description": "Banner in the Seerr request dialog for a continuing series whose aired seasons are all in the library"
   },
   "advancedOptions": "Advanced Options",
+  "seerrLoadingRequestOptions": "Loading request options...",
+  "@seerrLoadingRequestOptions": {
+    "description": "Loading row in the Apple TV Seerr season-request picker"
+  },
   "@advancedOptions": {
     "description": "Expansion tile for advanced request options"
   },

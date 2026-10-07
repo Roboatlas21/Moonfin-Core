@@ -608,8 +608,14 @@ class AppleTvBackend implements PlayerBackend {
     return selected?.map((key, value) => MapEntry(key.toString(), value));
   }
 
-  Future<void> dismissCinemaRequestOptions() =>
-      _invoke<void>('dismissCinemaRequestOptions');
+  Future<bool> updateCinemaRequestOptions(Map<String, Object?> options) async =>
+      await _invoke<bool>('updateCinemaRequestOptions', options) ?? false;
+
+  Future<void> dismissCinemaRequestOptions({int? requestId}) =>
+      _invoke<void>(
+        'dismissCinemaRequestOptions',
+        requestId == null ? null : {'requestId': requestId},
+      );
 
   Future<void> showCinemaError(String message) =>
       _invoke<void>('showCinemaError', {'message': message});

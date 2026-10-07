@@ -769,7 +769,17 @@ final class AppleTvPlayerViewController: UIViewController {
         present(picker, animated: true)
     }
 
-    func dismissCinemaRequestOptions() { cinemaPicker?.finish(nil) }
+    func updateCinemaRequestOptions(_ args: [String: Any]) -> Bool {
+        cinemaPicker?.applyOptions(args) ?? false
+    }
+
+    @discardableResult
+    func dismissCinemaRequestOptions(requestId: Int? = nil) -> Bool {
+        guard let picker = cinemaPicker,
+              requestId == nil || picker.requestId == requestId else { return false }
+        picker.finish(nil)
+        return true
+    }
 
     func showCinemaError(_ message: String) {
         guard presentedViewController == nil else { return }
@@ -4153,20 +4163,23 @@ private final class RemotePlayerMenu: UITableViewController, RemotePlayerNavigab
 /// Native request picker. Dart owns identity, permissions, defaults,
 /// validation, submission, and expiry; UIKit only renders and returns ids.
 private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavigable {
+    let requestId: Int
     private let seasons: [Int]
     private let labels: [String]
     private let allLabel: String
     private let submitLabel: String
     private let cancelLabel: String
-    private let quotaLabel: String?
+    private var quotaLabel: String?
     private let quotaBlockedLabel: String
-    private let quotaRemaining: Int?
-    private let quotaRestricted: Bool
-    private let advancedEnabled: Bool
+    private var quotaRemaining: Int?
+    private var quotaRestricted: Bool
+    private var advancedEnabled: Bool
+    private var optionsLoading: Bool
+    private let loadingLabel: String
     private let serverLabel: String
     private let profileLabel: String
     private let rootFolderLabel: String
-    private let servers: [[String: Any]]
+    private var servers: [[String: Any]]
     private let completion: ([String: Any]?) -> Void
 
     private var selected: Set<Int>
@@ -4178,6 +4191,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     private var answered = false
 
     init(options: [String: Any], completion: @escaping ([String: Any]?) -> Void) {
+        requestId = Self.intValue(options["requestId"]) ?? -1
         seasons = Self.intArray(options["seasons"])
         labels = options["labels"] as? [String] ?? []
         selected = Set(Self.intArray(options["selected"])).intersection(seasons)
@@ -4189,6 +4203,8 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         quotaRemaining = Self.intValue(options["quotaRemaining"])
         quotaRestricted = options["quotaRestricted"] as? Bool ?? false
         advancedEnabled = options["advancedEnabled"] as? Bool ?? false
+        optionsLoading = options["optionsLoading"] as? Bool ?? false
+        loadingLabel = options["loadingLabel"] as? String ?? "Loading request options..."
         serverLabel = options["serverLabel"] as? String ?? "Server"
         profileLabel = options["profileLabel"] as? String ?? "Quality Profile"
         rootFolderLabel = options["rootFolderLabel"] as? String ?? "Root Folder"
@@ -4207,12 +4223,13 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
 
     private var advancedCount: Int { advancedEnabled ? 3 : 0 }
     private var advancedStart: Int { seasons.count + 1 }
-    private var quotaRow: Int { advancedStart + advancedCount }
+    private var loadingCount: Int { optionsLoading ? 1 : 0 }
+    private var quotaRow: Int { advancedStart + advancedCount + loadingCount }
     private var quotaCount: Int { quotaLabel == nil ? 0 : 1 }
     private var submitRow: Int { quotaRow + quotaCount }
     private var cancelRow: Int { submitRow + 1 }
     private var canSubmit: Bool {
-        (allSeasons ? !seasons.isEmpty : !selected.isEmpty) && !quotaBlocked
+        !optionsLoading && (allSeasons ? !seasons.isEmpty : !selected.isEmpty) && !quotaBlocked
     }
     private var quotaBlocked: Bool {
         guard quotaLabel != nil else { return false }
@@ -4237,6 +4254,30 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         activeServer?["rootFolders"] as? [[String: Any]] ?? []
     }
 
+    /// Season choices persist while late network options fill the same picker.
+    /// An update from an older request must never mutate a newer picker.
+    func applyOptions(_ options: [String: Any]) -> Bool {
+        guard !answered,
+              Self.intValue(options["requestId"]) == requestId else { return false }
+        let wasSubmit = focusedRow == submitRow
+        let wasCancel = focusedRow == cancelRow
+        optionsLoading = options["optionsLoading"] as? Bool ?? false
+        advancedEnabled = options["advancedEnabled"] as? Bool ?? false
+        servers = options["servers"] as? [[String: Any]] ?? []
+        quotaLabel = options["quotaLabel"] as? String
+        quotaRemaining = Self.intValue(options["quotaRemaining"])
+        quotaRestricted = options["quotaRestricted"] as? Bool ?? false
+        selectedServerId = Self.intValue(options["selectedServerId"])
+        selectedProfileId = Self.intValue(options["selectedProfileId"])
+        selectedRootFolderId = Self.intValue(options["selectedRootFolderId"])
+        normalizeAdvancedSelection()
+        if wasSubmit { focusedRow = submitRow }
+        else if wasCancel { focusedRow = cancelRow }
+        else { focusedRow = min(focusedRow, cancelRow) }
+        if isViewLoaded { tableView.reloadData() }
+        return true
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         tableView.backgroundColor = UIColor(white: 0.08, alpha: 0.98)
@@ -4257,7 +4298,8 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         var content = cell.defaultContentConfiguration()
         var checked = false
         cell.accessoryType = .none
-        cell.selectionStyle = quotaCount > 0 && row == quotaRow ? .none : .default
+        cell.selectionStyle = ((optionsLoading && row == advancedStart) ||
+            (quotaCount > 0 && row == quotaRow)) ? .none : .default
 
         if row == 0 {
             content.text = allLabel
@@ -4265,6 +4307,8 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         } else if row <= seasons.count {
             content.text = labels.indices.contains(row - 1) ? labels[row - 1] : String(seasons[row - 1])
             checked = allSeasons || selected.contains(seasons[row - 1])
+        } else if optionsLoading && row == advancedStart {
+            content.text = loadingLabel
         } else if advancedEnabled && row < quotaRow {
             let offset = row - advancedStart
             switch offset {
@@ -4329,7 +4373,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
             tableView.reloadData()
             return
         }
-        guard advancedEnabled && row < quotaRow else { return }
+        guard !optionsLoading && advancedEnabled && row < quotaRow else { return }
         switch row - advancedStart {
         case 0:
             presentChoices(title: serverLabel, options: servers, selectedId: selectedServerId) { [weak self] id in
@@ -4405,6 +4449,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
 
     private func result() -> [String: Any] {
         var value: [String: Any] = [
+            "requestId": requestId,
             "allSeasons": allSeasons,
             "seasons": allSeasons ? [] : selected.sorted()
         ]
