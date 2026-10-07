@@ -46,7 +46,11 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  Future<void> open(WidgetTester tester, {int? season}) async {
+  Future<void> open(
+    WidgetTester tester, {
+    int? season,
+    bool cinema = true,
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -60,9 +64,9 @@ void main() {
                   vm: vm,
                   is4k: false,
                   season: season,
-                  selectAllSeasons: false,
-                  showAdvancedOptions: false,
-                  waitForSubmission: true,
+                  selectAllSeasons: !cinema,
+                  showAdvancedOptions: !cinema,
+                  waitForSubmission: cinema,
                   onDismissReady: (dismiss) => dismissDialog = dismiss,
                 );
                 closed = true;
@@ -133,6 +137,55 @@ void main() {
       expect(closed, true);
     },
   );
+
+  testWidgets('ordinary Seerr still submits All Seasons without metadata', (
+    tester,
+  ) async {
+    vm.dispose();
+    vm = SeerrMediaDetailViewModel.forCinema(
+      repo,
+      CinemaTvPreferences(),
+      details: const SeerrTvDetails(id: 42),
+      user: const SeerrUser(id: 5, permissions: SeerrPermission.requestTv),
+      requestAllowed: () => current,
+    );
+    await open(tester, cinema: false);
+    expect(
+      tester.widget<SeerrToggleRow>(find.byType(SeerrToggleRow)).value,
+      isTrue,
+    );
+    expect(
+      tester.widget<SeerrDialogButton>(
+        find.widgetWithText(SeerrDialogButton, 'Submit Request'),
+      ).onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.text('Submit Request'));
+    await tester.pumpAndSettle();
+    expect(repo.submissions.single.all, isTrue);
+    expect(repo.submissions.single.seasons, isNull);
+  });
+
+  testWidgets('Cinema still blocks missing season metadata', (tester) async {
+    vm.dispose();
+    vm = SeerrMediaDetailViewModel.forCinema(
+      repo,
+      CinemaTvPreferences(),
+      details: const SeerrTvDetails(id: 42),
+      user: const SeerrUser(id: 5, permissions: SeerrPermission.requestTv),
+      requestAllowed: () => current,
+    );
+    await open(tester);
+    expect(
+      tester.widget<SeerrDialogButton>(
+        find.widgetWithText(SeerrDialogButton, 'Submit Request'),
+      ).onPressed,
+      isNull,
+    );
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(repo.submissions, isEmpty);
+  });
 
   testWidgets(
     'validated season is preselected and dialog awaits its TV submission',
