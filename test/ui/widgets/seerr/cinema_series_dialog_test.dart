@@ -56,6 +56,7 @@ void main() {
     WidgetTester tester, {
     int? season,
     bool cinema = true,
+    FocusNode? launchFocus,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -64,6 +65,7 @@ void main() {
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
+              focusNode: launchFocus,
               onPressed: () async {
                 await showSeerrRequestDialog(
                   context: context,
@@ -83,6 +85,10 @@ void main() {
         ),
       ),
     );
+    if (launchFocus != null) {
+      launchFocus.requestFocus();
+      await tester.pump();
+    }
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
   }
@@ -317,11 +323,15 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('an older Cinema submission cannot pop a newer picker', (
+  testWidgets('an older Cinema submission cannot pop or refocus a newer picker', (
     tester,
   ) async {
+    final launchFocus = FocusNode(debugLabel: 'original Cinema action');
+    final nextFocus = FocusNode(debugLabel: 'next Cinema picker');
+    addTearDown(launchFocus.dispose);
+    addTearDown(nextFocus.dispose);
     repo.submission = Completer<SeerrRequest>();
-    await open(tester, season: 5);
+    await open(tester, season: 5, launchFocus: launchFocus);
     await tester.tap(find.text('Submit Request'));
     await tester.pump();
     expect(vm.state.isRequesting, true);
@@ -330,14 +340,25 @@ void main() {
     unawaited(
       showDialog<void>(
         context: navigator.context,
-        builder: (_) => const AlertDialog(content: Text('New picker')),
+        builder: (_) => AlertDialog(
+          content: Focus(
+            focusNode: nextFocus,
+            autofocus: true,
+            child: const Text('New picker'),
+          ),
+        ),
       ),
     );
     await tester.pumpAndSettle();
+    nextFocus.requestFocus();
+    await tester.pump();
+    expect(nextFocus.hasPrimaryFocus, isTrue);
+
     repo.submission!.complete(const SeerrRequest(id: 1, status: 2, type: 'tv'));
     await tester.pumpAndSettle();
 
     expect(find.text('New picker'), findsOneWidget);
+    expect(nextFocus.hasPrimaryFocus, isTrue);
     expect(closed, isTrue);
     navigator.pop();
     await tester.pumpAndSettle();
