@@ -194,9 +194,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
         widget.isTv &&
         _allSeasons &&
         _seasonNumbers.isNotEmpty) {
-      return (_seasonNumbers.length -
-              _quality.unavailableOrRequestedSeasons.length)
-          .clamp(1, _seasonNumbers.length);
+      return _requestableSeasons.length.clamp(1, _seasonNumbers.length);
     }
     return seerrTvQuotaNeeded(
       allSeasons: _allSeasons,
