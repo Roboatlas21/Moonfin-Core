@@ -270,6 +270,34 @@ void main() {
     );
   }
 
+  testWidgets('prior trailer rejection leaves the next native picker active', (
+    tester,
+  ) async {
+    await mount(tester);
+    await submit(tester, await openPicker(tester));
+    await action(tester, 'select'); // Skip while the original POST is pending.
+    final next = await openPicker(tester);
+
+    repository.posts[42]!.completeError(StateError('Seerr rejected request'));
+    await tester.pumpAndSettle();
+
+    expect(repository.posts.keys, [42]);
+    expect(pickers[next]!.isCompleted, isFalse);
+    expect(
+      calls.where((call) => call.method == 'showCinemaError'),
+      hasLength(1),
+    );
+    expect(
+      calls.where(
+        (call) =>
+            call.method == 'dismissCinemaRequestOptions' &&
+            call.arguments['requestId'] == next,
+      ),
+      isEmpty,
+    );
+    await unmount(tester);
+  });
+
   testWidgets(
     'Submit near grace expiry preserves the POST after the deadline',
     (tester) async {
