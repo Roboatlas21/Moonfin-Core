@@ -31,6 +31,7 @@ void main() {
     'cinemaModeEnabled',
     'cinemaModeEpisodesEnabled',
     'cinemaModeSkipAutoHide',
+    'cinemaModeSkipMinDurationSeconds',
     'cinemaModeSkipCountdown',
     'clockBehavior',
     'collectionsRowShowEpisodes',
