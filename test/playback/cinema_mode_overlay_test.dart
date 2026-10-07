@@ -156,7 +156,8 @@ void main() {
       final requestOutline = tester.widget<Container>(
         find.byKey(const ValueKey('cinema-request-outline')),
       );
-      final requestBorder = (requestOutline.decoration! as BoxDecoration).border;
+      final requestBorder =
+          (requestOutline.foregroundDecoration! as BoxDecoration).border;
       expect((requestBorder! as Border).top.color, AppColorScheme.accent);
       await tester.tap(find.text('Request Movie'));
       await tester.pump();
@@ -167,7 +168,7 @@ void main() {
         find.byKey(const ValueKey('cinema-request-outline')),
       );
       final requestedBorder =
-          (requestedOutline.decoration! as BoxDecoration).border;
+          (requestedOutline.foregroundDecoration! as BoxDecoration).border;
       expect(
         (requestedBorder! as Border).top.color,
         isNot(AppColorScheme.accent),
