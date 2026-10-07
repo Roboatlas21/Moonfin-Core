@@ -546,8 +546,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   Future<void> _skipCinemaPreroll() {
-    _seriesPickerSession?.close();
-    _seriesPickerSession = null;
+    if (_seriesPickerSession?.closeForSkip() == true) {
+      _seriesPickerSession = null;
+    }
     return _manager.nextInQueue();
   }
 

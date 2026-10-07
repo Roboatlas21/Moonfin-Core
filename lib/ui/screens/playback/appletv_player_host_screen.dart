@@ -201,8 +201,9 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   }
 
   Future<void> _skipCinema() {
-    _cinemaPicker?.close();
-    _cinemaPicker = null;
+    if (_cinemaPicker?.closeForSkip() == true) {
+      _cinemaPicker = null;
+    }
     return _manager?.nextInQueue() ?? Future.value();
   }
 

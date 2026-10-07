@@ -37,6 +37,14 @@ class CinemaSeriesPickerSession {
     _graceTimer = null;
   }
 
+  /// Skip advances playback but must not cancel an in-flight submission.
+  /// Return whether the picker was closed so the player can clear its handle.
+  bool closeForSkip() {
+    if (_submitting && isCurrent) return false;
+    close();
+    return true;
+  }
+
   void close() {
     if (_closeRequested) return;
     _closeRequested = true;

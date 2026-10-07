@@ -748,7 +748,12 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
     if (user == null || _state.quota != null) return;
     try {
       final quota = await _repo.getUserQuota(user.id);
-      _state = _state.copyWith(quota: quota);
+      _state = _state.copyWith(
+        quota: quota,
+        requestError: _state.requestError,
+        requestErrorKind: _state.requestErrorKind,
+        requestSuccess: _state.requestSuccess,
+      );
       notifyListeners();
     } catch (_) {}
   }
