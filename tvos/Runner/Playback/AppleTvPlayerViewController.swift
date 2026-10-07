@@ -4331,13 +4331,28 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         ]
     }
 
+    // Notify the player only after an in-progress UIKit dismissal finishes.
+    // Otherwise a deferred request error can be handed back to this picker
+    // while it is still presented and never get another dismissal callback.
+    private func notifyAfterDismissal() {
+        if let coordinator = transitionCoordinator {
+            let registered = coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+                self?.onDismissed?()
+            }
+            if registered { return }
+        }
+        DispatchQueue.main.async { [weak self] in self?.onDismissed?() }
+    }
+
     func finish(_ value: [String: Any]?) {
         guard !answered else { return }
         answered = true
         // Hand Submit to Dart at press time, before grace expiry or a late
         // quota response can change the decision during a dismissal animation.
         completion(value)
-        if isBeingDismissed || viewIfLoaded?.window == nil {
+        if isBeingDismissed {
+            notifyAfterDismissal()
+        } else if viewIfLoaded?.window == nil {
             onDismissed?()
         } else {
             // Immediate dismissal also lets a fast POST failure present its alert.
@@ -4350,7 +4365,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         if !answered && presentedViewController == nil {
             answered = true
             completion(nil)
-            onDismissed?()
+            notifyAfterDismissal()
         }
     }
 
