@@ -134,6 +134,20 @@ Future<T?> showFocusRestoringDialog<T>({
     routeSettings: routeSettings,
     barrierLabel: barrierLabel,
   ).whenComplete(() {
+    final focusedContext = FocusManager.instance.primaryFocus?.context;
+    final previousContext = previousFocus?.context;
+    if (focusedContext != null &&
+        previousContext != null &&
+        focusedContext.mounted &&
+        previousContext.mounted) {
+      final focusedRoute = ModalRoute.of(focusedContext);
+      if (focusedRoute != null &&
+          focusedRoute.isCurrent &&
+          !identical(focusedRoute, ModalRoute.of(previousContext))) {
+        // Another dialog owns focus; don't restore focus behind it.
+        return;
+      }
+    }
     _safeRestoreFocus(previousFocus);
   });
 }

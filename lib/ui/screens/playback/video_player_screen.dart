@@ -511,21 +511,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _cinemaPreviousSourceToken = initial ? null : _cinemaSourceToken;
     final item = _queue.currentItem;
     final raw = _isCurrentPreroll ? _rawDataForQueueItem(item) : null;
-    final client = _clientForQueueItem(item);
+    final client = raw == null ? null : _clientForQueueItem(item);
     final id = _itemIdForQueueItem(item) ?? '';
-    // Resolve the trailer on its source server; use the active account's Seerr.
+    // Ordinary playback never needs Cinema identity resolution.
     _cinema.enter(
       item: raw,
-      resolveMedia: () => _cinemaResolver.resolve(
-        client: client,
-        itemId: id,
-        item: raw ?? const {},
-        expectedMediaType: switch (raw?['__moonfinCinemaFeatureType']) {
-          'Movie' => CinemaMediaType.movie,
-          'Episode' => CinemaMediaType.tv,
-          _ => null,
-        },
-      ),
+      resolveMedia: () => client == null
+          ? Future<CinemaMedia?>.value()
+          : _cinemaResolver.resolve(
+              client: client,
+              itemId: id,
+              item: raw!,
+              expectedMediaType: switch (raw['__moonfinCinemaFeatureType']) {
+                'Movie' => CinemaMediaType.movie,
+                'Episode' => CinemaMediaType.tv,
+                _ => null,
+              },
+            ),
     );
     _armPrerollSkipAfterPlaybackStarts();
   }
@@ -592,11 +594,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         waitForSubmission: true,
         onDismissReady: (dismiss) => session.dismissDialog = dismiss,
       );
-      if (vm.state.requestError != null) {
+      if (vm.state.requestError != null && session.isCurrent) {
         if (isCurrent()) {
           throw StateError('Cinema series request failed');
         }
         if (mounted) {
+          // Preserve feedback after Skip, but not after an account change
+          // or player exit.
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(AppLocalizations.of(context).cinemaActionFailed),
