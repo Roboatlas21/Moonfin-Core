@@ -150,6 +150,7 @@ final class AppleTvPlayerViewController: UIViewController {
     private let cinemaRequestPanel = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private var skipBottomConstraint: NSLayoutConstraint?
     private weak var cinemaPicker: CinemaRequestPicker?
+    private var pendingCinemaError: String?
 
     private var skipSegmentActive = false
     private let skipSegmentButton = UIView()
@@ -765,6 +766,11 @@ final class AppleTvPlayerViewController: UIViewController {
             return
         }
         let picker = CinemaRequestPicker(options: args, completion: completion)
+        picker.onDismissed = { [weak self] in
+            guard let self, let message = self.pendingCinemaError else { return }
+            self.pendingCinemaError = nil
+            self.showCinemaError(message)
+        }
         cinemaPicker = picker
         present(picker, animated: true)
     }
@@ -782,6 +788,12 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     func showCinemaError(_ message: String) {
+        guard !isBeingDismissed, viewIfLoaded?.window != nil else { return }
+        if presentedViewController is CinemaRequestPicker {
+            // A previous trailer's POST can finish while another picker is open.
+            pendingCinemaError = message
+            return
+        }
         guard presentedViewController == nil else { return }
         let alert = makePlayerMenu(title: nil, message: message, preferredStyle: .alert)
         alert.addAction(makePlayerAction(title: "OK", style: .cancel))
@@ -4170,6 +4182,7 @@ private final class RemotePlayerMenu: UITableViewController, RemotePlayerNavigab
 /// validation, submission, and expiry; UIKit only renders and returns ids.
 private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavigable {
     let requestId: Int
+    var onDismissed: (() -> Void)?
     private let seasons: [Int]
     private let labels: [String]
     private let allLabel: String
@@ -4203,9 +4216,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var quotaRow: Int { seasons.count + 1 }
-    private var quotaCount: Int { quotaLabel == nil ? 0 : 1 }
-    private var submitRow: Int { quotaRow + quotaCount }
+    private var submitRow: Int { seasons.count + 1 }
     private var cancelRow: Int { submitRow + 1 }
     private var requestedCount: Int { allSeasons ? seasons.count : selected.count }
     private var quotaBlocked: Bool {
@@ -4219,13 +4230,9 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         guard !answered, Self.intValue(quota["requestId"]) == requestId else {
             return false
         }
-        let wasSubmit = focusedRow == submitRow
-        let wasCancel = focusedRow == cancelRow
         quotaLabel = quota["quotaLabel"] as? String
         quotaRemaining = Self.intValue(quota["quotaRemaining"])
         quotaRestricted = quota["quotaRestricted"] as? Bool ?? false
-        if wasSubmit { focusedRow = submitRow }
-        else if wasCancel { focusedRow = cancelRow }
         if isViewLoaded { tableView.reloadData() }
         return true
     }
@@ -4240,6 +4247,14 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { title }
 
+    override func tableView(_ tableView: UITableView, titleForFooterInSection section: Int) -> String? {
+        quotaBlocked ? quotaBlockedLabel : quotaLabel
+    }
+
+    override func tableView(_ tableView: UITableView, willDisplayFooterView view: UIView, forSection section: Int) {
+        (view as? UITableViewHeaderFooterView)?.textLabel?.textColor = quotaBlocked ? .systemRed : .gray
+    }
+
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         cancelRow + 1
     }
@@ -4250,7 +4265,6 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         var content = cell.defaultContentConfiguration()
         var checked = false
         cell.accessoryType = .none
-        cell.selectionStyle = quotaCount > 0 && row == quotaRow ? .none : .default
 
         if row == 0 {
             content.text = allLabel
@@ -4258,15 +4272,11 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         } else if row <= seasons.count {
             content.text = labels.indices.contains(row - 1) ? labels[row - 1] : String(seasons[row - 1])
             checked = allSeasons || selected.contains(seasons[row - 1])
-        } else if quotaCount > 0 && row == quotaRow {
-            content.text = quotaBlocked ? quotaBlockedLabel : quotaLabel
         } else {
             content.text = row == submitRow ? submitLabel : cancelLabel
         }
 
-        content.textProperties.color = row == submitRow && !canSubmit ? .gray
-            : row == quotaRow && quotaCount > 0 ? (quotaBlocked ? .systemRed : .gray)
-            : .white
+        content.textProperties.color = row == submitRow && !canSubmit ? .gray : .white
         cell.contentConfiguration = content
         if checked { cell.accessoryType = .checkmark }
         return cell
@@ -4324,10 +4334,14 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     func finish(_ value: [String: Any]?) {
         guard !answered else { return }
         answered = true
+        // Hand Submit to Dart at press time, before grace expiry or a late
+        // quota response can change the decision during a dismissal animation.
+        completion(value)
         if isBeingDismissed || viewIfLoaded?.window == nil {
-            completion(value)
+            onDismissed?()
         } else {
-            dismiss(animated: true) { self.completion(value) }
+            // Immediate dismissal also lets a fast POST failure present its alert.
+            dismiss(animated: false) { self.onDismissed?() }
         }
     }
 
@@ -4336,6 +4350,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         if !answered && presentedViewController == nil {
             answered = true
             completion(nil)
+            onDismissed?()
         }
     }
 

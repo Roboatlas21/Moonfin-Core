@@ -552,14 +552,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     return _manager.nextInQueue();
   }
 
-  Future<void> _showCinemaSeriesRequest(
+  Future<SeerrTvDetails?> _showCinemaSeriesRequest(
     SeerrRepository repository,
     SeerrTvDetails details,
     SeerrUser user,
     int? season,
     bool Function() isCurrent,
   ) async {
-    if (!mounted || !isCurrent()) return;
+    if (!mounted || !isCurrent()) return null;
     _seriesPickerSession?.close();
     final session = CinemaSeriesPickerSession(
       accountKey: _cinemaUserAccountKey,
@@ -603,6 +603,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           );
         }
       }
+      return vm.confirmedCinemaTvDetails;
     } finally {
       if (requestListener != null) {
         vm?.removeListener(requestListener);

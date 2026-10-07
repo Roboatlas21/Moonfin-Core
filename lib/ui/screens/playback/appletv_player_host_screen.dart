@@ -207,7 +207,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     return _manager?.nextInQueue() ?? Future.value();
   }
 
-  Future<void> _requestCinemaSeries(
+  Future<SeerrTvDetails?> _requestCinemaSeries(
     SeerrRepository repository,
     SeerrTvDetails details,
     SeerrUser user,
@@ -215,12 +215,12 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     bool Function() isCurrent,
   ) async {
     final backend = _backend;
-    if (!mounted || backend == null || !isCurrent()) return;
+    if (!mounted || backend == null || !isCurrent()) return null;
     _cinemaPicker?.close();
     final requestId = ++_cinemaPickerId;
     final session = CinemaSeriesPickerSession(
       accountKey: _cinemaUserKey,
-      isMounted: () => mounted,
+      isMounted: () => mounted && !_exiting,
     );
     _cinemaPicker = session;
     session.dismissDialog = () => unawaited(
@@ -289,25 +289,36 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       if (!session.isCurrent ||
           selected == null ||
           selected['requestId'] != requestId) {
-        return;
+        return null;
       }
       final seasonRequest = cinemaTvRequestSelection(
         selected,
         seasons.toSet(),
         quotaDetail,
       );
-      if (seasonRequest == null) return;
+      if (seasonRequest == null) {
+        // Quota may have arrived after UIKit accepted Submit. Report the
+        // rejection instead of silently dropping the user's selection.
+        throw StateError('Cinema series selection is no longer requestable');
+      }
 
       session.markSubmitting();
+      // Only the open picker belongs in this slot. The submitted request
+      // remains valid for this account/player until this async call finishes.
+      // Opening another trailer's picker must not invalidate its POST.
+      if (identical(_cinemaPicker, session)) _cinemaPicker = null;
       await vm.submitRequest(
         is4k: false,
         seasons: seasonRequest.seasons,
         allSeasons: seasonRequest.allSeasons,
       );
       if (vm.state.requestError != null) {
-        if (session.isCurrent && !isCurrent()) _showCinemaError();
         throw StateError('Cinema series request failed');
       }
+      return vm.confirmedCinemaTvDetails;
+    } catch (_) {
+      if (session.isCurrent && !isCurrent()) _showCinemaError();
+      rethrow;
     } finally {
       vm.dispose();
       session.dispose();

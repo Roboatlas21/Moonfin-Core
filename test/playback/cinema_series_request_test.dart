@@ -71,7 +71,7 @@ void main() {
   late int dialogs;
   late int? selected;
   late bool Function() current;
-  late Completer<void> dialog;
+  late Completer<SeerrTvDetails?> dialog;
 
   setUp(() {
     repository = CinemaTvRepository();
@@ -140,6 +140,27 @@ void main() {
     });
   });
 
+  test('timeout confirmation updates the rail without another detail lookup', () {
+    fakeAsync((time) {
+      enter();
+      time.flushMicrotasks();
+      controller.request();
+      time.flushMicrotasks();
+      repository.failOnLookup = 2;
+      dialog.complete(
+        const SeerrTvDetails(
+          id: 42,
+          numberOfSeasons: 5,
+          mediaInfo: SeerrMediaInfo(status: SeerrMediaStatus.available),
+        ),
+      );
+      time.flushMicrotasks();
+      expect(repository.lookups, 1);
+      expect(controller.seerrState, CinemaSeerrState.available);
+      expect(controller.canRequest, isFalse);
+    });
+  });
+
   test('TV picker submission errors still reach the controller', () {
     fakeAsync((time) {
       final captured = <Object>[];
@@ -193,7 +214,12 @@ void main() {
         expect(current(), true);
         account = 'account-b';
         expect(current(), false);
-        dialog.complete();
+        dialog.complete(
+          const SeerrTvDetails(
+            id: 42,
+            mediaInfo: SeerrMediaInfo(status: SeerrMediaStatus.available),
+          ),
+        );
         time.flushMicrotasks();
         expect(repository.lookups, 1);
         expect(controller.visible, false);
@@ -210,7 +236,12 @@ void main() {
       time.flushMicrotasks();
       enter();
       expect(current(), false);
-      dialog.complete();
+      dialog.complete(
+        const SeerrTvDetails(
+          id: 42,
+          mediaInfo: SeerrMediaInfo(status: SeerrMediaStatus.available),
+        ),
+      );
       time.flushMicrotasks();
       expect(controller.seerrState, CinemaSeerrState.request);
     });

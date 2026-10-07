@@ -158,7 +158,9 @@ class CinemaModeController extends ChangeNotifier {
   final Object Function() _accountKey;
   final Future<void> Function() _onSkip;
   final void Function(Object) _onError;
-  final Future<void> Function(
+
+  /// Returns details already refreshed during timeout confirmation, if any.
+  final Future<SeerrTvDetails?> Function(
     SeerrRepository repository,
     SeerrTvDetails details,
     SeerrUser user,
@@ -447,7 +449,7 @@ class CinemaModeController extends ChangeNotifier {
     try {
       final seasons = cinemaRequestableSeasons(details);
       final season = seasons.contains(media?.season) ? media?.season : null;
-      await onRequestSeries!(
+      final confirmed = await onRequestSeries!(
         repository,
         details,
         user,
@@ -455,12 +457,15 @@ class CinemaModeController extends ChangeNotifier {
         () => _current(ticket) && !_skipping,
       );
       if (!_current(ticket)) return;
-      // Cancel and submit both refresh; another user may have requested a season.
+      // Reuse timeout confirmation; otherwise refresh after cancel or submit.
+      // Another user may have requested a season while the picker was open.
       seerrState = CinemaSeerrState.hidden;
       try {
-        final refreshed = await repository
-            .getTvDetails(id)
-            .timeout(const Duration(seconds: 10));
+        final refreshed =
+            confirmed ??
+            await repository
+                .getTvDetails(id)
+                .timeout(const Duration(seconds: 10));
         if (!_current(ticket) || refreshed.id != id) return;
         _tvDetails = refreshed;
         seerrState = cinemaTvSeerrState(refreshed);

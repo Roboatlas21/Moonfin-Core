@@ -379,6 +379,10 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
   bool _isDisposed = false;
 
   final bool Function()? _requestAllowed;
+  SeerrTvDetails? _confirmedCinemaTvDetails;
+
+  /// Fresh details from timeout reconciliation, reusable by the Cinema rail.
+  SeerrTvDetails? get confirmedCinemaTvDetails => _confirmedCinemaTvDetails;
 
   SeerrMediaDetailViewModel(this._repo, this._prefs) : _requestAllowed = null;
 
@@ -645,6 +649,7 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
     if (_isDisposed || _state.isRequesting || _requestAllowed?.call() == false) {
       return;
     }
+    _confirmedCinemaTvDetails = null;
 
     // Only Cinema TV needs a snapshot to reconcile an uncertain timeout.
     // Never infer success from a title-wide status; check the exact seasons.
@@ -732,6 +737,7 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
       if (!status.unavailableOrRequestedSeasons.containsAll(expectedSeasons)) {
         return false;
       }
+      _confirmedCinemaTvDetails = details;
       _state = _state.copyWith(
         tv: details,
         isRequesting: false,

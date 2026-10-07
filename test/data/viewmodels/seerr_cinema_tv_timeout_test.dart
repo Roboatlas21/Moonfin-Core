@@ -106,6 +106,7 @@ void main() {
       expect(vm.state.requestSuccess, 'Request submitted');
       expect(vm.state.requestError, isNull);
       expect(vm.state.isRequesting, isFalse);
+      expect(vm.confirmedCinemaTvDetails, same(repo.details));
       vm.dispose();
       repo.post.complete(const SeerrRequest(id: 8, type: 'tv', status: 2));
       clock.flushMicrotasks();
@@ -140,6 +141,7 @@ void main() {
       expect(repo.lookups, 1);
       expect(vm.state.requestSuccess, isNull);
       expect(vm.state.requestError, contains('TimeoutException'));
+      expect(vm.confirmedCinemaTvDetails, isNull);
       vm.dispose();
       repo.post.complete(const SeerrRequest(id: 8, type: 'tv', status: 2));
       clock.flushMicrotasks();
@@ -160,6 +162,7 @@ void main() {
       expect(repo.submitted, 1);
       expect(repo.lookups, 0);
       expect(vm.state.requestSuccess, isNull);
+      expect(vm.confirmedCinemaTvDetails, isNull);
       vm.dispose();
       repo.post.complete(const SeerrRequest(id: 8, type: 'tv', status: 2));
       clock.flushMicrotasks();
@@ -176,6 +179,7 @@ void main() {
     await submitted;
     expect(vm.state.requestSuccess, 'Request submitted');
     expect(vm.state.requestError, isNull);
+    expect(vm.confirmedCinemaTvDetails, isNull);
 
     repo.quota.complete(const SeerrQuota(
       tv: SeerrQuotaDetail(limit: 5, remaining: 3),
@@ -230,6 +234,7 @@ void main() {
       expect(repo.submitted, 1);
       expect(repo.lookups, 0);
       expect(vm.state.requestErrorKind, SeerrRequestErrorKind.quotaExceeded);
+      expect(vm.confirmedCinemaTvDetails, isNull);
       vm.dispose();
     });
   });
