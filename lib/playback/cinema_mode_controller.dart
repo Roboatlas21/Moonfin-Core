@@ -26,10 +26,9 @@ enum CinemaSeerrState {
 CinemaSeerrState cinemaSeerrState({
   int? mediaStatus,
   List<SeerrRequest>? requests,
-  required bool canRequest,
   bool acknowledged = false,
 }) {
-  if (!canRequest || mediaStatus == SeerrMediaStatus.blocklisted) {
+  if (mediaStatus == SeerrMediaStatus.blocklisted) {
     return CinemaSeerrState.hidden;
   }
   switch (mediaStatus) {
@@ -96,7 +95,6 @@ CinemaSeerrState cinemaTvSeerrState(SeerrTvDetails details) {
   }
   final state = cinemaSeerrState(
     mediaStatus: status,
-    canRequest: true,
     acknowledged:
         details.mediaInfo?.requests?.any(
           (r) =>
@@ -242,7 +240,6 @@ class CinemaModeController extends ChangeNotifier {
       seerrState = cinemaSeerrState(
         mediaStatus: details.mediaInfo?.status,
         requests: details.mediaInfo?.requests,
-        canRequest: permitted,
       );
       notifyListeners();
     } catch (_) {
@@ -291,16 +288,14 @@ class CinemaModeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void moveLeft() {
-    if (!visible) return;
-    if (canRequest) focusedAction = CinemaAction.request;
-    _restartTimer();
-    notifyListeners();
-  }
+  void moveLeft() =>
+      _moveFocus(canRequest ? CinemaAction.request : CinemaAction.skip);
 
-  void moveRight() {
+  void moveRight() => _moveFocus(CinemaAction.skip);
+
+  void _moveFocus(CinemaAction action) {
     if (!visible) return;
-    focusedAction = CinemaAction.skip;
+    focusedAction = action;
     _restartTimer();
     notifyListeners();
   }
@@ -367,8 +362,7 @@ class CinemaModeController extends ChangeNotifier {
       if (!_current(ticket)) return;
       seerrState = cinemaSeerrState(
         mediaStatus: response.media?.status,
-        canRequest: true,
-        acknowledged: true,
+            acknowledged: true,
       );
     } catch (error) {
       if (!_current(ticket)) return;
@@ -383,8 +377,7 @@ class CinemaModeController extends ChangeNotifier {
         seerrState = cinemaSeerrState(
           mediaStatus: details.mediaInfo?.status,
           requests: details.mediaInfo?.requests,
-          canRequest: true,
-        );
+              );
       } catch (_) {
         /* Uncertain outcome: don't offer another request. */
       }

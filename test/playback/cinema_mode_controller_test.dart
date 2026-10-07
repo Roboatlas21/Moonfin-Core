@@ -85,8 +85,7 @@ void main() {
           entry.value,
         );
       }
-      expect(cinemaSeerrState(canRequest: true), CinemaSeerrState.request);
-      expect(cinemaSeerrState(canRequest: false), CinemaSeerrState.hidden);
+      expect(cinemaSeerrState(), CinemaSeerrState.request);
     },
   );
 
@@ -100,7 +99,6 @@ void main() {
           cinemaSeerrState(
             mediaStatus: 1,
             requests: requests,
-            canRequest: true,
           ),
           !is4k && status <= 2
               ? CinemaSeerrState.requested
@@ -110,7 +108,6 @@ void main() {
           cinemaSeerrState(
             mediaStatus: 3,
             requests: requests,
-            canRequest: true,
           ),
           CinemaSeerrState.processing,
         );
@@ -118,7 +115,6 @@ void main() {
           cinemaSeerrState(
             mediaStatus: 6,
             requests: requests,
-            canRequest: true,
           ),
           CinemaSeerrState.hidden,
         );
