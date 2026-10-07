@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
@@ -87,6 +89,79 @@ void main() {
     expect(args['quotaRestricted'], false);
     expect(args['quotaLabel'], '1 of 3 seasons remaining');
     expect(args['quotaBlockedLabel'], 'Quota exceeded');
+  });
+
+  test('native options update can arrive while the picker is still open', () async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final completed = Completer<Map<String, dynamic>?>();
+    messenger.setMockMethodCallHandler(control, (call) async {
+      calls.add(call);
+      if (call.method == 'showCinemaRequestOptions') {
+        return completed.future;
+      }
+      if (call.method == 'updateCinemaRequestOptions') {
+        return true;
+      }
+      return null;
+    });
+
+    final picker = backend.showCinemaRequestOptions({
+      'requestId': 123,
+      'seasons': [2, 5],
+      'optionsLoading': true,
+    });
+    final updated = await backend.updateCinemaRequestOptions({
+      'requestId': 123,
+      'optionsLoading': false,
+      'advancedEnabled': true,
+      'selectedServerId': 1,
+      'selectedProfileId': 11,
+      'selectedRootFolderId': 101,
+      'servers': [
+        {
+          'id': 1,
+          'label': 'Sonarr',
+          'defaultProfileId': 11,
+          'defaultRootFolderId': 101,
+          'profiles': [
+            {'id': 11, 'label': 'Default'},
+          ],
+          'rootFolders': [
+            {'id': 101, 'label': '/tv'},
+          ],
+        },
+      ],
+    });
+    expect(updated, isTrue);
+    expect(calls.map((c) => c.method).toList(), [
+      'showCinemaRequestOptions',
+      'updateCinemaRequestOptions',
+    ]);
+    expect((calls.first.arguments as Map)['optionsLoading'], true);
+
+    completed.complete({
+      'requestId': 123,
+      'allSeasons': false,
+      'seasons': [5],
+      'serverId': 1,
+      'profileId': 11,
+      'rootFolderId': 101,
+    });
+    expect((await picker)?['requestId'], 123);
+    await backend.dismissCinemaRequestOptions(requestId: 123);
+    expect(calls.last.method, 'dismissCinemaRequestOptions');
+    expect(calls.last.arguments, {'requestId': 123});
+  });
+
+  test('unsupported native picker update is reported to Dart', () async {
+    expect(
+      await backend.updateCinemaRequestOptions({
+        'requestId': 123,
+        'optionsLoading': false,
+      }),
+      isFalse,
+    );
   });
 
   test(
