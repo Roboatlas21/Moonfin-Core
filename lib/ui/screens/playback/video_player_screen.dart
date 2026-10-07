@@ -675,16 +675,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     });
   }
 
-  void _showPrerollSkip() => _cinema.reveal();
-
   void _hidePrerollSkip({bool suppressBack = false}) {
     if (suppressBack) {
       _suppressBackNavigation(duration: const Duration(milliseconds: 500));
     }
     _cinema.hide();
   }
-
-  void _skipPreroll() => _cinema.skip();
 
   void _armPrerollSkipAfterPlaybackStarts() {
     final source = _manager.bringupState;
@@ -1233,7 +1229,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (isPreroll) {
         _hideTimer?.cancel();
         _focusTvSkipSegment();
-        _armPrerollSkipAfterPlaybackStarts();
       }
     });
 
@@ -3303,16 +3298,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _focusTvSkipSegment({int attempt = 0}) {
-    if (_isCurrentPreroll) { _focusCinemaAction(); return; }
-    if (!PlatformDetection.isTV ||
-        (_skipSegment == null && !_isPrerollSkipButtonVisible)) {
+    if (_isCurrentPreroll) {
+      _focusCinemaAction();
       return;
     }
+    if (!PlatformDetection.isTV || _skipSegment == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          (_skipSegment == null && !_isPrerollSkipButtonVisible)) {
-        return;
-      }
+      if (!mounted || _skipSegment == null) return;
       _tvSkipSegmentFocus.requestFocus();
 
       if (!_tvSkipSegmentFocus.hasFocus && attempt < 8) {
@@ -3357,7 +3349,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (_isCurrentPreroll) {
       _syncPrerollOsdState();
       if (!_isPrerollSkipButtonVisible) {
-        _showPrerollSkip();
+        _cinema.reveal();
       }
       return;
     }
@@ -3837,88 +3829,54 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (_routeCovered) return KeyEventResult.ignored;
     if (_isCurrentPreroll) {
       if (event is KeyUpEvent) {
-        final isBackKey = event.logicalKey.isBackKey;
-        if (isBackKey) {
+        return event.logicalKey.isBackKey
+            ? KeyEventResult.handled
+            : KeyEventResult.ignored;
+      }
+      if (event is KeyRepeatEvent) return KeyEventResult.handled;
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+      if (event.logicalKey.isBackKey) {
+        if (_isPrerollSkipButtonVisible) {
+          _hidePrerollSkip(suppressBack: true);
+        } else if (!_isBackNavigationSuppressed()) {
+          _exitPlayback();
+        }
+        return KeyEventResult.handled;
+      }
+
+      switch (event.logicalKey) {
+        case LogicalKeyboardKey.mediaPlay:
+          unawaited(_resumeWithConfiguredRewind());
           return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      }
-
-      if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-        return KeyEventResult.ignored;
-      }
-
-      if (event is KeyDownEvent) {
-        final isBackKey = event.logicalKey.isBackKey;
-
-        if (isBackKey) {
-          if (_isPrerollSkipButtonVisible) {
-            _hidePrerollSkip(suppressBack: true);
-          } else if (!_isBackNavigationSuppressed()) {
-            _exitPlayback();
-          }
+        case LogicalKeyboardKey.mediaPause:
+          _manager.pause();
           return KeyEventResult.handled;
-        }
-
-        switch (event.logicalKey) {
-          case LogicalKeyboardKey.mediaPlay:
-            unawaited(_resumeWithConfiguredRewind());
-            return KeyEventResult.handled;
-          case LogicalKeyboardKey.mediaPause:
-            _manager.pause();
-            return KeyEventResult.handled;
-          case LogicalKeyboardKey.mediaPlayPause:
-          case LogicalKeyboardKey.space:
-            _togglePlayPause();
-            return KeyEventResult.handled;
-          case LogicalKeyboardKey.enter:
-          case LogicalKeyboardKey.select:
-            _cinema.activate();
-            return KeyEventResult.handled;
-          case LogicalKeyboardKey.arrowLeft:
-            _cinema.moveLeft();
-            return KeyEventResult.handled;
-          case LogicalKeyboardKey.arrowRight:
-            _cinema.moveRight();
-            return KeyEventResult.handled;
-
-          case LogicalKeyboardKey.mediaFastForward:
-            _skipPreroll();
-            return KeyEventResult.handled;
-
-          case LogicalKeyboardKey.mediaRewind:
-            unawaited(_seekDirect(Duration.zero));
-            _lastSeekTime = DateTime.now();
-            unawaited(_manager.resume());
-            return KeyEventResult.handled;
-
-          default:
-            return KeyEventResult.handled;
-        }
-      }
-
-      if (event is KeyRepeatEvent) {
-        final isBackKey = event.logicalKey.isBackKey;
-        if (isBackKey) {
+        case LogicalKeyboardKey.mediaPlayPause:
+        case LogicalKeyboardKey.space:
+          _togglePlayPause();
           return KeyEventResult.handled;
-        }
-
-        switch (event.logicalKey) {
-          case LogicalKeyboardKey.mediaPlay:
-          case LogicalKeyboardKey.mediaPause:
-          case LogicalKeyboardKey.mediaPlayPause:
-          case LogicalKeyboardKey.space:
-          case LogicalKeyboardKey.enter:
-          case LogicalKeyboardKey.select:
-          case LogicalKeyboardKey.mediaFastForward:
-          case LogicalKeyboardKey.mediaRewind:
-            return KeyEventResult.handled;
-          default:
-            return KeyEventResult.handled;
-        }
+        case LogicalKeyboardKey.enter:
+        case LogicalKeyboardKey.select:
+          _cinema.activate();
+          return KeyEventResult.handled;
+        case LogicalKeyboardKey.arrowLeft:
+          _cinema.moveLeft();
+          return KeyEventResult.handled;
+        case LogicalKeyboardKey.arrowRight:
+          _cinema.moveRight();
+          return KeyEventResult.handled;
+        case LogicalKeyboardKey.mediaFastForward:
+          _cinema.skip();
+          return KeyEventResult.handled;
+        case LogicalKeyboardKey.mediaRewind:
+          unawaited(_seekDirect(Duration.zero));
+          _lastSeekTime = DateTime.now();
+          unawaited(_manager.resume());
+          return KeyEventResult.handled;
+        default:
+          return KeyEventResult.handled;
       }
-
-      return KeyEventResult.ignored;
     }
 
     if (event is KeyUpEvent) {
