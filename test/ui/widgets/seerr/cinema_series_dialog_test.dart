@@ -17,6 +17,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../playback/cinema_series_request_test.dart'
     show CinemaTvRepository, CinemaTvPreferences;
 
+class _QuotaExhaustedRepo extends CinemaTvRepository {
+  @override
+  Future<SeerrQuota> getUserQuota(int userId) async =>
+      const SeerrQuota(tv: SeerrQuotaDetail(limit: 1, remaining: 0));
+}
+
 void main() {
   late CinemaTvRepository repo;
   late SeerrMediaDetailViewModel vm;
@@ -166,6 +172,43 @@ void main() {
     expect(repo.submissions.single.seasons, isNull);
   });
 
+  testWidgets('ordinary All Seasons retains its minimum quota for known seasons', (
+    tester,
+  ) async {
+    vm.dispose();
+    repo = _QuotaExhaustedRepo();
+    vm = SeerrMediaDetailViewModel.forCinema(
+      repo,
+      CinemaTvPreferences(),
+      details: const SeerrTvDetails(
+        id: 42,
+        numberOfSeasons: 2,
+        mediaInfo: SeerrMediaInfo(
+          seasons: [
+            SeerrSeasonAvailability(
+              seasonNumber: 1,
+              status: SeerrMediaStatus.available,
+            ),
+            SeerrSeasonAvailability(
+              seasonNumber: 2,
+              status: SeerrMediaStatus.available,
+            ),
+          ],
+        ),
+      ),
+      user: const SeerrUser(id: 5, permissions: SeerrPermission.requestTv),
+      requestAllowed: () => current,
+    );
+    await open(tester, cinema: false);
+    expect(
+      tester.widget<SeerrDialogButton>(
+        find.widgetWithText(SeerrDialogButton, 'Submit Request'),
+      ).onPressed,
+      isNull,
+    );
+    expect(repo.submissions, isEmpty);
+  });
+
   testWidgets('Cinema still blocks missing season metadata', (tester) async {
     vm.dispose();
     vm = SeerrMediaDetailViewModel.forCinema(
@@ -271,6 +314,34 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(SeerrRequestDialog), findsNothing);
     expect(closed, true);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an older Cinema submission cannot pop a newer picker', (
+    tester,
+  ) async {
+    repo.submission = Completer<SeerrRequest>();
+    await open(tester, season: 5);
+    await tester.tap(find.text('Submit Request'));
+    await tester.pump();
+    expect(vm.state.isRequesting, true);
+
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator).first);
+    unawaited(
+      showDialog<void>(
+        context: navigator.context,
+        builder: (_) => const AlertDialog(content: Text('New picker')),
+      ),
+    );
+    await tester.pumpAndSettle();
+    repo.submission!.complete(const SeerrRequest(id: 1, status: 2, type: 'tv'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New picker'), findsOneWidget);
+    expect(closed, isTrue);
+    navigator.pop();
+    await tester.pumpAndSettle();
+    expect(find.byType(SeerrRequestDialog), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
