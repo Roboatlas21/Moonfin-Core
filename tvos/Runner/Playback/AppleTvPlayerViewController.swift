@@ -149,7 +149,7 @@ final class AppleTvPlayerViewController: UIViewController {
     private let cinemaRequest = UILabel()
     private let cinemaRequestPanel = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private var skipBottomConstraint: NSLayoutConstraint?
-    private weak var cinemaPicker: CinemaSeasonPicker?
+    private weak var cinemaPicker: CinemaRequestPicker?
 
     private var skipSegmentActive = false
     private let skipSegmentButton = UIView()
@@ -757,17 +757,19 @@ final class AppleTvPlayerViewController: UIViewController {
         }
     }
 
-    func presentCinemaSeasons(_ args: [String: Any], completion: @escaping ([Int]?) -> Void) {
+    func presentCinemaRequestOptions(
+        _ args: [String: Any], completion: @escaping ([String: Any]?) -> Void
+    ) {
         guard !isBeingDismissed, presentedViewController == nil, viewIfLoaded?.window != nil else {
             completion(nil)
             return
         }
-        let picker = CinemaSeasonPicker(options: args, completion: completion)
+        let picker = CinemaRequestPicker(options: args, completion: completion)
         cinemaPicker = picker
         present(picker, animated: true)
     }
 
-    func dismissCinemaSeasons() { cinemaPicker?.finish(nil) }
+    func dismissCinemaRequestOptions() { cinemaPicker?.finish(nil) }
 
     func showCinemaError(_ message: String) {
         guard presentedViewController == nil else { return }
@@ -4148,105 +4150,252 @@ private final class RemotePlayerMenu: UITableViewController, RemotePlayerNavigab
     }
 }
 
-/// Native season selection; identity, permission, submission, and expiry stay in Dart.
-private final class CinemaSeasonPicker: UITableViewController, RemotePlayerNavigable {
+/// Native request picker. Dart owns identity, permissions, defaults,
+/// validation, submission, and expiry; UIKit only renders and returns ids.
+private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavigable {
     private let seasons: [Int]
     private let labels: [String]
     private let allLabel: String
     private let submitLabel: String
     private let cancelLabel: String
-    private let completion: ([Int]?) -> Void
+    private let advancedEnabled: Bool
+    private let serverLabel: String
+    private let profileLabel: String
+    private let rootFolderLabel: String
+    private let servers: [[String: Any]]
+    private let completion: ([String: Any]?) -> Void
+
     private var selected: Set<Int>
+    private var selectedServerId: Int?
+    private var selectedProfileId: Int?
+    private var selectedRootFolderId: Int?
     private var focusedRow = 0
     private var answered = false
 
-    init(options: [String: Any], completion: @escaping ([Int]?) -> Void) {
-        let availableSeasons = options["seasons"] as? [Int] ?? []
-        seasons = availableSeasons
+    init(options: [String: Any], completion: @escaping ([String: Any]?) -> Void) {
+        seasons = Self.intArray(options["seasons"])
         labels = options["labels"] as? [String] ?? []
-        selected = Set(options["selected"] as? [Int] ?? []).intersection(availableSeasons)
+        selected = Set(Self.intArray(options["selected"])).intersection(seasons)
         allLabel = options["allLabel"] as? String ?? ""
         submitLabel = options["submitLabel"] as? String ?? ""
         cancelLabel = options["cancelLabel"] as? String ?? ""
+        advancedEnabled = options["advancedEnabled"] as? Bool ?? false
+        serverLabel = options["serverLabel"] as? String ?? "Server"
+        profileLabel = options["profileLabel"] as? String ?? "Quality Profile"
+        rootFolderLabel = options["rootFolderLabel"] as? String ?? "Root Folder"
+        servers = options["servers"] as? [[String: Any]] ?? []
+        selectedServerId = Self.intValue(options["selectedServerId"])
+        selectedProfileId = Self.intValue(options["selectedProfileId"])
+        selectedRootFolderId = Self.intValue(options["selectedRootFolderId"])
         self.completion = completion
         super.init(style: .grouped)
         title = options["title"] as? String
         modalPresentationStyle = .overFullScreen
+        normalizeAdvancedSelection()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private var advancedCount: Int { advancedEnabled ? 3 : 0 }
+    private var advancedStart: Int { seasons.count + 1 }
+    private var submitRow: Int { advancedStart + advancedCount }
+    private var cancelRow: Int { submitRow + 1 }
+
+    private var activeServer: [String: Any]? {
+        if let selectedServerId,
+           let server = servers.first(where: { Self.intValue($0["id"]) == selectedServerId }) {
+            return server
+        }
+        return servers.first
+    }
+
+    private var profiles: [[String: Any]] {
+        activeServer?["profiles"] as? [[String: Any]] ?? []
+    }
+
+    private var rootFolders: [[String: Any]] {
+        activeServer?["rootFolders"] as? [[String: Any]] ?? []
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         tableView.backgroundColor = UIColor(white: 0.08, alpha: 0.98)
         tableView.contentInset = UIEdgeInsets(top: 60, left: 240, bottom: 60, right: 240)
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "season")
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "request")
         tableView.remembersLastFocusedIndexPath = true
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { title }
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { seasons.count + 3 }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        cancelRow + 1
+    }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "season", for: indexPath)
+        let cell = tableView.dequeueReusableCell(withIdentifier: "request", for: indexPath)
         let row = indexPath.row
         var content = cell.defaultContentConfiguration()
         var checked = false
+        cell.accessoryType = .none
+
         if row == 0 {
             content.text = allLabel
             checked = !seasons.isEmpty && selected.count == seasons.count
         } else if row <= seasons.count {
             content.text = labels.indices.contains(row - 1) ? labels[row - 1] : String(seasons[row - 1])
             checked = selected.contains(seasons[row - 1])
+        } else if advancedEnabled && row < submitRow {
+            let offset = row - advancedStart
+            switch offset {
+            case 0:
+                content.text = summary(serverLabel, labelFor(selectedServerId, in: servers))
+            case 1:
+                content.text = summary(profileLabel, labelFor(selectedProfileId, in: profiles))
+            default:
+                content.text = summary(rootFolderLabel, labelFor(selectedRootFolderId, in: rootFolders))
+            }
+            cell.accessoryType = .disclosureIndicator
         } else {
-            content.text = row == seasons.count + 1 ? submitLabel : cancelLabel
+            content.text = row == submitRow ? submitLabel : cancelLabel
         }
-        content.textProperties.color = row == seasons.count + 1 && selected.isEmpty ? .gray : .white
+
+        content.textProperties.color = row == submitRow && selected.isEmpty ? .gray : .white
         cell.contentConfiguration = content
-        cell.accessoryType = checked ? .checkmark : .none
+        if checked { cell.accessoryType = .checkmark }
         return cell
     }
 
-    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { activate(indexPath.row) }
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        activate(indexPath.row)
+    }
 
-    override func tableView(_ tableView: UITableView, didUpdateFocusIn context: UITableViewFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
+    override func tableView(
+        _ tableView: UITableView,
+        didUpdateFocusIn context: UITableViewFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
         if let next = context.nextFocusedIndexPath { focusedRow = next.row }
     }
 
     override func indexPathForPreferredFocusedView(in tableView: UITableView) -> IndexPath? {
-        IndexPath(row: focusedRow, section: 0)
+        IndexPath(row: min(focusedRow, cancelRow), section: 0)
     }
 
     private func activate(_ row: Int) {
         guard !answered else { return }
-        if row == seasons.count + 2 { finish(nil); return }
-        if row == seasons.count + 1 {
-            if !selected.isEmpty { finish(selected.sorted()) }
+        if row == cancelRow { finish(nil); return }
+        if row == submitRow {
+            if !selected.isEmpty { finish(result()) }
             return
         }
         if row == 0 {
             selected = selected.count == seasons.count ? [] : Set(seasons)
-        } else if seasons.indices.contains(row - 1) {
+            tableView.reloadData()
+            return
+        }
+        if seasons.indices.contains(row - 1) {
             let number = seasons[row - 1]
             if selected.contains(number) { selected.remove(number) } else { selected.insert(number) }
+            tableView.reloadData()
+            return
         }
-        tableView.reloadData()
+        guard advancedEnabled else { return }
+        switch row - advancedStart {
+        case 0:
+            presentChoices(title: serverLabel, options: servers, selectedId: selectedServerId) { [weak self] id in
+                guard let self else { return }
+                selectedServerId = id
+                normalizeAdvancedSelection(resetChildren: true)
+                tableView.reloadData()
+            }
+        case 1:
+            presentChoices(title: profileLabel, options: profiles, selectedId: selectedProfileId) { [weak self] id in
+                self?.selectedProfileId = id
+                self?.tableView.reloadData()
+            }
+        case 2:
+            presentChoices(title: rootFolderLabel, options: rootFolders, selectedId: selectedRootFolderId) { [weak self] id in
+                self?.selectedRootFolderId = id
+                self?.tableView.reloadData()
+            }
+        default:
+            break
+        }
     }
 
-    func finish(_ seasons: [Int]?) {
+    private func normalizeAdvancedSelection(resetChildren: Bool = false) {
+        guard advancedEnabled, !servers.isEmpty else {
+            selectedServerId = nil
+            selectedProfileId = nil
+            selectedRootFolderId = nil
+            return
+        }
+        var reset = resetChildren
+        if selectedServerId == nil || !servers.contains(where: { Self.intValue($0["id"]) == selectedServerId }) {
+            selectedServerId = Self.intValue(servers.first?["id"])
+            reset = true
+        }
+        guard let server = activeServer else { return }
+        if reset ||
+            selectedProfileId == nil ||
+            !profiles.contains(where: { Self.intValue($0["id"]) == selectedProfileId }) {
+            selectedProfileId = Self.intValue(server["defaultProfileId"])
+        }
+        if reset ||
+            selectedRootFolderId == nil ||
+            !rootFolders.contains(where: { Self.intValue($0["id"]) == selectedRootFolderId }) {
+            selectedRootFolderId = Self.intValue(server["defaultRootFolderId"])
+        }
+    }
+
+    private func presentChoices(
+        title: String,
+        options: [[String: Any]],
+        selectedId: Int?,
+        onSelect: @escaping (Int) -> Void
+    ) {
+        guard !options.isEmpty, presentedViewController == nil else { return }
+        let entries = options.compactMap { option -> RemotePlayerMenu.Entry? in
+            guard let id = Self.intValue(option["id"]) else { return nil }
+            let label = option["label"] as? String ?? String(id)
+            let action = UIAlertAction(
+                title: id == selectedId ? "✓ \(label)" : label,
+                style: .default
+            )
+            return RemotePlayerMenu.Entry(action: action) { _ in onSelect(id) }
+        }
+        let cancel = UIAlertAction(title: cancelLabel, style: .cancel)
+        let menu = RemotePlayerMenu(
+            title: title,
+            message: nil,
+            entries: entries + [RemotePlayerMenu.Entry(action: cancel) { _ in }]
+        )
+        present(menu, animated: true)
+    }
+
+    private func result() -> [String: Any] {
+        var value: [String: Any] = ["seasons": selected.sorted()]
+        if let selectedServerId { value["serverId"] = selectedServerId }
+        if let selectedProfileId { value["profileId"] = selectedProfileId }
+        if let selectedRootFolderId { value["rootFolderId"] = selectedRootFolderId }
+        return value
+    }
+
+    func finish(_ value: [String: Any]?) {
         guard !answered else { return }
         answered = true
-        // Finish dismissal before Dart can display a submission failure.
         if isBeingDismissed || viewIfLoaded?.window == nil {
-            completion(seasons)
+            completion(value)
         } else {
-            dismiss(animated: true) { self.completion(seasons) }
+            dismiss(animated: true) { self.completion(value) }
         }
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if !answered {
+        // Presenting a server/profile/folder submenu must not cancel the
+        // parent request picker.
+        if !answered && presentedViewController == nil {
             answered = true
             completion(nil)
         }
@@ -4254,11 +4403,15 @@ private final class CinemaSeasonPicker: UITableViewController, RemotePlayerNavig
 
     func handleRemoteNavigation(_ command: String) {
         guard !answered else { return }
+        if let modal = presentedViewController as? RemotePlayerNavigable {
+            modal.handleRemoteNavigation(command)
+            return
+        }
         if command == "back" { finish(nil); return }
         if command == "select" { activate(focusedRow); return }
         switch command {
         case "moveup", "moveleft": focusedRow = max(0, focusedRow - 1)
-        case "movedown", "moveright": focusedRow = min(seasons.count + 2, focusedRow + 1)
+        case "movedown", "moveright": focusedRow = min(cancelRow, focusedRow + 1)
         default: return
         }
         let path = IndexPath(row: focusedRow, section: 0)
@@ -4272,7 +4425,26 @@ private final class CinemaSeasonPicker: UITableViewController, RemotePlayerNavig
     }
 
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if presses.contains(where: { $0.type == .menu }) { finish(nil); return }
+        if presses.contains(where: { $0.type == .menu }) { handleRemoteNavigation("back"); return }
         super.pressesBegan(presses, with: event)
     }
+
+    private func summary(_ label: String, _ value: String?) -> String {
+        value.map { "\(label): \($0)" } ?? label
+    }
+
+    private func labelFor(_ id: Int?, in options: [[String: Any]]) -> String? {
+        guard let id else { return nil }
+        return options.first(where: { Self.intValue($0["id"]) == id })?["label"] as? String
+    }
+
+    private static func intArray(_ value: Any?) -> [Int] {
+        (value as? [Any] ?? []).compactMap(intValue)
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let number = value as? NSNumber { return number.intValue }
+        return value as? Int
+    }
 }
+

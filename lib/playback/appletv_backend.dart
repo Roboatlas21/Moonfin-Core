@@ -598,12 +598,18 @@ class AppleTvBackend implements PlayerBackend {
   Future<void> setCinemaActions(Map<String, Object?> state) =>
       _invoke<void>('setCinemaActions', state);
 
-  Future<List<int>?> showCinemaSeasons(Map<String, Object?> options) async {
-    final selected = await _invoke<List<dynamic>>('showCinemaSeasons', options);
-    return selected?.whereType<int>().toList();
+  Future<Map<String, dynamic>?> showCinemaRequestOptions(
+    Map<String, Object?> options,
+  ) async {
+    final selected = await _invoke<Map<dynamic, dynamic>>(
+      'showCinemaRequestOptions',
+      options,
+    );
+    return selected?.map((key, value) => MapEntry(key.toString(), value));
   }
 
-  Future<void> dismissCinemaSeasons() => _invoke<void>('dismissCinemaSeasons');
+  Future<void> dismissCinemaRequestOptions() =>
+      _invoke<void>('dismissCinemaRequestOptions');
 
   Future<void> showCinemaError(String message) =>
       _invoke<void>('showCinemaError', {'message': message});

@@ -29,29 +29,39 @@ void main() {
 
   tearDown(() => backend.dispose());
 
-  test('native season selection returns explicit seasons and preserves cancellation', () async {
+  test('native request picker returns options and preserves cancellation', () async {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    Object? reply = [2, 5];
+    Object? reply = {
+      'seasons': [2, 5],
+      'serverId': 1,
+      'profileId': 11,
+      'rootFolderId': 101,
+    };
     messenger.setMockMethodCallHandler(control, (call) async {
       calls.add(call);
-      return call.method == 'showCinemaSeasons' ? reply : null;
+      return call.method == 'showCinemaRequestOptions' ? reply : null;
     });
     expect(
-      await backend.showCinemaSeasons({
+      await backend.showCinemaRequestOptions({
         'seasons': [2, 5],
       }),
-      [2, 5],
+      {
+        'seasons': [2, 5],
+        'serverId': 1,
+        'profileId': 11,
+        'rootFolderId': 101,
+      },
     );
     reply = null;
     expect(
-      await backend.showCinemaSeasons({
+      await backend.showCinemaRequestOptions({
         'seasons': [2, 5],
       }),
       isNull,
     );
-    await backend.dismissCinemaSeasons();
-    expect(calls.last.method, 'dismissCinemaSeasons');
+    await backend.dismissCinemaRequestOptions();
+    expect(calls.last.method, 'dismissCinemaRequestOptions');
   });
 
   test(

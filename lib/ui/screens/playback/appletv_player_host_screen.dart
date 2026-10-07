@@ -13,6 +13,8 @@ import '../../../auth/repositories/session_repository.dart';
 import '../../../data/repositories/seerr_repository.dart';
 import '../../../data/services/cinema_media_resolver.dart';
 import '../../../data/services/seerr/seerr_api_models.dart';
+import '../../../data/services/seerr/seerr_request_options.dart';
+import '../../../data/viewmodels/seerr_media_detail_view_model.dart';
 import '../../../playback/cinema_mode_controller.dart';
 import '../../../playback/cinema_series_picker_session.dart';
 import '../../widgets/playback/cinema_mode_actions_overlay.dart';
@@ -33,6 +35,7 @@ import '../../screensaver/screensaver_controller.dart';
 import '../../navigation/app_router.dart';
 import '../../navigation/destinations.dart';
 import '../../../preference/preference_constants.dart';
+import '../../../preference/seerr_preferences.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../util/remote_subtitle_labels.dart';
@@ -218,11 +221,43 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       isMounted: () => mounted,
     );
     _cinemaPicker = session;
-    session.dismissDialog = () => unawaited(backend.dismissCinemaSeasons());
+    session.dismissDialog = () =>
+        unawaited(backend.dismissCinemaRequestOptions());
+
+    final vm = SeerrMediaDetailViewModel.forCinema(
+      repository,
+      GetIt.instance<SeerrPreferences>(),
+      details: details,
+      user: user,
+      requestAllowed: () => session.isCurrent && isCurrent(),
+    );
     final seasons = cinemaRequestableSeasons(details).toList()..sort();
+    final options = SeerrRequestOptions(
+      isTv: true,
+      isAnime: vm.state.isAnime,
+    )..applyDefaults(
+        SeerrRequestDefaults(
+          serverId: vm.savedServerId,
+          profileId: vm.savedProfileId,
+          rootFolderId: vm.savedRootFolderId,
+        ),
+      );
+
+    if (vm.canRequestAdvanced) {
+      try {
+        await options.load(repository);
+      } catch (_) {
+        // Advanced overrides are optional; Seerr can still use server defaults.
+      }
+      if (!session.isCurrent || !isCurrent()) {
+        vm.dispose();
+        return;
+      }
+    }
+
     final l10n = AppLocalizations.of(context);
     try {
-      final selected = await backend.showCinemaSeasons({
+      final selected = await backend.showCinemaRequestOptions({
         'title': l10n.requestSeriesOrMovie(l10n.series),
         'seasons': seasons,
         'labels': [for (final number in seasons) l10n.seasonChip(number)],
@@ -230,22 +265,75 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         'allLabel': l10n.allSeasons,
         'submitLabel': l10n.submitRequest,
         'cancelLabel': l10n.cancel,
+        'advancedEnabled': vm.canRequestAdvanced && options.servers.isNotEmpty,
+        'serverLabel': l10n.server,
+        'profileLabel': l10n.qualityProfile,
+        'rootFolderLabel': l10n.rootFolder,
+        'selectedServerId': options.effectiveServerId,
+        'selectedProfileId': options.effectiveProfileId,
+        'selectedRootFolderId': options.effectiveRootFolderId,
+        'servers': [
+          for (final server in options.servers)
+            {
+              'id': server.server.id,
+              'label':
+                  '${server.server.name}${server.server.is4k ? ' (${l10n.uhd4k})' : ''}',
+              'defaultProfileId': options.defaultProfileIdFor(server),
+              'defaultRootFolderId': options.defaultRootFolderIdFor(server),
+              'profiles': [
+                for (final profile in server.profiles)
+                  {'id': profile.id, 'label': profile.name},
+              ],
+              'rootFolders': [
+                for (final folder in server.rootFolders)
+                  {'id': folder.id, 'label': folder.path},
+              ],
+            },
+        ],
       });
-      if (!session.isCurrent || selected == null || selected.isEmpty) return;
-      if (!selected.every(seasons.contains)) return;
+      if (!session.isCurrent || !isCurrent() || selected == null) return;
+
+      final selectedSeasons = (selected['seasons'] as List?)
+              ?.whereType<num>()
+              .map((value) => value.toInt())
+              .toSet()
+              .toList() ??
+          <int>[];
+      selectedSeasons.sort();
+      if (selectedSeasons.isEmpty ||
+          !selectedSeasons.every(seasons.contains)) {
+        return;
+      }
+
+      if (vm.canRequestAdvanced && options.servers.isNotEmpty) {
+        final serverId = (selected['serverId'] as num?)?.toInt();
+        final profileId = (selected['profileId'] as num?)?.toInt();
+        final rootFolderId = (selected['rootFolderId'] as num?)?.toInt();
+        if (!options.selectServer(serverId) ||
+            !options.selectProfile(profileId) ||
+            !options.selectRootFolder(rootFolderId)) {
+          throw StateError('Invalid Seerr request option returned by tvOS');
+        }
+      }
+
+      final submission = options.submission;
+      if (submission == null) {
+        throw StateError('Invalid Seerr request option selection');
+      }
+
       session.markSubmitting();
-      await repository
-          .createRequest(
-            mediaId: details.id,
-            mediaType: 'tv',
-            seasons: selected.toSet().toList()..sort(),
-            is4k: false,
-          )
-          .timeout(const Duration(seconds: 20));
-    } catch (_) {
-      if (session.isCurrent && !isCurrent()) _showCinemaError();
-      rethrow;
+      await vm.submitRequest(
+        is4k: false,
+        seasons: selectedSeasons,
+        profileId: submission.profileId,
+        rootFolder: submission.rootFolder,
+        serverId: submission.serverId,
+      );
+      if (vm.state.requestError != null) {
+        throw StateError('Cinema series request failed');
+      }
     } finally {
+      vm.dispose();
       session.dispose();
       if (identical(_cinemaPicker, session)) _cinemaPicker = null;
     }

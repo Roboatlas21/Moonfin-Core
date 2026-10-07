@@ -45,10 +45,10 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                 }
                 return
             }
-            if call.method == "showCinemaSeasons" {
+            if call.method == "showCinemaRequestOptions" {
                 Task { @MainActor in
                     guard let vc = self?.playerVC else { result(nil); return }
-                    vc.presentCinemaSeasons(call.arguments as? [String: Any] ?? [:]) {
+                    vc.presentCinemaRequestOptions(call.arguments as? [String: Any] ?? [:]) {
                         result($0)
                     }
                 }
@@ -118,8 +118,8 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         case "setCinemaActions":
             lastCinemaActions = args
             playerVC?.applyCinemaActions(args)
-        case "dismissCinemaSeasons":
-            playerVC?.dismissCinemaSeasons()
+        case "dismissCinemaRequestOptions":
+            playerVC?.dismissCinemaRequestOptions()
         case "showCinemaError":
             playerVC?.showCinemaError((args["message"] as? String) ?? "")
         case "showNextUp":
@@ -368,7 +368,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
     }
 
     private func dismiss() {
-        playerVC?.dismissCinemaSeasons()
+        playerVC?.dismissCinemaRequestOptions()
         lastCinemaActions = nil
         stopStateTimer()
         player?.shutdown()
