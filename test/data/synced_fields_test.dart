@@ -30,6 +30,8 @@ void main() {
     'cardFocusExpansion',
     'cinemaModeEnabled',
     'cinemaModeEpisodesEnabled',
+    'cinemaModeSkipAutoHide',
+    'cinemaModeSkipCountdown',
     'clockBehavior',
     'collectionsRowShowEpisodes',
     'collectionsRowSortBy',
