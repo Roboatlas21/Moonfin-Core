@@ -13,7 +13,6 @@ import '../../../auth/repositories/session_repository.dart';
 import '../../../data/repositories/seerr_repository.dart';
 import '../../../data/services/cinema_media_resolver.dart';
 import '../../../data/services/seerr/seerr_api_models.dart';
-import '../../../data/services/seerr/seerr_request_options.dart';
 import '../../../data/viewmodels/seerr_media_detail_view_model.dart';
 import '../../../playback/cinema_mode_controller.dart';
 import '../../../playback/cinema_series_picker_session.dart';
@@ -232,14 +231,13 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       GetIt.instance<SeerrPreferences>(),
       details: details,
       user: user,
-      // After a trailer transition, the picker owns its ten-second grace.
       requestAllowed: () => session.isCurrent,
     );
     final seasons = cinemaRequestableSeasons(details).toList()..sort();
     final l10n = AppLocalizations.of(context);
     try {
-      // The native method completes only on submit or cancel. Start it before
-      // any Seerr network work so season selection is immediately interactive.
+      // Movies request directly; TV only asks which seasons to request.
+      // Seerr's configured Sonarr defaults supply server/profile/root folder.
       final pickerResult = backend.showCinemaRequestOptions({
         'requestId': requestId,
         'title': l10n.requestSeriesOrMovie(l10n.series),
@@ -249,143 +247,61 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         'allLabel': l10n.allSeasons,
         'submitLabel': l10n.submitRequest,
         'cancelLabel': l10n.cancel,
-        'optionsLoading': true,
-        'loadingLabel': l10n.seerrLoadingRequestOptions,
-        'serverLabel': l10n.server,
-        'profileLabel': l10n.qualityProfile,
-        'rootFolderLabel': l10n.rootFolder,
         'quotaBlockedLabel': l10n.requestErrorQuota,
       });
 
-      final options = SeerrRequestOptions(
-        isTv: true,
-        isAnime: vm.state.isAnime,
-      )..applyDefaults(
-          SeerrRequestDefaults(
-            serverId: vm.savedServerId,
-            profileId: vm.savedProfileId,
-            rootFolderId: vm.savedRootFolderId,
-          ),
-        );
-      final optionsFuture = vm.canRequestAdvanced
-          ? loadCinemaSeerrOptions(repository, options)
-          : Future<SeerrRequestOptions?>.value();
-      final quotaFuture = repository
-          .getUserQuota(user.id)
-          .timeout(const Duration(seconds: 5))
-          .then<SeerrQuotaDetail?>(
-            (quota) => quota.tv,
-            onError: (Object _) => null,
-          );
-
-      // Independent, bounded fetches run while the picker is already open.
-      // The native picker is not allowed to submit until it receives this
-      // final snapshot; late network results have no active model to mutate.
-      final readyFuture = (() async {
-        final loaded = await optionsFuture;
-        final quota = await quotaFuture;
-        if (!session.isCurrent || !identical(_cinemaPicker, session)) {
-          return null;
-        }
-        final limited = quota != null && !quota.isUnlimited ? quota : null;
-        String? quotaLabel;
-        if (limited != null) {
-          if (limited.restricted) {
-            quotaLabel = l10n.requestErrorQuota;
-          } else if (limited.remaining != null) {
-            quotaLabel = l10n.seasonQuotaRemaining(
-              limited.remaining!,
-              limited.limit ?? 0,
-            );
-          }
-        }
+      SeerrQuotaDetail? quotaDetail;
+      // Optional quota fetch runs while the picker is already interactive.
+      // Seerr validates quota itself if the user submits before it arrives.
+      unawaited(() async {
         try {
-          final applied = await backend.updateCinemaRequestOptions({
+          final quota = (await repository
+                  .getUserQuota(user.id)
+                  .timeout(const Duration(seconds: 5)))
+              .tv;
+          if (!session.isCurrent ||
+              !identical(_cinemaPicker, session) ||
+              quota == null ||
+              quota.isUnlimited) {
+            return;
+          }
+          quotaDetail = quota;
+          final remaining = quota.remaining;
+          final label = quota.restricted
+              ? l10n.requestErrorQuota
+              : remaining == null
+              ? null
+              : l10n.seasonQuotaRemaining(remaining, quota.limit ?? 0);
+          if (label == null) return;
+          await backend.updateCinemaRequestQuota({
             'requestId': requestId,
-            'optionsLoading': false,
-            'advancedEnabled':
-                loaded != null && loaded.eligibleServers.isNotEmpty,
-            'quotaLabel': quotaLabel,
-            'quotaRemaining': limited?.remaining,
-            'quotaRestricted': limited?.restricted ?? false,
-            'selectedServerId': loaded?.effectiveServerId,
-            'selectedProfileId': loaded?.effectiveProfileId,
-            'selectedRootFolderId': loaded?.effectiveRootFolderId,
-            'servers': [
-              for (final server in loaded?.eligibleServers ??
-                  <SeerrServiceServerDetails>[])
-                {
-                  'id': server.server.id,
-                  'label':
-                      '${server.server.name}${server.server.is4k ? ' (${l10n.uhd4k})' : ''}',
-                  'defaultProfileId': loaded!.defaultProfileIdFor(server),
-                  'defaultRootFolderId': loaded!.defaultRootFolderIdFor(server),
-                  'profiles': [
-                    for (final profile in server.profiles)
-                      {'id': profile.id, 'label': profile.name},
-                  ],
-                  'rootFolders': [
-                    for (final folder in server.rootFolders)
-                      {'id': folder.id, 'label': folder.path},
-                  ],
-                },
-            ],
+            'quotaLabel': label,
+            'quotaRemaining': remaining,
+            'quotaRestricted': quota.restricted,
           });
-          if (!applied && session.isCurrent) session.close();
-          return applied ? (options: loaded, quota: limited) : null;
         } catch (_) {
-          if (session.isCurrent) session.close();
-          return null;
+          // Missing quota information does not block normal Seerr requests.
         }
-      })();
+      }());
 
       final selected = await pickerResult;
-      if (!session.isCurrent || selected == null) return;
-      final ready = await readyFuture;
-      if (!session.isCurrent || ready == null) return;
-      if (selected['requestId'] != requestId) return;
-
+      if (!session.isCurrent ||
+          selected == null ||
+          selected['requestId'] != requestId) {
+        return;
+      }
       final seasonRequest = cinemaTvRequestSelection(
         selected,
         seasons.toSet(),
-        ready.quota,
+        quotaDetail,
       );
       if (seasonRequest == null) return;
-
-      SeerrRequestSubmissionOptions? submission =
-          ready.options?.submission ?? const SeerrRequestSubmissionOptions();
-      if (vm.canRequestAdvanced &&
-          ready.options != null &&
-          ready.options!.eligibleServers.isNotEmpty) {
-        final serverId = selected['serverId'];
-        final profileId = selected['profileId'];
-        final rootFolderId = selected['rootFolderId'];
-        if (serverId is! int ||
-            (profileId != null && profileId is! int) ||
-            (rootFolderId != null && rootFolderId is! int)) {
-          throw StateError('Invalid Seerr request option returned by tvOS');
-        }
-        submission = ready.options!.resolveForSubmission(
-          SeerrRequestSelection(
-            serverId: serverId,
-            profileId: profileId as int?,
-            rootFolderId: rootFolderId as int?,
-          ),
-        );
-      }
-
-      if (submission == null) {
-        throw StateError('Invalid Seerr request option selection');
-      }
 
       session.markSubmitting();
       await vm.submitRequest(
         is4k: false,
         seasons: seasonRequest.seasons,
         allSeasons: seasonRequest.allSeasons,
-        profileId: submission.profileId,
-        rootFolder: submission.rootFolder,
-        serverId: submission.serverId,
       );
       if (vm.state.requestError != null) {
         if (session.isCurrent && !isCurrent()) _showCinemaError();

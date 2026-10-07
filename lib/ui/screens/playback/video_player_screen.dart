@@ -586,6 +586,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         season: season,
         isContinuing: cinemaSeriesIsContinuing(details),
         selectAllSeasons: false,
+        showAdvancedOptions: false,
         waitForSubmission: true,
         onDismissReady: (dismiss) => session.dismissDialog = dismiss,
       );

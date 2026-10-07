@@ -33,6 +33,7 @@ Future<void> showSeerrRequestDialog({
   int? season,
   bool isContinuing = false,
   bool selectAllSeasons = true,
+  bool showAdvancedOptions = true,
   bool waitForSubmission = false,
   ValueChanged<VoidCallback>? onDismissReady,
 }) async {
@@ -66,6 +67,7 @@ Future<void> showSeerrRequestDialog({
         season: season,
         isContinuing: isContinuing,
         selectAllSeasons: selectAllSeasons,
+        showAdvancedOptions: showAdvancedOptions,
         waitForSubmission: waitForSubmission,
       );
     },
@@ -83,6 +85,7 @@ class SeerrRequestDialog extends StatefulWidget {
   final int numberOfSeasons;
   final bool isContinuing;
   final bool selectAllSeasons;
+  final bool showAdvancedOptions;
   final bool waitForSubmission;
 
   /// Opens with just this season ticked, for a viewer who asked for one rather
@@ -100,6 +103,7 @@ class SeerrRequestDialog extends StatefulWidget {
     this.season,
     this.isContinuing = false,
     this.selectAllSeasons = true,
+    this.showAdvancedOptions = true,
     this.waitForSubmission = false,
   });
 
@@ -127,7 +131,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
       is4k: _is4k,
     );
     _applySavedPreferences(resetSelection: false);
-    if (widget.vm.canRequestAdvanced) {
+    if (widget.showAdvancedOptions && widget.vm.canRequestAdvanced) {
       _advanced.load();
     }
     _advanced.addListener(_onVmChanged);
@@ -186,12 +190,14 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
       seerrQuotaBlocked(_quotaDetail, widget.isTv ? _seasonsNeeded : 1);
 
   void _submit() async {
-    final requestOptions = widget.vm.canRequestAdvanced
+    final advancedEnabled =
+        widget.showAdvancedOptions && widget.vm.canRequestAdvanced;
+    final requestOptions = advancedEnabled
         ? _advanced.submission
         : const SeerrRequestSubmissionOptions();
     if (_submitting ||
         _quotaBlocked ||
-        (widget.vm.canRequestAdvanced && _advanced.loading) ||
+        (advancedEnabled && _advanced.loading) ||
         requestOptions == null) {
       return;
     }
@@ -221,7 +227,9 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final quotaRow = _buildQuotaRow(l10n);
-    final advancedReady = !widget.vm.canRequestAdvanced ||
+    final advancedReady =
+        !widget.showAdvancedOptions ||
+        !widget.vm.canRequestAdvanced ||
         (!_advanced.loading && _advanced.submission != null);
 
     final showToggle = _hasQualityToggle(widget.vm, widget.qualityToggle);
@@ -273,7 +281,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
       children.add(const Divider(color: Colors.white12));
       children.add(_buildSeasonSelector(autofocusAll: !showToggle));
     }
-    if (widget.vm.canRequestAdvanced) {
+    if (widget.showAdvancedOptions && widget.vm.canRequestAdvanced) {
       children.add(const Divider(color: Colors.white12));
       children.add(
         ExcludeFocus(

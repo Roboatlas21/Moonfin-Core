@@ -45,21 +45,6 @@ class SeerrRequestSelection {
   final int? rootFolderId;
 }
 
-/// A timed-out loader is never published to either picker. Its underlying
-/// request may still finish, but only its private options instance changes.
-Future<SeerrRequestOptions?> loadCinemaSeerrOptions(
-  SeerrRepository repository,
-  SeerrRequestOptions options, {
-  Duration timeout = const Duration(seconds: 5),
-}) async {
-  try {
-    await options.load(repository).timeout(timeout);
-    return options;
-  } catch (_) {
-    return null;
-  }
-}
-
 class SeerrRequestOptions {
   SeerrRequestOptions({
     required this.isTv,

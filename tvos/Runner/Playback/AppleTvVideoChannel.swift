@@ -23,7 +23,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
     private var lastPromptStrings: [String: Any]?
     private var lastTimeSlots: [String: Any]?
     private var lastCinemaActions: [String: Any]?
-    private var pendingCinemaRequestUpdate: [String: Any]?
+    private var pendingCinemaRequestQuota: [String: Any]?
     private var pendingCinemaRequestDismissId: Int?
     static var lastCommand = "-"
 
@@ -60,14 +60,14 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                     vc.presentCinemaRequestOptions(options) {
                         result($0)
                     }
-                    if let pending = self?.pendingCinemaRequestUpdate {
-                        _ = vc.updateCinemaRequestOptions(pending)
-                        self?.pendingCinemaRequestUpdate = nil
+                    if let pending = self?.pendingCinemaRequestQuota {
+                        _ = vc.updateCinemaRequestQuota(pending)
+                        self?.pendingCinemaRequestQuota = nil
                     }
                 }
                 return
             }
-            if call.method == "updateCinemaRequestOptions" {
+            if call.method == "updateCinemaRequestQuota" {
                 Task { @MainActor in
                     guard let self,
                           let args = call.arguments as? [String: Any],
@@ -75,12 +75,12 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                         result(false)
                         return
                     }
-                    if self.playerVC?.updateCinemaRequestOptions(args) == true {
+                    if self.playerVC?.updateCinemaRequestQuota(args) == true {
                         result(true)
                     } else {
-                        // An update can reach the main actor just before its
-                        // show call. The request ID prevents stale application.
-                        self.pendingCinemaRequestUpdate = args
+                        // Quota can arrive before the picker presents. Match request IDs
+                        // before applying any buffered update.
+                        self.pendingCinemaRequestQuota = args
                         result(true)
                     }
                 }
@@ -153,8 +153,8 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         case "dismissCinemaRequestOptions":
             let id = (args["requestId"] as? NSNumber)?.intValue
             if id == nil ||
-                (pendingCinemaRequestUpdate?["requestId"] as? NSNumber)?.intValue == id {
-                pendingCinemaRequestUpdate = nil
+                (pendingCinemaRequestQuota?["requestId"] as? NSNumber)?.intValue == id {
+                pendingCinemaRequestQuota = nil
             }
             if playerVC?.dismissCinemaRequestOptions(requestId: id) != true,
                let id {
@@ -408,7 +408,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
     }
 
     private func dismiss() {
-        pendingCinemaRequestUpdate = nil
+        pendingCinemaRequestQuota = nil
         pendingCinemaRequestDismissId = nil
         playerVC?.dismissCinemaRequestOptions()
         lastCinemaActions = nil

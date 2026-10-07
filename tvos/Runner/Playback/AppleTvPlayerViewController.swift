@@ -769,8 +769,8 @@ final class AppleTvPlayerViewController: UIViewController {
         present(picker, animated: true)
     }
 
-    func updateCinemaRequestOptions(_ args: [String: Any]) -> Bool {
-        cinemaPicker?.applyOptions(args) ?? false
+    func updateCinemaRequestQuota(_ args: [String: Any]) -> Bool {
+        cinemaPicker?.applyQuota(args) ?? false
     }
 
     @discardableResult
@@ -4169,24 +4169,14 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     private let allLabel: String
     private let submitLabel: String
     private let cancelLabel: String
-    private var quotaLabel: String?
     private let quotaBlockedLabel: String
-    private var quotaRemaining: Int?
-    private var quotaRestricted: Bool
-    private var advancedEnabled: Bool
-    private var optionsLoading: Bool
-    private let loadingLabel: String
-    private let serverLabel: String
-    private let profileLabel: String
-    private let rootFolderLabel: String
-    private var servers: [[String: Any]]
     private let completion: ([String: Any]?) -> Void
 
     private var selected: Set<Int>
     private var allSeasons = false
-    private var selectedServerId: Int?
-    private var selectedProfileId: Int?
-    private var selectedRootFolderId: Int?
+    private var quotaLabel: String?
+    private var quotaRemaining: Int?
+    private var quotaRestricted = false
     private var focusedRow = 0
     private var answered = false
 
@@ -4198,82 +4188,38 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         allLabel = options["allLabel"] as? String ?? ""
         submitLabel = options["submitLabel"] as? String ?? ""
         cancelLabel = options["cancelLabel"] as? String ?? ""
-        quotaLabel = options["quotaLabel"] as? String
         quotaBlockedLabel = options["quotaBlockedLabel"] as? String ?? ""
-        quotaRemaining = Self.intValue(options["quotaRemaining"])
-        quotaRestricted = options["quotaRestricted"] as? Bool ?? false
-        advancedEnabled = options["advancedEnabled"] as? Bool ?? false
-        optionsLoading = options["optionsLoading"] as? Bool ?? false
-        loadingLabel = options["loadingLabel"] as? String ?? "Loading request options..."
-        serverLabel = options["serverLabel"] as? String ?? "Server"
-        profileLabel = options["profileLabel"] as? String ?? "Quality Profile"
-        rootFolderLabel = options["rootFolderLabel"] as? String ?? "Root Folder"
-        servers = options["servers"] as? [[String: Any]] ?? []
-        selectedServerId = Self.intValue(options["selectedServerId"])
-        selectedProfileId = Self.intValue(options["selectedProfileId"])
-        selectedRootFolderId = Self.intValue(options["selectedRootFolderId"])
         self.completion = completion
         super.init(style: .grouped)
         title = options["title"] as? String
         modalPresentationStyle = .overFullScreen
-        normalizeAdvancedSelection()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    private var advancedCount: Int { advancedEnabled ? 3 : 0 }
-    private var advancedStart: Int { seasons.count + 1 }
-    private var loadingCount: Int { optionsLoading ? 1 : 0 }
-    private var quotaRow: Int { advancedStart + advancedCount + loadingCount }
+    private var quotaRow: Int { seasons.count + 1 }
     private var quotaCount: Int { quotaLabel == nil ? 0 : 1 }
     private var submitRow: Int { quotaRow + quotaCount }
     private var cancelRow: Int { submitRow + 1 }
-    private var canSubmit: Bool {
-        !optionsLoading && (allSeasons ? !seasons.isEmpty : !selected.isEmpty) && !quotaBlocked
-    }
+    private var requestedCount: Int { allSeasons ? seasons.count : selected.count }
     private var quotaBlocked: Bool {
-        guard quotaLabel != nil else { return false }
-        if quotaRestricted { return true }
-        guard let quotaRemaining else { return false }
-        return (allSeasons ? seasons.count : selected.count) > quotaRemaining
+        quotaRestricted || (quotaRemaining.map { requestedCount > $0 } ?? false)
     }
+    private var canSubmit: Bool { requestedCount > 0 && !quotaBlocked }
 
-    private var activeServer: [String: Any]? {
-        if let selectedServerId,
-           let server = servers.first(where: { Self.intValue($0["id"]) == selectedServerId }) {
-            return server
+    /// Quota arrives independently; season selection never waits for it.
+    /// The request ID prevents results for an older picker from changing this one.
+    func applyQuota(_ quota: [String: Any]) -> Bool {
+        guard !answered, Self.intValue(quota["requestId"]) == requestId else {
+            return false
         }
-        return servers.first
-    }
-
-    private var profiles: [[String: Any]] {
-        activeServer?["profiles"] as? [[String: Any]] ?? []
-    }
-
-    private var rootFolders: [[String: Any]] {
-        activeServer?["rootFolders"] as? [[String: Any]] ?? []
-    }
-
-    /// Season choices persist while late network options fill the same picker.
-    /// An update from an older request must never mutate a newer picker.
-    func applyOptions(_ options: [String: Any]) -> Bool {
-        guard !answered,
-              Self.intValue(options["requestId"]) == requestId else { return false }
         let wasSubmit = focusedRow == submitRow
         let wasCancel = focusedRow == cancelRow
-        optionsLoading = options["optionsLoading"] as? Bool ?? false
-        advancedEnabled = options["advancedEnabled"] as? Bool ?? false
-        servers = options["servers"] as? [[String: Any]] ?? []
-        quotaLabel = options["quotaLabel"] as? String
-        quotaRemaining = Self.intValue(options["quotaRemaining"])
-        quotaRestricted = options["quotaRestricted"] as? Bool ?? false
-        selectedServerId = Self.intValue(options["selectedServerId"])
-        selectedProfileId = Self.intValue(options["selectedProfileId"])
-        selectedRootFolderId = Self.intValue(options["selectedRootFolderId"])
-        normalizeAdvancedSelection()
+        quotaLabel = quota["quotaLabel"] as? String
+        quotaRemaining = Self.intValue(quota["quotaRemaining"])
+        quotaRestricted = quota["quotaRestricted"] as? Bool ?? false
         if wasSubmit { focusedRow = submitRow }
         else if wasCancel { focusedRow = cancelRow }
-        else { focusedRow = min(focusedRow, cancelRow) }
         if isViewLoaded { tableView.reloadData() }
         return true
     }
@@ -4298,8 +4244,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         var content = cell.defaultContentConfiguration()
         var checked = false
         cell.accessoryType = .none
-        cell.selectionStyle = ((optionsLoading && row == advancedStart) ||
-            (quotaCount > 0 && row == quotaRow)) ? .none : .default
+        cell.selectionStyle = quotaCount > 0 && row == quotaRow ? .none : .default
 
         if row == 0 {
             content.text = allLabel
@@ -4307,19 +4252,6 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         } else if row <= seasons.count {
             content.text = labels.indices.contains(row - 1) ? labels[row - 1] : String(seasons[row - 1])
             checked = allSeasons || selected.contains(seasons[row - 1])
-        } else if optionsLoading && row == advancedStart {
-            content.text = loadingLabel
-        } else if advancedEnabled && row < quotaRow {
-            let offset = row - advancedStart
-            switch offset {
-            case 0:
-                content.text = summary(serverLabel, labelFor(selectedServerId, in: servers))
-            case 1:
-                content.text = summary(profileLabel, labelFor(selectedProfileId, in: profiles))
-            default:
-                content.text = summary(rootFolderLabel, labelFor(selectedRootFolderId, in: rootFolders))
-            }
-            cell.accessoryType = .disclosureIndicator
         } else if quotaCount > 0 && row == quotaRow {
             content.text = quotaBlocked ? quotaBlockedLabel : quotaLabel
         } else {
@@ -4369,94 +4301,18 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
                 allSeasons = false
                 selected.removeAll()
             }
-            if selected.contains(number) { selected.remove(number) } else { selected.insert(number) }
+            if selected.contains(number) { selected.remove(number) }
+            else { selected.insert(number) }
             tableView.reloadData()
-            return
         }
-        guard !optionsLoading && advancedEnabled && row < quotaRow else { return }
-        switch row - advancedStart {
-        case 0:
-            presentChoices(title: serverLabel, options: servers, selectedId: selectedServerId) { [weak self] id in
-                guard let self else { return }
-                selectedServerId = id
-                normalizeAdvancedSelection(resetChildren: true)
-                tableView.reloadData()
-            }
-        case 1:
-            presentChoices(title: profileLabel, options: profiles, selectedId: selectedProfileId) { [weak self] id in
-                self?.selectedProfileId = id
-                self?.tableView.reloadData()
-            }
-        case 2:
-            presentChoices(title: rootFolderLabel, options: rootFolders, selectedId: selectedRootFolderId) { [weak self] id in
-                self?.selectedRootFolderId = id
-                self?.tableView.reloadData()
-            }
-        default:
-            break
-        }
-    }
-
-    private func normalizeAdvancedSelection(resetChildren: Bool = false) {
-        guard advancedEnabled, !servers.isEmpty else {
-            selectedServerId = nil
-            selectedProfileId = nil
-            selectedRootFolderId = nil
-            return
-        }
-        var reset = resetChildren
-        if selectedServerId == nil || !servers.contains(where: { Self.intValue($0["id"]) == selectedServerId }) {
-            selectedServerId = Self.intValue(servers.first?["id"])
-            reset = true
-        }
-        guard let server = activeServer else { return }
-        if reset ||
-            selectedProfileId == nil ||
-            !profiles.contains(where: { Self.intValue($0["id"]) == selectedProfileId }) {
-            selectedProfileId = Self.intValue(server["defaultProfileId"])
-        }
-        if reset ||
-            selectedRootFolderId == nil ||
-            !rootFolders.contains(where: { Self.intValue($0["id"]) == selectedRootFolderId }) {
-            selectedRootFolderId = Self.intValue(server["defaultRootFolderId"])
-        }
-    }
-
-    private func presentChoices(
-        title: String,
-        options: [[String: Any]],
-        selectedId: Int?,
-        onSelect: @escaping (Int) -> Void
-    ) {
-        guard !options.isEmpty, presentedViewController == nil else { return }
-        let entries = options.compactMap { option -> RemotePlayerMenu.Entry? in
-            guard let id = Self.intValue(option["id"]) else { return nil }
-            let label = option["label"] as? String ?? String(id)
-            let action = UIAlertAction(
-                title: id == selectedId ? "✓ \(label)" : label,
-                style: .default
-            )
-            return RemotePlayerMenu.Entry(action: action) { _ in onSelect(id) }
-        }
-        let cancel = UIAlertAction(title: cancelLabel, style: .cancel)
-        let menu = RemotePlayerMenu(
-            title: title,
-            message: nil,
-            entries: entries + [RemotePlayerMenu.Entry(action: cancel) { _ in }]
-        )
-        present(menu, animated: true)
     }
 
     private func result() -> [String: Any] {
-        var value: [String: Any] = [
+        [
             "requestId": requestId,
             "allSeasons": allSeasons,
             "seasons": allSeasons ? [] : selected.sorted()
         ]
-        if let selectedServerId { value["serverId"] = selectedServerId }
-        if let selectedProfileId { value["profileId"] = selectedProfileId }
-        if let selectedRootFolderId { value["rootFolderId"] = selectedRootFolderId }
-        return value
     }
 
     func finish(_ value: [String: Any]?) {
@@ -4471,8 +4327,6 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        // Presenting a server/profile/folder submenu must not cancel the
-        // parent request picker.
         if !answered && presentedViewController == nil {
             answered = true
             completion(nil)
@@ -4481,10 +4335,6 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
 
     func handleRemoteNavigation(_ command: String) {
         guard !answered else { return }
-        if let modal = presentedViewController as? RemotePlayerNavigable {
-            modal.handleRemoteNavigation(command)
-            return
-        }
         if command == "back" { finish(nil); return }
         if command == "select" { activate(focusedRow); return }
         switch command {
@@ -4507,15 +4357,6 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         super.pressesBegan(presses, with: event)
     }
 
-    private func summary(_ label: String, _ value: String?) -> String {
-        value.map { "\(label): \($0)" } ?? label
-    }
-
-    private func labelFor(_ id: Int?, in options: [[String: Any]]) -> String? {
-        guard let id else { return nil }
-        return options.first(where: { Self.intValue($0["id"]) == id })?["label"] as? String
-    }
-
     private static func intArray(_ value: Any?) -> [Int] {
         (value as? [Any] ?? []).compactMap(intValue)
     }
@@ -4525,4 +4366,3 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         return value as? Int
     }
 }
-
