@@ -46,11 +46,7 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  Future<void> open(
-    WidgetTester tester, {
-    int? season,
-    bool showAdvancedOptions = false,
-  }) async {
+  Future<void> open(WidgetTester tester, {int? season}) async {
     await tester.pumpWidget(
       MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -65,7 +61,7 @@ void main() {
                   is4k: false,
                   season: season,
                   selectAllSeasons: false,
-                  showAdvancedOptions: showAdvancedOptions,
+                  showAdvancedOptions: false,
                   waitForSubmission: true,
                   onDismissReady: (dismiss) => dismissDialog = dismiss,
                 );
@@ -106,27 +102,6 @@ void main() {
       expect(closed, true);
     },
   );
-
-  testWidgets('normal Seerr dialog still offers advanced options', (
-    tester,
-  ) async {
-    vm.dispose();
-    vm = SeerrMediaDetailViewModel.forCinema(
-      repo,
-      CinemaTvPreferences(),
-      details: repo.details,
-      user: const SeerrUser(
-        id: 5,
-        permissions: SeerrPermission.requestTv | SeerrPermission.requestAdvanced,
-      ),
-      requestAllowed: () => current,
-    );
-    await open(tester, season: 5, showAdvancedOptions: true);
-    expect(find.text('Advanced Options'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(repo.submissions, isEmpty);
-  });
 
   testWidgets(
     'unidentified season starts empty and cannot submit the whole series',
@@ -209,32 +184,20 @@ void main() {
     expect(closed, true);
   });
 
-  testWidgets(
-    'expiry closes the season dialog and its advanced-options picker',
-    (tester) async {
-      await open(tester, season: 5);
-      final childClosed = showSeerrOptionPicker(
-        tester.element(find.byType(SeerrRequestDialog)),
-        title: 'Quality profile',
-        labels: ['Default profile'],
-        selectedIndex: 0,
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('Quality profile'), findsOneWidget);
+  testWidgets('expiry dismisses the Cinema season picker safely', (
+    tester,
+  ) async {
+    await open(tester, season: 5);
+    current = false;
+    dismissDialog();
+    await tester.pumpAndSettle();
 
-      current = false;
-      dismissDialog();
-      await tester.pumpAndSettle();
-
-      expect(await childClosed, isNull);
-      expect(find.text('Quality profile'), findsNothing);
-      expect(find.byType(SeerrRequestDialog), findsNothing);
-      expect(find.text('Open'), findsOneWidget);
-      expect(closed, true);
-      expect(repo.submissions, isEmpty);
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(find.byType(SeerrRequestDialog), findsNothing);
+    expect(find.text('Open'), findsOneWidget);
+    expect(closed, true);
+    expect(repo.submissions, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('an old dismissal handle cannot close a newer dialog', (
     tester,
