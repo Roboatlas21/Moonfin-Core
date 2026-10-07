@@ -53,6 +53,40 @@ void main() {
     expect(session.isCurrent, isFalse);
   });
 
+  test('picker submission remains valid when the original trailer changes', () {
+    fakeAsync((time) {
+      var playingOriginalTrailer = true;
+      final session = CinemaSeriesPickerSession(
+        accountKey: () => 'account',
+        isMounted: () => true,
+      );
+      final requestAllowed = () => session.isCurrent;
+      session.beginGrace();
+      playingOriginalTrailer = false;
+      time.elapse(const Duration(seconds: 9));
+      expect(playingOriginalTrailer, isFalse);
+      expect(requestAllowed(), isTrue);
+      session.markSubmitting();
+      time.elapse(const Duration(seconds: 20));
+      expect(requestAllowed(), isTrue);
+      session.dispose();
+      expect(requestAllowed(), isFalse);
+    });
+  });
+
+  test('expired picker cannot regain permission by starting submission', () {
+    fakeAsync((time) {
+      final session = CinemaSeriesPickerSession(
+        accountKey: () => 'account',
+        isMounted: () => true,
+      );
+      session.beginGrace();
+      time.elapse(const Duration(seconds: 10));
+      session.markSubmitting();
+      expect(session.isCurrent, isFalse);
+    });
+  });
+
   test('expiry before the dialog attaches still closes the dialog', () {
     fakeAsync((time) {
       final session = CinemaSeriesPickerSession(

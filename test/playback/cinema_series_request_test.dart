@@ -240,6 +240,83 @@ void main() {
     );
   }
 
+  test('native All Seasons uses Seerr all, not enumerated seasons', () {
+    final selection = cinemaTvRequestSelection(
+      {'allSeasons': true, 'seasons': <int>[]},
+      {2, 5},
+      const SeerrQuotaDetail(limit: 4, remaining: 2),
+    );
+    expect(selection, isNotNull);
+    expect(selection!.allSeasons, isTrue);
+    expect(selection.seasons, isNull);
+  });
+
+  test('native explicit season selection is sorted and deduplicated', () {
+    final selection = cinemaTvRequestSelection(
+      {'allSeasons': false, 'seasons': [5, 2, 5]},
+      {2, 5},
+      null,
+    );
+    expect(selection?.allSeasons, isFalse);
+    expect(selection?.seasons, [2, 5]);
+  });
+
+  test('native selection rejects malformed and unrequestable seasons', () {
+    for (final value in [
+      {'seasons': [2]},
+      {'allSeasons': false, 'seasons': [2.0]},
+      {'allSeasons': false, 'seasons': [99]},
+      {'allSeasons': false, 'seasons': <int>[]},
+      {'allSeasons': true, 'seasons': [2]},
+    ]) {
+      expect(cinemaTvRequestSelection(value, {2, 5}, null), isNull);
+    }
+    expect(
+      cinemaTvRequestSelection(
+        {'allSeasons': true, 'seasons': <int>[]},
+        <int>{},
+        null,
+      ),
+      isNull,
+    );
+  });
+
+  test('quota applies equally to all and explicitly chosen seasons', () {
+    const quota = SeerrQuotaDetail(limit: 3, remaining: 1);
+    expect(
+      cinemaTvRequestSelection(
+        {'allSeasons': true, 'seasons': <int>[]},
+        {2, 5},
+        quota,
+      ),
+      isNull,
+    );
+    expect(
+      cinemaTvRequestSelection(
+        {'allSeasons': false, 'seasons': [2, 5]},
+        {2, 5},
+        quota,
+      ),
+      isNull,
+    );
+    expect(
+      cinemaTvRequestSelection(
+        {'allSeasons': false, 'seasons': [5]},
+        {2, 5},
+        quota,
+      )?.seasons,
+      [5],
+    );
+    expect(
+      cinemaTvRequestSelection(
+        {'allSeasons': false, 'seasons': [5]},
+        {2, 5},
+        const SeerrQuotaDetail(limit: 5, remaining: 5, restricted: true),
+      ),
+      isNull,
+    );
+  });
+
   test(
     'continuing series with every season available has no request action',
     () {

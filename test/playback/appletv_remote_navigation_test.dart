@@ -64,6 +64,31 @@ void main() {
     expect(calls.last.method, 'dismissCinemaRequestOptions');
   });
 
+  test('tvOS bridge preserves quota and All Seasons request semantics', () async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(control, (call) async {
+      calls.add(call);
+      return call.method == 'showCinemaRequestOptions'
+          ? {'allSeasons': true, 'seasons': <int>[]}
+          : null;
+    });
+
+    final result = await backend.showCinemaRequestOptions({
+      'seasons': [2, 5],
+      'quotaLabel': '1 of 3 seasons remaining',
+      'quotaRemaining': 1,
+      'quotaRestricted': false,
+      'quotaBlockedLabel': 'Quota exceeded',
+    });
+    expect(result, {'allSeasons': true, 'seasons': <int>[]});
+    final args = calls.last.arguments as Map;
+    expect(args['quotaRemaining'], 1);
+    expect(args['quotaRestricted'], false);
+    expect(args['quotaLabel'], '1 of 3 seasons remaining');
+    expect(args['quotaBlockedLabel'], 'Quota exceeded');
+  });
+
   test(
     'native cinema input retains the generation that owned the press',
     () async {
