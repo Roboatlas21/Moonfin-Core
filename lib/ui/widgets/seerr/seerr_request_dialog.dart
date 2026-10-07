@@ -180,6 +180,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   );
 
   bool get _hasSeasonSelection =>
+      !widget.waitForSubmission ||
       !widget.isTv ||
       (_allSeasons
           ? _requestableSeasons.isNotEmpty
