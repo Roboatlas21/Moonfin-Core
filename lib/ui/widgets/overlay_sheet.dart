@@ -112,7 +112,8 @@ Future<T?> showFocusRestoringDialog<T>({
             return KeyEventResult.ignored;
           }
           DialogBackSuppressor.markDismissed();
-          Navigator.of(dialogContext).pop();
+          // Respect a dialog's PopScope while it is submitting a request.
+          unawaited(Navigator.of(dialogContext).maybePop());
           return KeyEventResult.handled;
         }
         if (event is KeyUpEvent) {

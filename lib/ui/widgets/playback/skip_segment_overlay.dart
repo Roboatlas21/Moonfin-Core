@@ -15,11 +15,12 @@ import '../adaptive/adaptive_glass.dart';
 import '../anime_marker_badge.dart';
 import '../focus/focus_theme.dart';
 
+/// Skip-segment presentation. By default it positions itself over playback;
+/// Cinema Mode uses [inline] to place the same capsule in its action row.
 class SkipSegmentOverlay extends StatefulWidget {
   final MediaSegment segment;
   final VoidCallback onSkip;
   final VoidCallback onDismiss;
-  final String? segmentLabel;
   final MediaSegmentCountdown? countdownStyle;
   final FocusNode? focusNode;
   final Stream<Duration>? positionStream;
@@ -32,9 +33,14 @@ class SkipSegmentOverlay extends StatefulWidget {
   /// The item that will be played next, if any.
   final AggregatedItem? nextItem;
 
-  /// Distance from the bottom edge of the screen. The player passes the
-  /// measured height of the on-screen controls so the capsule clears the
-  /// time row instead of landing on top of it.
+  final String? actionLabel;
+  final List<String> labelAlternatives;
+  final bool isFocused;
+  final bool handleActivationKeys;
+  final Color? outlineColor;
+  final Color? countdownColor;
+  final Color? focusRingColor;
+  final bool inline;
   final double bottomInset;
 
   const SkipSegmentOverlay({
@@ -42,12 +48,19 @@ class SkipSegmentOverlay extends StatefulWidget {
     required this.segment,
     required this.onSkip,
     required this.onDismiss,
-    this.segmentLabel,
     this.countdownStyle,
     this.focusNode,
     this.positionStream,
     this.initialPosition,
     this.nextItem,
+    this.actionLabel,
+    this.labelAlternatives = const [],
+    this.isFocused = true,
+    this.handleActivationKeys = true,
+    this.outlineColor,
+    this.countdownColor,
+    this.focusRingColor,
+    this.inline = false,
     this.bottomInset = _fallbackBottomInset,
   });
 
@@ -116,19 +129,25 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
     final mediaSegmentCountdown =
         widget.countdownStyle ??
         prefs.get(UserPreferences.mediaSegmentCountdown);
-    final showProgressBar = mediaSegmentCountdown == MediaSegmentCountdown.progressBar ||
+    final showProgressBar =
+        mediaSegmentCountdown == MediaSegmentCountdown.progressBar ||
         mediaSegmentCountdown == MediaSegmentCountdown.both;
-    final showTimer = mediaSegmentCountdown == MediaSegmentCountdown.timer ||
+    final showTimer =
+        mediaSegmentCountdown == MediaSegmentCountdown.timer ||
         mediaSegmentCountdown == MediaSegmentCountdown.both;
 
     final segmentDuration = widget.segment.duration;
     final elapsed = _currentPosition - widget.segment.start;
     final progress = segmentDuration.inMilliseconds > 0
-        ? (1.0 - (elapsed.inMilliseconds / segmentDuration.inMilliseconds)).clamp(0.0, 1.0)
+        ? (1.0 - (elapsed.inMilliseconds / segmentDuration.inMilliseconds))
+              .clamp(0.0, 1.0)
         : 0.0;
 
     final remaining = widget.segment.end - _currentPosition;
-    final remainingSec = remaining.inSeconds.clamp(0, segmentDuration.inSeconds);
+    final remainingSec = remaining.inSeconds.clamp(
+      0,
+      segmentDuration.inSeconds,
+    );
 
     final int minutes = remainingSec ~/ 60;
     final int seconds = remainingSec % 60;
@@ -145,161 +164,188 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
 
     final effectiveRadius = AppColorScheme.isPixel ? 0.0 : _capsuleRadius;
     final borders = ThemeRegistry.active.borders;
+    final focusRingInset = widget.focusRingColor == null
+        ? 0.0
+        : FocusTheme.borderWidth + 2;
+    final focusRadius = AppColorScheme.isPixel
+        ? 0.0
+        : effectiveRadius + focusRingInset;
+    final outlineColor =
+        widget.outlineColor ??
+        AppColorScheme.accent.withValues(alpha: widget.isFocused ? 1 : 0.4);
 
-    return Positioned(
-      right: 24,
-      bottom: widget.bottomInset,
-      child: Material(
-        color: Colors.transparent,
-        child: Focus(
-          focusNode: widget.focusNode,
-          onKeyEvent: (_, event) {
-            if (widget.focusNode == null) {
-              return KeyEventResult.ignored;
-            }
-            if (event is KeyDownEvent &&
-                (event.logicalKey == LogicalKeyboardKey.select ||
-                    event.logicalKey == LogicalKeyboardKey.enter)) {
-              widget.onSkip();
-              return KeyEventResult.handled;
-            }
+    final button = Material(
+      color: Colors.transparent,
+      child: Focus(
+        focusNode: widget.focusNode,
+        onKeyEvent: (_, event) {
+          if (widget.focusNode == null || !widget.handleActivationKeys) {
             return KeyEventResult.ignored;
-          },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              if (showDismissButton) ...[
-                _SkipDismissButton(
-                  onPressed: widget.onDismiss,
-                  label: l10n.dismiss,
+          }
+          if (event is KeyDownEvent &&
+              (event.logicalKey == LogicalKeyboardKey.select ||
+                  event.logicalKey == LogicalKeyboardKey.enter)) {
+            widget.onSkip();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (showDismissButton) ...[
+              SkipDismissButton(
+                onPressed: widget.onDismiss,
+                label: l10n.dismiss,
+              ),
+              const SizedBox(height: 8),
+            ],
+            InkWell(
+              key: const ValueKey('skip-segment-capsule'),
+              onTap: widget.onSkip,
+              borderRadius: AppRadius.circular(focusRadius),
+              child: Container(
+                decoration: FocusTheme.focusDecoration(
+                  isFocused: widget.isFocused,
+                  radius: focusRadius,
+                  color: widget.focusRingColor,
                 ),
-                const SizedBox(height: 8),
-              ],
-              InkWell(
-                onTap: widget.onSkip,
-                borderRadius: AppRadius.circular(effectiveRadius),
-                child: Container(
-                  decoration: FocusTheme.focusDecoration(
-                    isFocused: true,
-                    radius: effectiveRadius,
-                    color: null,
-                  ),
-                  child: Stack(
-                    clipBehavior: Clip.none,
-                    fit: StackFit.passthrough,
-                    children: [
-                      adaptiveGlass(
-                        context: context,
-                        cornerRadius: effectiveRadius,
-                        blur: 24,
-                        fallbackColor: AppColorScheme.surface.withValues(
-                          alpha: 0.55,
-                        ),
-                        tint: AppColorScheme.surface.withValues(alpha: 0.18),
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 10, 16, 10),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.skip_next_rounded,
-                                color: AppColorScheme.accent,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 9),
-                              Text(
-                                l10n.skipSegment(
-                                  widget.segmentLabel ??
-                                      widget.segment.type.displayName,
-                                ),
-                                style: TextStyle(
-                                  color: AppColorScheme.onSurface,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              if (widget.nextItem case final next?)
-                                AnimeMarkerBadge(
-                                  seriesId: next.seriesId,
-                                  episodeId: next.id,
-                                  scale: 0.9,
-                                  padding: const EdgeInsets.only(left: 8),
-                                ),
-                              if (showInlineTimer) ...[
-                                const SizedBox(width: 8),
-                                Text(
-                                  l10n.endsIn(timerText),
-                                  style: TextStyle(
-                                    color: AppColorScheme.onSurface.withValues(
-                                      alpha: 0.5,
+                padding: EdgeInsets.all(focusRingInset),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  fit: StackFit.passthrough,
+                  children: [
+                    adaptiveGlass(
+                      context: context,
+                      cornerRadius: effectiveRadius,
+                      blur: 24,
+                      fallbackColor: AppColorScheme.surface.withValues(
+                        alpha: 0.55,
+                      ),
+                      tint: AppColorScheme.surface.withValues(alpha: 0.18),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 10, 16, 10),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.skip_next_rounded,
+                              color: AppColorScheme.accent,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 9),
+                            Stack(
+                              alignment: Alignment.centerLeft,
+                              children: [
+                                for (final label in widget.labelAlternatives)
+                                  ExcludeSemantics(
+                                    child: Opacity(
+                                      opacity: 0,
+                                      child: _label(label),
                                     ),
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w600,
-                                    fontFeatures: const [
-                                      FontFeature.tabularFigures(),
-                                    ],
                                   ),
+                                _label(
+                                  widget.actionLabel ??
+                                      l10n.skipSegment(
+                                        widget.segment.type.displayName,
+                                      ),
                                 ),
                               ],
-                              if (showRing) ...[
-                                const SizedBox(width: 13),
-                                _CountdownRing(
-                                  progress: progress,
-                                  center: numberInRing
-                                      ? Text(
-                                          '$remainingSec',
-                                          style: TextStyle(
-                                            color: AppColorScheme.onSurface,
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w600,
-                                            fontFeatures: const [
-                                              FontFeature.tabularFigures(),
-                                            ],
-                                          ),
-                                        )
-                                      : Icon(
-                                          Icons.skip_next_rounded,
-                                          color: AppColorScheme.accent,
-                                          size: 15,
-                                        ),
+                            ),
+                            if (widget.nextItem case final next?)
+                              AnimeMarkerBadge(
+                                seriesId: next.seriesId,
+                                episodeId: next.id,
+                                scale: 0.9,
+                                padding: const EdgeInsets.only(left: 8),
+                              ),
+                            if (showInlineTimer) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                l10n.endsIn(timerText),
+                                style: TextStyle(
+                                  color: AppColorScheme.onSurface.withValues(
+                                    alpha: 0.5,
+                                  ),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
                                 ),
-                              ],
+                              ),
                             ],
-                          ),
+                            if (showRing) ...[
+                              const SizedBox(width: 13),
+                              _CountdownRing(
+                                progress: progress,
+                                color: widget.countdownColor,
+                                center: numberInRing
+                                    ? Text(
+                                        '$remainingSec',
+                                        style: TextStyle(
+                                          color: AppColorScheme.onSurface,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w600,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.skip_next_rounded,
+                                        color: AppColorScheme.accent,
+                                        size: 15,
+                                      ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: AppRadius.circular(effectiveRadius),
-                              border: Border.fromBorderSide(
-                                borders.focusBorder.copyWith(
-                                  color: AppColorScheme.accent,
-                                ),
-                              ),
+                    ),
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: Container(
+                          key: const ValueKey('skip-segment-outline'),
+                          decoration: BoxDecoration(
+                            borderRadius: AppRadius.circular(effectiveRadius),
+                            border: Border.fromBorderSide(
+                              borders.focusBorder.copyWith(color: outlineColor),
                             ),
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
+    return widget.inline
+        ? button
+        : Positioned(right: 24, bottom: widget.bottomInset, child: button);
   }
+
+  Widget _label(String value) => Text(
+    value,
+    style: TextStyle(
+      color: AppColorScheme.onSurface,
+      fontSize: 15,
+      fontWeight: FontWeight.w600,
+    ),
+  );
 }
 
 class _CountdownRing extends StatelessWidget {
-  const _CountdownRing({required this.progress, this.center});
+  const _CountdownRing({required this.progress, this.center, this.color});
 
   final double progress;
   final Widget? center;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -314,7 +360,9 @@ class _CountdownRing extends StatelessWidget {
               value: progress.clamp(0.0, 1.0),
               strokeWidth: 3,
               backgroundColor: AppColorScheme.onSurface.withValues(alpha: 0.16),
-              valueColor: AlwaysStoppedAnimation<Color>(AppColorScheme.accent),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                color ?? AppColorScheme.accent,
+              ),
             ),
           ),
           ?center,
@@ -326,8 +374,12 @@ class _CountdownRing extends StatelessWidget {
 
 /// The close chip above the skip capsule. The padding widens the tap target
 /// without making the chip itself any bigger.
-class _SkipDismissButton extends StatelessWidget {
-  const _SkipDismissButton({required this.onPressed, required this.label});
+class SkipDismissButton extends StatelessWidget {
+  const SkipDismissButton({
+    super.key,
+    required this.onPressed,
+    required this.label,
+  });
 
   final VoidCallback onPressed;
   final String label;

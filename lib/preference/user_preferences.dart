@@ -500,6 +500,7 @@ class UserPreferences extends ChangeNotifier {
     'pref_enable_cinema_mode_episodes',
     'pref_cinema_mode_skip_countdown',
     'pref_cinema_mode_skip_auto_hide',
+    'pref_cinema_mode_skip_min_duration_seconds',
     'pref_resume_preroll',
     'media_segment_actions',
     'pref_autoplay_next_episode',
@@ -1918,6 +1919,11 @@ class UserPreferences extends ChangeNotifier {
     key: 'pref_cinema_mode_skip_countdown',
     defaultValue: MediaSegmentCountdown.progressBar,
     values: MediaSegmentCountdown.values,
+  );
+
+  static final cinemaModeSkipMinDurationSeconds = Preference(
+    key: 'pref_cinema_mode_skip_min_duration_seconds',
+    defaultValue: 15,
   );
 
   static final cinemaModeSkipAutoHide = EnumPreference(

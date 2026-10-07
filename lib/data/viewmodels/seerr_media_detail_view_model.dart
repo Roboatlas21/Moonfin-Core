@@ -377,7 +377,21 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
   Duration? _statusPollInterval;
   bool _isDisposed = false;
 
-  SeerrMediaDetailViewModel(this._repo, this._prefs);
+  final bool Function()? _requestAllowed;
+
+  SeerrMediaDetailViewModel(this._repo, this._prefs) : _requestAllowed = null;
+
+  /// The cinema resolver already supplied an exact series identity. Seed the
+  /// existing picker without invoking the detail page's title-search fallback.
+  SeerrMediaDetailViewModel.forCinema(
+    this._repo,
+    this._prefs, {
+    required SeerrTvDetails details,
+    required SeerrUser user,
+    required bool Function() this._requestAllowed,
+  }) {
+    _state = SeerrMediaDetailState(tv: details, currentUser: user);
+  }
 
   @override
   void notifyListeners() {
@@ -627,7 +641,7 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
     String? rootFolder,
     int? serverId,
   }) async {
-    if (_state.isRequesting) {
+    if (_isDisposed || _state.isRequesting || _requestAllowed?.call() == false) {
       return;
     }
 
@@ -636,7 +650,7 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
 
     try {
       final mediaType = _state.isTv ? 'tv' : 'movie';
-      await _repo.createRequest(
+      final request = _repo.createRequest(
         mediaId: _state.tmdbId,
         mediaType: mediaType,
         seasons: seasons,
@@ -646,7 +660,10 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
         rootFolder: rootFolder,
         serverId: serverId,
       );
-
+      await (_requestAllowed == null
+          ? request
+          : request.timeout(const Duration(seconds: 20)));
+      if (_requestAllowed?.call() == false) return;
       await _reloadDetails('Request submitted');
     } catch (e) {
       _setRequestFailure(e);
