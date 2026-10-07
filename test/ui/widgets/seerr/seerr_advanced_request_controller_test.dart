@@ -262,12 +262,42 @@ void main() {
 
   test('one offline backend does not suppress another configured backend',
       () async {
-    GetIt.instance.registerSingleton<SeerrRepository>(_PartialServerRepository());
+    GetIt.instance.registerSingletonAsync<SeerrRepository>(
+      () async => _PartialServerRepository(),
+    );
+    await GetIt.instance.allReady();
     final controller = SeerrAdvancedRequestController(isTv: true);
     await controller.load();
     expect(controller.loading, isFalse);
     expect(controller.servers?.map((s) => s.server.id), [2]);
     expect(controller.submission?.serverId, 2);
+    controller.dispose();
+  });
+
+  test('validated submission is unavailable while advanced options load',
+      () async {
+    final repo = _SlowServerRepository();
+    GetIt.instance.registerSingletonAsync<SeerrRepository>(() async => repo);
+    await GetIt.instance.allReady();
+
+    final controller = SeerrAdvancedRequestController(isTv: true);
+    final loading = controller.load();
+    await repo.requested.future;
+    expect(controller.loading, isTrue);
+    expect(controller.submission, isNull);
+
+    repo.pending.complete([
+      const SeerrServiceServer(
+        id: 1,
+        name: 'Sonarr',
+        activeProfileId: 11,
+        activeDirectory: '/tv',
+      ),
+    ]);
+    await loading;
+    expect(controller.submission?.serverId, 1);
+    expect(controller.submission?.profileId, 11);
+    expect(controller.submission?.rootFolder, '/tv');
     controller.dispose();
   });
 

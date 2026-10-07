@@ -13,6 +13,7 @@ class CinemaTvRepository extends Fake implements SeerrRepository {
   int lookups = 0;
   Completer<SeerrRequest>? submission;
   Completer<SeerrTvDetails>? detailsResponse;
+  int? failOnLookup;
   SeerrTvDetails details = const SeerrTvDetails(id: 42, numberOfSeasons: 5);
   final submissions = <({int id, String type, List<int>? seasons, bool all})>[];
   @override
@@ -26,6 +27,7 @@ class CinemaTvRepository extends Fake implements SeerrRepository {
   Future<SeerrTvDetails> getTvDetails(int tmdbId) async {
     lookups++;
     expect(tmdbId, 42);
+    if (lookups == failOnLookup) throw StateError('Seerr detail refresh failed');
     if (detailsResponse != null) return detailsResponse!.future;
     return details;
   }
@@ -119,6 +121,51 @@ void main() {
       });
     },
   );
+
+  test('failed TV status refresh after picker completion is not a request failure',
+      () {
+    fakeAsync((time) {
+      enter();
+      time.flushMicrotasks();
+      expect(repository.lookups, 1);
+      repository.failOnLookup = 2;
+      controller.request();
+      time.flushMicrotasks();
+      expect(dialogs, 1);
+      dialog.complete();
+      time.flushMicrotasks();
+      expect(repository.lookups, 2);
+      expect(controller.seerrState, CinemaSeerrState.hidden);
+      expect(controller.canRequest, isFalse);
+    });
+  });
+
+  test('TV picker submission errors still reach the controller', () {
+    fakeAsync((time) {
+      final captured = <Object>[];
+      final rejecting = CinemaModeController(
+        seerr: () async => repository,
+        accountKey: () => account,
+        onSkip: () async {},
+        onError: captured.add,
+        onRequestSeries: (_, _, _, _, _) async {
+          throw StateError('Seerr rejected request');
+        },
+      );
+      rejecting.enter(
+        item: {'Type': 'Video', 'RunTimeTicks': 900000000},
+        resolveMedia: () async =>
+            const CinemaMedia(42, CinemaMediaType.tv, season: 5),
+      );
+      time.flushMicrotasks();
+      rejecting.request();
+      time.flushMicrotasks();
+      expect(repository.lookups, 1);
+      expect(captured, hasLength(1));
+      expect(rejecting.seerrState, CinemaSeerrState.hidden);
+      rejecting.dispose();
+    });
+  });
 
   test('movie permission alone cannot open a TV request', () {
     fakeAsync((time) {

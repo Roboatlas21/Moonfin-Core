@@ -387,7 +387,7 @@ void main() {
     });
   });
 
-  test('failure reconciles once and never automatically resubmits', () {
+  test('confirmed movie request suppresses stale POST failure notification', () {
     fakeAsync((time) {
       enter();
       time.flushMicrotasks();
@@ -398,6 +398,20 @@ void main() {
       expect(seerr.submitted, [42]);
       expect(seerr.lookups, 2);
       expect(controller.seerrState, CinemaSeerrState.pending);
+      expect(errors, isEmpty);
+    });
+  });
+
+  test('unconfirmed movie POST failure still reports an error once', () {
+    fakeAsync((time) {
+      enter();
+      time.flushMicrotasks();
+      seerr.failure = StateError('offline');
+      controller.request();
+      time.flushMicrotasks();
+      expect(seerr.submitted, [42]);
+      expect(seerr.lookups, 2);
+      expect(controller.seerrState, CinemaSeerrState.request);
       expect(errors, hasLength(1));
     });
   });

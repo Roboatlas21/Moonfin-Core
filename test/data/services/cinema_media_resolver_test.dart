@@ -80,6 +80,26 @@ void main() {
     },
   );
 
+  test('Enhanced private movie trailer needs no Moonbase resolver endpoint',
+      () async {
+    final client = _Client();
+    final result = await CinemaMediaResolver().resolve(
+      client: client,
+      itemId: 'trailer-item',
+      item: {
+        'Type': 'Video',
+        'ProviderIds': {
+          'Tmdb': '42',
+          'trailers4jellyfin.trailer': '/trailers/movie.mkv',
+        },
+      },
+      expectedMediaType: CinemaMediaType.tv,
+    );
+    expect(result?.type, CinemaMediaType.movie);
+    expect(result?.tmdbId, 42);
+    expect(client.calls, 0);
+  });
+
   test('deduplication includes source, account, token, and search category; no completed cache', () async {
     final client = _Client();
     final resolver = CinemaMediaResolver();
