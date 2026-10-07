@@ -362,7 +362,7 @@ class CinemaModeController extends ChangeNotifier {
       if (!_current(ticket)) return;
       seerrState = cinemaSeerrState(
         mediaStatus: response.media?.status,
-            acknowledged: true,
+        acknowledged: true,
       );
     } catch (error) {
       if (!_current(ticket)) return;
@@ -377,7 +377,7 @@ class CinemaModeController extends ChangeNotifier {
         seerrState = cinemaSeerrState(
           mediaStatus: details.mediaInfo?.status,
           requests: details.mediaInfo?.requests,
-              );
+        );
       } catch (_) {
         /* Uncertain outcome: don't offer another request. */
       }
