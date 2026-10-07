@@ -243,20 +243,17 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         ),
       );
 
-    if (vm.canRequestAdvanced) {
-      try {
-        await options.load(repository);
-      } catch (_) {
-        // Advanced overrides are optional; Seerr can still use server defaults.
-      }
-      if (!session.isCurrent || !isCurrent()) {
-        vm.dispose();
-        return;
-      }
-    }
-
-    final l10n = AppLocalizations.of(context);
     try {
+      if (vm.canRequestAdvanced) {
+        try {
+          await options.load(repository);
+        } catch (_) {
+          // Advanced overrides are optional; Seerr can still use server defaults.
+        }
+        if (!session.isCurrent || !isCurrent()) return;
+      }
+
+      final l10n = AppLocalizations.of(context);
       final selected = await backend.showCinemaRequestOptions({
         'title': l10n.requestSeriesOrMovie(l10n.series),
         'seasons': seasons,
