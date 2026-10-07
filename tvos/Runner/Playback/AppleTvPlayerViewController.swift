@@ -4158,6 +4158,10 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     private let allLabel: String
     private let submitLabel: String
     private let cancelLabel: String
+    private let quotaLabel: String?
+    private let quotaBlockedLabel: String
+    private let quotaRemaining: Int?
+    private let quotaRestricted: Bool
     private let advancedEnabled: Bool
     private let serverLabel: String
     private let profileLabel: String
@@ -4166,6 +4170,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     private let completion: ([String: Any]?) -> Void
 
     private var selected: Set<Int>
+    private var allSeasons = false
     private var selectedServerId: Int?
     private var selectedProfileId: Int?
     private var selectedRootFolderId: Int?
@@ -4179,6 +4184,10 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         allLabel = options["allLabel"] as? String ?? ""
         submitLabel = options["submitLabel"] as? String ?? ""
         cancelLabel = options["cancelLabel"] as? String ?? ""
+        quotaLabel = options["quotaLabel"] as? String
+        quotaBlockedLabel = options["quotaBlockedLabel"] as? String ?? ""
+        quotaRemaining = Self.intValue(options["quotaRemaining"])
+        quotaRestricted = options["quotaRestricted"] as? Bool ?? false
         advancedEnabled = options["advancedEnabled"] as? Bool ?? false
         serverLabel = options["serverLabel"] as? String ?? "Server"
         profileLabel = options["profileLabel"] as? String ?? "Quality Profile"
@@ -4198,8 +4207,19 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
 
     private var advancedCount: Int { advancedEnabled ? 3 : 0 }
     private var advancedStart: Int { seasons.count + 1 }
-    private var submitRow: Int { advancedStart + advancedCount }
+    private var quotaRow: Int { advancedStart + advancedCount }
+    private var quotaCount: Int { quotaLabel == nil ? 0 : 1 }
+    private var submitRow: Int { quotaRow + quotaCount }
     private var cancelRow: Int { submitRow + 1 }
+    private var canSubmit: Bool {
+        (allSeasons ? !seasons.isEmpty : !selected.isEmpty) && !quotaBlocked
+    }
+    private var quotaBlocked: Bool {
+        guard quotaLabel != nil else { return false }
+        if quotaRestricted { return true }
+        guard let quotaRemaining else { return false }
+        return (allSeasons ? seasons.count : selected.count) > quotaRemaining
+    }
 
     private var activeServer: [String: Any]? {
         if let selectedServerId,
@@ -4237,14 +4257,15 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         var content = cell.defaultContentConfiguration()
         var checked = false
         cell.accessoryType = .none
+        cell.selectionStyle = quotaCount > 0 && row == quotaRow ? .none : .default
 
         if row == 0 {
             content.text = allLabel
-            checked = !seasons.isEmpty && selected.count == seasons.count
+            checked = allSeasons
         } else if row <= seasons.count {
             content.text = labels.indices.contains(row - 1) ? labels[row - 1] : String(seasons[row - 1])
-            checked = selected.contains(seasons[row - 1])
-        } else if advancedEnabled && row < submitRow {
+            checked = allSeasons || selected.contains(seasons[row - 1])
+        } else if advancedEnabled && row < quotaRow {
             let offset = row - advancedStart
             switch offset {
             case 0:
@@ -4255,11 +4276,15 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
                 content.text = summary(rootFolderLabel, labelFor(selectedRootFolderId, in: rootFolders))
             }
             cell.accessoryType = .disclosureIndicator
+        } else if quotaCount > 0 && row == quotaRow {
+            content.text = quotaBlocked ? quotaBlockedLabel : quotaLabel
         } else {
             content.text = row == submitRow ? submitLabel : cancelLabel
         }
 
-        content.textProperties.color = row == submitRow && selected.isEmpty ? .gray : .white
+        content.textProperties.color = row == submitRow && !canSubmit ? .gray
+            : row == quotaRow && quotaCount > 0 ? (quotaBlocked ? .systemRed : .gray)
+            : .white
         cell.contentConfiguration = content
         if checked { cell.accessoryType = .checkmark }
         return cell
@@ -4285,21 +4310,26 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         guard !answered else { return }
         if row == cancelRow { finish(nil); return }
         if row == submitRow {
-            if !selected.isEmpty { finish(result()) }
+            if canSubmit { finish(result()) }
             return
         }
         if row == 0 {
-            selected = selected.count == seasons.count ? [] : Set(seasons)
+            allSeasons.toggle()
+            selected.removeAll()
             tableView.reloadData()
             return
         }
         if seasons.indices.contains(row - 1) {
             let number = seasons[row - 1]
+            if allSeasons {
+                allSeasons = false
+                selected.removeAll()
+            }
             if selected.contains(number) { selected.remove(number) } else { selected.insert(number) }
             tableView.reloadData()
             return
         }
-        guard advancedEnabled else { return }
+        guard advancedEnabled && row < quotaRow else { return }
         switch row - advancedStart {
         case 0:
             presentChoices(title: serverLabel, options: servers, selectedId: selectedServerId) { [weak self] id in
@@ -4374,7 +4404,10 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     }
 
     private func result() -> [String: Any] {
-        var value: [String: Any] = ["seasons": selected.sorted()]
+        var value: [String: Any] = [
+            "allSeasons": allSeasons,
+            "seasons": allSeasons ? [] : selected.sorted()
+        ]
         if let selectedServerId { value["serverId"] = selectedServerId }
         if let selectedProfileId { value["profileId"] = selectedProfileId }
         if let selectedRootFolderId { value["rootFolderId"] = selectedRootFolderId }

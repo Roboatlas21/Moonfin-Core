@@ -173,28 +173,16 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     widget.numberOfSeasons,
   );
 
-  int get _seasonsNeeded {
-    if (!widget.isTv) return 0;
-    if (_allSeasons) {
-      final total = _seasonNumbers.length;
-      return (total - _quality.unavailableOrRequestedSeasons.length).clamp(
-        1,
-        total,
-      );
-    }
-    return _selectedSeasons.length;
-  }
+  int get _seasonsNeeded => seerrTvQuotaNeeded(
+    allSeasons: _allSeasons,
+    requestableSeasons: _seasonNumbers.toSet().difference(
+      _quality.unavailableOrRequestedSeasons,
+    ),
+    selectedSeasons: _selectedSeasons,
+  );
 
-  bool get _quotaBlocked {
-    final detail = _quotaDetail;
-    if (detail == null || detail.isUnlimited) return false;
-    if (detail.restricted) return true;
-    final remaining = detail.remaining;
-    if (remaining == null) return false;
-    // TV quota counts seasons, movie quota counts one movie per request.
-    final needed = widget.isTv ? _seasonsNeeded : 1;
-    return needed > remaining;
-  }
+  bool get _quotaBlocked =>
+      seerrQuotaBlocked(_quotaDetail, widget.isTv ? _seasonsNeeded : 1);
 
   void _submit() async {
     final requestOptions = widget.vm.canRequestAdvanced

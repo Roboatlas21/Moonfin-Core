@@ -59,6 +59,42 @@ CinemaSeerrState cinemaSeerrState({
       : CinemaSeerrState.hidden;
 }
 
+/// Only a well-formed, requestable native selection may reach Seerr.
+/// In particular, an explicit All Seasons choice must remain "all" rather
+/// than being silently converted to an enumerated list.
+({bool allSeasons, List<int>? seasons})? cinemaTvRequestSelection(
+  Map<String, dynamic> raw,
+  Set<int> requestableSeasons,
+  SeerrQuotaDetail? quota,
+) {
+  final allSeasons = raw['allSeasons'];
+  final nativeSeasons = raw['seasons'];
+  if (allSeasons is! bool ||
+      nativeSeasons is! List ||
+      nativeSeasons.any((value) => value is! int)) {
+    return null;
+  }
+  final selected = nativeSeasons.cast<int>().toSet();
+  if (requestableSeasons.isEmpty ||
+      (allSeasons && selected.isNotEmpty) ||
+      (!allSeasons && selected.isEmpty) ||
+      !requestableSeasons.containsAll(selected) ||
+      seerrQuotaBlocked(
+        quota,
+        seerrTvQuotaNeeded(
+          allSeasons: allSeasons,
+          requestableSeasons: requestableSeasons,
+          selectedSeasons: selected,
+        ),
+      )) {
+    return null;
+  }
+  return (
+    allSeasons: allSeasons,
+    seasons: allSeasons ? null : (selected.toList()..sort()),
+  );
+}
+
 Set<int> cinemaRequestableSeasons(SeerrTvDetails details) {
   final quality = SeerrQualityStatus.of(
     is4k: false,

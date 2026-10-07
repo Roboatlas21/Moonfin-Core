@@ -14,3 +14,19 @@ List<int> seerrSeasonNumbersOf(List<SeerrSeason> seasons, int fallbackCount) {
   if (reported.isNotEmpty) return reported;
   return List.generate(fallbackCount, (i) => i + 1);
 }
+
+/// Seerr TV quota is measured in requested seasons, not series.
+int seerrTvQuotaNeeded({
+  required bool allSeasons,
+  required Iterable<int> requestableSeasons,
+  required Iterable<int> selectedSeasons,
+}) => allSeasons
+    ? requestableSeasons.toSet().length
+    : selectedSeasons.toSet().length;
+
+/// Quota unavailability must not prevent requests; Seerr remains authoritative.
+bool seerrQuotaBlocked(SeerrQuotaDetail? quota, int needed) {
+  if (quota == null || quota.isUnlimited) return false;
+  return quota.restricted ||
+      (quota.remaining != null && needed > quota.remaining!);
+}

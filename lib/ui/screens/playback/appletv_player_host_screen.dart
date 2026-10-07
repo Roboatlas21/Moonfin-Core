@@ -229,9 +229,15 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       GetIt.instance<SeerrPreferences>(),
       details: details,
       user: user,
-      requestAllowed: () => session.isCurrent && isCurrent(),
+      // After the trailer advances, the picker owns its ten-second grace.
+      // Requiring the old Cinema generation here would reject valid submits.
+      requestAllowed: () => session.isCurrent,
     );
     final seasons = cinemaRequestableSeasons(details).toList()..sort();
+    final quotaFuture = repository
+        .getUserQuota(user.id)
+        .timeout(const Duration(seconds: 5))
+        .then<SeerrQuota?>((quota) => quota, onError: (Object _) => null);
     final options = SeerrRequestOptions(
       isTv: true,
       isAnime: vm.state.isAnime,
@@ -250,9 +256,13 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         } catch (_) {
           // Advanced overrides are optional; Seerr can still use server defaults.
         }
-        if (!session.isCurrent || !isCurrent()) return;
       }
 
+      final quotaDetail = (await quotaFuture)?.tv;
+      if (!session.isCurrent) return;
+      final limitedQuota = quotaDetail != null && !quotaDetail.isUnlimited
+          ? quotaDetail
+          : null;
       final l10n = AppLocalizations.of(context);
       final selected = await backend.showCinemaRequestOptions({
         'title': l10n.requestSeriesOrMovie(l10n.series),
@@ -260,6 +270,15 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         'labels': [for (final number in seasons) l10n.seasonChip(number)],
         'selected': [if (season != null) season],
         'allLabel': l10n.allSeasons,
+        'quotaLabel': limitedQuota == null
+            ? null
+            : l10n.seasonQuotaRemaining(
+                limitedQuota.remaining ?? 0,
+                limitedQuota.limit ?? 0,
+              ),
+        'quotaBlockedLabel': l10n.requestErrorQuota,
+        'quotaRemaining': limitedQuota?.remaining,
+        'quotaRestricted': limitedQuota?.restricted ?? false,
         'submitLabel': l10n.submitRequest,
         'cancelLabel': l10n.cancel,
         'advancedEnabled': vm.canRequestAdvanced && options.eligibleServers.isNotEmpty,
@@ -288,18 +307,13 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
             },
         ],
       });
-      if (!session.isCurrent || !isCurrent() || selected == null) return;
-
-      final selectedSeasons = (selected['seasons'] as List?)
-              ?.whereType<int>()
-              .toSet()
-              .toList() ??
-          <int>[];
-      selectedSeasons.sort();
-      if (selectedSeasons.isEmpty ||
-          !selectedSeasons.every(seasons.contains)) {
-        return;
-      }
+      if (!session.isCurrent || selected == null) return;
+      final seasonRequest = cinemaTvRequestSelection(
+        selected,
+        seasons.toSet(),
+        limitedQuota,
+      );
+      if (seasonRequest == null) return;
 
       SeerrRequestSubmissionOptions? submission = options.submission;
       if (vm.canRequestAdvanced && options.eligibleServers.isNotEmpty) {
@@ -327,12 +341,16 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       session.markSubmitting();
       await vm.submitRequest(
         is4k: false,
-        seasons: selectedSeasons,
+        seasons: seasonRequest.seasons,
+        allSeasons: seasonRequest.allSeasons,
         profileId: submission.profileId,
         rootFolder: submission.rootFolder,
         serverId: submission.serverId,
       );
       if (vm.state.requestError != null) {
+        // The controller suppresses errors from a superseded trailer; the
+        // still-valid picker must nevertheless report submission failures.
+        if (session.isCurrent && !isCurrent()) _showCinemaError();
         throw StateError('Cinema series request failed');
       }
     } finally {
