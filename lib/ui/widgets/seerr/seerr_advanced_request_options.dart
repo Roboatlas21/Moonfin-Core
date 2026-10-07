@@ -8,94 +8,57 @@ import '../../../l10n/app_localizations.dart';
 import '../focus/focusable_wrapper.dart';
 import 'seerr_tv_controls.dart';
 
-class SeerrRequestSubmissionOptions {
-  const SeerrRequestSubmissionOptions({
-    this.serverId,
-    this.profileId,
-    this.rootFolder,
-  });
-
-  final int? serverId;
-  final int? profileId;
-  final String? rootFolder;
-}
-
-/// Radarr/Sonarr selections for regular and collection requests. Cinema Mode
-/// uses Seerr defaults and never loads these advanced choices.
+/// Holds the Radarr/Sonarr server, profile, and root folder selection for a
+/// request, including the saved-preference and anime defaults. Shared by the
+/// single request dialog and the collection request sheet.
 class SeerrAdvancedRequestController extends ChangeNotifier {
+  final bool isTv;
+  final bool isAnime;
+  bool is4k;
+
+  List<SeerrServiceServerDetails>? servers;
+  bool loading = false;
+
+  int? selectedServerId;
+  int? selectedProfileId;
+  int? selectedRootFolderId;
+
+  String? _savedServerId;
+  String? _savedProfileId;
+  String? _savedRootFolderId;
+
   SeerrAdvancedRequestController({
     required this.isTv,
     this.isAnime = false,
     this.is4k = false,
   });
 
-  final bool isTv;
-  final bool isAnime;
-  bool is4k;
-  bool loading = false;
-  bool _disposed = false;
-
-  List<SeerrServiceServerDetails>? _servers;
-  List<SeerrServiceServerDetails>? get servers => _servers == null
-      ? null
-      : [for (final s in _servers!) if (s.server.is4k == is4k) s];
-
-  int? selectedServerId;
-  int? selectedProfileId;
-  int? selectedRootFolderId;
-  String? _savedServerId;
-  String? _savedProfileId;
-  String? _savedRootFolderId;
-
-  static int? _id(String? value) => int.tryParse(value ?? '');
-
-  @override
-  void dispose() {
-    _disposed = true;
-    super.dispose();
-  }
-
   Future<void> load() async {
-    if (_disposed) return;
     loading = true;
     notifyListeners();
     try {
       final repo = await GetIt.instance.getAsync<SeerrRepository>();
-      if (_disposed) return;
-      final summaries =
-          isTv ? await repo.getSonarrServers() : await repo.getRadarrServers();
-      // A failing Sonarr/Radarr instance must not hide other usable instances.
-      final details = await Future.wait(summaries.map((s) async {
-        try {
-          return isTv
-              ? await repo.getSonarrServerDetails(s.id)
-              : await repo.getRadarrServerDetails(s.id);
-        } catch (_) {
-          return null;
-        }
-      }));
-      if (_disposed) return;
-      _servers = List.unmodifiable(details.whereType<SeerrServiceServerDetails>());
-      _normalize();
-    } catch (_) {
-      if (!_disposed) {
-        _servers = const [];
-        _clearSelection();
+      if (isTv) {
+        final sonarrServers = await repo.getSonarrServers();
+        servers = await Future.wait(
+          sonarrServers.map((s) => repo.getSonarrServerDetails(s.id)),
+        );
+      } else {
+        final radarrServers = await repo.getRadarrServers();
+        servers = await Future.wait(
+          radarrServers.map((s) => repo.getRadarrServerDetails(s.id)),
+        );
       }
+      _applySavedPreferences();
+    } catch (_) {
     } finally {
       loading = false;
-      if (!_disposed) notifyListeners();
+      notifyListeners();
     }
   }
 
-  /// Also lets selection rules be exercised without network or widget setup.
-  void setServers(List<SeerrServiceServerDetails> value) {
-    if (_disposed) return;
-    _servers = List.unmodifiable(value);
-    _normalize();
-    notifyListeners();
-  }
-
+  /// Called on init and whenever the 4K toggle flips, with the saved defaults
+  /// for the now-active flavor.
   void applySavedPreferences({
     String? serverId,
     String? profileId,
@@ -103,154 +66,143 @@ class SeerrAdvancedRequestController extends ChangeNotifier {
     bool resetSelection = false,
     bool? is4k,
   }) {
-    if (_disposed) return;
-    final trackChanged = is4k != null && is4k != this.is4k;
-    if (is4k != null) this.is4k = is4k;
+    if (is4k != null) {
+      this.is4k = is4k;
+    }
     _savedServerId = serverId;
     _savedProfileId = profileId;
     _savedRootFolderId = rootFolderId;
-    if (resetSelection || trackChanged) _clearSelection();
-    _normalize();
-    notifyListeners();
-  }
-
-  void _clearSelection() {
-    selectedServerId = null;
-    selectedProfileId = null;
-    selectedRootFolderId = null;
-  }
-
-  SeerrServiceServerDetails? get activeServer {
-    final eligible = servers ?? const <SeerrServiceServerDetails>[];
-    return eligible.where((s) => s.server.id == selectedServerId).firstOrNull ??
-        eligible.where((s) => s.server.isDefault).firstOrNull ??
-        eligible.firstOrNull;
-  }
-
-  int? _defaultProfile(SeerrServiceServerDetails server) {
-    if (server.profiles.isEmpty) return null;
-    final desired = isAnime
-        ? server.server.activeAnimeProfileId ?? server.server.activeProfileId
-        : server.server.activeProfileId;
-    return server.profiles.any((p) => p.id == desired)
-        ? desired
-        : server.profiles.first.id;
-  }
-
-  int? _defaultRoot(SeerrServiceServerDetails server) {
-    final directory = isAnime &&
-            (server.server.activeAnimeDirectory?.isNotEmpty ?? false)
-        ? server.server.activeAnimeDirectory!
-        : server.server.activeDirectory;
-    return server.rootFolders.where((f) => f.path == directory).firstOrNull?.id ??
-        server.rootFolders.firstOrNull?.id;
-  }
-
-  void _normalize() {
-    final eligible = servers ?? const <SeerrServiceServerDetails>[];
-    if (eligible.isEmpty) {
-      _clearSelection();
-      return;
-    }
-    final previousServerId = selectedServerId;
-    if (!eligible.any((s) => s.server.id == selectedServerId)) {
-      final saved = _id(_savedServerId);
-      selectedServerId = eligible.any((s) => s.server.id == saved)
-          ? saved
-          : eligible.where((s) => s.server.isDefault).firstOrNull?.server.id ??
-              eligible.first.server.id;
-    }
-    if (selectedServerId != previousServerId) {
+    if (resetSelection) {
+      selectedServerId = null;
       selectedProfileId = null;
       selectedRootFolderId = null;
     }
-    final server = activeServer!;
-    // Profiles and roots are server-specific; matching numeric IDs alone
-    // are not enough to carry a saved selection to a replacement server.
-    final useSaved = _id(_savedServerId) == server.server.id;
-    if (!server.profiles.any((p) => p.id == selectedProfileId)) {
-      final saved = _id(_savedProfileId);
-      selectedProfileId = useSaved &&
-              server.profiles.any((p) => p.id == saved)
-          ? saved
-          : _defaultProfile(server);
+    _applySavedPreferences();
+    notifyListeners();
+  }
+
+  void _applySavedPreferences() {
+    if (_savedServerId != null && _savedServerId!.isNotEmpty) {
+      selectedServerId ??= int.tryParse(_savedServerId!);
     }
-    if (!server.rootFolders.any((f) => f.id == selectedRootFolderId)) {
-      final saved = _id(_savedRootFolderId);
-      selectedRootFolderId = useSaved &&
-              server.rootFolders.any((f) => f.id == saved)
-          ? saved
-          : _defaultRoot(server);
+    if (_savedProfileId != null && _savedProfileId!.isNotEmpty) {
+      selectedProfileId ??= int.tryParse(_savedProfileId!);
+    }
+    if (_savedRootFolderId != null && _savedRootFolderId!.isNotEmpty) {
+      selectedRootFolderId ??= int.tryParse(_savedRootFolderId!);
+    }
+    _applyServerDefaults();
+  }
+
+  void _applyServerDefaults() {
+    final server = activeServer;
+    if (server == null) return;
+    selectedServerId ??= server.server.id;
+
+    final int? animeProfileId = server.server.activeAnimeProfileId;
+    final String? animeDir = server.server.activeAnimeDirectory;
+
+    if (isAnime && animeProfileId != null) {
+      selectedProfileId ??= animeProfileId;
+    } else {
+      selectedProfileId ??= server.server.activeProfileId;
+    }
+
+    final String dir;
+    if (isAnime && animeDir != null && animeDir.isNotEmpty) {
+      dir = animeDir;
+    } else {
+      dir = server.server.activeDirectory;
+    }
+
+    if (selectedRootFolderId == null && dir.isNotEmpty) {
+      final match = server.rootFolders.where((f) => f.path == dir).firstOrNull;
+      if (match != null) selectedRootFolderId = match.id;
     }
   }
 
-  int? get effectiveServerId => activeServer?.server.id;
+  SeerrServiceServerDetails? _findDefaultServer() {
+    if (servers == null || servers!.isEmpty) return null;
+
+    // 1. Try to find a server that matches both is4k and isDefault
+    final primaryMatch = servers!
+        .where((s) => s.server.is4k == is4k && s.server.isDefault)
+        .firstOrNull;
+    if (primaryMatch != null) return primaryMatch;
+
+    // 2. Try to find any server that matches is4k
+    final secondaryMatch = servers!
+        .where((s) => s.server.is4k == is4k)
+        .firstOrNull;
+    if (secondaryMatch != null) return secondaryMatch;
+
+    // 3. Fall back to the first server in the list
+    return servers!.first;
+  }
+
+  SeerrServiceServerDetails? get activeServer {
+    if (servers == null || servers!.isEmpty) return null;
+    if (selectedServerId == null) return _findDefaultServer();
+    return servers!
+            .where((s) => s.server.id == selectedServerId)
+            .firstOrNull ??
+        _findDefaultServer();
+  }
+
+  int? get effectiveServerId =>
+      selectedServerId ?? activeServer?.server.id;
 
   int? get effectiveProfileId {
+    if (selectedProfileId != null) return selectedProfileId;
     final server = activeServer;
     if (server == null) return null;
-    return server.profiles.any((p) => p.id == selectedProfileId)
-        ? selectedProfileId
-        : _defaultProfile(server);
+    final int? animeProfileId = server.server.activeAnimeProfileId;
+    if (isAnime && animeProfileId != null) return animeProfileId;
+    return server.server.activeProfileId;
   }
 
   String? get effectiveRootFolderPath {
     final server = activeServer;
     if (server == null) return null;
-    final root = server.rootFolders
-        .where((f) => f.id == selectedRootFolderId)
-        .firstOrNull;
-    return root?.path;
-  }
 
-  /// Validate overrides together. Missing configuration uses Seerr's own
-  /// defaults; malformed choices never get submitted as partial overrides.
-  SeerrRequestSubmissionOptions? get submission {
-    if (loading) return null;
-    final server = activeServer;
-    if (server == null) return const SeerrRequestSubmissionOptions();
-    final profileId = effectiveProfileId;
-    final rootFolder = effectiveRootFolderPath;
-    if (server.profiles.isNotEmpty && profileId == null) return null;
-    if (server.rootFolders.isNotEmpty &&
-        (rootFolder == null || rootFolder.trim().isEmpty)) {
-      return null;
+    if (selectedRootFolderId != null) {
+      return server.rootFolders
+          .where((f) => f.id == selectedRootFolderId)
+          .firstOrNull
+          ?.path;
     }
-    return SeerrRequestSubmissionOptions(
-      serverId: server.server.id,
-      profileId: profileId,
-      rootFolder: rootFolder,
-    );
+
+    final String? animeDir = server.server.activeAnimeDirectory;
+    final String dir;
+    if (isAnime && animeDir != null && animeDir.isNotEmpty) {
+      dir = animeDir;
+    } else {
+      dir = server.server.activeDirectory;
+    }
+
+    if (dir.isNotEmpty) {
+      final match = server.rootFolders.where((f) => f.path == dir).firstOrNull;
+      if (match != null) return match.path;
+    }
+
+    return server.rootFolders.firstOrNull?.path;
   }
 
   void onServerChanged(int? value) {
-    if (_disposed) return;
-    final eligible = servers ?? const <SeerrServiceServerDetails>[];
-    if (value != null && !eligible.any((s) => s.server.id == value)) return;
     selectedServerId = value;
     selectedProfileId = null;
     selectedRootFolderId = null;
-    _normalize();
+    _applyServerDefaults();
     notifyListeners();
   }
 
   void onProfileChanged(int? value) {
-    if (_disposed) return;
-    final server = activeServer;
-    if (server == null ||
-        (value != null && !server.profiles.any((p) => p.id == value))) return;
-    selectedProfileId = value ?? _defaultProfile(server);
+    selectedProfileId = value;
     notifyListeners();
   }
 
   void onRootFolderChanged(int? value) {
-    if (_disposed) return;
-    final server = activeServer;
-    if (server == null ||
-        (value != null && !server.rootFolders.any((f) => f.id == value))) {
-      return;
-    }
-    selectedRootFolderId = value ?? _defaultRoot(server);
+    selectedRootFolderId = value;
     notifyListeners();
   }
 }
@@ -313,7 +265,8 @@ class _SeerrAdvancedRequestOptionsState
                 padding: EdgeInsets.all(16),
                 child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
               )
-            else if (controller.servers?.isNotEmpty == true) ...[
+            else if (controller.servers != null &&
+                controller.servers!.isNotEmpty) ...[
               _buildPickerRow<SeerrServiceServerDetails>(
                 label: l10n.server,
                 items: controller.servers ?? const [],

@@ -451,7 +451,6 @@ class _CollectionRequestSheetState extends State<_CollectionRequestSheet> {
     if (widget.vm.canRequestAdvanced) {
       _advanced.load();
     }
-    _advanced.addListener(_onVmChanged);
     widget.vm.addListener(_onVmChanged);
     _selectAll();
   }
@@ -459,7 +458,6 @@ class _CollectionRequestSheetState extends State<_CollectionRequestSheet> {
   @override
   void dispose() {
     widget.vm.removeListener(_onVmChanged);
-    _advanced.removeListener(_onVmChanged);
     _advanced.dispose();
     super.dispose();
   }
@@ -506,27 +504,16 @@ class _CollectionRequestSheetState extends State<_CollectionRequestSheet> {
   bool get _allSelected =>
       _selected.length >= _selectionCap && _selectionCap > 0;
 
-  SeerrRequestSubmissionOptions? get _requestOptions =>
-      widget.vm.canRequestAdvanced
-          ? _advanced.submission
-          : const SeerrRequestSubmissionOptions();
-
   Future<void> _submit() async {
-    final options = _requestOptions;
-    if (_submitting ||
-        _selected.isEmpty ||
-        _selected.length > _selectionCap ||
-        options == null) {
-      return;
-    }
+    if (_submitting || _selected.isEmpty) return;
     setState(() => _submitting = true);
 
     final result = await widget.vm.requestParts(
       _selected.toList(),
       is4k: _is4k,
-      profileId: options.profileId,
-      rootFolder: options.rootFolder,
-      serverId: options.serverId,
+      profileId: _advanced.effectiveProfileId,
+      rootFolder: _advanced.effectiveRootFolderPath,
+      serverId: _advanced.effectiveServerId,
     );
 
     if (!mounted) return;
@@ -544,7 +531,6 @@ class _CollectionRequestSheetState extends State<_CollectionRequestSheet> {
     final quota = _movieQuota;
     final overCap =
         quota != null && !quota.isUnlimited && _selected.length > _selectionCap;
-    final advancedReady = _requestOptions != null;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
@@ -625,10 +611,7 @@ class _CollectionRequestSheetState extends State<_CollectionRequestSheet> {
                     s.requestProgressCurrent,
                     s.requestProgressTotal,
                   ),
-                  onPressed: _submitting ||
-                          _selected.isEmpty ||
-                          overCap ||
-                          !advancedReady
+                  onPressed: _submitting || _selected.isEmpty || overCap
                       ? null
                       : _submit,
                 ),
