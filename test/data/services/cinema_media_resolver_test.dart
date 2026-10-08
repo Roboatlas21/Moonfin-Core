@@ -6,6 +6,7 @@ import 'package:server_core/server_core.dart';
 
 class _Client extends Fake implements MediaServerClient {
   int calls = 0;
+  CinemaMediaType? requestedType;
   Completer<CinemaMedia?> reply = Completer();
   @override
   Future<CinemaMedia?> resolveCinemaMedia(
@@ -13,6 +14,7 @@ class _Client extends Fake implements MediaServerClient {
     CinemaMediaType? expectedMediaType,
   }) {
     calls++;
+    requestedType = expectedMediaType;
     return reply.future;
   }
 }
@@ -41,13 +43,69 @@ void main() {
       expect(
         direct('Video', {
           'Tmdb': '42',
-          'trailers4jellyfin.trailer': '/movie.mp4',
-        })?.type,
-        CinemaMediaType.movie,
+          'UnrelatedPlugin.Marker': '/movie.mp4',
+        }),
+        isNull,
       );
       expect(CinemaMedia.fromJson({'tmdbId': 42}), isNull);
     },
   );
+
+
+  test('movie context resolves an untyped ID without Moonbase', () async {
+    final item = <String, dynamic>{
+      'Type': 'Video',
+      'ProviderIds': {'Tmdb': '42'},
+      '__moonfinCinemaFeatureType': 'Movie',
+    };
+    final client = _Client()..reply.complete(null);
+    final result = await CinemaMediaResolver.resolve(
+      client: client,
+      itemId: 'trailer',
+      item: item,
+    );
+    expect(result?.tmdbId, 42);
+    expect(result?.type, CinemaMediaType.movie);
+    expect(client.calls, 0);
+    expect(
+      CinemaMediaResolver.directMedia({
+        ...item,
+        '__moonfinCinemaFeatureType': 'Episode',
+      }),
+      isNull,
+    );
+    expect(
+      CinemaMediaResolver.directMedia({
+        ...item,
+        'OwnerId': '11111111-1111-1111-1111-111111111111',
+      }),
+      isNull,
+    );
+    expect(
+      CinemaMediaResolver.directMedia({
+        ...item,
+        'ProviderIds': {'Tmdb': '42', 'TmdbMediaType': 'tv'},
+      })?.type,
+      CinemaMediaType.tv,
+    );
+  });
+
+  test('untyped TV trailers require Moonbase identity resolution', () async {
+    final client = _Client()
+      ..reply.complete(const CinemaMedia(42, CinemaMediaType.tv));
+    final result = await CinemaMediaResolver.resolve(
+      client: client,
+      itemId: 'trailer',
+      item: {
+        'Type': 'Video',
+        'ProviderIds': {'Tmdb': '42'},
+        '__moonfinCinemaFeatureType': 'Episode',
+      },
+    );
+    expect(result?.type, CinemaMediaType.tv);
+    expect(client.calls, 1);
+    expect(client.requestedType, CinemaMediaType.tv);
+  });
 
   test('endpoint failures do not retain results', () async {
     final client = _Client();
