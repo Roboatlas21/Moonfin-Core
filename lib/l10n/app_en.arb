@@ -13126,7 +13126,5 @@
     "description": "Bottom bar tab that opens the user's own menu with their profile, extra destinations and settings"
   },
   "cinemaMinimumIntroLength": "Minimum intro length for Skip button",
-  "cinemaMinimumIntroLengthDescription": "Hide Cinema Mode actions for intros shorter than this. Auto hide still applies.",
-  "cinemaSkip": "Skip",
-  "cinemaRequestMovie": "Request Movie"
+  "cinemaMinimumIntroLengthDescription": "Hide Cinema Mode actions for intros shorter than this. Auto hide still applies."
 }

@@ -14,11 +14,11 @@ String? cinemaRequestLabel(
 ) => switch (controller.seerrState) {
   CinemaSeerrState.hidden => null,
   CinemaSeerrState.request =>
-    controller.isSeries
-        ? (controller.isTvRequestMore
-              ? l10n.requestMore
-              : l10n.requestSeriesOrMovie(l10n.series))
-        : l10n.cinemaRequestMovie,
+    controller.isSeries && controller.isTvRequestMore
+        ? l10n.requestMore
+        : l10n.requestSeriesOrMovie(
+            controller.isSeries ? l10n.series : l10n.movie,
+          ),
   CinemaSeerrState.requested => l10n.seerrRequestedStatus,
   CinemaSeerrState.pending => l10n.pendingStatus,
   CinemaSeerrState.processing => l10n.processing,
@@ -97,9 +97,9 @@ class CinemaModeActionsOverlay extends StatelessWidget {
                 end: controller.duration,
               ),
               actionLabel: controller.media == null
-                  ? l10n.cinemaSkip
+                  ? l10n.settingsSkip
                   : skipLabel,
-              labelAlternatives: [l10n.cinemaSkip, skipLabel],
+              labelAlternatives: [l10n.settingsSkip, skipLabel],
               countdownStyle: countdownStyle,
               focusNode: skipFocus,
               handleActivationKeys: false,

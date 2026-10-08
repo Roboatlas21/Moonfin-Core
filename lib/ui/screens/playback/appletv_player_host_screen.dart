@@ -174,7 +174,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         'canRequest': _cinema.canRequest,
         'requestLabel': cinemaRequestLabel(_cinema, l10n),
         'skipLabel': _cinema.media == null
-            ? l10n.cinemaSkip
+            ? l10n.settingsSkip
             : l10n.skipSegment(l10n.trailer),
         'durationMs': _cinema.duration.inMilliseconds,
         'countdownStyle':
