@@ -78,6 +78,47 @@ SeerrTvDetails _requestedSeasons(List<int> seasons) => SeerrTvDetails(
 );
 
 void main() {
+  test('cancelling TV picker preserves Request without a refresh', () async {
+    final repo = _Repo()..refreshed = _original;
+    final controller = CinemaModeController(
+      seerr: () async => repo,
+      accountKey: () => 'server/user',
+      onSkip: () async {},
+      onError: (error) => fail('Unexpected failure: $error'),
+      onRequestSeries: (
+        repository,
+        details,
+        user,
+        season,
+        excluded,
+        isCurrent,
+        submit,
+      ) async => null,
+    );
+    try {
+      controller.enter(
+        item: {
+          'Type': 'Series',
+          'RunTimeTicks': 900000000,
+          'ProviderIds': {'Tmdb': '42'},
+        },
+        resolveMedia: () async => null,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(repo.lookups, 1);
+      expect(controller.canRequest, isTrue);
+
+      await controller.request();
+
+      expect(repo.submissions, 0);
+      expect(repo.lookups, 1);
+      expect(controller.seerrState, CinemaSeerrState.request);
+      expect(controller.canRequest, isTrue);
+    } finally {
+      controller.dispose();
+    }
+  });
+
   test('accepted TV seasons do not hide Request More for other seasons', () async {
     final repo = _Repo()..refreshed = _original;
     repo.post.complete(const SeerrRequest(
