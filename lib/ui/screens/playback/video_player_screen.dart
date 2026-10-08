@@ -559,7 +559,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _seriesPickerSession = session;
     SeerrMediaDetailViewModel? vm;
     SeerrTvDetails? confirmed;
-    Object? submitFailure;
     try {
       vm = SeerrMediaDetailViewModel.forCinema(
         repository,
@@ -579,16 +578,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         onDismissReady: (dismiss) => session.dismissDialog = dismiss,
         cinemaSubmit: (selection, quota) async {
           session.markSubmitting();
-          try {
-            confirmed = await submit(selection, quota, () => session.isCurrent);
-          } catch (error) {
-            submitFailure = error;
-          }
+          confirmed = await submit(selection, quota, () => session.isCurrent);
         },
       );
-      if (submitFailure != null && session.isCurrent && isCurrent()) {
-        throw submitFailure!;
-      }
       return confirmed;
     } finally {
       vm?.dispose();
