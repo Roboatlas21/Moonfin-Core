@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/repositories/seerr_repository.dart';
 import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
 import 'package:moonfin/playback/cinema_mode_controller.dart';
+import 'package:moonfin/playback/cinema_request_picker_session.dart';
 
 class FakeCinemaSeerr extends Fake implements SeerrRepository {
   SeerrMediaInfo? info;
@@ -12,6 +13,7 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
   bool movie4kEnabled = true;
   Completer<Map<String, dynamic>>? settingsResponse;
   Completer<SeerrRequest>? submission;
+  Future<SeerrMovieDetails> Function(int)? movieLookup;
   int lookups = 0;
   final submitted = <int>[];
   final requested4k = <bool>[];
@@ -34,6 +36,7 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
   @override
   Future<SeerrMovieDetails> getMovieDetails(int tmdbId) async {
     lookups++;
+    if (movieLookup != null) return movieLookup!(tmdbId);
     return SeerrMovieDetails(id: tmdbId, title: 'Movie', mediaInfo: info);
   }
 
@@ -148,6 +151,96 @@ void main() {
     });
   });
 
+  test('late movie recovery cannot hide Request on the next trailer', () {
+    fakeAsync((clock) {
+      final recovery = Completer<SeerrMovieDetails>();
+      final next = Completer<SeerrMovieDetails>();
+      seerr.submission = Completer<SeerrRequest>();
+      enter();
+      clock.flushMicrotasks();
+      controller.request();
+      clock.flushMicrotasks();
+      seerr.movieLookup = (id) => id == 42 ? recovery.future : next.future;
+      seerr.submission!.completeError(StateError('Lost request response'));
+      clock.flushMicrotasks();
+
+      enter(tmdb: 99);
+      clock.flushMicrotasks();
+      recovery.complete(const SeerrMovieDetails(
+        id: 42,
+        title: 'Previous movie',
+        mediaInfo: SeerrMediaInfo(status: SeerrMediaStatus.processing),
+      ));
+      clock.flushMicrotasks();
+      next.complete(const SeerrMovieDetails(id: 99, title: 'Next movie'));
+      clock.flushMicrotasks();
+      expect(controller.media?.tmdbId, 99);
+      expect(controller.canRequest, isTrue);
+    });
+  });
+
+  test('movie recovery preserves the status confirmed by Seerr', () {
+    fakeAsync((clock) {
+      for (final entry in {
+        SeerrMediaStatus.processing: CinemaSeerrState.processing,
+        SeerrMediaStatus.available: CinemaSeerrState.available,
+      }.entries) {
+        seerr.info = null;
+        seerr.submission = Completer<SeerrRequest>();
+        enter();
+        clock.flushMicrotasks();
+        controller.request();
+        clock.flushMicrotasks();
+        seerr.info = SeerrMediaInfo(status: entry.key);
+        seerr.submission!.completeError(StateError('Lost request response'));
+        clock.flushMicrotasks();
+        expect(controller.seerrState, entry.value);
+        expect(controller.canRequest, isFalse);
+      }
+    });
+  });
+
+  test('movie picker grace keeps its movie but cannot cross accounts', () {
+    for (final changeAccount in [false, true]) {
+      fakeAsync((clock) {
+        var account = 'original';
+        final repo = FakeCinemaSeerr()
+          ..permissions = SeerrPermission.requestMovie | SeerrPermission.request4kMovie;
+        final picked = Completer<bool>();
+        late CinemaRequestPickerSession session;
+        final choice = CinemaModeController(
+          seerr: () async => repo,
+          accountKey: () => account,
+          onSkip: () async {},
+          onRequestMovie: (_, _, _, _, submit) async {
+            session = CinemaRequestPickerSession(
+              accountKey: () => account,
+              isMounted: () => true,
+            );
+            final is4k = await picked.future;
+            session.markSubmitting();
+            await submit(is4k, () => session.isCurrent);
+            session.dispose();
+          },
+        );
+        choice.enter(item: cinemaItem(), resolveMedia: () async => null);
+        clock.flushMicrotasks();
+        choice.request();
+        clock.flushMicrotasks();
+        session.beginGrace();
+        choice.enter(item: cinemaItem(tmdb: 99), resolveMedia: () async => null);
+        clock.flushMicrotasks();
+        if (changeAccount) account = 'other';
+        picked.complete(true);
+        clock.flushMicrotasks();
+        expect(repo.submitted, changeAccount ? isEmpty : [42]);
+        expect(repo.requested4k, changeAccount ? isEmpty : [true]);
+        if (!changeAccount) expect(choice.canRequest, isTrue);
+        choice.dispose();
+      });
+    }
+  });
+
   test('standard Request works while optional 4K settings are pending', () async {
     seerr.permissions =
         SeerrPermission.requestMovie | SeerrPermission.request4kMovie;
@@ -200,7 +293,7 @@ void main() {
       onSkip: () async {},
       onRequestMovie: (repository, details, user, isCurrent, submit) async {
         prompts++;
-        await submit(true);
+        await submit(true, isCurrent);
       },
     );
     try {

@@ -1,12 +1,12 @@
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:moonfin/playback/cinema_series_picker_session.dart';
+import 'package:moonfin/playback/cinema_request_picker_session.dart';
 
 void main() {
   test('queue transitions give one ten-second grace period', () {
     fakeAsync((time) {
       var dismissed = 0;
-      final session = CinemaSeriesPickerSession(
+      final session = CinemaRequestPickerSession(
         accountKey: () => 'account',
         isMounted: () => true,
       )..dismissDialog = () => dismissed++;
@@ -25,7 +25,7 @@ void main() {
   test('Skip preserves a submitting request; player exit still closes it', () {
     fakeAsync((time) {
       var dismissals = 0;
-      final session = CinemaSeriesPickerSession(
+      final session = CinemaRequestPickerSession(
         accountKey: () => 'account',
         isMounted: () => true,
       )..dismissDialog = () => dismissals++;
