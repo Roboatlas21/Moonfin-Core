@@ -1,13 +1,7 @@
 import 'package:server_core/server_core.dart';
 
-/// Resolves typed identities without retaining completed results.
+/// Resolves typed identities from metadata or the optional server endpoint.
 class CinemaMediaResolver {
-  final _inFlight =
-      <
-        (String, String?, String?, String, CinemaMediaType?),
-        Future<CinemaMedia?>
-      >{};
-
   static bool _supported(Map<String, dynamic> item) => {
     'movie',
     'series',
@@ -60,29 +54,24 @@ class CinemaMediaResolver {
     required String itemId,
     required Map<String, dynamic> item,
     CinemaMediaType? expectedMediaType,
-  }) {
-    if (!_supported(item)) return Future.value();
+  }) async {
+    if (!_supported(item)) return null;
     final direct = directMedia(item);
-    if (direct != null) return Future.value(direct);
+    if (direct != null) return direct;
     final type = expectedMediaType ?? switch (item['__moonfinCinemaFeatureType']) {
       'Movie' => CinemaMediaType.movie,
       'Episode' => CinemaMediaType.tv,
       _ => null,
     };
-    final key = (client.baseUrl, client.userId, client.accessToken, itemId, type);
-    return _inFlight.putIfAbsent(key, () async {
-      try {
-        final media = await client
-            .resolveCinemaMedia(itemId, expectedMediaType: type)
-            .timeout(const Duration(seconds: 10));
-        return media != null && media.tmdbId > 0 ? media : null;
-      } catch (_) {
-        // Includes older plugins without the typed endpoint. Never reinterpret
-        // an untyped legacy result as a movie or a series.
-        return null;
-      } finally {
-        _inFlight.remove(key);
-      }
-    });
+    try {
+      final media = await client
+          .resolveCinemaMedia(itemId, expectedMediaType: type)
+          .timeout(const Duration(seconds: 10));
+      return media != null && media.tmdbId > 0 ? media : null;
+    } catch (_) {
+      // Includes older plugins without the typed endpoint. Never reinterpret
+      // an untyped legacy result as a movie or a series.
+      return null;
+    }
   }
 }
