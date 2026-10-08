@@ -145,6 +145,7 @@ final class AppleTvPlayerViewController: UIViewController {
 
     private var cinemaActive = false
     private var cinemaVisible = false
+    private var cinemaRequestFocused = false
     private var cinemaGeneration = 0
     private let cinemaRequest = UILabel()
     private let cinemaRequestPanel = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
@@ -419,14 +420,15 @@ final class AppleTvPlayerViewController: UIViewController {
 
     private func restyleForTheme() {
         let accent = themeAccent
+        let subdued = accent.withAlphaComponent(0.4).cgColor
         scrubber.progressTintColor = glassActive ? glassRangeProgress : accent
         channelBadge.backgroundColor = accent
         upNextLabel.textColor = accent
-        skipSegmentButton.layer.borderColor = accent.cgColor
+        skipSegmentButton.layer.borderColor = cinemaVisible && cinemaRequestFocused ? subdued : accent.cgColor
         skipSegmentIcon.tintColor = .white
         skipSegmentRingIcon.tintColor = .white
         skipSegmentRing.strokeColor = UIColor.white.cgColor
-        cinemaRequestPanel.layer.borderColor = accent.cgColor
+        cinemaRequestPanel.layer.borderColor = cinemaVisible && !cinemaRequestFocused ? subdued : accent.cgColor
         nextUpPlayButton.backgroundColor = accent
     }
 
@@ -747,12 +749,10 @@ final class AppleTvPlayerViewController: UIViewController {
                 hideSkipSegment()
             }
         }
-        restyleForTheme()
-        // One blue border per button; a slightly thicker border shows remote focus.
-        let requestFocused = cinemaVisible && !cinemaRequestPanel.isHidden &&
+        // Keep a single 4-point outline; focus changes opacity, never thickness.
+        cinemaRequestFocused = cinemaVisible && !cinemaRequestPanel.isHidden &&
             (args["requestFocused"] as? Bool ?? false)
-        cinemaRequestPanel.layer.borderWidth = requestFocused ? 6 : 4
-        skipSegmentButton.layer.borderWidth = cinemaVisible && !requestFocused ? 6 : 4
+        restyleForTheme()
     }
 
     func presentCinemaRequestOptions(
