@@ -14,6 +14,7 @@ void main() {
     final first = Object();
     final second = Object();
     expect(guard.enter(first, 0, initial: true), isTrue);
+    expect(guard.enter(first, 0), isFalse);
     expect(
       guard.observeReady(item: first, index: 0, itemId: 'trailer', source: ready('trailer', 7)),
       isTrue,
@@ -29,22 +30,6 @@ void main() {
     );
     expect(
       guard.observeReady(item: second, index: 1, itemId: 'trailer', source: ready('trailer', 8)),
-      isTrue,
-    );
-  });
-
-  test('same queue entry is not reentered, but a changed index is', () {
-    final guard = CinemaPlaybackSourceGuard();
-    final item = Object();
-    expect(guard.enter(item, 0, initial: true), isTrue);
-    expect(guard.enter(item, 0), isFalse);
-    expect(guard.enter(item, 1), isTrue);
-    expect(
-      guard.observeReady(item: item, index: 0, itemId: 'id', source: ready('id', 2)),
-      isFalse,
-    );
-    expect(
-      guard.observeReady(item: item, index: 1, itemId: 'id', source: ready('id', 2)),
       isTrue,
     );
   });

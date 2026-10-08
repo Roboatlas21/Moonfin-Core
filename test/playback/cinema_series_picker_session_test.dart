@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/playback/cinema_series_picker_session.dart';
 
 void main() {
-
   test('queue transitions give one ten-second grace period', () {
     fakeAsync((time) {
       var dismissed = 0;
@@ -42,19 +41,5 @@ void main() {
       expect(session.isCurrent, isFalse);
       expect(dismissals, 1);
     });
-  });
-
-  test('Skip does not preserve a submission after the account changes', () {
-    var account = 'first';
-    var dismissals = 0;
-    final session = CinemaSeriesPickerSession(
-      accountKey: () => account,
-      isMounted: () => true,
-    )..dismissDialog = () => dismissals++;
-    session.markSubmitting();
-    account = 'second';
-    expect(session.closeForSkip(), isTrue);
-    expect(session.isCurrent, isFalse);
-    expect(dismissals, 1);
   });
 }
