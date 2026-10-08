@@ -93,10 +93,11 @@ SeerrTvDetails _requestedSeasons(List<int> seasons) => SeerrTvDetails(
 );
 
 void main() {
-  test('4K-only TV requests use 4K seasons, not the HD track', () async {
+  test('4K TV requests use their own seasons and recheck late settings', () async {
     final repo = _Repo()
       ..permissions = SeerrPermission.request4kTv
       ..refreshed = _original;
+    var disable4kWhileOpen = false;
     repo.post.complete(const SeerrRequest(
       id: 8,
       type: 'tv',
@@ -107,9 +108,13 @@ void main() {
       seerr: () async => repo,
       accountKey: () => 'server/user',
       onSkip: () async {},
-      onRequestSeries: (_, _, _, options, isCurrent, submit) {
+      onRequestSeries: (_, _, _, options, isCurrent, submit) async {
         expect(options.standard, isFalse);
         expect(options.fourK, isTrue);
+        if (disable4kWhileOpen) {
+          repo.settingsResponse!.complete({'series4kEnabled': false});
+          await Future<void>.delayed(Duration.zero);
+        }
         // Season 1 exists in HD but is still requestable in 4K.
         return submit({
           'is4k': true,
@@ -138,47 +143,16 @@ void main() {
       );
       expect(denied, isNull);
       expect(repo.submissions, 1);
-    } finally {
-      controller.dispose();
-    }
-  });
 
-  test('TV picker cannot submit 4K after settings disable it', () async {
-    final pickerOpened = Completer<void>();
-    final choose = Completer<void>();
-    final repo = _Repo()
-      ..permissions = SeerrPermission.request4kTv
-      ..refreshed = _original
-      ..settingsResponse = Completer<Map<String, dynamic>>();
-    final controller = CinemaModeController(
-      seerr: () async => repo,
-      accountKey: () => 'server/user',
-      onSkip: () async {},
-      onRequestSeries: (_, _, _, options, isCurrent, submit) async {
-        expect(options.standard, isFalse);
-        expect(options.fourK, isTrue);
-        pickerOpened.complete();
-        await choose.future;
-        return submit({
-          'is4k': true,
-          'allSeasons': false,
-          'seasons': <int>[1],
-        }, null, isCurrent);
-      },
-    );
-    try {
+      // Keep the picker open until the delayed settings response disables 4K.
+      disable4kWhileOpen = true;
+      repo.settingsResponse = Completer<Map<String, dynamic>>();
       controller.enter(item: _item(), resolveMedia: () async => null);
       await Future<void>.delayed(Duration.zero);
-      expect(controller.only4kRequestable, isTrue);
-      final request = controller.request();
-      await pickerOpened.future;
-
-      repo.settingsResponse!.complete({'series4kEnabled': false});
-      await Future<void>.delayed(Duration.zero);
+      expect(controller.canRequest, isTrue);
+      await controller.request();
       expect(controller.only4kRequestable, isFalse);
-      choose.complete();
-      await request;
-      expect(repo.submissions, 0);
+      expect(repo.submissions, 1);
     } finally {
       controller.dispose();
     }
