@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
+import 'package:moonfin/data/services/seerr/seerr_seasons.dart';
 import 'package:moonfin/playback/cinema_mode_controller.dart';
 
 void main() {
@@ -68,4 +69,35 @@ void main() {
       isNull,
     );
   });
+  test('season coverage keeps HD, 4K and completed requests separate', () {
+    const info = SeerrMediaInfo(
+      seasons: [
+        SeerrSeasonAvailability(seasonNumber: 1, status: SeerrMediaStatus.available),
+        SeerrSeasonAvailability(seasonNumber: 2, status4k: SeerrMediaStatus.available),
+      ],
+      requests: [
+        SeerrRequest(
+          id: 1, type: 'tv', status: SeerrRequest.statusApproved,
+          seasons: [SeerrSeasonRequest(id: 1, seasonNumber: 3, status: 2)],
+        ),
+        SeerrRequest(
+          id: 2, type: 'tv', status: SeerrRequest.statusPending, is4k: true,
+          seasons: [SeerrSeasonRequest(id: 2, seasonNumber: 4, status: 1)],
+        ),
+        SeerrRequest(
+          id: 3, type: 'tv', status: SeerrRequest.statusCompleted,
+          seasons: [SeerrSeasonRequest(id: 3, seasonNumber: 5, status: 5)],
+        ),
+      ],
+    );
+    expect(seerrUnavailableOrRequestedSeasons(info, is4k: false), {1, 3});
+    expect(seerrUnavailableOrRequestedSeasons(info, is4k: true), {2, 4});
+    expect(
+      cinemaRequestableSeasons(const SeerrTvDetails(
+        id: 42, numberOfSeasons: 5, mediaInfo: info,
+      )),
+      {2, 4, 5},
+    );
+  });
+
 }
