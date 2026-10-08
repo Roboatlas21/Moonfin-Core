@@ -200,21 +200,23 @@ void main() {
     });
   });
 
-  test('movie picker grace keeps its movie but cannot cross accounts', () {
-    for (final changeAccount in [false, true]) {
+  test('movie picker grace cannot cross users or changed credentials', () {
+    for (final change in ['none', 'user', 'token']) {
       fakeAsync((clock) {
         var account = 'original';
+        var token = 'original-token';
+        Object sessionKey() => (account, token);
         final repo = FakeCinemaSeerr()
           ..permissions = SeerrPermission.requestMovie | SeerrPermission.request4kMovie;
         final picked = Completer<bool>();
         late CinemaRequestPickerSession session;
         final choice = CinemaModeController(
           seerr: () async => repo,
-          accountKey: () => account,
+          accountKey: sessionKey,
           onSkip: () async {},
           onRequestMovie: (_, _, _, _, submit) async {
             session = CinemaRequestPickerSession(
-              accountKey: () => account,
+              accountKey: sessionKey,
               isMounted: () => true,
             );
             final is4k = await picked.future;
@@ -230,12 +232,13 @@ void main() {
         session.beginGrace();
         choice.enter(item: cinemaItem(tmdb: 99), resolveMedia: () async => null);
         clock.flushMicrotasks();
-        if (changeAccount) account = 'other';
+        if (change == 'user') account = 'other';
+        if (change == 'token') token = 'new-token';
         picked.complete(true);
         clock.flushMicrotasks();
-        expect(repo.submitted, changeAccount ? isEmpty : [42]);
-        expect(repo.requested4k, changeAccount ? isEmpty : [true]);
-        if (!changeAccount) expect(choice.canRequest, isTrue);
+        expect(repo.submitted, change == 'none' ? [42] : isEmpty);
+        expect(repo.requested4k, change == 'none' ? [true] : isEmpty);
+        if (change == 'none') expect(choice.canRequest, isTrue);
         choice.dispose();
       });
     }

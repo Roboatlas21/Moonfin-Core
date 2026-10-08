@@ -486,11 +486,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       client.baseUrl, client.userId, client.accessToken);
   }
 
-  Object _cinemaUserAccountKey() {
-    final session = GetIt.instance<SessionRepository>();
-    return (session.activeServerId, session.activeUserId);
-  }
-
   void _configureCinema() => _cinema.configure(
     minimumSeconds: _prefs.get(UserPreferences.cinemaModeSkipMinDurationSeconds),
     autoHideSeconds: _prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds,
@@ -581,7 +576,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     if (!mounted || !isCurrent()) return null;
     _cinemaPickerSession?.closeForSkip();
     final session = CinemaRequestPickerSession(
-      accountKey: _cinemaUserAccountKey,
+      accountKey: _cinemaAccountKey,
       isMounted: () => mounted && !_isStopping,
     );
     _cinemaPickerSession = session;

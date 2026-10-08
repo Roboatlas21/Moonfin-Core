@@ -204,7 +204,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     _cinemaPicker?.close();
     final requestId = ++_cinemaPickerId;
     final session = CinemaRequestPickerSession(
-      accountKey: _cinemaUserKey,
+      accountKey: _cinemaAccountKey,
       isMounted: () => mounted && !_exiting,
     );
     _cinemaPicker = session;
