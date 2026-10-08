@@ -4082,84 +4082,47 @@ protocol RemotePlayerNavigable: AnyObject {
 /// UIKit has no public way to trigger a UIAlertAction from code, so when a
 /// session remote command reaches an alert, this table replaces it with the
 /// same actions. Alerts driven by the Siri Remote stay native.
-private final class RemotePlayerMenu: UITableViewController, RemotePlayerNavigable {
-    struct Entry {
-        let action: UIAlertAction
-        let invoke: (UIAlertAction) -> Void
-    }
-    private let entries: [Entry]
-    private let message: String?
-    private var selectedIndex = 0
-    private var answered = false
-
-    init(title: String?, message: String?, entries: [Entry]) {
-        self.entries = entries.filter { $0.action.isEnabled }
-        self.message = message
-        super.init(style: .grouped)
-        self.title = title
-        modalPresentationStyle = .overFullScreen
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+/// Shared table focus and session-remote navigation for native player menus.
+private class RemotePlayerList: UITableViewController, RemotePlayerNavigable {
+    var focusedRow = 0
+    var rowCount: Int { 0 }
+    var cellIdentifier: String { "action" }
+    func activate(_ row: Int) {}
+    func cancel() {}
 
     override func viewDidLoad() {
         super.viewDidLoad()
         tableView.backgroundColor = UIColor(white: 0.08, alpha: 0.98)
         tableView.contentInset = UIEdgeInsets(top: 60, left: 240, bottom: 60, right: 240)
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "action")
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: cellIdentifier)
         tableView.remembersLastFocusedIndexPath = true
     }
 
-    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        [title, message].compactMap { $0 }.joined(separator: "\n")
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        activate(indexPath.row)
     }
 
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { entries.count }
-
-    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "action", for: indexPath)
-        var content = cell.defaultContentConfiguration()
-        content.text = entries[indexPath.row].action.title
-        cell.contentConfiguration = content
-        return cell
-    }
-
-    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) { activate(indexPath.row) }
-
-    override func tableView(_ tableView: UITableView, didUpdateFocusIn context: UITableViewFocusUpdateContext, with coordinator: UIFocusAnimationCoordinator) {
-        if let next = context.nextFocusedIndexPath { selectedIndex = next.row }
+    override func tableView(
+        _ tableView: UITableView, didUpdateFocusIn context: UITableViewFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        if let next = context.nextFocusedIndexPath { focusedRow = next.row }
     }
 
     override func indexPathForPreferredFocusedView(in tableView: UITableView) -> IndexPath? {
-        entries.isEmpty ? nil : IndexPath(row: selectedIndex, section: 0)
-    }
-
-    private func activate(_ index: Int) {
-        guard !answered, !isBeingDismissed, entries.indices.contains(index) else { return }
-        answered = true
-        let entry = entries[index]
-        dismiss(animated: true) { entry.invoke(entry.action) }
+        rowCount > 0 ? IndexPath(row: min(focusedRow, rowCount - 1), section: 0) : nil
     }
 
     func handleRemoteNavigation(_ command: String) {
-        guard !answered, !isBeingDismissed else { return }
-        if command == "back" {
-            if let cancel = entries.firstIndex(where: { $0.action.style == .cancel }) {
-                activate(cancel)
-            } else {
-                answered = true
-                dismiss(animated: true)
-            }
-            return
-        }
-        guard !entries.isEmpty else { return }
-        if command == "select" { activate(selectedIndex); return }
+        if command == "back" { cancel(); return }
+        guard rowCount > 0 else { return }
+        if command == "select" { activate(focusedRow); return }
         switch command {
-        case "moveup", "moveleft": selectedIndex = max(0, selectedIndex - 1)
-        case "movedown", "moveright": selectedIndex = min(entries.count - 1, selectedIndex + 1)
+        case "moveup", "moveleft": focusedRow = max(0, focusedRow - 1)
+        case "movedown", "moveright": focusedRow = min(rowCount - 1, focusedRow + 1)
         default: return
         }
-        let path = IndexPath(row: selectedIndex, section: 0)
+        let path = IndexPath(row: focusedRow, section: 0)
         tableView.scrollToRow(at: path, at: .middle, animated: false)
         tableView.layoutIfNeeded()
         if let cell = tableView.cellForRow(at: path) {
@@ -4178,9 +4141,66 @@ private final class RemotePlayerMenu: UITableViewController, RemotePlayerNavigab
     }
 }
 
+/// UIKit alerts need a table adapter for session remotes.
+private final class RemotePlayerMenu: RemotePlayerList {
+    struct Entry {
+        let action: UIAlertAction
+        let invoke: (UIAlertAction) -> Void
+    }
+    private let entries: [Entry]
+    private let message: String?
+    private var answered = false
+    override var rowCount: Int { entries.count }
+
+    init(title: String?, message: String?, entries: [Entry]) {
+        self.entries = entries.filter { $0.action.isEnabled }
+        self.message = message
+        super.init(style: .grouped)
+        self.title = title
+        modalPresentationStyle = .overFullScreen
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        [title, message].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { rowCount }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier, for: indexPath)
+        var content = cell.defaultContentConfiguration()
+        content.text = entries[indexPath.row].action.title
+        cell.contentConfiguration = content
+        return cell
+    }
+
+    override func activate(_ index: Int) {
+        guard !answered, !isBeingDismissed, entries.indices.contains(index) else { return }
+        answered = true
+        let entry = entries[index]
+        dismiss(animated: true) { entry.invoke(entry.action) }
+    }
+
+    override func cancel() {
+        if let index = entries.firstIndex(where: { $0.action.style == .cancel }) {
+            activate(index)
+        } else {
+            answered = true
+            dismiss(animated: true)
+        }
+    }
+
+    override func handleRemoteNavigation(_ command: String) {
+        guard !answered, !isBeingDismissed else { return }
+        super.handleRemoteNavigation(command)
+    }
+}
+
 /// Native request picker. Dart owns identity, permissions, defaults,
 /// validation, submission, and expiry; UIKit only renders and returns ids.
-private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavigable {
+private final class CinemaRequestPicker: RemotePlayerList {
     let requestId: Int
     var onDismissed: (() -> Void)?
     private let seasons: [Int]
@@ -4196,7 +4216,6 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
     private var quotaLabel: String?
     private var quotaRemaining: Int?
     private var quotaRestricted = false
-    private var focusedRow = 0
     private var answered = false
     private var dismissAfterPresentation = false
 
@@ -4226,6 +4245,8 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
 
     private var submitRow: Int { seasons.count + 1 }
     private var cancelRow: Int { submitRow + 1 }
+    override var rowCount: Int { cancelRow + 1 }
+    override var cellIdentifier: String { "request" }
     private var requestedCount: Int { allSeasons ? seasons.count : selected.count }
     private var quotaBlocked: Bool {
         quotaRestricted || (quotaRemaining.map { requestedCount > $0 } ?? false)
@@ -4243,14 +4264,6 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         quotaRestricted = quota["quotaRestricted"] as? Bool ?? false
         if isViewLoaded { tableView.reloadData() }
         return true
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        tableView.backgroundColor = UIColor(white: 0.08, alpha: 0.98)
-        tableView.contentInset = UIEdgeInsets(top: 60, left: 240, bottom: 60, right: 240)
-        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "request")
-        tableView.remembersLastFocusedIndexPath = true
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? { title }
@@ -4290,23 +4303,7 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         return cell
     }
 
-    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        activate(indexPath.row)
-    }
-
-    override func tableView(
-        _ tableView: UITableView,
-        didUpdateFocusIn context: UITableViewFocusUpdateContext,
-        with coordinator: UIFocusAnimationCoordinator
-    ) {
-        if let next = context.nextFocusedIndexPath { focusedRow = next.row }
-    }
-
-    override func indexPathForPreferredFocusedView(in tableView: UITableView) -> IndexPath? {
-        IndexPath(row: min(focusedRow, cancelRow), section: 0)
-    }
-
-    private func activate(_ row: Int) {
+    override func activate(_ row: Int) {
         guard !answered else { return }
         if row == cancelRow { finish(nil); return }
         if row == submitRow {
@@ -4379,28 +4376,11 @@ private final class CinemaRequestPicker: UITableViewController, RemotePlayerNavi
         }
     }
 
-    func handleRemoteNavigation(_ command: String) {
-        guard !answered else { return }
-        if command == "back" { finish(nil); return }
-        if command == "select" { activate(focusedRow); return }
-        switch command {
-        case "moveup", "moveleft": focusedRow = max(0, focusedRow - 1)
-        case "movedown", "moveright": focusedRow = min(cancelRow, focusedRow + 1)
-        default: return
-        }
-        let path = IndexPath(row: focusedRow, section: 0)
-        tableView.scrollToRow(at: path, at: .middle, animated: false)
-        tableView.layoutIfNeeded()
-        if let cell = tableView.cellForRow(at: path) {
-            let system = UIFocusSystem.focusSystem(for: view)
-            system?.requestFocusUpdate(to: cell)
-            system?.updateFocusIfNeeded()
-        }
-    }
+    override func cancel() { finish(nil) }
 
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        if presses.contains(where: { $0.type == .menu }) { handleRemoteNavigation("back"); return }
-        super.pressesBegan(presses, with: event)
+    override func handleRemoteNavigation(_ command: String) {
+        guard !answered else { return }
+        super.handleRemoteNavigation(command)
     }
 
     private static func intArray(_ value: Any?) -> [Int] {
