@@ -45,6 +45,7 @@ Future<void> showSeerrRequestDialog({
   bool selectAllSeasons = true,
   bool showAdvancedOptions = true,
   Set<int> cinemaExcludedSeasons = const {},
+  Set<int> cinemaExcluded4kSeasons = const {},
   SeerrCinemaSubmit? cinemaSubmit,
   ValueChanged<VoidCallback>? onDismissReady,
 }) async {
@@ -80,6 +81,7 @@ Future<void> showSeerrRequestDialog({
         selectAllSeasons: selectAllSeasons,
         showAdvancedOptions: showAdvancedOptions,
         cinemaExcludedSeasons: cinemaExcludedSeasons,
+        cinemaExcluded4kSeasons: cinemaExcluded4kSeasons,
         isCinema: cinemaSubmit != null,
       );
     },
@@ -102,6 +104,7 @@ class SeerrRequestDialog extends StatefulWidget {
   final bool selectAllSeasons;
   final bool showAdvancedOptions;
   final Set<int> cinemaExcludedSeasons;
+  final Set<int> cinemaExcluded4kSeasons;
   final bool isCinema;
 
   /// Opens with just this season ticked, for a viewer who asked for one rather
@@ -121,6 +124,7 @@ class SeerrRequestDialog extends StatefulWidget {
     this.selectAllSeasons = true,
     this.showAdvancedOptions = true,
     this.cinemaExcludedSeasons = const {},
+    this.cinemaExcluded4kSeasons = const {},
     this.isCinema = false,
   });
 
@@ -138,6 +142,10 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   /// The track being asked for, so flipping the switch redraws the sheet
   /// against the one the request will actually go out on.
   SeerrQualityStatus get _quality => widget.vm.state.quality(is4k: _is4k);
+
+  Set<int> get _excludedSeasons => _is4k
+      ? widget.cinemaExcluded4kSeasons
+      : widget.cinemaExcludedSeasons;
 
   @override
   void initState() {
@@ -195,14 +203,14 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
 
   Set<int> get _requestableSeasons => _seasonNumbers.toSet().difference({
     ..._quality.unavailableOrRequestedSeasons,
-    ...widget.cinemaExcludedSeasons,
+    ..._excludedSeasons,
   });
 
   bool get _hasSeasonSelection =>
       !widget.isCinema ||
       !widget.isTv ||
       (_allSeasons
-          ? widget.cinemaExcludedSeasons.isEmpty &&
+          ? _excludedSeasons.isEmpty &&
               _requestableSeasons.isNotEmpty
           : _selectedSeasons.isNotEmpty &&
               _requestableSeasons.containsAll(_selectedSeasons));
@@ -242,6 +250,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
         selection: {
           'allSeasons': _allSeasons,
           'seasons': seasons ?? <int>[],
+          'is4k': _is4k,
         },
         quota: _quotaDetail,
       ));
@@ -308,6 +317,10 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
           autofocus: true,
           onChanged: (v) => setState(() {
             _is4k = v;
+            if (widget.isCinema) {
+              _allSeasons = false;
+              _selectedSeasons.clear();
+            }
             _applySavedPreferences();
           }),
         ),
@@ -381,7 +394,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     final quality = _quality;
     final unselectable = {
       ...quality.unavailableOrRequestedSeasons,
-      ...widget.cinemaExcludedSeasons,
+      ..._excludedSeasons,
     };
     final available = quality.availableSeasons;
     return Column(
@@ -392,7 +405,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
           value: _allSeasons,
           checkbox: true,
           autofocus: autofocusAll,
-          onChanged: widget.cinemaExcludedSeasons.isNotEmpty
+          onChanged: _excludedSeasons.isNotEmpty
               ? null
               : (v) => setState(() {
                   _allSeasons = v;

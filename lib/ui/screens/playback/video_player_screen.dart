@@ -545,7 +545,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     SeerrRepository repository,
     SeerrTvDetails details,
     SeerrUser user,
-    Set<int> excludedSeasons,
+    CinemaTvQualityOptions options,
     bool Function() isCurrent,
     CinemaTvSubmit submit,
   ) async {
@@ -568,9 +568,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       await showSeerrRequestDialog(
         context: context,
         vm: vm,
-        is4k: false,
+        is4k: !options.standard,
+        qualityToggle: options.standard && options.fourK,
         isContinuing: cinemaSeriesIsContinuing(details),
-        cinemaExcludedSeasons: excludedSeasons,
+        cinemaExcludedSeasons: options.excludedStandard,
+        cinemaExcluded4kSeasons: options.excluded4k,
         selectAllSeasons: false,
         showAdvancedOptions: false,
         onDismissReady: (dismiss) => session.dismissDialog = dismiss,
@@ -582,6 +584,53 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       return confirmed;
     } finally {
       vm?.dispose();
+      session.dispose();
+      if (identical(_seriesPickerSession, session)) {
+        _seriesPickerSession = null;
+      }
+      if (mounted && isCurrent()) _focusCinemaAction();
+    }
+  }
+
+  Future<void> _showCinemaMovieRequest(
+    SeerrRepository repository,
+    SeerrMovieDetails details,
+    SeerrUser user,
+    bool Function() isCurrent,
+    CinemaMovieSubmit submit,
+  ) async {
+    if (!mounted || !isCurrent()) return;
+    _seriesPickerSession?.closeForSkip();
+    final session = CinemaSeriesPickerSession(
+      accountKey: _cinemaUserAccountKey,
+      isMounted: () => mounted && !_isStopping,
+    );
+    _seriesPickerSession = session;
+    final vm = SeerrMediaDetailViewModel.forCinemaMovie(
+      repository,
+      GetIt.instance<SeerrPreferences>(),
+      details: details,
+      user: user,
+    );
+    try {
+      await showSeerrRequestDialog(
+        context: context,
+        vm: vm,
+        is4k: false,
+        qualityToggle: true,
+        showAdvancedOptions: false,
+        onDismissReady: (dismiss) => session.dismissDialog = dismiss,
+        cinemaSubmit: (selection, _) async {
+          if (!session.isCurrent || !isCurrent()) return;
+          session.markSubmitting();
+          await submit(
+            selection['is4k'] == true,
+            () => session.isCurrent && isCurrent(),
+          );
+        },
+      );
+    } finally {
+      vm.dispose();
       session.dispose();
       if (identical(_seriesPickerSession, session)) {
         _seriesPickerSession = null;
@@ -980,6 +1029,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       seerr: () => GetIt.instance.getAsync<SeerrRepository>(), accountKey: _cinemaAccountKey,
       onSkip: _skipCinemaPreroll,
       onRequestSeries: _showCinemaSeriesRequest,
+      onRequestMovie: _showCinemaMovieRequest,
     )..addListener(_onCinemaChanged);
     _configureCinema();
     _startCinemaItem(initial: true);

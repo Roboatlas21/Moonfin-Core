@@ -4182,16 +4182,23 @@ private final class RemotePlayerMenu: RemotePlayerList {
 /// request and submits it.
 private final class CinemaRequestPicker: RemotePlayerList {
     let requestId: Int
-    private let seasons: [Int]
-    private let labels: [String]
+    private let isMovie: Bool
+    private let qualityToggle: Bool
+    private let qualityLabel: String
+    private let standardSeasons: [Int]
+    private let fourKSeasons: [Int]
+    private let standardLabels: [String]
+    private let fourKLabels: [String]
     private let allLabel: String
-    private let allEnabled: Bool
+    private let standardAllEnabled: Bool
+    private let fourKAllEnabled: Bool
     private let submitLabel: String
     private let cancelLabel: String
     private let quotaBlockedLabel: String
     private let completion: ([String: Any]?) -> Void
 
-    private var selected: Set<Int>
+    private var is4k: Bool
+    private var selected: Set<Int> = []
     private var allSeasons = false
     private var quotaLabel: String?
     private var quotaRemaining: Int?
@@ -4201,11 +4208,17 @@ private final class CinemaRequestPicker: RemotePlayerList {
 
     init(options: [String: Any], completion: @escaping ([String: Any]?) -> Void) {
         requestId = Self.intValue(options["requestId"]) ?? -1
-        seasons = Self.intArray(options["seasons"])
-        labels = options["labels"] as? [String] ?? []
-        selected = []
+        isMovie = options["isMovie"] as? Bool ?? false
+        qualityToggle = options["qualityToggle"] as? Bool ?? false
+        qualityLabel = options["qualityLabel"] as? String ?? "4K"
+        is4k = options["is4k"] as? Bool ?? false
+        standardSeasons = Self.intArray(options["seasons"])
+        fourKSeasons = Self.intArray(options["seasons4k"])
+        standardLabels = options["labels"] as? [String] ?? []
+        fourKLabels = options["labels4k"] as? [String] ?? []
         allLabel = options["allLabel"] as? String ?? ""
-        allEnabled = options["allEnabled"] as? Bool ?? true
+        standardAllEnabled = options["allEnabled"] as? Bool ?? true
+        fourKAllEnabled = options["all4kEnabled"] as? Bool ?? true
         submitLabel = options["submitLabel"] as? String ?? ""
         cancelLabel = options["cancelLabel"] as? String ?? ""
         quotaBlockedLabel = options["quotaBlockedLabel"] as? String ?? ""
@@ -4224,17 +4237,24 @@ private final class CinemaRequestPicker: RemotePlayerList {
         dismiss(animated: false)
     }
 
-    private var submitRow: Int { seasons.count + 1 }
+    private var seasons: [Int] { is4k ? fourKSeasons : standardSeasons }
+    private var labels: [String] { is4k ? fourKLabels : standardLabels }
+    private var allEnabled: Bool { is4k ? fourKAllEnabled : standardAllEnabled }
+    private var qualityRows: Int { qualityToggle ? 1 : 0 }
+    private var allRow: Int { qualityRows }
+    private var seasonStart: Int { allRow + 1 }
+    private var submitRow: Int { isMovie ? qualityRows : seasonStart + seasons.count }
     private var cancelRow: Int { submitRow + 1 }
     override var rowCount: Int { cancelRow + 1 }
-    private var requestedCount: Int { allSeasons ? seasons.count : selected.count }
+    private var requestedCount: Int {
+        isMovie ? 1 : (allSeasons ? seasons.count : selected.count)
+    }
     private var quotaBlocked: Bool {
         quotaRestricted || (quotaRemaining.map { requestedCount > $0 } ?? false)
     }
     private var canSubmit: Bool { requestedCount > 0 && !quotaBlocked }
 
-    /// The quota can arrive after the picker opens. Apply it only if it belongs to this
-    /// request.
+    /// Quota may arrive after the picker opens; ignore updates for an older request.
     func applyQuota(_ quota: [String: Any]) -> Bool {
         guard !answered, Self.intValue(quota["requestId"]) == requestId else { return false }
         quotaLabel = quota["quotaLabel"] as? String
@@ -4260,17 +4280,21 @@ private final class CinemaRequestPicker: RemotePlayerList {
         var content = cell.defaultContentConfiguration()
         var checked = false
 
-        if row == 0 {
+        if qualityToggle && row == 0 {
+            content.text = qualityLabel
+            checked = is4k
+        } else if !isMovie && row == allRow {
             content.text = allLabel
             checked = allSeasons
-        } else if row <= seasons.count {
-            content.text = labels.indices.contains(row - 1) ? labels[row - 1] : String(seasons[row - 1])
-            checked = allSeasons || selected.contains(seasons[row - 1])
+        } else if !isMovie && row >= seasonStart && row < submitRow {
+            let index = row - seasonStart
+            content.text = labels.indices.contains(index) ? labels[index] : String(seasons[index])
+            checked = allSeasons || selected.contains(seasons[index])
         } else {
             content.text = row == submitRow ? submitLabel : cancelLabel
         }
 
-        content.textProperties.color = (row == 0 && !allEnabled) ||
+        content.textProperties.color = (!isMovie && row == allRow && !allEnabled) ||
             (row == submitRow && !canSubmit) ? .gray : .white
         cell.contentConfiguration = content
         cell.accessoryType = checked ? .checkmark : .none
@@ -4284,15 +4308,24 @@ private final class CinemaRequestPicker: RemotePlayerList {
             if canSubmit { finish(result()) }
             return
         }
-        if row == 0 {
+        if qualityToggle && row == 0 {
+            is4k.toggle()
+            allSeasons = false
+            selected.removeAll()
+            focusedRow = 0
+            tableView.reloadData()
+            return
+        }
+        guard !isMovie else { return }
+        if row == allRow {
             guard allEnabled else { return }
             allSeasons.toggle()
             selected.removeAll()
             tableView.reloadData()
             return
         }
-        if seasons.indices.contains(row - 1) {
-            let number = seasons[row - 1]
+        if row >= seasonStart && row < submitRow {
+            let number = seasons[row - seasonStart]
             if allSeasons {
                 allSeasons = false
                 selected.removeAll()
@@ -4306,6 +4339,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
     private func result() -> [String: Any] {
         [
             "requestId": requestId,
+            "is4k": is4k,
             "allSeasons": allSeasons,
             "seasons": allSeasons ? [] : selected.sorted()
         ]
@@ -4314,8 +4348,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
     func finish(_ value: [String: Any]?) {
         guard !answered else { return }
         answered = true
-        // Send the choice to Dart as soon as Submit is pressed. A later quota update or
-        // dismissal animation must not change it.
+        // Pass the choice to Dart immediately so a later quota update cannot change it.
         completion(value)
         if isBeingDismissed { return }
         if isBeingPresented || viewIfLoaded?.window == nil {

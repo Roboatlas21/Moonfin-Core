@@ -8,8 +8,11 @@ import 'package:moonfin/playback/cinema_mode_controller.dart';
 
 class FakeCinemaSeerr extends Fake implements SeerrRepository {
   SeerrMediaInfo? info;
+  int permissions = SeerrPermission.requestMovie;
+  bool movie4kEnabled = true;
   int lookups = 0;
   final submitted = <int>[];
+  final requested4k = <bool>[];
   Completer<SeerrRequest>? submission;
 
   @override
@@ -18,7 +21,10 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
   Future<void> ensureInitialized({bool force = false}) async {}
   @override
   Future<SeerrUser> getCurrentUser() async =>
-      SeerrUser(id: 5, permissions: SeerrPermission.requestMovie);
+      SeerrUser(id: 5, permissions: permissions);
+  @override
+  Future<Map<String, dynamic>> getPublicSettings() async =>
+      {'movie4kEnabled': movie4kEnabled};
   @override
   Future<SeerrMovieDetails> getMovieDetails(int tmdbId) async {
     lookups++;
@@ -37,8 +43,8 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
     int? serverId,
   }) async {
     expect(mediaType, 'movie');
-    expect(is4k, false);
     submitted.add(mediaId);
+    requested4k.add(is4k);
     return submission?.future ??
         Future.value(
           const SeerrRequest(
@@ -155,6 +161,91 @@ void main() {
       });
     });
   }
+
+
+  test('movie available in standard can still be requested directly in 4K', () async {
+    seerr.permissions = SeerrPermission.requestMovie |
+        SeerrPermission.request4kMovie;
+    seerr.info = const SeerrMediaInfo(
+      status: SeerrMediaStatus.available,
+      status4k: SeerrMediaStatus.unknown,
+    );
+    enter();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.canRequest, isTrue);
+    expect(controller.only4kRequestable, isTrue);
+
+    await controller.request();
+    expect(seerr.requested4k, [true]);
+    expect(seerr.submitted, [42]);
+  });
+
+  test('only one permitted quality submits without opening a picker', () async {
+    seerr.permissions = SeerrPermission.requestMovie |
+        SeerrPermission.request4kMovie;
+    seerr.movie4kEnabled = false;
+    enter();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.only4kRequestable, isFalse);
+
+    await controller.request();
+    expect(seerr.requested4k, [false]);
+  });
+
+  test('two requestable qualities prompt once, then remaining quality submits directly', () async {
+    seerr.permissions = SeerrPermission.requestMovie |
+        SeerrPermission.request4kMovie;
+    var prompts = 0;
+    final choice = CinemaModeController(
+      seerr: () async => seerr,
+      accountKey: () => 'server/user',
+      onSkip: () async {},
+      onRequestMovie: (repository, details, user, isCurrent, submit) async {
+        prompts++;
+        await submit(true, isCurrent);
+      },
+    );
+    try {
+      choice.enter(item: cinemaItem(), resolveMedia: () async => null);
+      await Future<void>.delayed(Duration.zero);
+      expect(choice.canRequest, isTrue);
+      await choice.request();
+      expect(prompts, 1);
+      expect(seerr.requested4k, [true]);
+
+      expect(choice.canRequest, isTrue);
+      await choice.request();
+      expect(prompts, 1);
+      expect(seerr.requested4k, [true, false]);
+      expect(choice.canRequest, isFalse);
+    } finally {
+      choice.dispose();
+    }
+  });
+
+  test('cancelling the movie quality picker leaves Request available', () async {
+    seerr.permissions = SeerrPermission.requestMovie |
+        SeerrPermission.request4kMovie;
+    var prompts = 0;
+    final choice = CinemaModeController(
+      seerr: () async => seerr,
+      accountKey: () => 'server/user',
+      onSkip: () async {},
+      onRequestMovie: (repository, details, user, isCurrent, submit) async {
+        prompts++;
+      },
+    );
+    try {
+      choice.enter(item: cinemaItem(), resolveMedia: () async => null);
+      await Future<void>.delayed(Duration.zero);
+      await choice.request();
+      expect(prompts, 1);
+      expect(seerr.submitted, isEmpty);
+      expect(choice.canRequest, isTrue);
+    } finally {
+      choice.dispose();
+    }
+  });
 
   test(
     'repeat presses and rapid double taps skip only once across a transition',

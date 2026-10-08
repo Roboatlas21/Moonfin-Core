@@ -15,10 +15,14 @@ String? cinemaRequestLabel(
   CinemaSeerrState.hidden => null,
   CinemaSeerrState.request =>
     controller.isSeries && controller.isTvRequestMore
-        ? l10n.requestMore
-        : l10n.requestSeriesOrMovie(
-            controller.isSeries ? l10n.series : l10n.movie,
-          ),
+        ? (controller.only4kRequestable ? l10n.requestMore4k : l10n.requestMore)
+        : controller.only4kRequestable
+            ? l10n.requestSeriesOrMovie4k(
+                controller.isSeries ? l10n.series : l10n.movie,
+              )
+            : l10n.requestSeriesOrMovie(
+                controller.isSeries ? l10n.series : l10n.movie,
+              ),
   CinemaSeerrState.requested => l10n.seerrRequestedStatus,
   CinemaSeerrState.pending => l10n.pendingStatus,
   CinemaSeerrState.processing => l10n.processing,

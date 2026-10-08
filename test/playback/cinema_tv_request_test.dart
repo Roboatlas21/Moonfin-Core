@@ -9,6 +9,9 @@ import 'package:moonfin/playback/cinema_mode_controller.dart';
 class _Repo extends Fake implements SeerrRepository {
   int submissions = 0;
   int lookups = 0;
+  bool expected4k = false;
+  int permissions = SeerrPermission.requestTv;
+  final submitted4k = <bool>[];
   final submittedSeasons = <List<int>?>[];
   final post = Completer<SeerrRequest>();
 
@@ -20,7 +23,12 @@ class _Repo extends Fake implements SeerrRepository {
 
   @override
   Future<SeerrUser> getCurrentUser() async =>
-      const SeerrUser(id: 5, permissions: SeerrPermission.requestTv);
+      SeerrUser(id: 5, permissions: permissions);
+
+  @override
+  Future<Map<String, dynamic>> getPublicSettings() async =>
+      {'series4kEnabled': true};
+
   SeerrTvDetails refreshed = const SeerrTvDetails(id: 42);
 
   @override
@@ -36,8 +44,9 @@ class _Repo extends Fake implements SeerrRepository {
   }) {
     expect(mediaId, 42);
     expect(mediaType, 'tv');
-    expect(is4k, false);
+    expect(is4k, expected4k);
     submissions++;
+    submitted4k.add(is4k);
     submittedSeasons.add(seasons);
     return post.future;
   }
@@ -117,6 +126,44 @@ void main() {
     }
   });
 
+
+  test('4K-only TV permission opens the season picker in 4K', () async {
+    final repo = _Repo()
+      ..permissions = SeerrPermission.request4kTv
+      ..refreshed = _original;
+    CinemaTvQualityOptions? offered;
+    final controller = CinemaModeController(
+      seerr: () async => repo,
+      accountKey: () => 'server/user',
+      onSkip: () async {},
+      onRequestSeries: (
+        repository, details, user, options, isCurrent, submit,
+      ) async {
+        offered = options;
+        return null;
+      },
+    );
+    try {
+      controller.enter(
+        item: {
+          'Type': 'Series',
+          'RunTimeTicks': 900000000,
+          'ProviderIds': {'Tmdb': '42'},
+        },
+        resolveMedia: () async => null,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.canRequest, isTrue);
+      expect(controller.only4kRequestable, isTrue);
+      await controller.request();
+      expect(offered?.standard, isFalse);
+      expect(offered?.fourK, isTrue);
+      expect(repo.submissions, 0);
+    } finally {
+      controller.dispose();
+    }
+  });
+
   test('accepted TV seasons do not hide Request More for other seasons', () async {
     final repo = _Repo()..refreshed = _original;
     repo.post.complete(const SeerrRequest(
@@ -137,7 +184,7 @@ void main() {
         isCurrent,
         submit,
       ) {
-        excludedAtPicker.add({...excluded});
+        excludedAtPicker.add({...excluded.excludedStandard});
         return submit({
           'allSeasons': false,
           'seasons': <int>[excludedAtPicker.length + 1],
@@ -211,6 +258,88 @@ void main() {
       clock.elapse(const Duration(seconds: 20));
       clock.flushMicrotasks();
       expect(repo.submissions, 1);
+      expect(repo.lookups, 1);
+      expect(failure, isA<TimeoutException>());
+    });
+  });
+
+
+  test('TV requests use the chosen quality and ignore the other track', () async {
+    final repo = _Repo()..expected4k = true;
+    repo.post.complete(const SeerrRequest(
+      id: 99,
+      type: 'tv',
+      status: SeerrRequest.statusApproved,
+      is4k: true,
+    ));
+    const details = SeerrTvDetails(
+      id: 42,
+      numberOfSeasons: 3,
+      mediaInfo: SeerrMediaInfo(
+        seasons: [
+          SeerrSeasonAvailability(
+            seasonNumber: 1,
+            status4k: SeerrMediaStatus.available,
+          ),
+          SeerrSeasonAvailability(
+            seasonNumber: 2,
+            status: SeerrMediaStatus.available,
+          ),
+        ],
+      ),
+    );
+
+    final result = await submitCinemaTvRequest(
+      repository: repo,
+      details: details,
+      selection: {'is4k': true, 'allSeasons': false, 'seasons': <int>[2]},
+      quota: null,
+      isAllowed: () => true,
+      allowStandard: false,
+      allow4k: true,
+    );
+
+    expect(result?.seasons, {2});
+    expect(repo.submitted4k, [true]);
+    expect(repo.submittedSeasons, [[2]]);
+  });
+
+  test('a quality that is not requestable is never submitted', () async {
+    final repo = _Repo();
+    final result = await submitCinemaTvRequest(
+      repository: repo,
+      details: _original,
+      selection: {'is4k': true, 'allSeasons': false, 'seasons': <int>[2]},
+      quota: null,
+      isAllowed: () => true,
+      allowStandard: true,
+      allow4k: false,
+    );
+    expect(result, isNull);
+    expect(repo.submissions, 0);
+  });
+
+  test('a standard request cannot confirm a timed-out 4K request', () {
+    fakeAsync((clock) {
+      final repo = _Repo()..expected4k = true;
+      Object? failure;
+      submitCinemaTvRequest(
+        repository: repo,
+        details: _original,
+        selection: {'is4k': true, 'allSeasons': false, 'seasons': <int>[2]},
+        quota: null,
+        isAllowed: () => true,
+        allowStandard: false,
+        allow4k: true,
+      ).then<void>(
+        (_) {},
+        onError: (Object e) => failure = e,
+      );
+      clock.flushMicrotasks();
+      repo.refreshed = _requestedSeasons([2]); // Standard, not 4K.
+      clock.elapse(const Duration(seconds: 20));
+      clock.flushMicrotasks();
+      expect(repo.submitted4k, [true]);
       expect(repo.lookups, 1);
       expect(failure, isA<TimeoutException>());
     });

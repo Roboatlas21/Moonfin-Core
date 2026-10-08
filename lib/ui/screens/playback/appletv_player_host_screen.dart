@@ -192,13 +192,16 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     return _manager?.nextInQueue() ?? Future.value();
   }
 
-  Future<SeerrTvDetails?> _requestCinemaSeries(
+  Future<SeerrTvDetails?> _showCinemaNativePicker(
     SeerrRepository repository,
-    SeerrTvDetails details,
     SeerrUser user,
-    Set<int> excludedSeasons,
     bool Function() isCurrent,
-    CinemaTvSubmit submit,
+    Map<String, Object?> options,
+    Future<SeerrTvDetails?> Function(
+      Map<String, dynamic> selection,
+      SeerrQuotaDetail? quota,
+      bool Function() isAllowed,
+    ) submit,
   ) async {
     final backend = _backend;
     if (!mounted || backend == null || !isCurrent()) return null;
@@ -212,54 +215,47 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     session.dismissDialog = () => unawaited(
       backend.dismissCinemaRequestOptions(requestId: requestId),
     );
-
-    final seasons = cinemaRequestableSeasons(details)
-        .difference(excludedSeasons).toList()..sort();
     final l10n = AppLocalizations.of(context);
+    final isMovie = options['isMovie'] == true;
     try {
       final pickerResult = backend.showCinemaRequestOptions({
+        ...options,
         'requestId': requestId,
-        'title': l10n.requestSeriesOrMovie(l10n.series),
-        'seasons': seasons,
-        'labels': [for (final number in seasons) l10n.seasonChip(number)],
-        'allLabel': l10n.allSeasons,
-        'allEnabled': excludedSeasons.isEmpty,
         'submitLabel': l10n.submitRequest,
         'cancelLabel': l10n.cancel,
         'quotaBlockedLabel': l10n.requestErrorQuota,
       });
 
       SeerrQuotaDetail? quotaDetail;
-      // Show the quota if it loads while the picker is open. Check it again when the user
-      // submits.
+      // Load quota without delaying the picker.
       unawaited(() async {
         try {
-          final quota = (await repository
-                  .getUserQuota(user.id)
-                  .timeout(const Duration(seconds: 5)))
-              .tv;
-          if (!session.isCurrent ||
-              !identical(_cinemaPicker, session) ||
-              quota == null ||
-              quota.isUnlimited) {
+          final quota = await repository
+              .getUserQuota(user.id)
+              .timeout(const Duration(seconds: 5));
+          if (!session.isCurrent || !identical(_cinemaPicker, session)) {
             return;
           }
-          quotaDetail = quota;
-          final remaining = quota.remaining;
-          final label = quota.restricted
+          final detail = isMovie ? quota.movie : quota.tv;
+          if (detail == null || detail.isUnlimited) return;
+          quotaDetail = detail;
+          final remaining = detail.remaining;
+          final label = detail.restricted
               ? l10n.requestErrorQuota
               : remaining == null
-              ? null
-              : l10n.seasonQuotaRemaining(remaining, quota.limit ?? 0);
+                  ? null
+                  : isMovie
+                      ? l10n.movieQuotaRemaining(remaining, detail.limit ?? 0)
+                      : l10n.seasonQuotaRemaining(remaining, detail.limit ?? 0);
           if (label == null) return;
           await backend.updateCinemaRequestQuota({
             'requestId': requestId,
             'quotaLabel': label,
             'quotaRemaining': remaining,
-            'quotaRestricted': quota.restricted,
+            'quotaRestricted': detail.restricted,
           });
         } catch (_) {
-          // A missing quota response must never block the request picker.
+          // A quota lookup failure must not prevent a request.
         }
       }());
 
@@ -270,13 +266,77 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         return null;
       }
       session.markSubmitting();
-      // Once a request is submitted, it continues even if another trailer starts.
+      // A submitted request continues even if the next trailer starts.
       if (identical(_cinemaPicker, session)) _cinemaPicker = null;
       return await submit(selected, quotaDetail, () => session.isCurrent);
     } finally {
       session.dispose();
       if (identical(_cinemaPicker, session)) _cinemaPicker = null;
     }
+  }
+
+  Future<SeerrTvDetails?> _requestCinemaSeries(
+    SeerrRepository repository,
+    SeerrTvDetails details,
+    SeerrUser user,
+    CinemaTvQualityOptions options,
+    bool Function() isCurrent,
+    CinemaTvSubmit submit,
+  ) {
+    final standard = cinemaRequestableSeasons(details)
+        .difference(options.excludedStandard).toList()..sort();
+    final fourK = cinemaRequestableSeasons(details, is4k: true)
+        .difference(options.excluded4k).toList()..sort();
+    final l10n = AppLocalizations.of(context);
+    return _showCinemaNativePicker(
+      repository,
+      user,
+      isCurrent,
+      {
+        'title': options.standard
+            ? l10n.requestSeriesOrMovie(l10n.series)
+            : l10n.requestSeriesOrMovie4k(l10n.series),
+        'isMovie': false,
+        'is4k': !options.standard,
+        'qualityToggle': options.standard && options.fourK,
+        'qualityLabel': l10n.uhd4k,
+        'seasons': standard,
+        'labels': [for (final number in standard) l10n.seasonChip(number)],
+        'seasons4k': fourK,
+        'labels4k': [for (final number in fourK) l10n.seasonChip(number)],
+        'allLabel': l10n.allSeasons,
+        'allEnabled': options.standard && options.excludedStandard.isEmpty,
+        'all4kEnabled': options.fourK && options.excluded4k.isEmpty,
+      },
+      submit,
+    );
+  }
+
+  Future<void> _requestCinemaMovie(
+    SeerrRepository repository,
+    SeerrMovieDetails details,
+    SeerrUser user,
+    bool Function() isCurrent,
+    CinemaMovieSubmit submit,
+  ) async {
+    final l10n = AppLocalizations.of(context);
+    await _showCinemaNativePicker(
+      repository,
+      user,
+      isCurrent,
+      {
+        'title': l10n.requestSeriesOrMovie(l10n.movie),
+        'isMovie': true,
+        'is4k': false,
+        'qualityToggle': true,
+        'qualityLabel': l10n.uhd4k,
+      },
+      (selection, quota, isAllowed) async {
+        if (selection['is4k'] is! bool) return null;
+        await submit(selection['is4k'] as bool, isAllowed);
+        return null;
+      },
+    );
   }
 
   AppleTvBackend? get _backend {
@@ -303,6 +363,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       accountKey: _cinemaAccountKey,
       onSkip: _skipCinema,
       onRequestSeries: _requestCinemaSeries,
+      onRequestMovie: _requestCinemaMovie,
     )..addListener(_onCinemaChanged);
     try {
       _screensaverController = GetIt.instance<ScreensaverController>();

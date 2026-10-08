@@ -372,6 +372,15 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
     _state = SeerrMediaDetailState(tv: details, currentUser: user);
   }
 
+  SeerrMediaDetailViewModel.forCinemaMovie(
+    this._repo,
+    this._prefs, {
+    required SeerrMovieDetails details,
+    required SeerrUser user,
+  }) {
+    _state = SeerrMediaDetailState(movie: details, currentUser: user);
+  }
+
   @override
   void notifyListeners() {
     if (_isDisposed) {
