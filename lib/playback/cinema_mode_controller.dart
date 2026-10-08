@@ -223,7 +223,7 @@ class CinemaModeController extends ChangeNotifier {
   CinemaSeerrState seerrState = CinemaSeerrState.hidden;
   CinemaAction focusedAction = CinemaAction.skip;
   Duration get duration =>
-      _metadataDuration ?? _playerDuration ?? Duration.zero;
+      _playerDuration ?? _metadataDuration ?? Duration.zero;
   bool get eligible =>
       _active &&
       (_minimumSeconds == 0 || duration >= Duration(seconds: _minimumSeconds));

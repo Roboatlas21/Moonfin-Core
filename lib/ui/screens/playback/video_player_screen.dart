@@ -321,7 +321,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   MediaSegment? _skipSegment;
   Duration? _skipTo;
   late final CinemaModeController _cinema;
-  final _cinemaResolver = CinemaMediaResolver();
   final _cinemaRequestFocus = FocusNode(debugLabel: 'cinema-request');
   StreamSubscription<Duration>? _cinemaDurationSub;
   bool _cinemaWasVisible = false;
@@ -511,7 +510,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       item: raw,
       resolveMedia: () => client == null
           ? Future<CinemaMedia?>.value()
-          : _cinemaResolver.resolve(
+          : CinemaMediaResolver.resolve(
               client: client,
               itemId: id,
               item: raw!,

@@ -80,7 +80,6 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   PlaybackBringupState _bringupState = const PlaybackBringupState.idle();
 
   late final CinemaModeController _cinema;
-  final _cinemaResolver = CinemaMediaResolver();
   final _cinemaSource = CinemaPlaybackSourceGuard();
   CinemaSeriesPickerSession? _cinemaPicker;
   int _cinemaPickerId = DateTime.now().microsecondsSinceEpoch;
@@ -130,7 +129,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       item: raw,
       resolveMedia: () => client == null
           ? Future.value()
-          : _cinemaResolver.resolve(
+          : CinemaMediaResolver.resolve(
               client: client,
               itemId: _itemIdForQueueItem(item) ?? '',
               item: raw!,

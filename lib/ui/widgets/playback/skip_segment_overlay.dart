@@ -77,13 +77,18 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
   @override
   void didUpdateWidget(SkipSegmentOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.positionStream != widget.positionStream ||
-        oldWidget.segment != widget.segment) {
+    // Changing a segment should reset the position, not reattach a stable stream.
+    if (oldWidget.positionStream != widget.positionStream) {
       _unsubscribe();
-      if (widget.segment != oldWidget.segment) {
-        _currentPosition = widget.initialPosition ?? widget.segment.start;
-      }
       _subscribe();
+    }
+    final oldSegment = oldWidget.segment;
+    final segment = widget.segment;
+    if (oldSegment.id != segment.id ||
+        oldSegment.itemId != segment.itemId ||
+        oldSegment.type != segment.type ||
+        oldSegment.start != segment.start) {
+      _currentPosition = widget.initialPosition ?? segment.start;
     }
     // Keep the countdown in sync when the parent rebuilds with a fresh
     // position (e.g. after a seek) before the next stream tick arrives.

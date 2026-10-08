@@ -89,7 +89,7 @@ class CinemaModeActionsOverlay extends StatelessWidget {
               key: const ValueKey('cinema-skip'),
               inline: true,
               segment: MediaSegment(
-                id: '__preroll__',
+                id: '__preroll__${controller.generation}',
                 itemId: '',
                 type: MediaSegmentType.preview,
                 start: Duration.zero,

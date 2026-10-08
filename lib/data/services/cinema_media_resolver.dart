@@ -1,7 +1,7 @@
 import 'package:server_core/server_core.dart';
 
 /// Resolves typed identities from metadata or the optional server endpoint.
-class CinemaMediaResolver {
+abstract final class CinemaMediaResolver {
   static bool _supported(Map<String, dynamic> item) => {
     'movie',
     'series',
@@ -49,7 +49,7 @@ class CinemaMediaResolver {
     });
   }
 
-  Future<CinemaMedia?> resolve({
+  static Future<CinemaMedia?> resolve({
     required MediaServerClient client,
     required String itemId,
     required Map<String, dynamic> item,
