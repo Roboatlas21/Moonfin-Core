@@ -141,7 +141,7 @@ CinemaSeerrState cinemaTvSeerrState(
 
 /// Validate the choice and submit exactly once from either platform. Confirm
 /// uncertain timeouts against the precise season set, never a title-wide status.
-Future<SeerrTvDetails?> submitCinemaTvRequest({
+Future<({Set<int> seasons, SeerrTvDetails? confirmed})?> submitCinemaTvRequest({
   required SeerrRepository repository,
   required SeerrTvDetails details,
   required Map<String, dynamic> selection,
@@ -178,7 +178,7 @@ Future<SeerrTvDetails?> submitCinemaTvRequest({
             refreshed.mediaInfo,
             is4k: false,
           ).containsAll(expected)) {
-        return refreshed;
+        return (seasons: expected, confirmed: refreshed);
       }
     } catch (_) {
       // Uncertain response: do not infer success or retry the POST.
@@ -189,7 +189,8 @@ Future<SeerrTvDetails?> submitCinemaTvRequest({
     if (!isAllowed()) return null;
     rethrow;
   }
-  return null; // The controller performs the normal post-submit refresh.
+  // The controller performs the normal post-submit refresh.
+  return (seasons: expected, confirmed: null);
 }
 
 /// One lifetime/visibility/input model for TV, touch and desktop. Network work
@@ -526,8 +527,7 @@ class CinemaModeController extends ChangeNotifier {
         excluded,
         () => _current(ticket) && !_skipping,
         (selection, quota, isAllowed) async {
-          final choice = cinemaTvRequestSelection(selection, remaining, quota);
-          final confirmed = await submitCinemaTvRequest(
+          final result = await submitCinemaTvRequest(
             repository: repository,
             details: details,
             selection: selection,
@@ -535,13 +535,11 @@ class CinemaModeController extends ChangeNotifier {
             isAllowed: isAllowed,
             excludedSeasons: excluded,
           );
-          if (_current(ticket) && isAllowed() && choice != null) {
-            _submittedTvSeasons.addAll(
-              choice.allSeasons ? remaining : choice.seasons!.toSet(),
-            );
+          if (_current(ticket) && isAllowed() && result != null) {
+            _submittedTvSeasons.addAll(result.seasons);
             acknowledged = true;
           }
-          return confirmed;
+          return result?.confirmed;
         },
       );
       // Cancelling the picker leaves the existing Request state intact.

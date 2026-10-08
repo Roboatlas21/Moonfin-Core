@@ -182,7 +182,7 @@ void main() {
         selection: {'allSeasons': true, 'seasons': <int>[]},
         quota: null,
         isAllowed: () => true,
-      ).then((value) => confirmed = value);
+      ).then((value) => confirmed = value?.confirmed);
       clock.flushMicrotasks();
       repo.refreshed = _requestedSeasons([2, 3]);
       clock.elapse(const Duration(seconds: 20));
@@ -224,7 +224,7 @@ void main() {
     fakeAsync((clock) {
       final repo = _Repo();
       var allowed = true;
-      SeerrTvDetails? result;
+      Object? result;
       submitCinemaTvRequest(
         repository: repo,
         details: _original,

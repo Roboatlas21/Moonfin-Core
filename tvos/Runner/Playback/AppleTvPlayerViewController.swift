@@ -792,7 +792,7 @@ final class AppleTvPlayerViewController: UIViewController {
     func showCinemaError(_ message: String) {
         guard !isBeingDismissed, viewIfLoaded?.window != nil else { return }
         if presentedViewController is CinemaRequestPicker {
-            // A previous trailer's POST can finish while another picker is open.
+            // A fast request failure can arrive before its picker finishes dismissing.
             pendingCinemaError = message
             return
         }
