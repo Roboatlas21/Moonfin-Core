@@ -6,8 +6,6 @@ import '../../../l10n/app_localizations.dart';
 import '../../../playback/cinema_mode_controller.dart';
 import '../../../preference/preference_constants.dart';
 import '../../../util/platform_detection.dart';
-import '../adaptive/adaptive_glass.dart';
-import '../focus/focus_theme.dart';
 import 'skip_segment_overlay.dart';
 
 String? cinemaRequestLabel(
@@ -71,7 +69,8 @@ class CinemaModeActionsOverlay extends StatelessWidget {
           children: [
             if (status != null) ...[
               Flexible(
-                child: _SeerrAction(
+                child: _seerrAction(
+                  context,
                   label: status,
                   focusNode: requestFocus,
                   enabled: controller.canRequest,
@@ -120,89 +119,53 @@ class CinemaModeActionsOverlay extends StatelessWidget {
   }
 }
 
-class _SeerrAction extends StatelessWidget {
-  const _SeerrAction({
-    required this.label,
-    required this.focusNode,
-    required this.enabled,
-    required this.focused,
-    required this.onPressed,
-  });
-  final String label;
-  final FocusNode focusNode;
-  final bool enabled;
-  final bool focused;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final radius = AppColorScheme.isPixel ? 0.0 : 28.0;
-    final isTv = PlatformDetection.isTV;
-    final focusRingInset = isTv ? FocusTheme.borderWidth + 2 : 0.0;
-    final focusRadius = AppColorScheme.isPixel
-        ? 0.0
-        : radius + focusRingInset;
-    final outlineColor = enabled
-        ? (isTv ? AppColorScheme.onSurface : AppColorScheme.accent)
-        : AppColorScheme.onSurface.withValues(alpha: 0.4);
-    return Semantics(
-      button: true,
-      enabled: enabled,
-      label: label,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          focusNode: focusNode,
-          canRequestFocus: enabled,
-          onTap: enabled ? onPressed : null,
-          borderRadius: AppRadius.circular(focusRadius),
-          child: Container(
-            key: const ValueKey('cinema-request-focus-ring'),
-            decoration: FocusTheme.focusDecoration(
-              isFocused: focused,
-              radius: focusRadius,
-              color: isTv ? AppColorScheme.accent : null,
-            ),
-            padding: EdgeInsets.all(focusRingInset),
-            child: Container(
-              key: const ValueKey('cinema-request-outline'),
-              foregroundDecoration: BoxDecoration(
-                borderRadius: AppRadius.circular(radius),
-                border: Border.fromBorderSide(
-                  ThemeRegistry.active.borders.focusBorder.copyWith(
-                    color: outlineColor,
-                  ),
+Widget _seerrAction(
+  BuildContext context, {
+  required String label,
+  required FocusNode focusNode,
+  required bool enabled,
+  required bool focused,
+  required VoidCallback onPressed,
+}) {
+  final isTv = PlatformDetection.isTV;
+  final focusColor = isTv ? AppColorScheme.accent : null;
+  return Semantics(
+    button: true,
+    enabled: enabled,
+    label: label,
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        focusNode: focusNode,
+        canRequestFocus: enabled,
+        onTap: enabled ? onPressed : null,
+        borderRadius: AppRadius.circular(playbackActionFocusRadius(focusColor)),
+        child: playbackGlassAction(
+          context: context,
+          focusKey: const ValueKey('cinema-request-focus-ring'),
+          outlineKey: const ValueKey('cinema-request-outline'),
+          isFocused: focused,
+          focusRingColor: focusColor,
+          outlineColor: enabled
+              ? (isTv ? AppColorScheme.onSurface : AppColorScheme.accent)
+              : AppColorScheme.onSurface.withValues(alpha: 0.4),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppColorScheme.onSurface.withValues(
+                  alpha: enabled ? 1 : 0.65,
                 ),
-              ),
-              child: adaptiveGlass(
-                context: context,
-                cornerRadius: radius,
-                blur: 24,
-                fallbackColor: AppColorScheme.surface.withValues(alpha: 0.55),
-                tint: AppColorScheme.surface.withValues(alpha: 0.18),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 18,
-                  ),
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppColorScheme.onSurface.withValues(
-                        alpha: enabled ? 1 : 0.65,
-                      ),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
 }
