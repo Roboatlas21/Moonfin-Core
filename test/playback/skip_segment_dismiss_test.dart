@@ -6,6 +6,7 @@ import 'package:moonfin/data/models/media_segment.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/widgets/playback/skip_segment_overlay.dart';
+import 'package:moonfin_design/moonfin_design.dart';
 import 'package:moonfin/util/platform_detection.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -38,6 +39,7 @@ void main() {
     required VoidCallback onSkip,
     required VoidCallback onDismiss,
     Duration position = const Duration(seconds: 20),
+    bool inline = false,
   }) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -50,6 +52,7 @@ void main() {
               onSkip: onSkip,
               onDismiss: onDismiss,
               initialPosition: position,
+              inline: inline,
             ),
           ],
         ),
@@ -96,6 +99,21 @@ void main() {
 
     expect(skipped, 1);
     expect(dismissed, 0);
+  });
+
+  testWidgets('skip countdown ring stays white in both layouts', (tester) async {
+    for (final inline in [false, true]) {
+      await pumpOverlay(
+        tester,
+        onSkip: () {},
+        onDismiss: () {},
+        inline: inline,
+      );
+      final ring = tester.widget<CircularProgressIndicator>(
+        find.byType(CircularProgressIndicator),
+      );
+      expect(ring.valueColor?.value, AppColorScheme.onSurface);
+    }
   });
 
   testWidgets('TV leaves the chip out and keeps the skip button', (
