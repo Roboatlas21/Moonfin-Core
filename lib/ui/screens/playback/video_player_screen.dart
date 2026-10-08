@@ -586,16 +586,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           }
         },
       );
-      if (submitFailure != null && session.isCurrent) {
-        if (isCurrent()) throw submitFailure!;
-        if (mounted) {
-          // After Skip the POST still belongs to this player/account.
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(AppLocalizations.of(context).cinemaActionFailed),
-            ),
-          );
-        }
+      if (submitFailure != null && session.isCurrent && isCurrent()) {
+        throw submitFailure!;
       }
       return confirmed;
     } finally {

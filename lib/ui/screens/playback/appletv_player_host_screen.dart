@@ -275,9 +275,6 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       // Submitted work is independent of whichever trailer plays next.
       if (identical(_cinemaPicker, session)) _cinemaPicker = null;
       return await submit(selected, quotaDetail, () => session.isCurrent);
-    } catch (_) {
-      if (session.isCurrent && !isCurrent()) _showCinemaError();
-      rethrow;
     } finally {
       session.dispose();
       if (identical(_cinemaPicker, session)) _cinemaPicker = null;

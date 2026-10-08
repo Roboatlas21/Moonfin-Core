@@ -494,7 +494,7 @@ class CinemaModeController extends ChangeNotifier {
         // Uncertain outcome: do not offer another request.
       }
       // A confirmed request is not a failure just because its POST timed out.
-      if (_current(ticket) && seerrState == CinemaSeerrState.hidden) {
+      if (_current(ticket) && !_skipping && seerrState == CinemaSeerrState.hidden) {
         _onError(error);
       }
     } finally {
@@ -557,7 +557,7 @@ class CinemaModeController extends ChangeNotifier {
     } catch (error) {
       if (!_current(ticket)) return;
       seerrState = CinemaSeerrState.hidden;
-      _onError(error);
+      if (!_skipping) _onError(error);
     } finally {
       if (_current(ticket)) _setSending(false);
     }
