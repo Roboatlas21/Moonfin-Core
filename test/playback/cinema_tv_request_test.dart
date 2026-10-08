@@ -4,7 +4,9 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/repositories/seerr_repository.dart';
 import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
+import 'package:moonfin/l10n/app_localizations_en.dart';
 import 'package:moonfin/playback/cinema_mode_controller.dart';
+import 'package:moonfin/ui/widgets/playback/cinema_mode_actions_overlay.dart';
 
 class _Repo extends Fake implements SeerrRepository {
   int submissions = 0;
@@ -107,6 +109,8 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(repo.lookups, 1);
       expect(controller.canRequest, isTrue);
+      final l10n = AppLocalizationsEn();
+      expect(cinemaRequestLabel(controller, l10n), l10n.requestMore);
 
       await controller.request();
 
@@ -114,6 +118,25 @@ void main() {
       expect(repo.lookups, 1);
       expect(controller.seerrState, CinemaSeerrState.request);
       expect(controller.canRequest, isTrue);
+
+      repo.refreshed = const SeerrTvDetails(
+        id: 42,
+        numberOfSeasons: 2,
+        mediaInfo: SeerrMediaInfo(status: SeerrMediaStatus.unknown),
+      );
+      controller.enter(
+        item: {
+          'Type': 'Series',
+          'RunTimeTicks': 900000000,
+          'ProviderIds': {'Tmdb': '42'},
+        },
+        resolveMedia: () async => null,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(
+        cinemaRequestLabel(controller, l10n),
+        l10n.requestSeriesOrMovie(l10n.series),
+      );
     } finally {
       controller.dispose();
     }
@@ -159,9 +182,26 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
       expect(controller.canRequest, isTrue);
+      final l10n = AppLocalizationsEn();
+      expect(cinemaRequestLabel(controller, l10n), l10n.requestMore);
 
+      // Simulate an older Seerr status arriving just after the first POST.
+      repo.refreshed = const SeerrTvDetails(
+        id: 42,
+        numberOfSeasons: 3,
+        mediaInfo: SeerrMediaInfo(
+          status: SeerrMediaStatus.unknown,
+          seasons: [
+            SeerrSeasonAvailability(
+              seasonNumber: 1,
+              status: SeerrMediaStatus.available,
+            ),
+          ],
+        ),
+      );
       await controller.request();
       expect(controller.canRequest, isTrue);
+      expect(cinemaRequestLabel(controller, l10n), l10n.requestMore);
       await controller.request();
 
       expect(excludedAtPicker, [<int>{}, <int>{2}]);
