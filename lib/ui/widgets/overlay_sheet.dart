@@ -111,7 +111,7 @@ Future<T?> showFocusRestoringDialog<T>({
                   null) {
             return KeyEventResult.ignored;
           }
-          // A PopScope can veto Back while a Cinema request is submitting.
+          // A dialog's PopScope can veto Back while an operation is in progress.
           // Don't leave a dismissal mark if the route remains on screen.
           if (ModalRoute.of(dialogContext)?.popDisposition ==
               RoutePopDisposition.pop) {
