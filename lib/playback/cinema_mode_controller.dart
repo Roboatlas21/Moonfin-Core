@@ -19,7 +19,6 @@ bool _activeStandardRequest(SeerrRequest request, String type) =>
 enum CinemaSeerrState {
   hidden,
   request,
-  requesting,
   requested,
   pending,
   processing,
@@ -466,7 +465,6 @@ class CinemaModeController extends ChangeNotifier {
       await _requestSeries(repository, ticket, id);
       return;
     }
-    seerrState = CinemaSeerrState.requesting;
     _setSending(true);
     try {
       final response = await repository

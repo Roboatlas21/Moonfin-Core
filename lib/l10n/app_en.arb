@@ -13129,6 +13129,5 @@
   "cinemaMinimumIntroLengthDescription": "Hide Cinema Mode actions for intros shorter than this. Auto hide still applies.",
   "cinemaAlwaysShow": "Always show",
   "cinemaSkip": "Skip",
-  "cinemaRequestMovie": "Request Movie",
-  "cinemaRequesting": "Requesting..."
+  "cinemaRequestMovie": "Request Movie"
 }

@@ -19,7 +19,6 @@ String? cinemaRequestLabel(
               ? l10n.requestMore
               : l10n.requestSeriesOrMovie(l10n.series))
         : l10n.cinemaRequestMovie,
-  CinemaSeerrState.requesting => l10n.cinemaRequesting,
   CinemaSeerrState.requested => l10n.seerrRequestedStatus,
   CinemaSeerrState.pending => l10n.pendingStatus,
   CinemaSeerrState.processing => l10n.processing,
