@@ -5,12 +5,6 @@ import 'package:moonfin/data/services/cinema_media_resolver.dart';
 import 'package:server_core/server_core.dart';
 
 class _Client extends Fake implements MediaServerClient {
-  @override
-  String baseUrl = 'https://server';
-  @override
-  String? userId = 'user';
-  @override
-  String? accessToken = 'token';
   int calls = 0;
   Completer<CinemaMedia?> reply = Completer();
   @override
@@ -57,14 +51,21 @@ void main() {
     },
   );
 
-  test('endpoint failures and old plugins hide the action and clear in-flight work', () async {
+  test('endpoint failures do not retain results', () async {
     final client = _Client();
-    final resolver = CinemaMediaResolver();
-    final a = resolver.resolve(client: client, itemId: 'intro', item: {});
+    final a = CinemaMediaResolver.resolve(
+      client: client,
+      itemId: 'intro',
+      item: {},
+    );
     client.reply.completeError(StateError('404'));
     expect(await a, isNull);
     client.reply = Completer();
-    final b = resolver.resolve(client: client, itemId: 'intro', item: {});
+    final b = CinemaMediaResolver.resolve(
+      client: client,
+      itemId: 'intro',
+      item: {},
+    );
     client.reply.complete(null);
     expect(await b, isNull);
     expect(client.calls, 2);
