@@ -122,7 +122,7 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                   description: l10n.cinemaMinimumIntroLengthDescription,
                   icon: Icons.timelapse,
                   options: {
-                    0: l10n.cinemaAlwaysShow,
+                    0: l10n.noLimit,
                     for (var seconds = 5; seconds <= 60; seconds += 5)
                       seconds: l10n.secondsValue(seconds),
                   },
