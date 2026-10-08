@@ -677,7 +677,7 @@ class CinemaModeController extends ChangeNotifier {
             allow4k: options.fourK,
           );
           if (_current(ticket) && isAllowed() && result != null) {
-            _submittedTvSeasons[selection['is4k'] == true]!
+            _submittedTvSeasons[is4k]!
                 .addAll(result.seasons);
             acknowledged = true;
           }
