@@ -211,7 +211,7 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
                     children: [
                       Icon(
                         Icons.skip_next_rounded,
-                        color: AppColorScheme.accent,
+                        color: AppColorScheme.onSurface,
                         size: 20,
                       ),
                       const SizedBox(width: 9),
@@ -275,7 +275,7 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
                                 )
                               : Icon(
                                   Icons.skip_next_rounded,
-                                  color: AppColorScheme.accent,
+                                  color: AppColorScheme.onSurface,
                                   size: 15,
                                 ),
                         ),
