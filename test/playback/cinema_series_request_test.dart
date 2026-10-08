@@ -32,17 +32,15 @@ void main() {
     );
   });
 
-  test('All Seasons remains a single Seerr request option', () {
-    final selection = cinemaTvRequestSelection(
+  test('All Seasons works but invalid or over-quota choices are rejected', () {
+    final all = cinemaTvRequestSelection(
       {'allSeasons': true, 'seasons': <int>[]},
       {2, 5},
       const SeerrQuotaDetail(limit: 4, remaining: 2),
     );
-    expect(selection?.allSeasons, isTrue);
-    expect(selection?.seasons, isNull);
-  });
+    expect(all?.allSeasons, isTrue);
+    expect(all?.seasons, isNull);
 
-  test('invalid, unavailable and over-quota selections are rejected', () {
     for (final invalid in [
       {'seasons': [2]},
       {'allSeasons': false, 'seasons': [2.0]},

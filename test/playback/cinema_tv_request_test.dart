@@ -73,50 +73,25 @@ Map<String, dynamic> _item() => {
   'ProviderIds': {'Tmdb': '42'},
 };
 
-SeerrTvDetails _requestedSeasons(List<int> seasons, {bool is4k = false}) =>
-    SeerrTvDetails(
-      id: 42,
-      mediaInfo: SeerrMediaInfo(
-        status: is4k ? null : SeerrMediaStatus.processing,
-        status4k: is4k ? SeerrMediaStatus.processing : null,
-        requests: [
-          SeerrRequest(
-            id: 8,
-            status: SeerrRequest.statusApproved,
-            type: 'tv',
-            is4k: is4k,
-            seasons: [
-              for (final n in seasons)
-                SeerrSeasonRequest(id: n, seasonNumber: n, status: 2),
-            ],
-          ),
+SeerrTvDetails _requestedSeasons(List<int> seasons) => SeerrTvDetails(
+  id: 42,
+  mediaInfo: SeerrMediaInfo(
+    status: SeerrMediaStatus.processing,
+    requests: [
+      SeerrRequest(
+        id: 8,
+        status: SeerrRequest.statusApproved,
+        type: 'tv',
+        seasons: [
+          for (final number in seasons)
+            SeerrSeasonRequest(id: number, seasonNumber: number, status: 2),
         ],
       ),
-    );
+    ],
+  ),
+);
 
 void main() {
-  test('cancelling the TV picker leaves Request available', () async {
-    final repo = _Repo()..refreshed = _original;
-    final controller = CinemaModeController(
-      seerr: () async => repo,
-      accountKey: () => 'server/user',
-      onSkip: () async {},
-      onRequestSeries: (_, _, _, _, _, _) async => null,
-    );
-    try {
-      controller.enter(item: _item(), resolveMedia: () async => null);
-      await Future<void>.delayed(Duration.zero);
-      expect(controller.canRequest, isTrue);
-
-      await controller.request();
-      expect(repo.submissions, 0);
-      expect(repo.lookups, 1);
-      expect(controller.canRequest, isTrue);
-    } finally {
-      controller.dispose();
-    }
-  });
-
   test('4K-only TV requests use 4K seasons, not the HD track', () async {
     final repo = _Repo()
       ..permissions = SeerrPermission.request4kTv

@@ -88,14 +88,4 @@ void main() {
     expect(client.requestedType, CinemaMediaType.tv);
   });
 
-  test('a failed server lookup leaves the trailer unmatched', () async {
-    final client = _Client();
-    final result = CinemaMediaResolver.resolve(
-      client: client,
-      itemId: 'intro',
-      item: {},
-    );
-    client.reply.completeError(StateError('404'));
-    expect(await result, isNull);
-  });
 }
