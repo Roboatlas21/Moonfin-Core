@@ -151,7 +151,6 @@ final class AppleTvPlayerViewController: UIViewController {
     private let cinemaRequestPanel = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
     private var skipBottomConstraint: NSLayoutConstraint?
     private weak var cinemaPicker: CinemaRequestPicker?
-    private var pendingCinemaError: String?
 
     private var skipSegmentActive = false
     private let skipSegmentButton = UIView()
@@ -728,9 +727,6 @@ final class AppleTvPlayerViewController: UIViewController {
         cinemaActive = args["active"] as? Bool ?? false
         cinemaVisible = cinemaActive && (args["visible"] as? Bool ?? false)
         let generation = (args["generation"] as? NSNumber)?.intValue ?? 0
-        if !cinemaVisible || generation != cinemaGeneration {
-            pendingCinemaError = nil
-        }
         cinemaGeneration = generation
         skipBottomConstraint?.constant = cinemaActive ? -48 : -240
         let requestEnabled = cinemaVisible && (args["canRequest"] as? Bool ?? false)
@@ -768,11 +764,6 @@ final class AppleTvPlayerViewController: UIViewController {
             return
         }
         let picker = CinemaRequestPicker(options: args, completion: completion)
-        picker.onDismissed = { [weak self] in
-            guard let self, let message = self.pendingCinemaError else { return }
-            self.pendingCinemaError = nil
-            self.showCinemaError(message)
-        }
         cinemaPicker = picker
         present(picker, animated: true)
     }
@@ -787,19 +778,6 @@ final class AppleTvPlayerViewController: UIViewController {
               requestId == nil || picker.requestId == requestId else { return false }
         picker.finish(nil)
         return true
-    }
-
-    func showCinemaError(_ message: String) {
-        guard !isBeingDismissed, viewIfLoaded?.window != nil else { return }
-        if presentedViewController is CinemaRequestPicker {
-            // A fast request failure can arrive before its picker finishes dismissing.
-            pendingCinemaError = message
-            return
-        }
-        guard presentedViewController == nil else { return }
-        let alert = makePlayerMenu(title: nil, message: message, preferredStyle: .alert)
-        alert.addAction(makePlayerAction(title: "OK", style: .cancel))
-        present(alert, animated: true)
     }
 
     private func setupLiveOverlays() {
@@ -4204,7 +4182,6 @@ private final class RemotePlayerMenu: RemotePlayerList {
 /// validation, submission, and expiry; UIKit only renders and returns ids.
 private final class CinemaRequestPicker: RemotePlayerList {
     let requestId: Int
-    var onDismissed: (() -> Void)?
     private let seasons: [Int]
     private let labels: [String]
     private let allLabel: String
@@ -4244,7 +4221,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
         super.viewDidAppear(animated)
         guard dismissAfterPresentation else { return }
         dismissAfterPresentation = false
-        dismiss(animated: false, completion: onDismissed)
+        dismiss(animated: false)
     }
 
     private var submitRow: Int { seasons.count + 1 }
@@ -4334,32 +4311,18 @@ private final class CinemaRequestPicker: RemotePlayerList {
         ]
     }
 
-    // Notify the player only after an in-progress UIKit dismissal finishes.
-    // Otherwise a deferred request error can be handed back to this picker
-    // while it is still presented and never get another dismissal callback.
-    private func notifyAfterDismissal() {
-        // Keep the callback alive even if UIKit releases the picker first.
-        let didDismiss = onDismissed
-        if transitionCoordinator?.animate(alongsideTransition: nil,
-                                          completion: { _ in didDismiss?() }) == true {
-            return
-        }
-        DispatchQueue.main.async { didDismiss?() }
-    }
-
     func finish(_ value: [String: Any]?) {
         guard !answered else { return }
         answered = true
         // Hand Submit to Dart at press time, before grace expiry or a late
         // quota response can change the decision during a dismissal animation.
         completion(value)
-        if isBeingDismissed {
-            notifyAfterDismissal()
-        } else if isBeingPresented || viewIfLoaded?.window == nil {
+        if isBeingDismissed { return }
+        if isBeingPresented || viewIfLoaded?.window == nil {
             // Finish presenting before dismissing, or UIKit may ignore it.
             dismissAfterPresentation = true
         } else {
-            dismiss(animated: false, completion: onDismissed)
+            dismiss(animated: false)
         }
     }
 
@@ -4368,7 +4331,6 @@ private final class CinemaRequestPicker: RemotePlayerList {
         if !answered && presentedViewController == nil {
             answered = true
             completion(nil)
-            notifyAfterDismissal()
         }
     }
 

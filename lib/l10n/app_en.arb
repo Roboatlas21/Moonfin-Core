@@ -13130,6 +13130,5 @@
   "cinemaAlwaysShow": "Always show",
   "cinemaSkip": "Skip",
   "cinemaRequestMovie": "Request Movie",
-  "cinemaRequesting": "Requesting...",
-  "cinemaActionFailed": "Could not complete this action. Please try again later."
+  "cinemaRequesting": "Requesting..."
 }

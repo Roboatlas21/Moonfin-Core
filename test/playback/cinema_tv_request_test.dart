@@ -84,7 +84,6 @@ void main() {
       seerr: () async => repo,
       accountKey: () => 'server/user',
       onSkip: () async {},
-      onError: (error) => fail('Unexpected failure: $error'),
       onRequestSeries: (
         repository,
         details,
@@ -131,7 +130,6 @@ void main() {
       seerr: () async => repo,
       accountKey: () => 'server/user',
       onSkip: () async {},
-      onError: (error) => fail('Unexpected request failure: $error'),
       onRequestSeries: (
         repository,
         details,

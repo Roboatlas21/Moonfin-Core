@@ -83,18 +83,15 @@ void main() {
   late FakeCinemaSeerr seerr;
   late CinemaModeController controller;
   late int skips;
-  late List<Object> errors;
   setUp(() {
     seerr = FakeCinemaSeerr();
     skips = 0;
-    errors = [];
     controller = CinemaModeController(
       seerr: () async => seerr,
       accountKey: () => 'server/user',
       onSkip: () async {
         skips++;
       },
-      onError: errors.add,
     );
   });
   tearDown(() => controller.dispose());
@@ -120,7 +117,6 @@ void main() {
       time.flushMicrotasks();
       expect(controller.media?.tmdbId, 99);
       expect(controller.canRequest, isTrue);
-      expect(errors, isEmpty);
     });
   });
 
@@ -145,7 +141,6 @@ void main() {
         expect(seerr.lookups, 2);
         expect(controller.seerrState, CinemaSeerrState.hidden);
         expect(controller.canRequest, isFalse);
-        expect(errors, hasLength(1));
 
         controller.request();
         time.flushMicrotasks();

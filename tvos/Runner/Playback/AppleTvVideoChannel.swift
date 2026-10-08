@@ -148,8 +148,6 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                let id {
                 pendingCinemaRequestDismissId = id
             }
-        case "showCinemaError":
-            playerVC?.showCinemaError((args["message"] as? String) ?? "")
         case "showNextUp":
             playerVC?.showNextUpCard(
                 title: (args["title"] as? String) ?? "",

@@ -982,12 +982,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       seerr: () => GetIt.instance.getAsync<SeerrRepository>(), accountKey: _cinemaAccountKey,
       onSkip: _skipCinemaPreroll,
       onRequestSeries: _showCinemaSeriesRequest,
-      onError: (_) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(AppLocalizations.of(context).cinemaActionFailed),
-        ));
-      },
     )..addListener(_onCinemaChanged);
     _configureCinema();
     _startCinemaItem(initial: true);

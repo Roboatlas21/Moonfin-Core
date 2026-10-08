@@ -200,7 +200,6 @@ class CinemaModeController extends ChangeNotifier {
     required this._seerr,
     required this._accountKey,
     required this._onSkip,
-    required this._onError,
     this.onRequestSeries,
   });
 
@@ -208,7 +207,6 @@ class CinemaModeController extends ChangeNotifier {
   SeerrRepository? _requestRepository;
   final Object Function() _accountKey;
   final Future<void> Function() _onSkip;
-  final void Function(Object) _onError;
 
   /// Returns details already refreshed during timeout confirmation, if any.
   final Future<SeerrTvDetails?> Function(
@@ -443,10 +441,9 @@ class CinemaModeController extends ChangeNotifier {
     final ticket = _generation;
     notifyListeners();
     unawaited(
-      _onSkip().catchError((Object error) {
+      _onSkip().catchError((Object _) {
         if (!_current(ticket)) return;
         _skipping = false;
-        _onError(error);
         _restartTimer();
         notifyListeners();
       }),
@@ -480,7 +477,7 @@ class CinemaModeController extends ChangeNotifier {
         mediaStatus: response.media?.status,
         acknowledged: true,
       );
-    } catch (error) {
+    } catch (_) {
       if (!_current(ticket)) return;
       // The POST may have been accepted. Reconcile once, never retry it.
       seerrState = CinemaSeerrState.hidden;
@@ -493,10 +490,6 @@ class CinemaModeController extends ChangeNotifier {
         }
       } catch (_) {
         // Uncertain outcome: do not offer another request.
-      }
-      // A confirmed request is not a failure just because its POST timed out.
-      if (_current(ticket) && !_skipping && seerrState == CinemaSeerrState.hidden) {
-        _onError(error);
       }
     } finally {
       if (_current(ticket)) _setSending(false);
@@ -552,10 +545,9 @@ class CinemaModeController extends ChangeNotifier {
       try {
         await _refreshStatus(repository, ticket, id, confirmedTv: confirmed);
       } catch (_) {}
-    } catch (error) {
+    } catch (_) {
       if (!_current(ticket)) return;
       seerrState = CinemaSeerrState.hidden;
-      if (!_skipping) _onError(error);
     } finally {
       if (_current(ticket)) _setSending(false);
     }

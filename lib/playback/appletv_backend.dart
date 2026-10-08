@@ -617,9 +617,6 @@ class AppleTvBackend implements PlayerBackend {
         requestId == null ? null : {'requestId': requestId},
       );
 
-  Future<void> showCinemaError(String message) =>
-      _invoke<void>('showCinemaError', {'message': message});
-
   Future<void> showSkipSegment(
     String label, {
     required String countdownStyle,

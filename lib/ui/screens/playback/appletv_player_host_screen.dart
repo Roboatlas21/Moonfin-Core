@@ -281,16 +281,6 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     }
   }
 
-  void _showCinemaError() {
-    if (!mounted || _exiting) return;
-    unawaited(
-      _backend?.showCinemaError(
-            AppLocalizations.of(context).cinemaActionFailed,
-          ) ??
-          Future.value(),
-    );
-  }
-
   AppleTvBackend? get _backend {
     try {
       return GetIt.instance<AppleTvBackend>();
@@ -314,7 +304,6 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       seerr: () => GetIt.instance.getAsync<SeerrRepository>(),
       accountKey: _cinemaAccountKey,
       onSkip: _skipCinema,
-      onError: (_) => _showCinemaError(),
       onRequestSeries: _requestCinemaSeries,
     )..addListener(_onCinemaChanged);
     try {
