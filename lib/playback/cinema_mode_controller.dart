@@ -482,9 +482,7 @@ class CinemaModeController extends ChangeNotifier {
         // Uncertain outcome: do not offer another request.
       }
       // A confirmed request is not a failure just because its POST timed out.
-      if (_current(ticket) &&
-          (seerrState == CinemaSeerrState.hidden ||
-              seerrState == CinemaSeerrState.request)) {
+      if (_current(ticket) && seerrState == CinemaSeerrState.hidden) {
         _onError(error);
       }
     } finally {
@@ -534,15 +532,13 @@ class CinemaModeController extends ChangeNotifier {
           return confirmed;
         },
       );
-      if (!_current(ticket)) return;
-      // Reuse confirmed seasons or refresh after submit/cancel. A failed
-      // status refresh must not be reported as a failed request.
-      seerrState = acknowledged
-          ? cinemaTvSeerrState(
-              details,
-              excludedSeasons: _submittedTvSeasons,
-            )
-          : CinemaSeerrState.hidden;
+      // Cancelling the picker leaves the existing Request state intact.
+      // Only accepted submissions need their Seerr status reconciled.
+      if (!_current(ticket) || !acknowledged) return;
+      seerrState = cinemaTvSeerrState(
+        details,
+        excludedSeasons: _submittedTvSeasons,
+      );
       try {
         await _refreshStatus(repository, ticket, id, confirmedTv: confirmed);
       } catch (_) {}
