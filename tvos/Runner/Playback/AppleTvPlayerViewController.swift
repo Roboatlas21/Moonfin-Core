@@ -420,14 +420,20 @@ final class AppleTvPlayerViewController: UIViewController {
 
     private func restyleForTheme() {
         let accent = themeAccent
+        let foreground = glassOnSurface
         scrubber.progressTintColor = glassActive ? glassRangeProgress : accent
         channelBadge.backgroundColor = accent
         upNextLabel.textColor = accent
-        skipSegmentButton.layer.borderColor = (cinemaVisible && cinemaRequestFocused ? UIColor.white : accent).cgColor
-        skipSegmentIcon.tintColor = .white
-        skipSegmentRingIcon.tintColor = .white
-        skipSegmentRing.strokeColor = UIColor.white.cgColor
-        cinemaRequestPanel.layer.borderColor = (cinemaRequestFocused ? accent : UIColor.white).cgColor
+        skipSegmentButton.layer.borderColor = (cinemaVisible && cinemaRequestFocused ? foreground : accent).cgColor
+        skipSegmentIcon.tintColor = foreground
+        skipSegmentLabel.textColor = foreground
+        skipSegmentTimerLabel.textColor = foreground.withAlphaComponent(0.5)
+        skipSegmentRingIcon.tintColor = foreground
+        skipSegmentRingNumber.textColor = foreground
+        skipSegmentRingTrack.strokeColor = foreground.withAlphaComponent(0.16).cgColor
+        skipSegmentRing.strokeColor = foreground.cgColor
+        cinemaRequest.textColor = foreground
+        cinemaRequestPanel.layer.borderColor = (cinemaRequestFocused ? accent : foreground).cgColor
         nextUpPlayButton.backgroundColor = accent
     }
 
@@ -629,10 +635,8 @@ final class AppleTvPlayerViewController: UIViewController {
         skipSegmentIcon.image = UIImage(systemName: "forward.end.fill", withConfiguration: iconConfig)
 
         skipSegmentLabel.font = .systemFont(ofSize: 30, weight: .semibold)
-        skipSegmentLabel.textColor = .white
 
         skipSegmentTimerLabel.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
-        skipSegmentTimerLabel.textColor = UIColor(white: 1, alpha: 0.5)
 
         skipSegmentRingContainer.translatesAutoresizingMaskIntoConstraints = false
         let ringPath = UIBezierPath(
@@ -648,11 +652,9 @@ final class AppleTvPlayerViewController: UIViewController {
             layer.path = ringPath.cgPath
             skipSegmentRingContainer.layer.addSublayer(layer)
         }
-        skipSegmentRingTrack.strokeColor = UIColor(white: 1, alpha: 0.16).cgColor
 
         skipSegmentRingNumber.translatesAutoresizingMaskIntoConstraints = false
         skipSegmentRingNumber.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
-        skipSegmentRingNumber.textColor = .white
         skipSegmentRingContainer.addSubview(skipSegmentRingNumber)
 
         let ringIconConfig = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
@@ -707,7 +709,6 @@ final class AppleTvPlayerViewController: UIViewController {
         view.addSubview(cinemaRequestPanel)
         cinemaRequest.translatesAutoresizingMaskIntoConstraints = false
         cinemaRequest.font = .systemFont(ofSize: 30, weight: .semibold)
-        cinemaRequest.textColor = .white
         cinemaRequest.lineBreakMode = .byTruncatingTail
         cinemaRequestPanel.contentView.addSubview(cinemaRequest)
         NSLayoutConstraint.activate([
