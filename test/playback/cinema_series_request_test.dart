@@ -24,6 +24,34 @@ void main() {
     expect(cinemaRequestableSeasons(details), {3});
     expect(cinemaTvSeerrState(details), CinemaSeerrState.request);
     expect(
+      cinemaTvSeerrState(details, excludedSeasons: {3}),
+      CinemaSeerrState.requested,
+    );
+    expect(
+      cinemaTvSeerrState(const SeerrTvDetails(
+        id: 42,
+        numberOfSeasons: 2,
+        mediaInfo: SeerrMediaInfo(
+          status: SeerrMediaStatus.partiallyAvailable,
+          seasons: [SeerrSeasonAvailability(seasonNumber: 1, status: 5)],
+          requests: [
+            SeerrRequest(
+              id: 1, type: 'tv', status: SeerrRequest.statusApproved,
+              seasons: [SeerrSeasonRequest(id: 1, seasonNumber: 2, status: 2)],
+            ),
+          ],
+        ),
+      )),
+      CinemaSeerrState.requested,
+    );
+    expect(
+      cinemaTvSeerrState(const SeerrTvDetails(
+        id: 42,
+        mediaInfo: SeerrMediaInfo(status: SeerrMediaStatus.partiallyAvailable),
+      )),
+      CinemaSeerrState.partiallyAvailable,
+    );
+    expect(
       cinemaTvSeerrState(
         const SeerrTvDetails(
           id: 42,
