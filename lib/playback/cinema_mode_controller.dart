@@ -239,6 +239,12 @@ class CinemaModeController extends ChangeNotifier {
 
   CinemaMedia? media;
   bool get isSeries => media?.type == CinemaMediaType.tv;
+  bool get isTvRequestMore {
+    final info = _tvDetails?.mediaInfo;
+    return _submittedTvSeasons.isNotEmpty ||
+        SeerrMediaStatus.isAvailable(info?.status) ||
+        (info?.requests?.any((r) => _activeStandardRequest(r, 'tv')) ?? false);
+  }
   CinemaSeerrState seerrState = CinemaSeerrState.hidden;
   CinemaAction focusedAction = CinemaAction.skip;
   Duration get duration =>

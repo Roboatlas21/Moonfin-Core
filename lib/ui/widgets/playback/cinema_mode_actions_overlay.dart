@@ -15,7 +15,9 @@ String? cinemaRequestLabel(
   CinemaSeerrState.hidden => null,
   CinemaSeerrState.request =>
     controller.isSeries
-        ? l10n.requestSeriesOrMovie(l10n.series)
+        ? (controller.isTvRequestMore
+              ? l10n.requestMore
+              : l10n.requestSeriesOrMovie(l10n.series))
         : l10n.cinemaRequestMovie,
   CinemaSeerrState.requesting => l10n.cinemaRequesting,
   CinemaSeerrState.requested => l10n.seerrRequestedStatus,
