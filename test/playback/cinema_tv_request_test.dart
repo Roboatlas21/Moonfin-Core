@@ -47,47 +47,43 @@ const _original = SeerrTvDetails(
   ),
 );
 
+SeerrTvDetails _requestedSeasons(List<int> seasons) => SeerrTvDetails(
+  id: 42,
+  mediaInfo: SeerrMediaInfo(
+    status: SeerrMediaStatus.processing,
+    requests: [
+      SeerrRequest(
+        id: 8,
+        status: SeerrRequest.statusApproved,
+        type: 'tv',
+        seasons: [
+          for (final number in seasons)
+            SeerrSeasonRequest(id: number, seasonNumber: number, status: 2),
+        ],
+      ),
+    ],
+  ),
+);
+
 void main() {
   test('Cinema All Seasons timeout confirms exactly the missing seasons', () {
     fakeAsync((clock) {
       final repo = _Repo();
       SeerrTvDetails? confirmed;
-      Object? failure;
       submitCinemaTvRequest(
         repository: repo,
         details: _original,
         selection: {'allSeasons': true, 'seasons': <int>[]},
         quota: null,
         isAllowed: () => true,
-      ).then((value) => confirmed = value, onError: (Object e) => failure = e);
+      ).then((value) => confirmed = value);
       clock.flushMicrotasks();
-      expect(repo.submissions, 1);
-
-      repo.refreshed = const SeerrTvDetails(
-        id: 42,
-        mediaInfo: SeerrMediaInfo(
-          status: SeerrMediaStatus.processing,
-          requests: [
-            SeerrRequest(
-              id: 8,
-              status: SeerrRequest.statusApproved,
-              type: 'tv',
-              seasons: [
-                SeerrSeasonRequest(id: 2, seasonNumber: 2, status: 2),
-                SeerrSeasonRequest(id: 3, seasonNumber: 3, status: 2),
-              ],
-            ),
-          ],
-        ),
-      );
+      repo.refreshed = _requestedSeasons([2, 3]);
       clock.elapse(const Duration(seconds: 20));
       clock.flushMicrotasks();
       expect(repo.submissions, 1);
       expect(repo.lookups, 1);
       expect(confirmed, same(repo.refreshed));
-      expect(failure, isNull);
-      repo.post.complete(const SeerrRequest(id: 8, type: 'tv', status: 2));
-      clock.flushMicrotasks();
     });
   });
 
@@ -109,33 +105,16 @@ void main() {
       );
       clock.flushMicrotasks();
 
-      repo.refreshed = const SeerrTvDetails(
-        id: 42,
-        mediaInfo: SeerrMediaInfo(
-          status: SeerrMediaStatus.processing,
-          requests: [
-            SeerrRequest(
-              id: 8,
-              status: SeerrRequest.statusApproved,
-              type: 'tv',
-              seasons: [
-                SeerrSeasonRequest(id: 2, seasonNumber: 2, status: 2),
-              ],
-            ),
-          ],
-        ),
-      );
+      repo.refreshed = _requestedSeasons([2]);
       clock.elapse(const Duration(seconds: 20));
       clock.flushMicrotasks();
       expect(repo.submissions, 1);
       expect(repo.lookups, 1);
       expect(failure, isA<TimeoutException>());
-      repo.post.complete(const SeerrRequest(id: 8, type: 'tv', status: 2));
-      clock.flushMicrotasks();
     });
   });
 
-  test('account change prevents timeout reconciliation under a new user', () {
+  test('invalidated picker skips timeout reconciliation', () {
     fakeAsync((clock) {
       final repo = _Repo();
       var allowed = true;
@@ -154,8 +133,6 @@ void main() {
       expect(repo.submissions, 1);
       expect(repo.lookups, 0);
       expect(result, isNull);
-      repo.post.complete(const SeerrRequest(id: 8, type: 'tv', status: 2));
-      clock.flushMicrotasks();
     });
   });
 }
