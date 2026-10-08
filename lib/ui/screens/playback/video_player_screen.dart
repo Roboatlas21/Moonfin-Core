@@ -562,7 +562,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       vm = SeerrMediaDetailViewModel.forCinema(
         repository,
         GetIt.instance<SeerrPreferences>(),
-        details: details,
+        tv: details,
         user: user,
       );
       await showSeerrRequestDialog(
@@ -606,10 +606,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       isMounted: () => mounted && !_isStopping,
     );
     _seriesPickerSession = session;
-    final vm = SeerrMediaDetailViewModel.forCinemaMovie(
+    final vm = SeerrMediaDetailViewModel.forCinema(
       repository,
       GetIt.instance<SeerrPreferences>(),
-      details: details,
+      movie: details,
       user: user,
     );
     try {
@@ -623,10 +623,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         cinemaSubmit: (selection, _) async {
           if (!session.isCurrent || !isCurrent()) return;
           session.markSubmitting();
-          await submit(
-            selection['is4k'] == true,
-            () => session.isCurrent && isCurrent(),
-          );
+          await submit(selection['is4k'] == true);
         },
       );
     } finally {

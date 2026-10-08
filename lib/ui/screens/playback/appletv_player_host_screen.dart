@@ -197,11 +197,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     SeerrUser user,
     bool Function() isCurrent,
     Map<String, Object?> options,
-    Future<SeerrTvDetails?> Function(
-      Map<String, dynamic> selection,
-      SeerrQuotaDetail? quota,
-      bool Function() isAllowed,
-    ) submit,
+    CinemaTvSubmit submit,
   ) async {
     final backend = _backend;
     if (!mounted || backend == null || !isCurrent()) return null;
@@ -333,7 +329,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       },
       (selection, quota, isAllowed) async {
         if (selection['is4k'] is! bool) return null;
-        await submit(selection['is4k'] as bool, isAllowed);
+        await submit(selection['is4k'] as bool);
         return null;
       },
     );

@@ -362,23 +362,15 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
 
   SeerrMediaDetailViewModel(this._repo, this._prefs);
 
-  /// Use the TV show details Cinema Mode already loaded, without fetching them again.
+  /// Use the details Cinema Mode already loaded, without fetching them again.
   SeerrMediaDetailViewModel.forCinema(
     this._repo,
     this._prefs, {
-    required SeerrTvDetails details,
+    SeerrTvDetails? tv,
+    SeerrMovieDetails? movie,
     required SeerrUser user,
   }) {
-    _state = SeerrMediaDetailState(tv: details, currentUser: user);
-  }
-
-  SeerrMediaDetailViewModel.forCinemaMovie(
-    this._repo,
-    this._prefs, {
-    required SeerrMovieDetails details,
-    required SeerrUser user,
-  }) {
-    _state = SeerrMediaDetailState(movie: details, currentUser: user);
+    _state = SeerrMediaDetailState(tv: tv, movie: movie, currentUser: user);
   }
 
   @override

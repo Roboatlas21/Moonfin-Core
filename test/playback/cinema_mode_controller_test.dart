@@ -10,6 +10,7 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
   SeerrMediaInfo? info;
   int permissions = SeerrPermission.requestMovie;
   bool movie4kEnabled = true;
+  Completer<Map<String, dynamic>>? settingsResponse;
   int lookups = 0;
   final submitted = <int>[];
   final requested4k = <bool>[];
@@ -23,8 +24,9 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
   Future<SeerrUser> getCurrentUser() async =>
       SeerrUser(id: 5, permissions: permissions);
   @override
-  Future<Map<String, dynamic>> getPublicSettings() async =>
-      {'movie4kEnabled': movie4kEnabled};
+  Future<Map<String, dynamic>> getPublicSettings() =>
+      settingsResponse?.future ??
+      Future.value({'movie4kEnabled': movie4kEnabled});
   @override
   Future<SeerrMovieDetails> getMovieDetails(int tmdbId) async {
     lookups++;
@@ -163,6 +165,33 @@ void main() {
   }
 
 
+  test('slow 4K settings never delay the standard Request button', () async {
+    seerr.permissions =
+        SeerrPermission.requestMovie | SeerrPermission.request4kMovie;
+    seerr.settingsResponse = Completer<Map<String, dynamic>>();
+    enter();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.canRequest, isTrue);
+
+    // Standard remains available even if Seerr's optional 4K settings are slow.
+    seerr.settingsResponse!.complete({'movie4kEnabled': false});
+    await Future<void>.delayed(Duration.zero);
+    await controller.request();
+    expect(seerr.requested4k, [false]);
+  });
+
+  test('disabled 4K backend hides a 4K-only request', () async {
+    seerr.permissions = SeerrPermission.request4kMovie;
+    seerr.settingsResponse = Completer<Map<String, dynamic>>();
+    enter();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.canRequest, isTrue);
+
+    seerr.settingsResponse!.complete({'movie4kEnabled': false});
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.canRequest, isFalse);
+  });
+
   test('movie available in standard can still be requested directly in 4K', () async {
     seerr.permissions = SeerrPermission.requestMovie |
         SeerrPermission.request4kMovie;
@@ -202,7 +231,7 @@ void main() {
       onSkip: () async {},
       onRequestMovie: (repository, details, user, isCurrent, submit) async {
         prompts++;
-        await submit(true, isCurrent);
+        await submit(true);
       },
     );
     try {

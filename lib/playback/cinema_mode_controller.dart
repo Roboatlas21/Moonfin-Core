@@ -7,6 +7,7 @@ import 'package:server_core/server_core.dart';
 import '../data/repositories/seerr_repository.dart';
 import '../data/services/cinema_media_resolver.dart';
 import '../data/services/seerr/seerr_api_models.dart';
+import '../data/viewmodels/seerr_media_detail_view_model.dart';
 
 enum CinemaAction { skip, request }
 
@@ -91,13 +92,17 @@ CinemaSeerrState cinemaSeerrState({
 Set<int> cinemaRequestableSeasons(
   SeerrTvDetails details, {
   bool is4k = false,
-}) =>
-    seerrSeasonNumbersOf(details.seasons, details.numberOfSeasons ?? 0)
-        .toSet()
-        .difference(seerrUnavailableOrRequestedSeasons(
-          details.mediaInfo,
-          is4k: is4k,
-        ));
+}) {
+  final quality = SeerrQualityStatus.of(
+    is4k: is4k,
+    mediaInfo: details.mediaInfo,
+    canManageRequests: false,
+    currentUserId: null,
+  );
+  return seerrSeasonNumbersOf(details.seasons, details.numberOfSeasons ?? 0)
+      .toSet()
+      .difference(quality.unavailableOrRequestedSeasons);
+}
 
 bool cinemaSeriesIsContinuing(SeerrTvDetails details) {
   final status = (details.status ?? '').toLowerCase();
@@ -109,11 +114,14 @@ CinemaSeerrState cinemaTvSeerrState(
   bool is4k = false,
   Set<int> excludedSeasons = const {},
 }) {
-  final status = is4k
-      ? details.mediaInfo?.status4k
-      : details.mediaInfo?.status;
-  if (status == SeerrMediaStatus.blocklisted ||
-      (status != null && !{0, 1, 2, 3, 4, 5, 7}.contains(status))) {
+  final quality = SeerrQualityStatus.of(
+    is4k: is4k,
+    mediaInfo: details.mediaInfo,
+    canManageRequests: false,
+    currentUserId: null,
+  );
+  final status = quality.status == 0 ? null : quality.status;
+  if (status != null && !{1, 2, 3, 4, 5, 7}.contains(status)) {
     return CinemaSeerrState.hidden;
   }
   // A show marked available may still have a new season. Show Request only when another season
@@ -125,9 +133,7 @@ CinemaSeerrState cinemaTvSeerrState(
           .isNotEmpty) {
     return CinemaSeerrState.request;
   }
-  final acknowledged = details.mediaInfo?.requests?.any(
-        (r) => _activeRequest(r, 'tv', is4k),
-      ) ?? false;
+  final acknowledged = quality.activeRequests.any((r) => r.type == 'tv');
   // Seerr may still say "partially available" after accepting the selected seasons.
   if (status == SeerrMediaStatus.partiallyAvailable &&
       (acknowledged || excludedSeasons.isNotEmpty)) {
@@ -215,10 +221,7 @@ typedef CinemaTvQualityOptions = ({
 });
 
 /// Shows a quality picker only when both movie qualities can be requested.
-typedef CinemaMovieSubmit = Future<void> Function(
-  bool is4k,
-  bool Function() isAllowed,
-);
+typedef CinemaMovieSubmit = Future<void> Function(bool is4k);
 
 /// Manages when trailer actions appear and how they respond across devices. Seerr checks must
 /// never delay playback.
@@ -257,10 +260,8 @@ class CinemaModeController extends ChangeNotifier {
   SeerrTvDetails? _tvDetails;
   SeerrMovieDetails? _movieDetails;
   SeerrUser? _user;
-  bool _allowStandard = false;
-  bool _allow4k = false;
-  bool _requestableStandard = false;
-  bool _requestable4k = false;
+  bool _fourKEnabled = true;
+  bool _requestFailed = false;
   final Set<bool> _submittedMovieQualities = {};
   final Map<bool, Set<int>> _submittedTvSeasons = {
     false: <int>{},
@@ -284,14 +285,49 @@ class CinemaModeController extends ChangeNotifier {
   bool get isSeries => media?.type == CinemaMediaType.tv;
   bool get only4kRequestable => !_requestableStandard && _requestable4k;
 
+  bool get _allowStandard =>
+      _user?.hasPermission(SeerrPermission.request) == true ||
+      (_user?.hasPermission(
+            isSeries ? SeerrPermission.requestTv : SeerrPermission.requestMovie,
+          ) ??
+          false);
+
+  bool get _allow4k =>
+      _fourKEnabled &&
+      (isSeries ? _user?.canRequest4kTv : _user?.canRequest4kMovies) == true;
+
+  bool get _requestableStandard => _canRequestQuality(false);
+  bool get _requestable4k => _canRequestQuality(true);
+
   bool get isTvRequestMore {
     final is4k = only4kRequestable;
-    final info = _tvDetails?.mediaInfo;
+    final quality = _quality(is4k);
     return _submittedTvSeasons[is4k]!.isNotEmpty ||
-        SeerrMediaStatus.isAvailable(is4k ? info?.status4k : info?.status) ||
-        (info?.requests?.any((r) => _activeRequest(r, 'tv', is4k)) ?? false);
+        quality.isAvailable ||
+        quality.activeRequests.any((r) => r.type == 'tv');
   }
-  CinemaSeerrState seerrState = CinemaSeerrState.hidden;
+  CinemaSeerrState get seerrState {
+    if (_requestFailed) return CinemaSeerrState.hidden;
+    if (_requestableStandard || _requestable4k) return CinemaSeerrState.request;
+    if (_submittedMovieQualities.isNotEmpty ||
+        _submittedTvSeasons.values.any((seasons) => seasons.isNotEmpty)) {
+      return CinemaSeerrState.requested;
+    }
+    final states = [
+      if (_allowStandard) _qualityState(false),
+      if (_allow4k) _qualityState(true),
+    ];
+    for (final status in const [
+      CinemaSeerrState.available,
+      CinemaSeerrState.partiallyAvailable,
+      CinemaSeerrState.processing,
+      CinemaSeerrState.pending,
+      CinemaSeerrState.requested,
+    ]) {
+      if (states.contains(status)) return status;
+    }
+    return CinemaSeerrState.hidden;
+  }
   CinemaAction focusedAction = CinemaAction.skip;
   Duration get duration =>
       _playerDuration ?? _metadataDuration ?? Duration.zero;
@@ -320,13 +356,12 @@ class CinemaModeController extends ChangeNotifier {
     _tvDetails = null;
     _movieDetails = null;
     _user = null;
-    _allowStandard = _allow4k = false;
-    _requestableStandard = _requestable4k = false;
+    _fourKEnabled = true;
+    _requestFailed = false;
     _submittedMovieQualities.clear();
     for (final seasons in _submittedTvSeasons.values) {
       seasons.clear();
     }
-    seerrState = CinemaSeerrState.hidden;
     _requestRepository = null;
     focusedAction = CinemaAction.skip;
     final ticks = int.tryParse(item?['RunTimeTicks']?.toString() ?? '');
@@ -360,35 +395,35 @@ class CinemaModeController extends ChangeNotifier {
         const Duration(seconds: 10),
       );
       if (!_current(ticket)) return;
-      _allowStandard =
-          user.hasPermission(SeerrPermission.request) ||
-          user.hasPermission(
-            isSeries ? SeerrPermission.requestTv : SeerrPermission.requestMovie,
-          );
-      _allow4k = isSeries ? user.canRequest4kTv : user.canRequest4kMovies;
-      if (!_allowStandard && !_allow4k) return;
       _user = user;
+      if (!_allowStandard && !_allow4k) return;
       if (isSeries && onRequestSeries == null) return;
 
-      if (_allow4k) {
-        try {
-          final settings = await repository
-              .getPublicSettings()
-              .timeout(const Duration(seconds: 5));
-          if (!_current(ticket)) return;
-          final flag = isSeries ? 'series4kEnabled' : 'movie4kEnabled';
-          if (settings.containsKey(flag)) _allow4k = settings[flag] == true;
-        } catch (_) {
-          // Like upstream Seerr, keep permission-based 4K access if settings are unavailable.
-        }
-      }
-      if (!_allowStandard && !_allow4k) return;
+      // Request status should not wait for optional 4K settings.
+      if (_allow4k) unawaited(_load4kSettings(repository, ticket));
       if (await _refreshStatus(repository, ticket, id)) {
         _requestRepository = repository;
         notifyListeners();
       }
     } catch (_) {
       // If Seerr cannot identify the trailer or load its status, playback and Skip still work.
+    }
+  }
+
+  Future<void> _load4kSettings(SeerrRepository repository, int ticket) async {
+    try {
+      final settings = await repository
+          .getPublicSettings()
+          .timeout(const Duration(seconds: 5));
+      if (!_current(ticket)) return;
+      _fourKEnabled = seerrPublicFlag(
+        settings,
+        isSeries ? 'series4kEnabled' : 'movie4kEnabled',
+        fallback: true,
+      );
+      notifyListeners();
+    } catch (_) {
+      // Older Seerr servers may not expose these settings.
     }
   }
 
@@ -408,86 +443,48 @@ class CinemaModeController extends ChangeNotifier {
               .timeout(const Duration(seconds: 10));
       if (!_current(ticket) || tv.id != id) return false;
       _tvDetails = tv;
-      _updateTvState(tv);
     } else {
       final movie = await repository
           .getMovieDetails(id)
           .timeout(const Duration(seconds: 10));
       if (!_current(ticket) || movie.id != id) return false;
       _movieDetails = movie;
-      _updateMovieState(movie.mediaInfo);
     }
     return true;
   }
 
-  CinemaSeerrState _statusWhenNotRequestable(
-    CinemaSeerrState standard,
-    CinemaSeerrState fourK,
-  ) {
-    final states = [
-      if (_allowStandard) standard,
-      if (_allow4k) fourK,
-    ];
-    for (final status in [
-      CinemaSeerrState.available,
-      CinemaSeerrState.partiallyAvailable,
-      CinemaSeerrState.processing,
-      CinemaSeerrState.pending,
-      CinemaSeerrState.requested,
-    ]) {
-      if (states.contains(status)) return status;
+  SeerrQualityStatus _quality(bool is4k) => SeerrQualityStatus.of(
+    is4k: is4k,
+    mediaInfo: _tvDetails?.mediaInfo ?? _movieDetails?.mediaInfo,
+    canManageRequests: false,
+    currentUserId: _user?.id,
+  );
+
+  CinemaSeerrState _qualityState(bool is4k) {
+    final tv = _tvDetails;
+    if (tv != null) {
+      return cinemaTvSeerrState(
+        tv,
+        is4k: is4k,
+        excludedSeasons: _submittedTvSeasons[is4k]!,
+      );
     }
-    return CinemaSeerrState.hidden;
+    final quality = _quality(is4k);
+    return cinemaSeerrState(
+      mediaStatus: quality.status == 0 ? null : quality.status,
+      requests: quality.requests,
+      is4k: is4k,
+      acknowledged: _submittedMovieQualities.contains(is4k),
+    );
   }
 
-  void _updateMovieState(SeerrMediaInfo? info) {
-    final standard = cinemaSeerrState(
-      mediaStatus: info?.status,
-      requests: info?.requests,
-    );
-    final fourK = cinemaSeerrState(
-      mediaStatus: info?.status4k,
-      requests: info?.requests,
-      is4k: true,
-    );
-    final blocked = info?.status == SeerrMediaStatus.blocklisted ||
-        info?.status4k == SeerrMediaStatus.blocklisted;
-    _requestableStandard = !blocked &&
-        _allowStandard &&
-        standard == CinemaSeerrState.request &&
-        !_submittedMovieQualities.contains(false);
-    _requestable4k = !blocked &&
-        _allow4k &&
-        fourK == CinemaSeerrState.request &&
-        !_submittedMovieQualities.contains(true);
-    seerrState = _requestableStandard || _requestable4k
-        ? CinemaSeerrState.request
-        : _submittedMovieQualities.isNotEmpty
-            ? CinemaSeerrState.requested
-            : _statusWhenNotRequestable(standard, fourK);
-  }
-
-  void _updateTvState(SeerrTvDetails details) {
-    final standard = cinemaTvSeerrState(
-      details,
-      excludedSeasons: _submittedTvSeasons[false]!,
-    );
-    final fourK = cinemaTvSeerrState(
-      details,
-      is4k: true,
-      excludedSeasons: _submittedTvSeasons[true]!,
-    );
-    final blocked = details.mediaInfo?.status == SeerrMediaStatus.blocklisted ||
-        details.mediaInfo?.status4k == SeerrMediaStatus.blocklisted;
-    _requestableStandard =
-        !blocked && _allowStandard && standard == CinemaSeerrState.request;
-    _requestable4k =
-        !blocked && _allow4k && fourK == CinemaSeerrState.request;
-    seerrState = _requestableStandard || _requestable4k
-        ? CinemaSeerrState.request
-        : _submittedTvSeasons.values.any((seasons) => seasons.isNotEmpty)
-            ? CinemaSeerrState.requested
-            : _statusWhenNotRequestable(standard, fourK);
+  bool _canRequestQuality(bool is4k) {
+    final info = _tvDetails?.mediaInfo ?? _movieDetails?.mediaInfo;
+    return (is4k ? _allow4k : _allowStandard) &&
+        (_tvDetails != null || _movieDetails != null) &&
+        info?.status != SeerrMediaStatus.blocklisted &&
+        info?.status4k != SeerrMediaStatus.blocklisted &&
+        _qualityState(is4k) == CinemaSeerrState.request;
   }
 
   void configure({required int minimumSeconds, required int autoHideSeconds}) {
@@ -600,64 +597,40 @@ class CinemaModeController extends ChangeNotifier {
     }
     _setSending(true);
     try {
-      final isAllowed = () => _current(ticket) && !_skipping;
+      bool isCurrent() => _current(ticket) && !_skipping;
+      Future<void> submit(bool is4k) async {
+        if (!isCurrent() || !_canRequestQuality(is4k)) return;
+        // Do not offer the same quality again while Seerr may be processing it.
+        _submittedMovieQualities.add(is4k);
+        try {
+          await repository
+              .createRequest(mediaId: id, mediaType: 'movie', is4k: is4k)
+              .timeout(const Duration(seconds: 20));
+        } catch (_) {
+          if (!_current(ticket)) return;
+          // A failed response does not mean Seerr rejected the request.
+          try {
+            await _refreshStatus(repository, ticket, id);
+          } catch (_) {}
+          if (!_requestableStandard && !_requestable4k) {
+            _requestFailed = true;
+          }
+        }
+      }
+
       if (_requestableStandard && _requestable4k) {
         final details = _movieDetails;
         final user = _user;
         if (details != null && user != null && onRequestMovie != null) {
-          await onRequestMovie!(
-            repository,
-            details,
-            user,
-            isAllowed,
-            (is4k, maySubmit) =>
-                _submitMovie(repository, ticket, id, is4k, maySubmit),
-          );
+          await onRequestMovie!(repository, details, user, isCurrent, submit);
         }
       } else {
-        await _submitMovie(
-          repository,
-          ticket,
-          id,
-          _requestable4k,
-          isAllowed,
-        );
+        await submit(_requestable4k);
       }
     } catch (_) {
-      // A picker failure should not affect playback or Skip.
+      // Seerr or the optional picker must never interrupt playback.
     } finally {
       if (_current(ticket)) _setSending(false);
-    }
-  }
-
-  Future<void> _submitMovie(
-    SeerrRepository repository,
-    int ticket,
-    int id,
-    bool is4k,
-    bool Function() isAllowed,
-  ) async {
-    if (!isAllowed() || !(is4k ? _requestable4k : _requestableStandard)) {
-      return;
-    }
-    _submittedMovieQualities.add(is4k);
-    _updateMovieState(_movieDetails?.mediaInfo);
-    try {
-      await repository
-          .createRequest(mediaId: id, mediaType: 'movie', is4k: is4k)
-          .timeout(const Duration(seconds: 20));
-      if (!_current(ticket)) return;
-      _updateMovieState(_movieDetails?.mediaInfo);
-    } catch (_) {
-      if (!_current(ticket)) return;
-      // An error or timeout does not prove Seerr rejected the request.
-      // Refresh once without resubmitting the same quality.
-      try {
-        if (!await _refreshStatus(repository, ticket, id)) return;
-      } catch (_) {}
-      if (!_requestableStandard && !_requestable4k) {
-        seerrState = CinemaSeerrState.hidden;
-      }
     }
   }
 
@@ -706,13 +679,12 @@ class CinemaModeController extends ChangeNotifier {
       );
       // A cancelled picker does not change availability.
       if (!_current(ticket) || !acknowledged) return;
-      _updateTvState(details);
       try {
         await _refreshStatus(repository, ticket, id, confirmedTv: confirmed);
       } catch (_) {}
     } catch (_) {
       if (!_current(ticket)) return;
-      seerrState = CinemaSeerrState.hidden;
+      _requestFailed = true;
     } finally {
       if (_current(ticket)) _setSending(false);
     }
