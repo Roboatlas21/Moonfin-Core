@@ -121,11 +121,17 @@ CinemaSeerrState cinemaTvSeerrState(
           .isNotEmpty) {
     return CinemaSeerrState.request;
   }
+  final acknowledged = details.mediaInfo?.requests?.any(
+        (r) => _activeStandardRequest(r, 'tv'),
+      ) ?? false;
+  // Missing episodes can keep Seerr partially available after a successful ask.
+  if (status == SeerrMediaStatus.partiallyAvailable &&
+      (acknowledged || excludedSeasons.isNotEmpty)) {
+    return CinemaSeerrState.requested;
+  }
   final state = cinemaSeerrState(
     mediaStatus: status,
-    acknowledged: details.mediaInfo?.requests?.any(
-          (r) => _activeStandardRequest(r, 'tv'),
-        ) ?? false,
+    acknowledged: acknowledged,
   );
   if (state != CinemaSeerrState.request) return state;
   return excludedSeasons.isNotEmpty
