@@ -168,7 +168,7 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
         (PlatformDetection.isTV && widget.focusNode != null
             ? (widget.focusNode!.hasFocus
                 ? AppColorScheme.accent
-                : Colors.white)
+                : AppColorScheme.onSurface)
             : AppColorScheme.accent.withValues(
                 alpha: widget.isFocused ? 1 : 0.4,
               ));

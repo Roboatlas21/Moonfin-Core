@@ -103,7 +103,7 @@ class CinemaModeActionsOverlay extends StatelessWidget {
               focusNode: skipFocus,
               handleActivationKeys: false,
               outlineColor: requestFocused
-                  ? Colors.white
+                  ? AppColorScheme.onSurface
                   : AppColorScheme.accent,
               onSkip: controller.skip,
               onDismiss: onDismiss,
@@ -144,7 +144,7 @@ Widget _seerrAction(
               ? null
               : focused
                   ? AppColorScheme.accent
-                  : (isTv ? Colors.white : AppColorScheme.accent),
+                  : (isTv ? AppColorScheme.onSurface : AppColorScheme.accent),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
             child: Text(
