@@ -727,7 +727,11 @@ final class AppleTvPlayerViewController: UIViewController {
         let wasActive = cinemaActive
         cinemaActive = args["active"] as? Bool ?? false
         cinemaVisible = cinemaActive && (args["visible"] as? Bool ?? false)
-        cinemaGeneration = (args["generation"] as? NSNumber)?.intValue ?? 0
+        let generation = (args["generation"] as? NSNumber)?.intValue ?? 0
+        if !cinemaVisible || generation != cinemaGeneration {
+            pendingCinemaError = nil
+        }
+        cinemaGeneration = generation
         skipBottomConstraint?.constant = cinemaActive ? -48 : -240
         let requestEnabled = cinemaVisible && (args["canRequest"] as? Bool ?? false)
         cinemaRequestPanel.layer.borderWidth = requestEnabled ? 4 : 0
