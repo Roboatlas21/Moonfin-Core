@@ -18,8 +18,13 @@ import '../track_selector_dialog.dart';
 bool _hasQualityToggle(SeerrMediaDetailViewModel vm, bool qualityToggle) =>
     qualityToggle && vm.canRequest && vm.canRequest4k;
 
-/// Cinema's picker only collects a choice; the shared playback workflow
-/// owns the request and returns when its submission completes.
+typedef _CinemaSelection = ({
+  Map<String, dynamic> selection,
+  SeerrQuotaDetail? quota,
+});
+
+/// Called after Cinema's picker closes. The shared playback workflow owns
+/// the request, and the dialog helper awaits it to preserve that session.
 typedef SeerrCinemaSubmit = Future<void> Function(
   Map<String, dynamic> selection,
   SeerrQuotaDetail? quota,
@@ -47,7 +52,7 @@ Future<void> showSeerrRequestDialog({
   final s = vm.state;
   final l10n = AppLocalizations.of(context);
   final type = s.isTv ? l10n.series : l10n.movie;
-  await showStyledPlayerDialog<void>(
+  final choice = await showStyledPlayerDialog<_CinemaSelection>(
     context,
     // With a switch on the sheet the title stays neutral, since either track
     // can end up being the one asked for. Without one it has to say which.
@@ -76,10 +81,13 @@ Future<void> showSeerrRequestDialog({
         selectAllSeasons: selectAllSeasons,
         showAdvancedOptions: showAdvancedOptions,
         cinemaExcludedSeasons: cinemaExcludedSeasons,
-        cinemaSubmit: cinemaSubmit,
+        isCinema: cinemaSubmit != null,
       );
     },
   );
+  if (choice != null && cinemaSubmit != null) {
+    await cinemaSubmit(choice.selection, choice.quota);
+  }
 }
 
 /// Picks what to request before submitting it: which seasons for a series, and
@@ -95,7 +103,7 @@ class SeerrRequestDialog extends StatefulWidget {
   final bool selectAllSeasons;
   final bool showAdvancedOptions;
   final Set<int> cinemaExcludedSeasons;
-  final SeerrCinemaSubmit? cinemaSubmit;
+  final bool isCinema;
 
   /// Opens with just this season ticked, for a viewer who asked for one rather
   /// than for the whole run.
@@ -114,7 +122,7 @@ class SeerrRequestDialog extends StatefulWidget {
     this.selectAllSeasons = true,
     this.showAdvancedOptions = true,
     this.cinemaExcludedSeasons = const {},
-    this.cinemaSubmit,
+    this.isCinema = false,
   });
 
   @override
@@ -192,7 +200,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   });
 
   bool get _hasSeasonSelection =>
-      widget.cinemaSubmit == null ||
+      !widget.isCinema ||
       !widget.isTv ||
       (_allSeasons
           ? widget.cinemaExcludedSeasons.isEmpty &&
@@ -203,7 +211,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   int get _seasonsNeeded {
     // Keep upstream's minimum-one quota for ordinary All Seasons requests
     // when season metadata exists. Cinema counts actual requestable seasons.
-    if (widget.cinemaSubmit == null &&
+    if (!widget.isCinema &&
         widget.isTv &&
         _allSeasons &&
         _seasonNumbers.isNotEmpty) {
@@ -219,7 +227,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
   bool get _quotaBlocked =>
       seerrQuotaBlocked(_quotaDetail, widget.isTv ? _seasonsNeeded : 1);
 
-  void _submit() async {
+  void _submit() {
     if (_submitting || !_hasSeasonSelection || _quotaBlocked) return;
 
     List<int>? seasons;
@@ -230,12 +238,14 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
 
     setState(() => _submitting = true);
 
-    if (widget.cinemaSubmit case final submit?) {
-      // The picker owns only the selection and busy presentation.
-      await submit({
-        'allSeasons': _allSeasons,
-        'seasons': seasons ?? <int>[],
-      }, _quotaDetail);
+    if (widget.isCinema) {
+      Navigator.of(context).pop<_CinemaSelection>((
+        selection: {
+          'allSeasons': _allSeasons,
+          'seasons': seasons ?? <int>[],
+        },
+        quota: _quotaDetail,
+      ));
     } else {
       widget.vm.submitRequest(
         is4k: _is4k,
@@ -251,14 +261,7 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
             ? _advanced.effectiveServerId
             : null,
       );
-    }
-    if (!mounted) return;
-    final route = ModalRoute.of(context);
-    if (widget.cinemaSubmit != null && route != null && !route.isCurrent) {
-      // An older submission must not pop a newer Cinema picker.
-      route.navigator?.removeRoute(route);
-    } else {
-      Navigator.of(context).pop();
+      if (mounted) Navigator.of(context).pop();
     }
   }
 
@@ -349,15 +352,12 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
       ),
     );
 
-    return PopScope(
-      canPop: widget.cinemaSubmit == null || !_submitting,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: children,
-        ),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
       ),
     );
   }
