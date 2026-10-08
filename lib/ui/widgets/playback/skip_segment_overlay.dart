@@ -34,7 +34,6 @@ class SkipSegmentOverlay extends StatefulWidget {
 
   final String? actionLabel;
   final List<String> labelAlternatives;
-  final bool isFocused;
   final bool handleActivationKeys;
   final Color? outlineColor;
   final bool inline;
@@ -52,7 +51,6 @@ class SkipSegmentOverlay extends StatefulWidget {
     this.nextItem,
     this.actionLabel,
     this.labelAlternatives = const [],
-    this.isFocused = true,
     this.handleActivationKeys = true,
     this.outlineColor,
     this.inline = false,
@@ -169,9 +167,7 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
             ? (widget.focusNode!.hasFocus
                 ? AppColorScheme.accent
                 : AppColorScheme.onSurface)
-            : AppColorScheme.accent.withValues(
-                alpha: widget.isFocused ? 1 : 0.4,
-              ));
+            : AppColorScheme.accent);
 
     final button = Material(
       color: Colors.transparent,
