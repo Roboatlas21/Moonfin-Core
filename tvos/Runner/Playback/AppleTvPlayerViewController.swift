@@ -148,6 +148,8 @@ final class AppleTvPlayerViewController: UIViewController {
     private var cinemaGeneration = 0
     private let cinemaRequest = UILabel()
     private let cinemaRequestPanel = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
+    private let cinemaFocusRing = CAShapeLayer()
+    private var cinemaRequestFocused = false
     private var skipBottomConstraint: NSLayoutConstraint?
     private weak var cinemaPicker: CinemaRequestPicker?
     private var pendingCinemaError: String?
@@ -422,10 +424,12 @@ final class AppleTvPlayerViewController: UIViewController {
         scrubber.progressTintColor = glassActive ? glassRangeProgress : accent
         channelBadge.backgroundColor = accent
         upNextLabel.textColor = accent
-        skipSegmentButton.layer.borderColor = accent.cgColor
-        skipSegmentIcon.tintColor = accent
-        skipSegmentRingIcon.tintColor = accent
-        skipSegmentRing.strokeColor = accent.cgColor
+        skipSegmentButton.layer.borderColor = (cinemaActive ? UIColor.white : accent).cgColor
+        skipSegmentIcon.tintColor = .white
+        skipSegmentRingIcon.tintColor = .white
+        skipSegmentRing.strokeColor = UIColor.white.cgColor
+        cinemaRequestPanel.layer.borderColor = UIColor.white.cgColor
+        cinemaFocusRing.strokeColor = accent.cgColor
         nextUpPlayButton.backgroundColor = accent
     }
 
@@ -611,7 +615,6 @@ final class AppleTvPlayerViewController: UIViewController {
     private func setupSkipSegment() {
         skipSegmentButton.translatesAutoresizingMaskIntoConstraints = false
         skipSegmentButton.layer.borderWidth = 4
-        skipSegmentButton.layer.borderColor = themeAccent.cgColor
         skipSegmentButton.clipsToBounds = true
         skipSegmentButton.isHidden = true
         view.addSubview(skipSegmentButton)
@@ -626,7 +629,6 @@ final class AppleTvPlayerViewController: UIViewController {
 
         let iconConfig = UIImage.SymbolConfiguration(pointSize: 34, weight: .semibold)
         skipSegmentIcon.image = UIImage(systemName: "forward.end.fill", withConfiguration: iconConfig)
-        skipSegmentIcon.tintColor = themeAccent
 
         skipSegmentLabel.font = .systemFont(ofSize: 30, weight: .semibold)
         skipSegmentLabel.textColor = .white
@@ -649,7 +651,6 @@ final class AppleTvPlayerViewController: UIViewController {
             skipSegmentRingContainer.layer.addSublayer(layer)
         }
         skipSegmentRingTrack.strokeColor = UIColor(white: 1, alpha: 0.16).cgColor
-        skipSegmentRing.strokeColor = themeAccent.cgColor
 
         skipSegmentRingNumber.translatesAutoresizingMaskIntoConstraints = false
         skipSegmentRingNumber.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
@@ -658,7 +659,6 @@ final class AppleTvPlayerViewController: UIViewController {
 
         let ringIconConfig = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
         skipSegmentRingIcon.image = UIImage(systemName: "forward.end.fill", withConfiguration: ringIconConfig)
-        skipSegmentRingIcon.tintColor = themeAccent
         skipSegmentRingIcon.translatesAutoresizingMaskIntoConstraints = false
         skipSegmentRingContainer.addSubview(skipSegmentRingIcon)
 
@@ -721,6 +721,10 @@ final class AppleTvPlayerViewController: UIViewController {
             cinemaRequest.topAnchor.constraint(equalTo: cinemaRequestPanel.contentView.topAnchor, constant: 32),
             cinemaRequest.bottomAnchor.constraint(equalTo: cinemaRequestPanel.contentView.bottomAnchor, constant: -32),
         ])
+        cinemaFocusRing.fillColor = UIColor.clear.cgColor
+        cinemaFocusRing.lineWidth = 4
+        cinemaFocusRing.isHidden = true
+        view.layer.addSublayer(cinemaFocusRing)
     }
 
     func applyCinemaActions(_ args: [String: Any]) {
@@ -729,33 +733,56 @@ final class AppleTvPlayerViewController: UIViewController {
         cinemaActive = args["active"] as? Bool ?? false
         cinemaVisible = cinemaActive && (args["visible"] as? Bool ?? false)
         cinemaGeneration = (args["generation"] as? NSNumber)?.intValue ?? 0
+        cinemaRequestFocused = args["requestFocused"] as? Bool ?? false
         skipBottomConstraint?.constant = cinemaActive ? -48 : -240
-        guard cinemaActive else {
+        if !cinemaActive {
             cinemaRequestPanel.isHidden = true
             if wasActive { hideSkipSegment() }
-            skipSegmentButton.layer.borderColor = themeAccent.cgColor
-            skipSegmentRing.strokeColor = themeAccent.cgColor
+        } else {
+            hideOsd()
+            let requestEnabled = args["canRequest"] as? Bool ?? false
+            let label = args["requestLabel"] as? String
+            cinemaRequest.text = label
+            cinemaRequest.alpha = requestEnabled ? 1 : 0.65
+            cinemaRequestPanel.isHidden = !cinemaVisible || label == nil
+            if cinemaVisible {
+                showSkipSegment(
+                    label: args["skipLabel"] as? String ?? "Skip",
+                    countdownStyle: args["countdownStyle"] as? String ?? "none",
+                    segmentStartMs: 0,
+                    segmentEndMs: (args["durationMs"] as? NSNumber)?.intValue ?? 0)
+            } else {
+                hideSkipSegment()
+            }
+        }
+        restyleForTheme()
+        view.layoutIfNeeded()
+        updateCinemaFocusRing()
+    }
+
+    /// One outer focus ring; the white capsule borders never become focus indicators.
+    private func updateCinemaFocusRing() {
+        guard cinemaVisible else {
+            cinemaFocusRing.isHidden = true
             return
         }
-        hideOsd()
-        let requestFocused = args["requestFocused"] as? Bool ?? false
-        let requestEnabled = args["canRequest"] as? Bool ?? false
-        let label = args["requestLabel"] as? String
-        cinemaRequest.text = label
-        cinemaRequest.alpha = requestEnabled ? 1 : 0.65
-        cinemaRequestPanel.isHidden = !cinemaVisible || label == nil
-        cinemaRequestPanel.layer.borderColor = (requestFocused ? themeAccent : UIColor.white).cgColor
-        skipSegmentButton.layer.borderColor = (requestFocused ? UIColor.white : themeAccent).cgColor
-        skipSegmentRing.strokeColor = UIColor.white.cgColor
-        if cinemaVisible {
-            showSkipSegment(
-                label: args["skipLabel"] as? String ?? "Skip",
-                countdownStyle: args["countdownStyle"] as? String ?? "none",
-                segmentStartMs: 0,
-                segmentEndMs: (args["durationMs"] as? NSNumber)?.intValue ?? 0)
-        } else {
-            hideSkipSegment()
+        let target = cinemaRequestFocused && !cinemaRequestPanel.isHidden
+            ? cinemaRequestPanel : skipSegmentButton
+        guard target.bounds.width > 0, target.bounds.height > 0 else {
+            cinemaFocusRing.isHidden = true
+            return
         }
+        let inset: CGFloat = 7
+        let rect = target.convert(target.bounds, to: view).insetBy(dx: -inset, dy: -inset)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        cinemaFocusRing.frame = view.bounds
+        cinemaFocusRing.path = UIBezierPath(
+            roundedRect: rect,
+            cornerRadius: min(target.layer.cornerRadius, target.bounds.height / 2) + inset
+        ).cgPath
+        cinemaFocusRing.isHidden = false
+        CATransaction.commit()
     }
 
     func presentCinemaRequestOptions(
@@ -1281,6 +1308,7 @@ final class AppleTvPlayerViewController: UIViewController {
         topGradientLayer.frame = topContainer.bounds
         layoutChapters()
         updateTooltip()
+        updateCinemaFocusRing()
     }
 
     func applyUiMetadata(_ args: [String: Any]) {
