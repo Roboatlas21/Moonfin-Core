@@ -36,10 +36,9 @@ void main() {
       final series = direct('Video', {
         'tmdb': '42',
         'TmdbMediaType': 'tv',
-        'TmdbSeason': '5',
       });
       expect(series?.type, CinemaMediaType.tv);
-      expect(series?.season, 5);
+      expect(series?.season, isNull);
       expect(
         direct('Video', {
           'Tmdb': '42',
