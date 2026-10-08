@@ -101,7 +101,12 @@ void main() {
         selection: {'allSeasons': false, 'seasons': <int>[2, 3]},
         quota: null,
         isAllowed: () => true,
-      ).then((_) {}, onError: (Object e) => failure = e);
+      ).then<void>(
+        (_) {},
+        onError: (Object e) {
+          failure = e;
+        },
+      );
       clock.flushMicrotasks();
 
       repo.refreshed = const SeerrTvDetails(
