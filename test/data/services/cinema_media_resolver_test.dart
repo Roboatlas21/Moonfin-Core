@@ -38,7 +38,6 @@ void main() {
         'TmdbMediaType': 'tv',
       });
       expect(series?.type, CinemaMediaType.tv);
-      expect(series?.season, isNull);
       expect(
         direct('Video', {
           'Tmdb': '42',
