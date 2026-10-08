@@ -45,7 +45,6 @@ abstract final class CinemaMediaResolver {
     return CinemaMedia.fromJson({
       'tmdbId': ids['tmdb'],
       'mediaType': types.single,
-      'season': ids['tmdbseason'],
     });
   }
 
