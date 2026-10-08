@@ -148,8 +148,8 @@ final class AppleTvPlayerViewController: UIViewController {
     private var cinemaGeneration = 0
     private let cinemaRequest = UILabel()
     private let cinemaRequestPanel = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
-    private let cinemaFocusRing = CAShapeLayer()
-    private var cinemaRequestFocused = false
+    private let cinemaSkipFocus = UIView()
+    private let cinemaRequestFocus = UIView()
     private var skipBottomConstraint: NSLayoutConstraint?
     private weak var cinemaPicker: CinemaRequestPicker?
     private var pendingCinemaError: String?
@@ -429,7 +429,8 @@ final class AppleTvPlayerViewController: UIViewController {
         skipSegmentRingIcon.tintColor = .white
         skipSegmentRing.strokeColor = UIColor.white.cgColor
         cinemaRequestPanel.layer.borderColor = UIColor.white.cgColor
-        cinemaFocusRing.strokeColor = accent.cgColor
+        cinemaSkipFocus.layer.borderColor = accent.cgColor
+        cinemaRequestFocus.layer.borderColor = accent.cgColor
         nextUpPlayButton.backgroundColor = accent
     }
 
@@ -721,10 +722,24 @@ final class AppleTvPlayerViewController: UIViewController {
             cinemaRequest.topAnchor.constraint(equalTo: cinemaRequestPanel.contentView.topAnchor, constant: 32),
             cinemaRequest.bottomAnchor.constraint(equalTo: cinemaRequestPanel.contentView.bottomAnchor, constant: -32),
         ])
-        cinemaFocusRing.fillColor = UIColor.clear.cgColor
-        cinemaFocusRing.lineWidth = 4
-        cinemaFocusRing.isHidden = true
-        view.layer.addSublayer(cinemaFocusRing)
+        // Like Flutter's focus decoration: blue outer border, white inner capsule.
+        for (ring, capsule) in [
+            (cinemaSkipFocus, skipSegmentButton),
+            (cinemaRequestFocus, cinemaRequestPanel as UIView),
+        ] {
+            ring.translatesAutoresizingMaskIntoConstraints = false
+            ring.isUserInteractionEnabled = false
+            ring.layer.borderWidth = 4
+            ring.layer.cornerRadius = 63
+            ring.isHidden = true
+            view.insertSubview(ring, belowSubview: capsule)
+            NSLayoutConstraint.activate([
+                ring.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: -7),
+                ring.trailingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: 7),
+                ring.topAnchor.constraint(equalTo: capsule.topAnchor, constant: -7),
+                ring.bottomAnchor.constraint(equalTo: capsule.bottomAnchor, constant: 7),
+            ])
+        }
     }
 
     func applyCinemaActions(_ args: [String: Any]) {
@@ -733,7 +748,6 @@ final class AppleTvPlayerViewController: UIViewController {
         cinemaActive = args["active"] as? Bool ?? false
         cinemaVisible = cinemaActive && (args["visible"] as? Bool ?? false)
         cinemaGeneration = (args["generation"] as? NSNumber)?.intValue ?? 0
-        cinemaRequestFocused = args["requestFocused"] as? Bool ?? false
         skipBottomConstraint?.constant = cinemaActive ? -48 : -240
         if !cinemaActive {
             cinemaRequestPanel.isHidden = true
@@ -756,33 +770,10 @@ final class AppleTvPlayerViewController: UIViewController {
             }
         }
         restyleForTheme()
-        view.layoutIfNeeded()
-        updateCinemaFocusRing()
-    }
-
-    /// One outer focus ring; the white capsule borders never become focus indicators.
-    private func updateCinemaFocusRing() {
-        guard cinemaVisible else {
-            cinemaFocusRing.isHidden = true
-            return
-        }
-        let target = cinemaRequestFocused && !cinemaRequestPanel.isHidden
-            ? cinemaRequestPanel : skipSegmentButton
-        guard target.bounds.width > 0, target.bounds.height > 0 else {
-            cinemaFocusRing.isHidden = true
-            return
-        }
-        let inset: CGFloat = 7
-        let rect = target.convert(target.bounds, to: view).insetBy(dx: -inset, dy: -inset)
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        cinemaFocusRing.frame = view.bounds
-        cinemaFocusRing.path = UIBezierPath(
-            roundedRect: rect,
-            cornerRadius: min(target.layer.cornerRadius, target.bounds.height / 2) + inset
-        ).cgPath
-        cinemaFocusRing.isHidden = false
-        CATransaction.commit()
+        let requestFocused = cinemaVisible && !cinemaRequestPanel.isHidden &&
+            (args["requestFocused"] as? Bool ?? false)
+        cinemaRequestFocus.isHidden = !requestFocused
+        cinemaSkipFocus.isHidden = !cinemaVisible || requestFocused
     }
 
     func presentCinemaRequestOptions(
@@ -1308,7 +1299,6 @@ final class AppleTvPlayerViewController: UIViewController {
         topGradientLayer.frame = topContainer.bounds
         layoutChapters()
         updateTooltip()
-        updateCinemaFocusRing()
     }
 
     func applyUiMetadata(_ args: [String: Any]) {
