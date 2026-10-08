@@ -353,6 +353,50 @@ const _movie = <String, dynamic>{
 };
 
 void main() {
+  test('Repeat One advances prerolls but still repeats the feature', () async {
+    const first = <String, dynamic>{
+      'Id': 'preroll-1',
+      'Type': 'Video',
+      '__moonfinIsPreroll': true,
+    };
+    const second = <String, dynamic>{
+      'Id': 'preroll-2',
+      'Type': 'Video',
+      '__moonfinIsPreroll': true,
+    };
+    final backend = _TestBackend();
+    final resolver = _TestResolver();
+    final clock = _Clock();
+    final manager = _manager(backend, resolver, _TestService(), clock);
+    try {
+      manager.toggleRepeat(); // All
+      manager.toggleRepeat(); // One
+      await manager.playItems(<dynamic>[first, second, _movie]);
+
+      await manager.nextInQueue();
+      expect(manager.queueService.currentItem, same(second));
+
+      backend.reportedDuration = const Duration(seconds: 20);
+      backend.currentPosition = backend.reportedDuration;
+      manager.state.setPosition(backend.reportedDuration);
+      clock.advance(const Duration(seconds: 20));
+      backend.emitCompleted();
+      await _settle();
+      expect(manager.queueService.currentItem, same(_movie));
+
+      backend.currentPosition = backend.reportedDuration;
+      manager.state.setPosition(backend.reportedDuration);
+      clock.advance(const Duration(seconds: 20));
+      backend.emitCompleted();
+      await _settle();
+      expect(manager.queueService.currentItem, same(_movie));
+      expect(manager.queueService.repeatMode, RepeatMode.repeatOne);
+      expect(resolver.calls, 4);
+    } finally {
+      manager.dispose();
+    }
+  });
+
   group('live end-of-stream never means finished', () {
     for (final autoAdvance in <bool>[true, false]) {
       test(
