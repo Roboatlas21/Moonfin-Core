@@ -2,11 +2,10 @@
 enum CinemaMediaType { movie, tv }
 
 class CinemaMedia {
-  const CinemaMedia(this.tmdbId, this.type, {this.season});
+  const CinemaMedia(this.tmdbId, this.type);
 
   final int tmdbId;
   final CinemaMediaType type;
-  final int? season;
 
   static CinemaMedia? fromJson(Map data) {
     final id = int.tryParse(data['tmdbId']?.toString() ?? '');
@@ -16,13 +15,6 @@ class CinemaMedia {
       _ => null,
     };
     if (id == null || id <= 0 || type == null) return null;
-    final season = int.tryParse(data['season']?.toString() ?? '');
-    return CinemaMedia(
-      id,
-      type,
-      season: type == CinemaMediaType.tv && season != null && season > 0
-          ? season
-          : null,
-    );
+    return CinemaMedia(id, type);
   }
 }

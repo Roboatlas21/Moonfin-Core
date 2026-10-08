@@ -212,7 +212,6 @@ class CinemaModeController extends ChangeNotifier {
     SeerrRepository repository,
     SeerrTvDetails details,
     SeerrUser user,
-    int? season,
     Set<int> excludedSeasons,
     bool Function() isCurrent,
     CinemaTvSubmit submit,
@@ -508,13 +507,10 @@ class CinemaModeController extends ChangeNotifier {
       final requestable = cinemaRequestableSeasons(details);
       // Seerr can briefly return stale details after acknowledging a POST.
       final excluded = requestable.intersection(_submittedTvSeasons);
-      final remaining = requestable.difference(excluded);
-      final season = remaining.contains(media?.season) ? media?.season : null;
       final confirmed = await onRequestSeries!(
         repository,
         details,
         user,
-        season,
         excluded,
         () => _current(ticket) && !_skipping,
         (selection, quota, isAllowed) async {
