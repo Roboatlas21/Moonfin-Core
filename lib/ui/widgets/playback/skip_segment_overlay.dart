@@ -13,7 +13,6 @@ import '../../../preference/user_preferences.dart';
 import '../../../util/platform_detection.dart';
 import '../adaptive/adaptive_glass.dart';
 import '../anime_marker_badge.dart';
-import '../focus/focus_theme.dart';
 
 /// Skip-segment presentation. By default it positions itself over playback;
 /// Cinema Mode uses [inline] to place the same capsule in its action row.
@@ -38,7 +37,6 @@ class SkipSegmentOverlay extends StatefulWidget {
   final bool isFocused;
   final bool handleActivationKeys;
   final Color? outlineColor;
-  final Color? focusRingColor;
   final bool inline;
   final double bottomInset;
 
@@ -57,7 +55,6 @@ class SkipSegmentOverlay extends StatefulWidget {
     this.isFocused = true,
     this.handleActivationKeys = true,
     this.outlineColor,
-    this.focusRingColor,
     this.inline = false,
     this.bottomInset = _fallbackBottomInset,
   });
@@ -193,13 +190,9 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
             InkWell(
               key: const ValueKey('skip-segment-capsule'),
               onTap: widget.onSkip,
-              borderRadius: AppRadius.circular(
-                playbackActionFocusRadius(widget.focusRingColor),
-              ),
+              borderRadius: AppRadius.circular(28),
               child: playbackGlassAction(
                 context: context,
-                isFocused: widget.isFocused,
-                focusRingColor: widget.focusRingColor,
                 outlineColor: outlineColor,
                 outlineKey: const ValueKey('skip-segment-outline'),
                 child: Padding(
@@ -380,51 +373,33 @@ class _SkipDismissButton extends StatelessWidget {
   }
 }
 
-/// Shared glass, focus ring and foreground outline for both actions.
-double playbackActionFocusRadius(Color? focusRingColor) =>
-    AppColorScheme.isPixel
-        ? 0.0
-        : _capsuleRadius +
-              (focusRingColor == null ? 0.0 : FocusTheme.borderWidth + 2);
-
+/// One capsule outline shared by Skip and Request. Null hides the outline.
 Widget playbackGlassAction({
   required BuildContext context,
   required Widget child,
-  required bool isFocused,
-  required Color outlineColor,
   required Key outlineKey,
-  Color? focusRingColor,
-  Key? focusKey,
+  Color? outlineColor,
 }) {
   final radius = AppColorScheme.isPixel ? 0.0 : _capsuleRadius;
-  final inset = focusRingColor == null ? 0.0 : FocusTheme.borderWidth + 2;
-  final outline = BoxDecoration(
-    borderRadius: AppRadius.circular(radius),
-    border: Border.fromBorderSide(
-      ThemeRegistry.active.borders.focusBorder.copyWith(color: outlineColor),
-    ),
-  );
-  final glass = adaptiveGlass(
-    context: context,
-    cornerRadius: radius,
-    blur: 24,
-    fallbackColor: AppColorScheme.surface.withValues(alpha: 0.55),
-    tint: AppColorScheme.surface.withValues(alpha: 0.18),
-    child: child,
-  );
-
   return Container(
-    key: focusKey,
-    decoration: FocusTheme.focusDecoration(
-      isFocused: isFocused,
-      radius: playbackActionFocusRadius(focusRingColor),
-      color: focusRingColor,
-    ),
-    padding: EdgeInsets.all(inset),
-    child: Container(
-      key: outlineKey,
-      foregroundDecoration: outline,
-      child: glass,
+    key: outlineKey,
+    foregroundDecoration: outlineColor == null
+        ? null
+        : BoxDecoration(
+            borderRadius: AppRadius.circular(radius),
+            border: Border.fromBorderSide(
+              ThemeRegistry.active.borders.focusBorder.copyWith(
+                color: outlineColor,
+              ),
+            ),
+          ),
+    child: adaptiveGlass(
+      context: context,
+      cornerRadius: radius,
+      blur: 24,
+      fallbackColor: AppColorScheme.surface.withValues(alpha: 0.55),
+      tint: AppColorScheme.surface.withValues(alpha: 0.18),
+      child: child,
     ),
   );
 }

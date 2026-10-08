@@ -55,6 +55,9 @@ class CinemaModeActionsOverlay extends StatelessWidget {
     final mobile = PlatformDetection.isMobile && !isTv;
     final skipLabel = l10n.skipSegment(l10n.trailer);
     final status = cinemaRequestLabel(controller, l10n);
+    final requestFocused = isTv &&
+        controller.canRequest &&
+        controller.focusedAction == CinemaAction.request;
     final right = 24.0 + (mobile ? safe.right : 0);
     return Positioned(
       right: right,
@@ -74,8 +77,7 @@ class CinemaModeActionsOverlay extends StatelessWidget {
                   label: status,
                   focusNode: requestFocus,
                   enabled: controller.canRequest,
-                  focused:
-                      isTv && controller.focusedAction == CinemaAction.request,
+                  focused: requestFocused,
                   onPressed: () => controller.request(),
                 ),
               ),
@@ -100,12 +102,9 @@ class CinemaModeActionsOverlay extends StatelessWidget {
               countdownStyle: countdownStyle,
               focusNode: skipFocus,
               handleActivationKeys: false,
-              isFocused:
-                  isTv && controller.focusedAction == CinemaAction.skip,
-              outlineColor: isTv
-                  ? AppColorScheme.onSurface
+              outlineColor: requestFocused
+                  ? Colors.white
                   : AppColorScheme.accent,
-              focusRingColor: isTv ? AppColorScheme.accent : null,
               onSkip: controller.skip,
               onDismiss: onDismiss,
               positionStream: positionStream,
@@ -127,7 +126,6 @@ Widget _seerrAction(
   required VoidCallback onPressed,
 }) {
   final isTv = PlatformDetection.isTV;
-  final focusColor = isTv ? AppColorScheme.accent : null;
   return Semantics(
     button: true,
     enabled: enabled,
@@ -138,16 +136,15 @@ Widget _seerrAction(
         focusNode: focusNode,
         canRequestFocus: enabled,
         onTap: enabled ? onPressed : null,
-        borderRadius: AppRadius.circular(playbackActionFocusRadius(focusColor)),
+        borderRadius: AppRadius.circular(28),
         child: playbackGlassAction(
           context: context,
-          focusKey: const ValueKey('cinema-request-focus-ring'),
           outlineKey: const ValueKey('cinema-request-outline'),
-          isFocused: focused,
-          focusRingColor: focusColor,
-          outlineColor: enabled
-              ? (isTv ? AppColorScheme.onSurface : AppColorScheme.accent)
-              : AppColorScheme.onSurface.withValues(alpha: 0.4),
+          outlineColor: !enabled
+              ? null
+              : focused
+                  ? AppColorScheme.accent
+                  : (isTv ? Colors.white : AppColorScheme.accent),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
             child: Text(

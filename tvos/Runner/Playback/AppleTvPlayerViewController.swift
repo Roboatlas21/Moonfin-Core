@@ -420,15 +420,14 @@ final class AppleTvPlayerViewController: UIViewController {
 
     private func restyleForTheme() {
         let accent = themeAccent
-        let subdued = accent.withAlphaComponent(0.4).cgColor
         scrubber.progressTintColor = glassActive ? glassRangeProgress : accent
         channelBadge.backgroundColor = accent
         upNextLabel.textColor = accent
-        skipSegmentButton.layer.borderColor = cinemaVisible && cinemaRequestFocused ? subdued : accent.cgColor
+        skipSegmentButton.layer.borderColor = (cinemaVisible && cinemaRequestFocused ? UIColor.white : accent).cgColor
         skipSegmentIcon.tintColor = .white
         skipSegmentRingIcon.tintColor = .white
         skipSegmentRing.strokeColor = UIColor.white.cgColor
-        cinemaRequestPanel.layer.borderColor = cinemaVisible && !cinemaRequestFocused ? subdued : accent.cgColor
+        cinemaRequestPanel.layer.borderColor = (cinemaRequestFocused ? accent : UIColor.white).cgColor
         nextUpPlayButton.backgroundColor = accent
     }
 
@@ -729,12 +728,13 @@ final class AppleTvPlayerViewController: UIViewController {
         cinemaVisible = cinemaActive && (args["visible"] as? Bool ?? false)
         cinemaGeneration = (args["generation"] as? NSNumber)?.intValue ?? 0
         skipBottomConstraint?.constant = cinemaActive ? -48 : -240
+        let requestEnabled = cinemaVisible && (args["canRequest"] as? Bool ?? false)
+        cinemaRequestPanel.layer.borderWidth = requestEnabled ? 4 : 0
         if !cinemaActive {
             cinemaRequestPanel.isHidden = true
             if wasActive { hideSkipSegment() }
         } else {
             hideOsd()
-            let requestEnabled = args["canRequest"] as? Bool ?? false
             let label = args["requestLabel"] as? String
             cinemaRequest.text = label
             cinemaRequest.alpha = requestEnabled ? 1 : 0.65
@@ -749,8 +749,8 @@ final class AppleTvPlayerViewController: UIViewController {
                 hideSkipSegment()
             }
         }
-        // Keep a single 4-point outline; focus changes opacity, never thickness.
-        cinemaRequestFocused = cinemaVisible && !cinemaRequestPanel.isHidden &&
+        // One 4-point outline: blue for focus, white otherwise, none for status-only labels.
+        cinemaRequestFocused = requestEnabled && !cinemaRequestPanel.isHidden &&
             (args["requestFocused"] as? Bool ?? false)
         restyleForTheme()
     }
