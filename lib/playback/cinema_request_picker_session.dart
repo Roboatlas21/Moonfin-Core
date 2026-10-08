@@ -1,9 +1,9 @@
 import 'dart:async';
 
-/// Limits how long a TV picker can stay open after its trailer changes, and closes it when the
-/// player or account changes.
-class CinemaSeriesPickerSession {
-  CinemaSeriesPickerSession({
+/// Lets a request picker stay open briefly after its trailer changes, but never
+/// beyond its player or account session.
+class CinemaRequestPickerSession {
+  CinemaRequestPickerSession({
     required Object Function() accountKey,
     required bool Function() isMounted,
   }) : _accountKey = accountKey,

@@ -92,17 +92,12 @@ CinemaSeerrState cinemaSeerrState({
 Set<int> cinemaRequestableSeasons(
   SeerrTvDetails details, {
   bool is4k = false,
-}) {
-  final quality = SeerrQualityStatus.of(
-    is4k: is4k,
-    mediaInfo: details.mediaInfo,
-    canManageRequests: false,
-    currentUserId: null,
-  );
-  return seerrSeasonNumbersOf(details.seasons, details.numberOfSeasons ?? 0)
+}) => seerrSeasonNumbersOf(details.seasons, details.numberOfSeasons ?? 0)
       .toSet()
-      .difference(quality.unavailableOrRequestedSeasons);
-}
+      .difference(seerrUnavailableOrRequestedSeasons(
+        details.mediaInfo,
+        is4k: is4k,
+      ));
 
 bool cinemaSeriesIsContinuing(SeerrTvDetails details) {
   final status = (details.status ?? '').toLowerCase();
@@ -220,8 +215,11 @@ typedef CinemaTvQualityOptions = ({
   Set<int> excluded4k,
 });
 
-/// Shows a quality picker only when both movie qualities can be requested.
-typedef CinemaMovieSubmit = Future<void> Function(bool is4k);
+/// Submits the chosen movie quality while its picker session is still valid.
+typedef CinemaMovieSubmit = Future<void> Function(
+  bool is4k,
+  bool Function() isAllowed,
+);
 
 /// Manages when trailer actions appear and how they respond across devices. Seerr checks must
 /// never delay playback.
@@ -309,8 +307,7 @@ class CinemaModeController extends ChangeNotifier {
   CinemaSeerrState get seerrState {
     if (_requestFailed) return CinemaSeerrState.hidden;
     if (_requestableStandard || _requestable4k) return CinemaSeerrState.request;
-    if (_submittedMovieQualities.isNotEmpty ||
-        _submittedTvSeasons.values.any((seasons) => seasons.isNotEmpty)) {
+    if (_submittedTvSeasons.values.any((seasons) => seasons.isNotEmpty)) {
       return CinemaSeerrState.requested;
     }
     final states = [
@@ -598,10 +595,18 @@ class CinemaModeController extends ChangeNotifier {
     _setSending(true);
     try {
       bool isCurrent() => _current(ticket) && !_skipping;
-      Future<void> submit(bool is4k) async {
-        if (!isCurrent() || !_canRequestQuality(is4k)) return;
-        // Do not offer the same quality again while Seerr may be processing it.
-        _submittedMovieQualities.add(is4k);
+      final requestable = {
+        if (_requestableStandard) false,
+        if (_requestable4k) true,
+      };
+      Future<void> submit(bool is4k, bool Function() isAllowed) async {
+        if (!isAllowed() || !requestable.remove(is4k)) return;
+        // The picker can outlive its trailer. Keep its original choices, but
+        // only update the controls if that trailer is still playing.
+        if (_current(ticket)) {
+          if (!_canRequestQuality(is4k)) return;
+          _submittedMovieQualities.add(is4k);
+        }
         try {
           await repository
               .createRequest(mediaId: id, mediaType: 'movie', is4k: is4k)
@@ -612,20 +617,27 @@ class CinemaModeController extends ChangeNotifier {
           try {
             await _refreshStatus(repository, ticket, id);
           } catch (_) {}
-          if (!_requestableStandard && !_requestable4k) {
-            _requestFailed = true;
-          }
+          if (!_current(ticket)) return;
+          final quality = _quality(is4k);
+          final recovered = cinemaSeerrState(
+            mediaStatus: quality.status == 0 ? null : quality.status,
+            requests: quality.requests,
+            is4k: is4k,
+          );
+          _requestFailed = !_requestableStandard && !_requestable4k &&
+              (recovered == CinemaSeerrState.request ||
+                  recovered == CinemaSeerrState.hidden);
         }
       }
 
-      if (_requestableStandard && _requestable4k) {
+      if (requestable.length == 2) {
         final details = _movieDetails;
         final user = _user;
         if (details != null && user != null && onRequestMovie != null) {
           await onRequestMovie!(repository, details, user, isCurrent, submit);
         }
       } else {
-        await submit(_requestable4k);
+        await submit(requestable.single, isCurrent);
       }
     } catch (_) {
       // Seerr or the optional picker must never interrupt playback.

@@ -15,7 +15,7 @@ import '../../../data/services/cinema_media_resolver.dart';
 import '../../../data/services/seerr/seerr_api_models.dart';
 import '../../../playback/cinema_mode_controller.dart';
 import '../../../playback/cinema_playback_source_guard.dart';
-import '../../../playback/cinema_series_picker_session.dart';
+import '../../../playback/cinema_request_picker_session.dart';
 import '../../widgets/playback/cinema_mode_actions_overlay.dart';
 import '../../../playback/subtitle_style.dart';
 import '../../../data/models/aggregated_item.dart';
@@ -81,7 +81,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
 
   late final CinemaModeController _cinema;
   final _cinemaSource = CinemaPlaybackSourceGuard();
-  CinemaSeriesPickerSession? _cinemaPicker;
+  CinemaRequestPickerSession? _cinemaPicker;
   int _cinemaPickerId = DateTime.now().microsecondsSinceEpoch;
 
   bool get _isCinema =>
@@ -203,7 +203,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     if (!mounted || backend == null || !isCurrent()) return null;
     _cinemaPicker?.close();
     final requestId = ++_cinemaPickerId;
-    final session = CinemaSeriesPickerSession(
+    final session = CinemaRequestPickerSession(
       accountKey: _cinemaUserKey,
       isMounted: () => mounted && !_exiting,
     );
@@ -329,7 +329,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       },
       (selection, quota, isAllowed) async {
         if (selection['is4k'] is! bool) return null;
-        await submit(selection['is4k'] as bool);
+        await submit(selection['is4k'] as bool, isAllowed);
         return null;
       },
     );
