@@ -7,7 +7,6 @@ import 'package:server_core/server_core.dart';
 import '../data/repositories/seerr_repository.dart';
 import '../data/services/cinema_media_resolver.dart';
 import '../data/services/seerr/seerr_api_models.dart';
-import '../data/viewmodels/seerr_media_detail_view_model.dart';
 
 enum CinemaAction { skip, request }
 
@@ -100,19 +99,13 @@ CinemaSeerrState cinemaSeerrState({
   );
 }
 
-Set<int> cinemaRequestableSeasons(SeerrTvDetails details) {
-  final quality = SeerrQualityStatus.of(
-    is4k: false,
-    mediaInfo: details.mediaInfo,
-    canManageRequests: false,
-    currentUserId: null,
-  );
-  final seasons = seerrSeasonNumbersOf(
-    details.seasons,
-    details.numberOfSeasons ?? 0,
-  ).toSet();
-  return seasons.difference(quality.unavailableOrRequestedSeasons);
-}
+Set<int> cinemaRequestableSeasons(SeerrTvDetails details) =>
+    seerrSeasonNumbersOf(details.seasons, details.numberOfSeasons ?? 0)
+        .toSet()
+        .difference(seerrUnavailableOrRequestedSeasons(
+          details.mediaInfo,
+          is4k: false,
+        ));
 
 bool cinemaSeriesIsContinuing(SeerrTvDetails details) {
   final status = (details.status ?? '').toLowerCase();
@@ -173,12 +166,10 @@ Future<SeerrTvDetails?> submitCinemaTvRequest({
           .timeout(const Duration(seconds: 10));
       if (!isAllowed()) return null;
       if (refreshed.id == details.id &&
-          SeerrQualityStatus.of(
+          seerrUnavailableOrRequestedSeasons(
+            refreshed.mediaInfo,
             is4k: false,
-            mediaInfo: refreshed.mediaInfo,
-            canManageRequests: false,
-            currentUserId: null,
-          ).unavailableOrRequestedSeasons.containsAll(expected)) {
+          ).containsAll(expected)) {
         return refreshed;
       }
     } catch (_) {

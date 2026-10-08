@@ -8,6 +8,7 @@ import '../repositories/seerr_repository.dart';
 import '../services/seerr/seerr_api_models.dart';
 import '../services/seerr/seerr_download_progress.dart';
 import '../services/seerr/seerr_error.dart';
+import '../services/seerr/seerr_seasons.dart';
 
 /// Reads one flag out of Seerr's public settings.
 ///
@@ -127,29 +128,11 @@ class SeerrQualityStatus {
   /// A completed request isn't one of them. It says the season arrived once,
   /// not that it is still there, so a season that has since been removed can
   /// be requested again.
-  Set<int> get requestedSeasons {
-    final seasons = <int>{};
-    for (final r in requests) {
-      if (r.status == SeerrRequest.statusDeclined ||
-          r.status == SeerrRequest.statusFailed ||
-          r.status == SeerrRequest.statusCompleted) {
-        continue;
-      }
-      if (r.seasons != null) {
-        for (final s in r.seasons!) {
-          seasons.add(s.seasonNumber);
-        }
-      }
-    }
-    return seasons;
-  }
+  Set<int> get requestedSeasons => seerrRequestedSeasons(requests);
 
   /// Seasons the library already holds for this track, fully or partially.
-  Set<int> get availableSeasons => {
-        for (final s in seasonAvailability)
-          if (SeerrMediaStatus.isAvailable(is4k ? s.status4k : s.status))
-            s.seasonNumber,
-      };
+  Set<int> get availableSeasons =>
+      seerrAvailableSeasons(seasonAvailability, is4k: is4k);
 
   /// Seasons the request sheet may not offer: already in the library or
   /// already spoken for by an open request.
