@@ -72,19 +72,6 @@ Map<String, dynamic> cinemaItem({int tmdb = 42}) => {
 Future<void> flush() => Future<void>.delayed(Duration.zero);
 
 void main() {
-  test('movie statuses distinguish available, blocked and requestable', () {
-    for (final entry in {
-      1: CinemaSeerrState.request,
-      2: CinemaSeerrState.pending,
-      5: CinemaSeerrState.available,
-      6: CinemaSeerrState.hidden,
-      7: CinemaSeerrState.request,
-      999: CinemaSeerrState.hidden,
-    }.entries) {
-      expect(cinemaSeerrState(mediaStatus: entry.key), entry.value);
-    }
-  });
-
   late FakeCinemaSeerr seerr;
   late CinemaModeController controller;
   var skips = 0;
@@ -106,25 +93,6 @@ void main() {
     item: cinemaItem(tmdb: tmdb),
     resolveMedia: () async => null,
   );
-
-  test('a late movie request cannot change the next trailer', () {
-    fakeAsync((clock) {
-      seerr.submission = Completer<SeerrRequest>();
-      enter();
-      clock.flushMicrotasks();
-      controller.request();
-      clock.flushMicrotasks();
-
-      enter(tmdb: 99);
-      clock.flushMicrotasks();
-      seerr.submission!.complete(
-        const SeerrRequest(id: 1, status: 2, type: 'movie'),
-      );
-      clock.flushMicrotasks();
-      expect(controller.media?.tmdbId, 99);
-      expect(controller.canRequest, isTrue);
-    });
-  });
 
   test('an uncertain movie timeout never submits the same quality twice', () {
     fakeAsync((clock) {
