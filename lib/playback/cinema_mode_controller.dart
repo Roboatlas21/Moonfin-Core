@@ -40,28 +40,19 @@ CinemaSeerrState cinemaSeerrState({
   int? mediaStatus,
   List<SeerrRequest>? requests,
   bool acknowledged = false,
-}) {
-  if (mediaStatus == SeerrMediaStatus.blocklisted) {
-    return CinemaSeerrState.hidden;
-  }
-  switch (mediaStatus) {
-    case SeerrMediaStatus.pending:
-      return CinemaSeerrState.pending;
-    case SeerrMediaStatus.processing:
-      return CinemaSeerrState.processing;
-    case SeerrMediaStatus.partiallyAvailable:
-      return CinemaSeerrState.partiallyAvailable;
-    case SeerrMediaStatus.available:
-      return CinemaSeerrState.available;
-  }
-  final active = requests?.any((r) => _activeStandardRequest(r, 'movie')) ?? false;
-  if (acknowledged || active) return CinemaSeerrState.requested;
-  return mediaStatus == null ||
-          mediaStatus == SeerrMediaStatus.unknown ||
-          mediaStatus == SeerrMediaStatus.deleted
-      ? CinemaSeerrState.request
-      : CinemaSeerrState.hidden;
-}
+}) => switch (mediaStatus) {
+  SeerrMediaStatus.blocklisted => CinemaSeerrState.hidden,
+  SeerrMediaStatus.pending => CinemaSeerrState.pending,
+  SeerrMediaStatus.processing => CinemaSeerrState.processing,
+  SeerrMediaStatus.partiallyAvailable => CinemaSeerrState.partiallyAvailable,
+  SeerrMediaStatus.available => CinemaSeerrState.available,
+  _ when acknowledged ||
+      (requests?.any((r) => _activeStandardRequest(r, 'movie')) ?? false) =>
+    CinemaSeerrState.requested,
+  null || SeerrMediaStatus.unknown || SeerrMediaStatus.deleted =>
+    CinemaSeerrState.request,
+  _ => CinemaSeerrState.hidden,
+};
 
 /// Only a well-formed, requestable native selection may reach Seerr.
 /// In particular, an explicit All Seasons choice must remain "all" rather
@@ -299,31 +290,44 @@ class CinemaModeController extends ChangeNotifier {
           );
       if (!permitted) return;
       _user = user;
-      if (isSeries) {
-        if (onRequestSeries == null) return;
-        final details = await repository
-            .getTvDetails(id)
-            .timeout(const Duration(seconds: 10));
-        if (!_current(ticket) || details.id != id) return;
-        _tvDetails = details;
+      if (isSeries && onRequestSeries == null) return;
+      if (await _refreshStatus(repository, ticket, id)) {
         _requestRepository = repository;
-        seerrState = cinemaTvSeerrState(details);
         notifyListeners();
-        return;
       }
-      final details = await repository
-          .getMovieDetails(id)
-          .timeout(const Duration(seconds: 10));
-      if (!_current(ticket)) return;
-      _requestRepository = repository;
-      seerrState = cinemaSeerrState(
-        mediaStatus: details.mediaInfo?.status,
-        requests: details.mediaInfo?.requests,
-      );
-      notifyListeners();
     } catch (_) {
       // Optional identity/status lookup failures leave playback and Skip alone.
     }
+  }
+
+  /// Refresh status for this trailer/account, reusing confirmed TV details
+  /// when the picker has already verified a timed-out submission.
+  Future<bool> _refreshStatus(
+    SeerrRepository repository,
+    int ticket,
+    int id, {
+    SeerrTvDetails? confirmedTv,
+  }) async {
+    if (isSeries) {
+      final tv =
+          confirmedTv ??
+          await repository
+              .getTvDetails(id)
+              .timeout(const Duration(seconds: 10));
+      if (!_current(ticket) || tv.id != id) return false;
+      _tvDetails = tv;
+      seerrState = cinemaTvSeerrState(tv);
+    } else {
+      final movie = await repository
+          .getMovieDetails(id)
+          .timeout(const Duration(seconds: 10));
+      if (!_current(ticket)) return false;
+      seerrState = cinemaSeerrState(
+        mediaStatus: movie.mediaInfo?.status,
+        requests: movie.mediaInfo?.requests,
+      );
+    }
+    return true;
   }
 
   void configure({required int minimumSeconds, required int autoHideSeconds}) {
@@ -448,26 +452,17 @@ class CinemaModeController extends ChangeNotifier {
       );
     } catch (error) {
       if (!_current(ticket)) return;
-      // A timeout can mean the server accepted the request. Reconcile once
-      // before offering a retry, and never automatically submit it again.
+      // The POST may have been accepted. Reconcile once, never retry it.
       seerrState = CinemaSeerrState.hidden;
       try {
-        final details = await repository
-            .getMovieDetails(id)
-            .timeout(const Duration(seconds: 10));
-        if (!_current(ticket)) return;
-        seerrState = cinemaSeerrState(
-          mediaStatus: details.mediaInfo?.status,
-          requests: details.mediaInfo?.requests,
-        );
-        // Unknown/deleted status after a POST timeout does not prove that
-        // Seerr rejected it. Don't offer a second request for this trailer.
+        if (!await _refreshStatus(repository, ticket, id)) return;
+        // Unknown/deleted after a timeout does not prove rejection.
         if (error is TimeoutException &&
             seerrState == CinemaSeerrState.request) {
           seerrState = CinemaSeerrState.hidden;
         }
       } catch (_) {
-        /* Uncertain outcome: don't offer another request. */
+        // Uncertain outcome: do not offer another request.
       }
       // A confirmed request is not a failure just because its POST timed out.
       if (_current(ticket) &&
@@ -507,22 +502,12 @@ class CinemaModeController extends ChangeNotifier {
         ),
       );
       if (!_current(ticket)) return;
-      // Reuse timeout confirmation; otherwise refresh after cancel or submit.
-      // Another user may have requested a season while the picker was open.
+      // Reuse confirmed seasons or refresh after submit/cancel. A failed
+      // status refresh must not be reported as a failed request.
       seerrState = CinemaSeerrState.hidden;
       try {
-        final refreshed =
-            confirmed ??
-            await repository
-                .getTvDetails(id)
-                .timeout(const Duration(seconds: 10));
-        if (!_current(ticket) || refreshed.id != id) return;
-        _tvDetails = refreshed;
-        seerrState = cinemaTvSeerrState(refreshed);
-      } catch (_) {
-        // The picker already handled submission. A failed status refresh
-        // must not be reported as a failed request.
-      }
+        await _refreshStatus(repository, ticket, id, confirmedTv: confirmed);
+      } catch (_) {}
     } catch (error) {
       if (!_current(ticket)) return;
       seerrState = CinemaSeerrState.hidden;
