@@ -28,6 +28,13 @@ enum CinemaSeerrState {
   available,
 }
 
+/// Both pickers only collect a choice; this is the one Cinema TV submit path.
+typedef CinemaTvSubmit = Future<SeerrTvDetails?> Function(
+  Map<String, dynamic> selection,
+  SeerrQuotaDetail? quota,
+  bool Function() isAllowed,
+);
+
 /// Media and request status codes are different enums. Only standard movie
 /// requests count here, because this action always requests the standard edition.
 CinemaSeerrState cinemaSeerrState({
@@ -134,6 +141,58 @@ CinemaSeerrState cinemaTvSeerrState(SeerrTvDetails details) {
   return state == CinemaSeerrState.request ? CinemaSeerrState.hidden : state;
 }
 
+/// Validate the choice and submit exactly once from either platform. Confirm
+/// uncertain timeouts against the precise season set, never a title-wide status.
+Future<SeerrTvDetails?> submitCinemaTvRequest({
+  required SeerrRepository repository,
+  required SeerrTvDetails details,
+  required Map<String, dynamic> selection,
+  required SeerrQuotaDetail? quota,
+  required bool Function() isAllowed,
+}) async {
+  if (!isAllowed()) return null;
+  final requestable = cinemaRequestableSeasons(details);
+  final choice = cinemaTvRequestSelection(selection, requestable, quota);
+  if (choice == null) {
+    throw StateError('Cinema series selection is no longer requestable');
+  }
+  final expected = choice.allSeasons ? requestable : choice.seasons!.toSet();
+  try {
+    await repository.createRequest(
+      mediaId: details.id,
+      mediaType: 'tv',
+      seasons: choice.seasons,
+      allSeasons: choice.allSeasons,
+      is4k: false,
+    ).timeout(const Duration(seconds: 20));
+  } on TimeoutException {
+    // A timed-out POST may already have been accepted; never submit again.
+    if (!isAllowed()) return null;
+    try {
+      final refreshed = await repository.getTvDetails(details.id)
+          .timeout(const Duration(seconds: 10));
+      if (!isAllowed()) return null;
+      if (refreshed.id == details.id &&
+          SeerrQualityStatus.of(
+            is4k: false,
+            mediaInfo: refreshed.mediaInfo,
+            canManageRequests: false,
+            currentUserId: null,
+          ).unavailableOrRequestedSeasons.containsAll(expected)) {
+        return refreshed;
+      }
+    } catch (_) {
+      // Uncertain response: do not infer success or retry the POST.
+    }
+    if (!isAllowed()) return null;
+    rethrow;
+  } catch (_) {
+    if (!isAllowed()) return null;
+    rethrow;
+  }
+  return null; // The controller performs the normal post-submit refresh.
+}
+
 /// One lifetime/visibility/input model for TV, touch and desktop. Network work
 /// never participates in opening or advancing playback.
 class CinemaModeController extends ChangeNotifier {
@@ -158,6 +217,7 @@ class CinemaModeController extends ChangeNotifier {
     SeerrUser user,
     int? season,
     bool Function() isCurrent,
+    CinemaTvSubmit submit,
   )?
   onRequestSeries;
   SeerrTvDetails? _tvDetails;
@@ -447,6 +507,13 @@ class CinemaModeController extends ChangeNotifier {
         user,
         season,
         () => _current(ticket) && !_skipping,
+        (selection, quota, isAllowed) => submitCinemaTvRequest(
+          repository: repository,
+          details: details,
+          selection: selection,
+          quota: quota,
+          isAllowed: isAllowed,
+        ),
       );
       if (!_current(ticket)) return;
       // Reuse timeout confirmation; otherwise refresh after cancel or submit.

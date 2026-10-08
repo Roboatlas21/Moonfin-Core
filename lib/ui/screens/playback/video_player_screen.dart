@@ -555,9 +555,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     SeerrUser user,
     int? season,
     bool Function() isCurrent,
+    CinemaTvSubmit submit,
   ) async {
     if (!mounted || !isCurrent()) return null;
-    // Like Skip, opening a new picker must preserve an in-flight request.
     _seriesPickerSession?.closeForSkip();
     final session = CinemaSeriesPickerSession(
       accountKey: _cinemaUserAccountKey,
@@ -565,19 +565,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     );
     _seriesPickerSession = session;
     SeerrMediaDetailViewModel? vm;
-    VoidCallback? requestListener;
+    SeerrTvDetails? confirmed;
+    Object? submitFailure;
     try {
       vm = SeerrMediaDetailViewModel.forCinema(
         repository,
         GetIt.instance<SeerrPreferences>(),
         details: details,
         user: user,
-        requestAllowed: () => session.isCurrent,
       );
-      requestListener = () {
-        if (vm!.state.isRequesting) session.markSubmitting();
-      };
-      vm.addListener(requestListener);
       await showSeerrRequestDialog(
         context: context,
         vm: vm,
@@ -586,16 +582,20 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         isContinuing: cinemaSeriesIsContinuing(details),
         selectAllSeasons: false,
         showAdvancedOptions: false,
-        waitForSubmission: true,
         onDismissReady: (dismiss) => session.dismissDialog = dismiss,
+        cinemaSubmit: (selection, quota) async {
+          session.markSubmitting();
+          try {
+            confirmed = await submit(selection, quota, () => session.isCurrent);
+          } catch (error) {
+            submitFailure = error;
+          }
+        },
       );
-      if (vm.state.requestError != null && session.isCurrent) {
-        if (isCurrent()) {
-          throw StateError('Cinema series request failed');
-        }
+      if (submitFailure != null && session.isCurrent) {
+        if (isCurrent()) throw submitFailure!;
         if (mounted) {
-          // Preserve feedback after Skip, but not after an account change
-          // or player exit.
+          // After Skip the POST still belongs to this player/account.
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(AppLocalizations.of(context).cinemaActionFailed),
@@ -603,19 +603,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           );
         }
       }
-      return vm.confirmedCinemaTvDetails;
+      return confirmed;
     } finally {
-      if (requestListener != null) {
-        vm?.removeListener(requestListener);
-      }
       vm?.dispose();
       session.dispose();
       if (identical(_seriesPickerSession, session)) {
         _seriesPickerSession = null;
       }
-      if (mounted && isCurrent()) {
-        _focusCinemaAction();
-      }
+      if (mounted && isCurrent()) _focusCinemaAction();
     }
   }
 

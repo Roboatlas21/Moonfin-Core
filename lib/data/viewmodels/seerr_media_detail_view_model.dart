@@ -8,7 +8,6 @@ import '../repositories/seerr_repository.dart';
 import '../services/seerr/seerr_api_models.dart';
 import '../services/seerr/seerr_download_progress.dart';
 import '../services/seerr/seerr_error.dart';
-import '../services/seerr/seerr_seasons.dart';
 
 /// Reads one flag out of Seerr's public settings.
 ///
@@ -378,22 +377,14 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
   Duration? _statusPollInterval;
   bool _isDisposed = false;
 
-  final bool Function()? _requestAllowed;
-  SeerrTvDetails? _confirmedCinemaTvDetails;
+  SeerrMediaDetailViewModel(this._repo, this._prefs);
 
-  /// Fresh details from timeout reconciliation, reusable by the Cinema rail.
-  SeerrTvDetails? get confirmedCinemaTvDetails => _confirmedCinemaTvDetails;
-
-  SeerrMediaDetailViewModel(this._repo, this._prefs) : _requestAllowed = null;
-
-  /// The cinema resolver already supplied an exact series identity. Seed the
-  /// existing picker without invoking the detail page's title-search fallback.
+  /// Cinema supplies exact TV details for the existing selection UI only.
   SeerrMediaDetailViewModel.forCinema(
     this._repo,
     this._prefs, {
     required SeerrTvDetails details,
     required SeerrUser user,
-    required bool Function() this._requestAllowed,
   }) {
     _state = SeerrMediaDetailState(tv: details, currentUser: user);
   }
@@ -646,32 +637,19 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
     String? rootFolder,
     int? serverId,
   }) async {
-    if (_isDisposed || _state.isRequesting || _requestAllowed?.call() == false) {
-      return;
-    }
-    _confirmedCinemaTvDetails = null;
+    if (_isDisposed || _state.isRequesting) return;
 
-    // Only Cinema TV needs a snapshot to reconcile an uncertain timeout.
-    // Never infer success from a title-wide status; check the exact seasons.
-    final expectedSeasons = _requestAllowed != null && _state.isTv
-        ? (allSeasons
-              ? seerrSeasonNumbersOf(
-                  _state.tv?.seasons ?? const <SeerrSeason>[],
-                  _state.numberOfSeasons ?? 0,
-                ).toSet().difference(
-                  _state.quality(is4k: is4k).unavailableOrRequestedSeasons,
-                )
-              : (seasons ?? const <int>[]).toSet())
-        : <int>{};
-
-    _state = _state.copyWith(isRequesting: true, requestError: null, requestSuccess: null);
+    _state = _state.copyWith(
+      isRequesting: true,
+      requestError: null,
+      requestSuccess: null,
+    );
     notifyListeners();
 
     try {
-      final mediaType = _state.isTv ? 'tv' : 'movie';
-      final request = _repo.createRequest(
+      await _repo.createRequest(
         mediaId: _state.tmdbId,
-        mediaType: mediaType,
+        mediaType: _state.isTv ? 'tv' : 'movie',
         seasons: seasons,
         allSeasons: allSeasons,
         is4k: is4k,
@@ -679,74 +657,11 @@ class SeerrMediaDetailViewModel extends ChangeNotifier {
         rootFolder: rootFolder,
         serverId: serverId,
       );
-      await (_requestAllowed == null
-          ? request
-          : request.timeout(const Duration(seconds: 20)));
-      if (_requestAllowed?.call() == false) return;
-      if (_requestAllowed == null) {
-        await _reloadDetails('Request submitted');
-      } else {
-        // Cinema owns the bounded status refresh after its sheet closes.
-        _state = _state.copyWith(
-          isRequesting: false,
-          requestSuccess: 'Request submitted',
-        );
-      }
-    } on TimeoutException catch (error) {
-      if (!await _confirmTimedOutCinemaTvRequest(
-        _state.tmdbId,
-        expectedSeasons,
-        is4k: is4k,
-      )) {
-        _setRequestFailure(error);
-      }
-    } catch (e) {
-      _setRequestFailure(e);
+      await _reloadDetails('Request submitted');
+    } catch (error) {
+      _setRequestFailure(error);
     }
     notifyListeners();
-  }
-
-  /// A timed-out POST might already have reached Seerr. Check once; never
-  /// send another POST or declare success from an unrelated series status.
-  Future<bool> _confirmTimedOutCinemaTvRequest(
-    int tmdbId,
-    Set<int> expectedSeasons, {
-    required bool is4k,
-  }) async {
-    if (_requestAllowed == null ||
-        !_state.isTv ||
-        expectedSeasons.isEmpty ||
-        _isDisposed ||
-        _requestAllowed.call() == false) {
-      return false;
-    }
-
-    try {
-      final details = await _repo.getTvDetails(tmdbId)
-          .timeout(const Duration(seconds: 10));
-      if (_isDisposed || _requestAllowed.call() == false ||
-          details.id != tmdbId) {
-        return false;
-      }
-      final status = SeerrQualityStatus.of(
-        is4k: is4k,
-        mediaInfo: details.mediaInfo,
-        canManageRequests: false,
-        currentUserId: _state.currentUser?.id,
-      );
-      if (!status.unavailableOrRequestedSeasons.containsAll(expectedSeasons)) {
-        return false;
-      }
-      _confirmedCinemaTvDetails = details;
-      _state = _state.copyWith(
-        tv: details,
-        isRequesting: false,
-        requestSuccess: 'Request submitted',
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
   }
 
   Future<void> loadQuota() async {

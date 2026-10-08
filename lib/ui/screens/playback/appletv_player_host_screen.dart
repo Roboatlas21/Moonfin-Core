@@ -13,7 +13,6 @@ import '../../../auth/repositories/session_repository.dart';
 import '../../../data/repositories/seerr_repository.dart';
 import '../../../data/services/cinema_media_resolver.dart';
 import '../../../data/services/seerr/seerr_api_models.dart';
-import '../../../data/viewmodels/seerr_media_detail_view_model.dart';
 import '../../../playback/cinema_mode_controller.dart';
 import '../../../playback/cinema_series_picker_session.dart';
 import '../../widgets/playback/cinema_mode_actions_overlay.dart';
@@ -34,7 +33,6 @@ import '../../screensaver/screensaver_controller.dart';
 import '../../navigation/app_router.dart';
 import '../../navigation/destinations.dart';
 import '../../../preference/preference_constants.dart';
-import '../../../preference/seerr_preferences.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../util/remote_subtitle_labels.dart';
@@ -208,6 +206,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     SeerrUser user,
     int? season,
     bool Function() isCurrent,
+    CinemaTvSubmit submit,
   ) async {
     final backend = _backend;
     if (!mounted || backend == null || !isCurrent()) return null;
@@ -222,18 +221,9 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       backend.dismissCinemaRequestOptions(requestId: requestId),
     );
 
-    final vm = SeerrMediaDetailViewModel.forCinema(
-      repository,
-      GetIt.instance<SeerrPreferences>(),
-      details: details,
-      user: user,
-      requestAllowed: () => session.isCurrent,
-    );
     final seasons = cinemaRequestableSeasons(details).toList()..sort();
     final l10n = AppLocalizations.of(context);
     try {
-      // Movies request directly; TV only asks which seasons to request.
-      // Seerr's configured Sonarr defaults supply server/profile/root folder.
       final pickerResult = backend.showCinemaRequestOptions({
         'requestId': requestId,
         'title': l10n.requestSeriesOrMovie(l10n.series),
@@ -247,8 +237,8 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       });
 
       SeerrQuotaDetail? quotaDetail;
-      // Optional quota fetch runs while the picker is already interactive.
-      // Seerr validates quota itself if the user submits before it arrives.
+      // Display optional quota while the picker is open. The shared
+      // submit path validates it again after selection.
       unawaited(() async {
         try {
           final quota = (await repository
@@ -276,7 +266,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
             'quotaRestricted': quota.restricted,
           });
         } catch (_) {
-          // Missing quota information does not block normal Seerr requests.
+          // A missing quota response must never block the request picker.
         }
       }());
 
@@ -286,36 +276,14 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
           selected['requestId'] != requestId) {
         return null;
       }
-      final seasonRequest = cinemaTvRequestSelection(
-        selected,
-        seasons.toSet(),
-        quotaDetail,
-      );
-      if (seasonRequest == null) {
-        // Quota may have arrived after UIKit accepted Submit. Report the
-        // rejection instead of silently dropping the user's selection.
-        throw StateError('Cinema series selection is no longer requestable');
-      }
-
       session.markSubmitting();
-      // Only the open picker belongs in this slot. The submitted request
-      // remains valid for this account/player until this async call finishes.
-      // Opening another trailer's picker must not invalidate its POST.
+      // Submitted work is independent of whichever trailer plays next.
       if (identical(_cinemaPicker, session)) _cinemaPicker = null;
-      await vm.submitRequest(
-        is4k: false,
-        seasons: seasonRequest.seasons,
-        allSeasons: seasonRequest.allSeasons,
-      );
-      if (vm.state.requestError != null) {
-        throw StateError('Cinema series request failed');
-      }
-      return vm.confirmedCinemaTvDetails;
+      return await submit(selected, quotaDetail, () => session.isCurrent);
     } catch (_) {
       if (session.isCurrent && !isCurrent()) _showCinemaError();
       rethrow;
     } finally {
-      vm.dispose();
       session.dispose();
       if (identical(_cinemaPicker, session)) _cinemaPicker = null;
     }
