@@ -204,7 +204,7 @@ final class AppleTvPlayerViewController: UIViewController {
 
     private enum TrickplayMode: String { case disabled, single, strip, full }
 
-    private enum Zone { case scrubber, buttons }
+    private enum Zone { case scrubber, buttons, skipSegment }
     private enum ControlId {
         case prev, skipBack, playPause, skipForward, next
         case speed, chapters, subtitles, audio, cast, quality, zoom, info, channels, favorite
@@ -412,11 +412,17 @@ final class AppleTvPlayerViewController: UIViewController {
         scrubber.progressTintColor = glassActive ? glassRangeProgress : accent
         channelBadge.backgroundColor = accent
         upNextLabel.textColor = accent
-        skipSegmentButton.layer.borderColor = accent.cgColor
+        updateSkipSegmentFocus()
         skipSegmentIcon.tintColor = accent
         skipSegmentRingIcon.tintColor = accent
         skipSegmentRing.strokeColor = accent.cgColor
         nextUpPlayButton.backgroundColor = accent
+    }
+
+    private func updateSkipSegmentFocus() {
+        skipSegmentButton.layer.borderColor =
+            (skipSegmentActive && focusedZone == .skipSegment
+                ? themeAccent : glassOnSurface).cgColor
     }
 
     private func setupOsd() {
@@ -1341,7 +1347,12 @@ final class AppleTvPlayerViewController: UIViewController {
     func showSkipSegment(
         label: String, countdownStyle: String, segmentStartMs: Int, segmentEndMs: Int
     ) {
+        let wasActive = skipSegmentActive
         skipSegmentActive = true
+        if !wasActive && !panScrubEngaged && scrubTargetMs == nil {
+            focusedZone = .skipSegment
+            updateFocusHighlight()
+        }
         skipSegmentLabel.text = label
         skipSegmentCountdownStyle = countdownStyle
         skipSegmentStartMs = segmentStartMs
@@ -1393,6 +1404,10 @@ final class AppleTvPlayerViewController: UIViewController {
 
     func hideSkipSegment() {
         skipSegmentActive = false
+        if focusedZone == .skipSegment {
+            focusedZone = isOsdOnScreen ? .buttons : .scrubber
+            updateFocusHighlight()
+        }
         guard !skipSegmentButton.isHidden else { return }
         UIView.animate(withDuration: 0.15) {
             self.skipSegmentButton.alpha = 0
@@ -1479,7 +1494,7 @@ final class AppleTvPlayerViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         player.notifySurfaceReady()
-        focusedZone = .buttons
+        focusedZone = skipSegmentActive ? .skipSegment : .buttons
         focusedControlIndex = controls.firstIndex(of: .playPause) ?? 0
         updateFocusHighlight()
         showOsd()
@@ -1576,6 +1591,7 @@ final class AppleTvPlayerViewController: UIViewController {
             updateFocusHighlight()
             showOsd()
         case .left, .right:
+            if moveSkipSegmentFocus(forward: recognizer.direction == .right) { return }
             // Horizontal flicks travel the action buttons. Scrubbing is the
             // pan's job, and an engaged pan owns the scrubber zone anyway.
             guard focusedZone == .buttons, isOsdOnScreen else { return }
@@ -1733,14 +1749,9 @@ final class AppleTvPlayerViewController: UIViewController {
             showOsd()
             return true
         case .select:
-            if skipSegmentActive {
-                let osdWasOnScreen = isOsdOnScreen
+            if skipSegmentActive && focusedZone == .skipSegment {
                 hideSkipSegment()
                 onSkipSegmentSelect?()
-                if !osdWasOnScreen {
-                    focusedZone = .scrubber
-                    updateFocusHighlight()
-                }
                 showOsd()
                 return true
             }
@@ -1896,7 +1907,34 @@ final class AppleTvPlayerViewController: UIViewController {
         case .buttons:
             guard controls.indices.contains(focusedControlIndex) else { return }
             activate(controls[focusedControlIndex])
+        case .skipSegment:
+            break // The visible Skip action is handled before the OSD.
         }
+    }
+
+    /// Navigation between Skip and the OSD matches the Android TV player.
+    /// Left from Skip reveals the scrubber; Right from the scrubber or the
+    /// last transport button returns to Skip. A key used to move focus must
+    /// never also seek or arm the press-and-hold scrub timer.
+    private func moveSkipSegmentFocus(forward: Bool) -> Bool {
+        guard skipSegmentActive else { return false }
+        if focusedZone == .skipSegment {
+            if !forward {
+                focusedZone = .scrubber
+                updateFocusHighlight()
+                showOsd()
+            }
+            return true
+        }
+        if forward && !panScrubEngaged && scrubTargetMs == nil &&
+            (focusedZone == .scrubber ||
+                (isOsdOnScreen && focusedZone == .buttons &&
+                    !controls.isEmpty && focusedControlIndex == controls.count - 1)) {
+            focusedZone = .skipSegment
+            updateFocusHighlight()
+            return true
+        }
+        return false
     }
 
     /// A sideways press with the OSD down seeks straight away instead of
@@ -1907,6 +1945,7 @@ final class AppleTvPlayerViewController: UIViewController {
     ///
     /// A live stream has nothing to seek, so it keeps the button behaviour.
     private func seekOrMoveFocus(forward: Bool) {
+        if moveSkipSegmentFocus(forward: forward) { return }
         if !isOsdOnScreen, !isLive {
             focusedZone = .scrubber
             updateFocusHighlight()
@@ -1924,6 +1963,8 @@ final class AppleTvPlayerViewController: UIViewController {
             let next = focusedControlIndex + (forward ? 1 : -1)
             focusedControlIndex = min(controls.count - 1, max(0, next))
             updateFocusHighlight()
+        case .skipSegment:
+            break // Skip's horizontal navigation is handled above.
         }
     }
 
@@ -2067,6 +2108,7 @@ final class AppleTvPlayerViewController: UIViewController {
             scrubFocused ? CGAffineTransform(scaleX: 1, y: 2.0) : .identity
         scrubber.trackTintColor =
             scrubFocused ? UIColor(white: 1, alpha: 0.45) : UIColor(white: 1, alpha: 0.25)
+        updateSkipSegmentFocus()
         updateTooltip()
     }
 
