@@ -10,6 +10,13 @@ abstract final class CinemaMediaResolver {
     '',
   }.contains((item['Type']?.toString() ?? '').toLowerCase());
 
+  static CinemaMediaType? _featureType(Map<String, dynamic> item) =>
+      switch (item['__moonfinCinemaFeatureType']) {
+        'Movie' => CinemaMediaType.movie,
+        'Episode' => CinemaMediaType.tv,
+        _ => null,
+      };
+
   static CinemaMedia? directMedia(Map<String, dynamic> item) {
     if (!_supported(item)) return null;
     final raw = item['ProviderIds'];
@@ -27,14 +34,14 @@ abstract final class CinemaMediaResolver {
       'series' => 'tv',
       _ => null,
     };
-    // Enhanced downloaded movie trailers carry TMDB + this provider marker,
-    // so they work even without the optional Moonbase identity endpoint.
-    final legacy =
-        explicit == null && ids.containsKey('trailers4jellyfin.trailer')
-        ? 'movie'
-        : null;
-    final types = {?explicit, ?itemType, ?legacy};
-    if (types.length != 1) return null;
+    final types = {?explicit, ?itemType};
+    if (types.length > 1) return null;
+    // An untyped TMDB ID belongs to a movie when this unattached clip plays
+    // before a movie. Playback context never supplies a TV identity.
+    final type = types.isNotEmpty
+        ? types.single
+        : (_featureType(item) == CinemaMediaType.movie ? 'movie' : null);
+    if (type == null) return null;
     // Attached trailers must have their owner checked on the source server.
     final owner = item['OwnerId']?.toString().replaceAll('-', '');
     if (owner != null &&
@@ -44,7 +51,7 @@ abstract final class CinemaMediaResolver {
     }
     return CinemaMedia.fromJson({
       'tmdbId': ids['tmdb'],
-      'mediaType': types.single,
+      'mediaType': type,
     });
   }
 
@@ -57,11 +64,7 @@ abstract final class CinemaMediaResolver {
     if (!_supported(item)) return null;
     final direct = directMedia(item);
     if (direct != null) return direct;
-    final type = expectedMediaType ?? switch (item['__moonfinCinemaFeatureType']) {
-      'Movie' => CinemaMediaType.movie,
-      'Episode' => CinemaMediaType.tv,
-      _ => null,
-    };
+    final type = expectedMediaType ?? _featureType(item);
     try {
       final media = await client
           .resolveCinemaMedia(itemId, expectedMediaType: type)
