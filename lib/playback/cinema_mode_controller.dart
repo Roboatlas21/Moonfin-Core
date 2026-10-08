@@ -230,7 +230,7 @@ class CinemaModeController extends ChangeNotifier {
   Duration? _metadataDuration;
   Duration? _playerDuration;
   int _minimumSeconds = 15;
-  int _autoHideSeconds = 10;
+  int _autoHideSeconds = 15;
   Timer? _hideTimer;
   DateTime? _lastSkip;
 

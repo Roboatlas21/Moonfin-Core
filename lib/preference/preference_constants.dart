@@ -372,6 +372,7 @@ enum MediaSegmentCountdown {
 enum MediaSegmentAutoHide {
   s5(5),
   s10(10),
+  s15(15),
   off(0);
 
   const MediaSegmentAutoHide(this.seconds);
