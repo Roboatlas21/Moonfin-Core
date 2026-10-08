@@ -353,6 +353,41 @@ const _movie = <String, dynamic>{
 };
 
 void main() {
+  test('short preroll only advances for a real early end', () async {
+    final backend = _TestBackend();
+    final resolver = _TestResolver();
+    final manager = _manager(backend, resolver, _TestService(), _Clock());
+    const preroll = <String, dynamic>{
+      'Id': 'intro-1',
+      'Type': 'Video',
+      '__moonfinIsPreroll': true,
+    };
+
+    try {
+      await manager.playItems(<dynamic>[preroll, _movie]);
+      backend.reportedDuration = const Duration(seconds: 4);
+      backend.currentPosition = const Duration(seconds: 1);
+      backend.emitCompleted();
+      await _settle();
+      expect(manager.queueService.currentIndex, 0);
+
+      backend.currentPosition = const Duration(seconds: 4);
+      backend.emitCompleted();
+      await _settle();
+      expect(manager.queueService.currentIndex, 1);
+      expect(resolver.calls, 2);
+
+      // The original guard still rejects premature completion of the feature.
+      backend.reportedDuration = const Duration(minutes: 90);
+      backend.currentPosition = backend.reportedDuration;
+      backend.emitCompleted();
+      await _settle();
+      expect(manager.queueService.currentIndex, 1);
+    } finally {
+      manager.dispose();
+    }
+  });
+
   group('live end-of-stream never means finished', () {
     for (final autoAdvance in <bool>[true, false]) {
       test(
