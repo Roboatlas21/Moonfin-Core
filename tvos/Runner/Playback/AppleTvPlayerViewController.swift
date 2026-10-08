@@ -4095,6 +4095,8 @@ private class RemotePlayerList: UITableViewController, RemotePlayerNavigable {
         tableView.remembersLastFocusedIndexPath = true
     }
 
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { rowCount }
+
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         activate(indexPath.row)
     }
@@ -4162,8 +4164,6 @@ private final class RemotePlayerMenu: RemotePlayerList {
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         [title, message].compactMap { $0 }.joined(separator: "\n")
     }
-
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { rowCount }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier, for: indexPath)
@@ -4243,7 +4243,6 @@ private final class CinemaRequestPicker: RemotePlayerList {
     private var submitRow: Int { seasons.count + 1 }
     private var cancelRow: Int { submitRow + 1 }
     override var rowCount: Int { cancelRow + 1 }
-    override var cellIdentifier: String { "request" }
     private var requestedCount: Int { allSeasons ? seasons.count : selected.count }
     private var quotaBlocked: Bool {
         quotaRestricted || (quotaRemaining.map { requestedCount > $0 } ?? false)
@@ -4271,16 +4270,11 @@ private final class CinemaRequestPicker: RemotePlayerList {
         (view as? UITableViewHeaderFooterView)?.textLabel?.textColor = quotaBlocked ? .systemRed : .gray
     }
 
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        cancelRow + 1
-    }
-
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "request", for: indexPath)
+        let cell = tableView.dequeueReusableCell(withIdentifier: cellIdentifier, for: indexPath)
         let row = indexPath.row
         var content = cell.defaultContentConfiguration()
         var checked = false
-        cell.accessoryType = .none
 
         if row == 0 {
             content.text = allLabel
@@ -4294,7 +4288,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
 
         content.textProperties.color = row == submitRow && !canSubmit ? .gray : .white
         cell.contentConfiguration = content
-        if checked { cell.accessoryType = .checkmark }
+        cell.accessoryType = checked ? .checkmark : .none
         return cell
     }
 
