@@ -60,28 +60,10 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                     vc.presentCinemaRequestOptions(options) {
                         result($0)
                     }
-                    if let pending = self?.pendingCinemaRequestQuota {
+                    if let pending = self?.pendingCinemaRequestQuota,
+                       (pending["requestId"] as? NSNumber)?.intValue == requestId {
                         _ = vc.updateCinemaRequestQuota(pending)
                         self?.pendingCinemaRequestQuota = nil
-                    }
-                }
-                return
-            }
-            if call.method == "updateCinemaRequestQuota" {
-                Task { @MainActor in
-                    guard let self,
-                          let args = call.arguments as? [String: Any],
-                          args["requestId"] is NSNumber else {
-                        result(false)
-                        return
-                    }
-                    if self.playerVC?.updateCinemaRequestQuota(args) == true {
-                        result(true)
-                    } else {
-                        // Quota can arrive before the picker presents. Match request IDs
-                        // before applying any buffered update.
-                        self.pendingCinemaRequestQuota = args
-                        result(true)
                     }
                 }
                 return
@@ -150,6 +132,12 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         case "setCinemaActions":
             lastCinemaActions = args
             playerVC?.applyCinemaActions(args)
+        case "updateCinemaRequestQuota":
+            // May precede presentation; the request ID gates replay.
+            if args["requestId"] is NSNumber,
+               playerVC?.updateCinemaRequestQuota(args) != true {
+                pendingCinemaRequestQuota = args
+            }
         case "dismissCinemaRequestOptions":
             let id = (args["requestId"] as? NSNumber)?.intValue
             if id == nil ||

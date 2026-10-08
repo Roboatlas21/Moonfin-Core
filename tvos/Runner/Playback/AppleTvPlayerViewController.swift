@@ -4256,9 +4256,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
     /// Quota arrives independently; season selection never waits for it.
     /// The request ID prevents results for an older picker from changing this one.
     func applyQuota(_ quota: [String: Any]) -> Bool {
-        guard !answered, Self.intValue(quota["requestId"]) == requestId else {
-            return false
-        }
+        guard !answered, Self.intValue(quota["requestId"]) == requestId else { return false }
         quotaLabel = quota["quotaLabel"] as? String
         quotaRemaining = Self.intValue(quota["quotaRemaining"])
         quotaRestricted = quota["quotaRestricted"] as? Bool ?? false
@@ -4340,13 +4338,11 @@ private final class CinemaRequestPicker: RemotePlayerList {
     // Otherwise a deferred request error can be handed back to this picker
     // while it is still presented and never get another dismissal callback.
     private func notifyAfterDismissal() {
-        // Capture the callback, not the picker, until UIKit finishes dismissal.
+        // Keep the callback alive even if UIKit releases the picker first.
         let didDismiss = onDismissed
-        if let coordinator = transitionCoordinator {
-            let registered = coordinator.animate(alongsideTransition: nil) { _ in
-                didDismiss?()
-            }
-            if registered { return }
+        if transitionCoordinator?.animate(alongsideTransition: nil,
+                                          completion: { _ in didDismiss?() }) == true {
+            return
         }
         DispatchQueue.main.async { didDismiss?() }
     }
