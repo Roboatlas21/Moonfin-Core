@@ -64,17 +64,16 @@ class CinemaMediaResolver {
     if (!_supported(item)) return Future.value();
     final direct = directMedia(item);
     if (direct != null) return Future.value(direct);
-    final key = (
-      client.baseUrl,
-      client.userId,
-      client.accessToken,
-      itemId,
-      expectedMediaType,
-    );
+    final type = expectedMediaType ?? switch (item['__moonfinCinemaFeatureType']) {
+      'Movie' => CinemaMediaType.movie,
+      'Episode' => CinemaMediaType.tv,
+      _ => null,
+    };
+    final key = (client.baseUrl, client.userId, client.accessToken, itemId, type);
     return _inFlight.putIfAbsent(key, () async {
       try {
         final media = await client
-            .resolveCinemaMedia(itemId, expectedMediaType: expectedMediaType)
+            .resolveCinemaMedia(itemId, expectedMediaType: type)
             .timeout(const Duration(seconds: 10));
         return media != null && media.tmdbId > 0 ? media : null;
       } catch (_) {

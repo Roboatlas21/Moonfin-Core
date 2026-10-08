@@ -11,6 +11,12 @@ import '../data/viewmodels/seerr_media_detail_view_model.dart';
 
 enum CinemaAction { skip, request }
 
+bool _activeStandardRequest(SeerrRequest request, String type) =>
+    !request.is4k &&
+    request.type == type &&
+    (request.status == SeerrRequest.statusPending ||
+        request.status == SeerrRequest.statusApproved);
+
 enum CinemaSeerrState {
   hidden,
   request,
@@ -42,15 +48,7 @@ CinemaSeerrState cinemaSeerrState({
     case SeerrMediaStatus.available:
       return CinemaSeerrState.available;
   }
-  final active =
-      requests?.any(
-        (r) =>
-            !r.is4k &&
-            r.type == 'movie' &&
-            (r.status == SeerrRequest.statusPending ||
-                r.status == SeerrRequest.statusApproved),
-      ) ??
-      false;
+  final active = requests?.any((r) => _activeStandardRequest(r, 'movie')) ?? false;
   if (acknowledged || active) return CinemaSeerrState.requested;
   return mediaStatus == null ||
           mediaStatus == SeerrMediaStatus.unknown ||
@@ -129,15 +127,9 @@ CinemaSeerrState cinemaTvSeerrState(SeerrTvDetails details) {
   }
   final state = cinemaSeerrState(
     mediaStatus: status,
-    acknowledged:
-        details.mediaInfo?.requests?.any(
-          (r) =>
-              !r.is4k &&
-              r.type == 'tv' &&
-              (r.status == SeerrRequest.statusPending ||
-                  r.status == SeerrRequest.statusApproved),
-        ) ??
-        false,
+    acknowledged: details.mediaInfo?.requests?.any(
+          (r) => _activeStandardRequest(r, 'tv'),
+        ) ?? false,
   );
   return state == CinemaSeerrState.request ? CinemaSeerrState.hidden : state;
 }

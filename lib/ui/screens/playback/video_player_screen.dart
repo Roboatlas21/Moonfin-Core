@@ -522,11 +522,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               client: client,
               itemId: id,
               item: raw!,
-              expectedMediaType: switch (raw['__moonfinCinemaFeatureType']) {
-                'Movie' => CinemaMediaType.movie,
-                'Episode' => CinemaMediaType.tv,
-                _ => null,
-              },
             ),
     );
     _armPrerollSkipAfterPlaybackStarts();

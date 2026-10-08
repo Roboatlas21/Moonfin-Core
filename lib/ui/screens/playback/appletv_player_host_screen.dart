@@ -143,11 +143,6 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
               client: client,
               itemId: _itemIdForQueueItem(item) ?? '',
               item: raw!,
-              expectedMediaType: switch (raw?['__moonfinCinemaFeatureType']) {
-                'Movie' => CinemaMediaType.movie,
-                'Episode' => CinemaMediaType.tv,
-                _ => null,
-              },
             ),
     );
     _updateCinemaPlayback();
