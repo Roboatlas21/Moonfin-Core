@@ -73,9 +73,10 @@ class QueueService {
     _queueChangedController.add(null);
   }
 
-  bool next() {
+  /// Prerolls can advance to their feature without changing Repeat One.
+  bool next({bool ignoreRepeatOne = false}) {
     if (_items.isEmpty) return false;
-    if (_repeatMode == RepeatMode.repeatOne) return true;
+    if (_repeatMode == RepeatMode.repeatOne && !ignoreRepeatOne) return true;
     if (_currentIndex < _items.length - 1) {
       _currentIndex++;
       _queueChangedController.add(null);

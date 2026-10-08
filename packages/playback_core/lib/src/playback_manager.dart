@@ -1994,7 +1994,9 @@ class PlaybackManager implements AudioOwnable {
     }
     await _stopAndReportCurrent(skipQueueChange: true);
     _resetBackendSelectionLock();
-    final hadNext = queueService.next();
+    final hadNext = queueService.next(
+      ignoreRepeatOne: _isPreroll(queueService.currentItem),
+    );
     if (hadNext) {
       await _playCurrentItem();
       return;
@@ -3189,7 +3191,9 @@ class PlaybackManager implements AudioOwnable {
     try {
       await _stopAndReportCurrent(skipQueueChange: true);
       _resetBackendSelectionLock();
-      final hadNext = queueService.next();
+      final hadNext = queueService.next(
+        ignoreRepeatOne: _isPreroll(queueService.currentItem),
+      );
       if (hadNext) {
         await _playCurrentItem();
       }
