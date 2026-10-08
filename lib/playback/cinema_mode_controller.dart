@@ -662,6 +662,9 @@ class CinemaModeController extends ChangeNotifier {
         options,
         () => _current(ticket) && !_skipping,
         (selection, quota, isAllowed) async {
+          // Recheck this trailer's selected quality if it is still playing.
+          final is4k = selection['is4k'] == true;
+          if (_current(ticket) && !_canRequestQuality(is4k)) return null;
           final result = await submitCinemaTvRequest(
             repository: repository,
             details: details,

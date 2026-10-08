@@ -10,6 +10,7 @@ class _Repo extends Fake implements SeerrRepository {
   int permissions = SeerrPermission.requestTv;
   int submissions = 0;
   int lookups = 0;
+  Completer<Map<String, dynamic>>? settingsResponse;
   final submittedSeasons = <List<int>?>[];
   final submitted4k = <bool>[];
   final post = Completer<SeerrRequest>();
@@ -26,8 +27,8 @@ class _Repo extends Fake implements SeerrRepository {
       SeerrUser(id: 5, permissions: permissions);
 
   @override
-  Future<Map<String, dynamic>> getPublicSettings() async =>
-      {'series4kEnabled': true};
+  Future<Map<String, dynamic>> getPublicSettings() =>
+      settingsResponse?.future ?? Future.value({'series4kEnabled': true});
 
   @override
   Future<SeerrRequest> createRequest({
@@ -137,6 +138,47 @@ void main() {
       );
       expect(denied, isNull);
       expect(repo.submissions, 1);
+    } finally {
+      controller.dispose();
+    }
+  });
+
+  test('TV picker cannot submit 4K after settings disable it', () async {
+    final pickerOpened = Completer<void>();
+    final choose = Completer<void>();
+    final repo = _Repo()
+      ..permissions = SeerrPermission.request4kTv
+      ..refreshed = _original
+      ..settingsResponse = Completer<Map<String, dynamic>>();
+    final controller = CinemaModeController(
+      seerr: () async => repo,
+      accountKey: () => 'server/user',
+      onSkip: () async {},
+      onRequestSeries: (_, _, _, options, isCurrent, submit) async {
+        expect(options.standard, isFalse);
+        expect(options.fourK, isTrue);
+        pickerOpened.complete();
+        await choose.future;
+        return submit({
+          'is4k': true,
+          'allSeasons': false,
+          'seasons': <int>[1],
+        }, null, isCurrent);
+      },
+    );
+    try {
+      controller.enter(item: _item(), resolveMedia: () async => null);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.only4kRequestable, isTrue);
+      final request = controller.request();
+      await pickerOpened.future;
+
+      repo.settingsResponse!.complete({'series4kEnabled': false});
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.only4kRequestable, isFalse);
+      choose.complete();
+      await request;
+      expect(repo.submissions, 0);
     } finally {
       controller.dispose();
     }
