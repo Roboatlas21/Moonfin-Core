@@ -105,17 +105,6 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                   },
                 ),
               if (cinemaModeEnabled)
-                EnumPreferenceTile<MediaSegmentAutoHide>(
-                  preference: UserPreferences.cinemaModeSkipAutoHide,
-                  title:
-                      '${l10n.settingsCinemaMode} — ${l10n.settingsSkipButtonAutoHide}',
-                  icon: Icons.visibility_off_outlined,
-                  labelOf: (v) => switch (v) {
-                    MediaSegmentAutoHide.off => l10n.off,
-                    _ => l10n.secondsValue(v.seconds),
-                  },
-                ),
-              if (cinemaModeEnabled)
                 IntPickerPreferenceTile(
                   preference: UserPreferences.cinemaModeSkipMinDurationSeconds,
                   title: l10n.cinemaMinimumIntroLength,
@@ -125,6 +114,17 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                     0: l10n.noLimit,
                     for (var seconds = 5; seconds <= 60; seconds += 5)
                       seconds: l10n.secondsValue(seconds),
+                  },
+                ),
+              if (cinemaModeEnabled)
+                EnumPreferenceTile<MediaSegmentAutoHide>(
+                  preference: UserPreferences.cinemaModeSkipAutoHide,
+                  title: l10n.cinemaAutoHideButtons,
+                  description: l10n.cinemaAutoHideButtonsDescription,
+                  icon: Icons.visibility_off_outlined,
+                  labelOf: (v) => switch (v) {
+                    MediaSegmentAutoHide.off => l10n.off,
+                    _ => l10n.secondsValue(v.seconds),
                   },
                 ),
               // Every type writes to the one preference, so each tile is
