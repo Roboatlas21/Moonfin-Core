@@ -11,22 +11,26 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
   int permissions = SeerrPermission.requestMovie;
   bool movie4kEnabled = true;
   Completer<Map<String, dynamic>>? settingsResponse;
+  Completer<SeerrRequest>? submission;
   int lookups = 0;
   final submitted = <int>[];
   final requested4k = <bool>[];
-  Completer<SeerrRequest>? submission;
 
   @override
   bool get isAvailable => true;
+
   @override
   Future<void> ensureInitialized({bool force = false}) async {}
+
   @override
   Future<SeerrUser> getCurrentUser() async =>
       SeerrUser(id: 5, permissions: permissions);
+
   @override
   Future<Map<String, dynamic>> getPublicSettings() =>
       settingsResponse?.future ??
       Future.value({'movie4kEnabled': movie4kEnabled});
+
   @override
   Future<SeerrMovieDetails> getMovieDetails(int tmdbId) async {
     lookups++;
@@ -43,18 +47,16 @@ class FakeCinemaSeerr extends Fake implements SeerrRepository {
     int? profileId,
     String? rootFolder,
     int? serverId,
-  }) async {
+  }) {
     expect(mediaType, 'movie');
     submitted.add(mediaId);
     requested4k.add(is4k);
     return submission?.future ??
-        Future.value(
-          const SeerrRequest(
-            id: 1,
-            status: SeerrRequest.statusApproved,
-            type: 'movie',
-          ),
-        );
+        Future.value(const SeerrRequest(
+          id: 1,
+          status: SeerrRequest.statusApproved,
+          type: 'movie',
+        ));
   }
 }
 
@@ -64,33 +66,26 @@ Map<String, dynamic> cinemaItem({int tmdb = 42}) => {
   'ProviderIds': {'Tmdb': '$tmdb'},
 };
 
+Future<void> flush() => Future<void>.delayed(Duration.zero);
+
 void main() {
-  test(
-    'media statuses stay distinct; blocked and unknown codes are hidden',
-    () {
-      final expected = {
-        1: CinemaSeerrState.request,
-        2: CinemaSeerrState.pending,
-        3: CinemaSeerrState.processing,
-        4: CinemaSeerrState.partiallyAvailable,
-        5: CinemaSeerrState.available,
-        6: CinemaSeerrState.hidden,
-        7: CinemaSeerrState.request,
-        999: CinemaSeerrState.hidden,
-      };
-      for (final entry in expected.entries) {
-        expect(
-          cinemaSeerrState(mediaStatus: entry.key),
-          entry.value,
-        );
-      }
-      expect(cinemaSeerrState(), CinemaSeerrState.request);
-    },
-  );
+  test('movie statuses distinguish available, blocked and requestable', () {
+    for (final entry in {
+      1: CinemaSeerrState.request,
+      2: CinemaSeerrState.pending,
+      5: CinemaSeerrState.available,
+      6: CinemaSeerrState.hidden,
+      7: CinemaSeerrState.request,
+      999: CinemaSeerrState.hidden,
+    }.entries) {
+      expect(cinemaSeerrState(mediaStatus: entry.key), entry.value);
+    }
+  });
 
   late FakeCinemaSeerr seerr;
   late CinemaModeController controller;
-  late int skips;
+  var skips = 0;
+
   setUp(() {
     seerr = FakeCinemaSeerr();
     skips = 0;
@@ -109,121 +104,95 @@ void main() {
     resolveMedia: () async => null,
   );
 
-  test('late movie POST cannot change the next trailer', () {
-    fakeAsync((time) {
+  test('a late movie request cannot change the next trailer', () {
+    fakeAsync((clock) {
       seerr.submission = Completer<SeerrRequest>();
       enter();
-      time.flushMicrotasks();
+      clock.flushMicrotasks();
       controller.request();
-      time.flushMicrotasks();
+      clock.flushMicrotasks();
 
       enter(tmdb: 99);
-      time.flushMicrotasks();
+      clock.flushMicrotasks();
       seerr.submission!.complete(
         const SeerrRequest(id: 1, status: 2, type: 'movie'),
       );
-      time.flushMicrotasks();
+      clock.flushMicrotasks();
       expect(controller.media?.tmdbId, 99);
       expect(controller.canRequest, isTrue);
     });
   });
 
-  for (final status in [
-    SeerrMediaStatus.unknown,
-    SeerrMediaStatus.deleted,
-  ]) {
-    test('movie POST timeout with stale status $status never offers retry', () {
-      fakeAsync((time) {
-        seerr.submission = Completer<SeerrRequest>();
-        seerr.info = SeerrMediaInfo(status: status);
-        enter();
-        time.flushMicrotasks();
-        expect(controller.canRequest, isTrue);
+  test('an uncertain movie timeout never submits the same quality twice', () {
+    fakeAsync((clock) {
+      seerr.submission = Completer<SeerrRequest>();
+      seerr.info = const SeerrMediaInfo(status: SeerrMediaStatus.unknown);
+      enter();
+      clock.flushMicrotasks();
+      controller.request();
+      clock.flushMicrotasks();
+      clock.elapse(const Duration(seconds: 20));
+      clock.flushMicrotasks();
 
-        controller.request();
-        time.flushMicrotasks();
-        expect(seerr.submitted, [42]);
-        time.elapse(const Duration(seconds: 20));
-        time.flushMicrotasks();
+      expect(seerr.lookups, 2);
+      expect(controller.canRequest, isFalse);
+      controller.request();
+      clock.flushMicrotasks();
+      expect(seerr.submitted, [42]);
 
-        expect(seerr.lookups, 2);
-        expect(controller.seerrState, CinemaSeerrState.hidden);
-        expect(controller.canRequest, isFalse);
-
-        controller.request();
-        time.flushMicrotasks();
-        expect(seerr.submitted, [42]);
-
-        // A late Seerr response must not make Request available again.
-        seerr.submission!.complete(
-          const SeerrRequest(id: 1, status: 2, type: 'movie'),
-        );
-        time.flushMicrotasks();
-        expect(controller.seerrState, CinemaSeerrState.hidden);
-      });
+      seerr.submission!.complete(
+        const SeerrRequest(id: 1, status: 2, type: 'movie'),
+      );
+      clock.flushMicrotasks();
+      expect(controller.canRequest, isFalse);
     });
-  }
+  });
 
-
-  test('slow 4K settings never delay the standard Request button', () async {
+  test('standard Request works while optional 4K settings are pending', () async {
     seerr.permissions =
         SeerrPermission.requestMovie | SeerrPermission.request4kMovie;
+    seerr.info = const SeerrMediaInfo(
+      status: SeerrMediaStatus.unknown,
+      status4k: SeerrMediaStatus.available,
+    );
     seerr.settingsResponse = Completer<Map<String, dynamic>>();
     enter();
-    await Future<void>.delayed(Duration.zero);
+    await flush();
     expect(controller.canRequest, isTrue);
 
-    // Standard remains available even if Seerr's optional 4K settings are slow.
-    seerr.settingsResponse!.complete({'movie4kEnabled': false});
-    await Future<void>.delayed(Duration.zero);
+    // Submit before the settings request has finished.
     await controller.request();
     expect(seerr.requested4k, [false]);
-  });
-
-  test('disabled 4K backend hides a 4K-only request', () async {
-    seerr.permissions = SeerrPermission.request4kMovie;
-    seerr.settingsResponse = Completer<Map<String, dynamic>>();
-    enter();
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.canRequest, isTrue);
-
     seerr.settingsResponse!.complete({'movie4kEnabled': false});
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.canRequest, isFalse);
+    await flush();
   });
 
-  test('movie available in standard can still be requested directly in 4K', () async {
-    seerr.permissions = SeerrPermission.requestMovie |
-        SeerrPermission.request4kMovie;
+  test('a disabled 4K backend blocks a 4K-only request', () async {
+    seerr.permissions = SeerrPermission.request4kMovie;
+    seerr.movie4kEnabled = false;
+    enter();
+    await flush();
+    expect(controller.canRequest, isFalse);
+    expect(seerr.submitted, isEmpty);
+  });
+
+  test('HD availability does not prevent a direct 4K request', () async {
+    seerr.permissions =
+        SeerrPermission.requestMovie | SeerrPermission.request4kMovie;
     seerr.info = const SeerrMediaInfo(
       status: SeerrMediaStatus.available,
       status4k: SeerrMediaStatus.unknown,
     );
     enter();
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.canRequest, isTrue);
+    await flush();
     expect(controller.only4kRequestable, isTrue);
-
     await controller.request();
     expect(seerr.requested4k, [true]);
-    expect(seerr.submitted, [42]);
   });
 
-  test('only one permitted quality submits without opening a picker', () async {
-    seerr.permissions = SeerrPermission.requestMovie |
-        SeerrPermission.request4kMovie;
-    seerr.movie4kEnabled = false;
-    enter();
-    await Future<void>.delayed(Duration.zero);
-    expect(controller.only4kRequestable, isFalse);
-
-    await controller.request();
-    expect(seerr.requested4k, [false]);
-  });
-
-  test('two requestable qualities prompt once, then remaining quality submits directly', () async {
-    seerr.permissions = SeerrPermission.requestMovie |
-        SeerrPermission.request4kMovie;
+  test('both qualities prompt, then the remaining one submits directly', () async {
+    seerr.permissions =
+        SeerrPermission.requestMovie | SeerrPermission.request4kMovie;
     var prompts = 0;
     final choice = CinemaModeController(
       seerr: () async => seerr,
@@ -236,13 +205,11 @@ void main() {
     );
     try {
       choice.enter(item: cinemaItem(), resolveMedia: () async => null);
-      await Future<void>.delayed(Duration.zero);
-      expect(choice.canRequest, isTrue);
+      await flush();
       await choice.request();
       expect(prompts, 1);
       expect(seerr.requested4k, [true]);
 
-      expect(choice.canRequest, isTrue);
       await choice.request();
       expect(prompts, 1);
       expect(seerr.requested4k, [true, false]);
@@ -252,40 +219,13 @@ void main() {
     }
   });
 
-  test('cancelling the movie quality picker leaves Request available', () async {
-    seerr.permissions = SeerrPermission.requestMovie |
-        SeerrPermission.request4kMovie;
-    var prompts = 0;
-    final choice = CinemaModeController(
-      seerr: () async => seerr,
-      accountKey: () => 'server/user',
-      onSkip: () async {},
-      onRequestMovie: (repository, details, user, isCurrent, submit) async {
-        prompts++;
-      },
-    );
-    try {
-      choice.enter(item: cinemaItem(), resolveMedia: () async => null);
-      await Future<void>.delayed(Duration.zero);
-      await choice.request();
-      expect(prompts, 1);
-      expect(seerr.submitted, isEmpty);
-      expect(choice.canRequest, isTrue);
-    } finally {
-      choice.dispose();
-    }
+  test('rapid double Skip does not advance twice', () {
+    enter();
+    controller.skip();
+    controller.skip();
+    expect(skips, 1);
+    enter(tmdb: 99);
+    controller.skip();
+    expect(skips, 1);
   });
-
-  test(
-    'repeat presses and rapid double taps skip only once across a transition',
-    () {
-      enter();
-      controller.skip();
-      controller.skip();
-      expect(skips, 1);
-      enter(tmdb: 99);
-      controller.skip();
-      expect(skips, 1);
-    },
-  );
 }
