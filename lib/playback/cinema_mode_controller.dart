@@ -152,9 +152,10 @@ Future<({Set<int> seasons, SeerrTvDetails? confirmed})?> submitCinemaTvRequest({
   final requestable = cinemaRequestableSeasons(details)
       .difference(excludedSeasons);
   final choice = cinemaTvRequestSelection(selection, requestable, quota);
+  // A stale or invalid choice is safe to reject: no POST has started.
   // Until Seerr reflects a recent request, "all" could submit it again.
   if (choice == null || (choice.allSeasons && excludedSeasons.isNotEmpty)) {
-    throw StateError('Cinema series selection is no longer requestable');
+    return null;
   }
   final expected = choice.allSeasons ? requestable : choice.seasons!.toSet();
   try {
