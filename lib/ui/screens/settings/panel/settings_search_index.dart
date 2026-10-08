@@ -1630,6 +1630,12 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
       subtitle: l10n.settingsCinemaModeSubtitle,
       keywords: ['trailers before movie'],
     ),
+    automation.leaf(
+      'pref_cinema_mode_skip_min_duration_seconds',
+      l10n.cinemaMinimumIntroLength,
+      subtitle: l10n.cinemaMinimumIntroLengthDescription,
+      keywords: ['cinema trailer skip minimum duration'],
+    ),
     for (final type in configurableMediaSegmentTypes)
       automation.leaf(
         'media_segment_actions_${type.name}',
