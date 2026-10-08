@@ -1325,18 +1325,37 @@ class PlaybackManager implements AudioOwnable {
       });
       return;
     }
+    final backendDuration = _backend?.duration ?? Duration.zero;
+    final backendPosition = _backend?.position ?? Duration.zero;
+    // A genuine short preroll can finish during the five-second startup
+    // guard. Require the backend's own duration and playhead to agree it
+    // reached the end; an early/stale completion still gets ignored.
+    final shortPrerollAtEnd =
+        _isPreroll(completedItem) &&
+        backendDuration > Duration.zero &&
+        backendDuration <= const Duration(seconds: 5) &&
+        backendPosition > Duration.zero &&
+        (backendDuration - backendPosition).abs() <=
+            const Duration(milliseconds: 500);
     if (_playbackStartTime != null &&
-        clock().difference(_playbackStartTime!).inSeconds < 5) {
+        clock().difference(_playbackStartTime!).inSeconds < 5 &&
+        !shortPrerollAtEnd) {
       _logCompletion('too-soon');
       return;
     }
-    final pos = _lastKnownPosition > state.position
-        ? _lastKnownPosition
-        : state.position;
-    final backendDuration = _backend?.duration ?? Duration.zero;
-    final effectiveDuration = _itemKnownDuration > Duration.zero
-        ? _itemKnownDuration
-        : (backendDuration > Duration.zero ? backendDuration : state.duration);
+    // The last progress tick and library runtime may lag a completed clip.
+    final pos = shortPrerollAtEnd
+        ? backendPosition
+        : (_lastKnownPosition > state.position
+            ? _lastKnownPosition
+            : state.position);
+    final effectiveDuration = shortPrerollAtEnd
+        ? backendDuration
+        : (_itemKnownDuration > Duration.zero
+            ? _itemKnownDuration
+            : (backendDuration > Duration.zero
+                ? backendDuration
+                : state.duration));
 
     if (effectiveDuration <= Duration.zero) {
       _logCompletion('no-duration', effectiveDuration: effectiveDuration);
