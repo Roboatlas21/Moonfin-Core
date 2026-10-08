@@ -231,12 +231,22 @@ void main() {
     await flush();
   });
 
-  test('a disabled 4K backend blocks a 4K-only request', () async {
+  test('disabling 4K moves Request focus back to Skip', () async {
     seerr.permissions = SeerrPermission.request4kMovie;
-    seerr.movie4kEnabled = false;
+    seerr.settingsResponse = Completer<Map<String, dynamic>>();
     enter();
     await flush();
+    expect(controller.canRequest, isTrue);
+    controller.moveLeft();
+    expect(controller.focusedAction, CinemaAction.request);
+
+    seerr.settingsResponse!.complete({'movie4kEnabled': false});
+    await flush();
     expect(controller.canRequest, isFalse);
+    expect(controller.focusedAction, CinemaAction.skip);
+
+    controller.activate();
+    expect(skips, 1);
     expect(seerr.submitted, isEmpty);
   });
 

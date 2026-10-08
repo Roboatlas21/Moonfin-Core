@@ -90,15 +90,12 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       )?['__moonfinIsPreroll'] ==
       true;
 
-  Object _cinemaUserKey() {
-    final session = GetIt.instance<SessionRepository>();
-    return (session.activeServerId, session.activeUserId);
-  }
-
   Object _cinemaAccountKey() {
+    final session = GetIt.instance<SessionRepository>();
     final client = _clientForQueueItem(_manager?.queueService.currentItem);
     return (
-      _cinemaUserKey(),
+      session.activeServerId,
+      session.activeUserId,
       client?.baseUrl,
       client?.userId,
       client?.accessToken,

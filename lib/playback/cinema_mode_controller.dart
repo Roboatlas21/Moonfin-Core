@@ -11,12 +11,6 @@ import '../data/viewmodels/seerr_media_detail_view_model.dart';
 
 enum CinemaAction { skip, request }
 
-bool _activeRequest(SeerrRequest request, String type, bool is4k) =>
-    request.is4k == is4k &&
-    request.type == type &&
-    (request.status == SeerrRequest.statusPending ||
-        request.status == SeerrRequest.statusApproved);
-
 enum CinemaSeerrState {
   hidden,
   request,
@@ -37,8 +31,6 @@ typedef CinemaTvSubmit = Future<SeerrTvDetails?> Function(
 /// Seerr reports availability and requests separately for standard and 4K.
 CinemaSeerrState cinemaSeerrState({
   int? mediaStatus,
-  List<SeerrRequest>? requests,
-  bool is4k = false,
   bool acknowledged = false,
 }) => switch (mediaStatus) {
   SeerrMediaStatus.blocklisted => CinemaSeerrState.hidden,
@@ -46,9 +38,7 @@ CinemaSeerrState cinemaSeerrState({
   SeerrMediaStatus.processing => CinemaSeerrState.processing,
   SeerrMediaStatus.partiallyAvailable => CinemaSeerrState.partiallyAvailable,
   SeerrMediaStatus.available => CinemaSeerrState.available,
-  _ when acknowledged ||
-      (requests?.any((r) => _activeRequest(r, 'movie', is4k)) ?? false) =>
-    CinemaSeerrState.requested,
+  _ when acknowledged => CinemaSeerrState.requested,
   null || SeerrMediaStatus.unknown || SeerrMediaStatus.deleted =>
     CinemaSeerrState.request,
   _ => CinemaSeerrState.hidden,
@@ -136,7 +126,6 @@ CinemaSeerrState cinemaTvSeerrState(
   }
   final state = cinemaSeerrState(
     mediaStatus: status,
-    is4k: is4k,
     acknowledged: acknowledged,
   );
   if (state != CinemaSeerrState.request) return state;
@@ -418,6 +407,9 @@ class CinemaModeController extends ChangeNotifier {
         isSeries ? 'series4kEnabled' : 'movie4kEnabled',
         fallback: true,
       );
+      if (focusedAction == CinemaAction.request && !canRequest) {
+        focusedAction = CinemaAction.skip;
+      }
       notifyListeners();
     } catch (_) {
       // Older Seerr servers may not expose these settings.
@@ -469,9 +461,8 @@ class CinemaModeController extends ChangeNotifier {
     final quality = _quality(is4k);
     return cinemaSeerrState(
       mediaStatus: quality.status == 0 ? null : quality.status,
-      requests: quality.requests,
-      is4k: is4k,
-      acknowledged: _submittedMovieQualities.contains(is4k),
+      acknowledged: _submittedMovieQualities.contains(is4k) ||
+          quality.activeRequests.any((request) => request.type == 'movie'),
     );
   }
 
@@ -545,7 +536,7 @@ class CinemaModeController extends ChangeNotifier {
       reveal();
       return;
     }
-    if (focusedAction == CinemaAction.request) {
+    if (focusedAction == CinemaAction.request && canRequest) {
       unawaited(request());
     } else {
       skip();
@@ -621,8 +612,9 @@ class CinemaModeController extends ChangeNotifier {
           final quality = _quality(is4k);
           final recovered = cinemaSeerrState(
             mediaStatus: quality.status == 0 ? null : quality.status,
-            requests: quality.requests,
-            is4k: is4k,
+            acknowledged: quality.activeRequests.any(
+              (request) => request.type == 'movie',
+            ),
           );
           _requestFailed = !_requestableStandard && !_requestable4k &&
               (recovered == CinemaSeerrState.request ||
