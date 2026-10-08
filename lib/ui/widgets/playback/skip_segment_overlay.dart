@@ -162,13 +162,29 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
     // TV dismisses with the back button, so this is for touch and desktop.
     final bool showDismissButton = !PlatformDetection.isTV;
 
+    // Cinema supplies its own focus color. Ordinary TV Skip follows the
+    // actual focus node as the viewer moves to and from the seekbar.
     final outlineColor = widget.outlineColor ??
-        AppColorScheme.accent.withValues(alpha: widget.isFocused ? 1 : 0.4);
+        (PlatformDetection.isTV && widget.focusNode != null
+            ? (widget.focusNode!.hasFocus
+                ? AppColorScheme.accent
+                : Colors.white)
+            : AppColorScheme.accent.withValues(
+                alpha: widget.isFocused ? 1 : 0.4,
+              ));
 
     final button = Material(
       color: Colors.transparent,
       child: Focus(
         focusNode: widget.focusNode,
+        onFocusChange: (_) {
+          if (mounted &&
+              widget.outlineColor == null &&
+              PlatformDetection.isTV &&
+              widget.focusNode != null) {
+            setState(() {});
+          }
+        },
         onKeyEvent: (_, event) {
           if (widget.focusNode == null || !widget.handleActivationKeys) {
             return KeyEventResult.ignored;

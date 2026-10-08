@@ -456,9 +456,9 @@ class CinemaModeController extends ChangeNotifier {
       seerrState = CinemaSeerrState.hidden;
       try {
         if (!await _refreshStatus(repository, ticket, id)) return;
-        // Unknown/deleted after a timeout does not prove rejection.
-        if (error is TimeoutException &&
-            seerrState == CinemaSeerrState.request) {
+        // A failed POST may have reached Seerr even without a timeout.
+        // An unchanged status is not proof that it is safe to submit again.
+        if (seerrState == CinemaSeerrState.request) {
           seerrState = CinemaSeerrState.hidden;
         }
       } catch (_) {
@@ -483,6 +483,7 @@ class CinemaModeController extends ChangeNotifier {
     final details = _tvDetails;
     final user = _user;
     if (details == null || user == null || onRequestSeries == null) return;
+    var acknowledged = false;
     _setSending(true);
     try {
       final seasons = cinemaRequestableSeasons(details);
@@ -493,21 +494,33 @@ class CinemaModeController extends ChangeNotifier {
         user,
         season,
         () => _current(ticket) && !_skipping,
-        (selection, quota, isAllowed) => submitCinemaTvRequest(
-          repository: repository,
-          details: details,
-          selection: selection,
-          quota: quota,
-          isAllowed: isAllowed,
-        ),
+        (selection, quota, isAllowed) async {
+          final confirmed = await submitCinemaTvRequest(
+            repository: repository,
+            details: details,
+            selection: selection,
+            quota: quota,
+            isAllowed: isAllowed,
+          );
+          if (isAllowed()) acknowledged = true;
+          return confirmed;
+        },
       );
       if (!_current(ticket)) return;
       // Reuse confirmed seasons or refresh after submit/cancel. A failed
       // status refresh must not be reported as a failed request.
-      seerrState = CinemaSeerrState.hidden;
+      seerrState = acknowledged
+          ? CinemaSeerrState.requested
+          : CinemaSeerrState.hidden;
       try {
         await _refreshStatus(repository, ticket, id, confirmedTv: confirmed);
       } catch (_) {}
+      // A stale Seerr response must not offer another request immediately.
+      if (_current(ticket) &&
+          acknowledged &&
+          seerrState == CinemaSeerrState.request) {
+        seerrState = CinemaSeerrState.requested;
+      }
     } catch (error) {
       if (!_current(ticket)) return;
       seerrState = CinemaSeerrState.hidden;
