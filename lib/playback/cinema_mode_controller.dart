@@ -293,8 +293,7 @@ class CinemaModeController extends ChangeNotifier {
     Future<CinemaMedia?> Function() resolveMedia,
   ) async {
     try {
-      final resolved =
-          media ?? await resolveMedia().timeout(const Duration(seconds: 10));
+      final resolved = media ?? await resolveMedia();
       if (!_current(ticket) || resolved == null || resolved.tmdbId <= 0) return;
       final id = resolved.tmdbId;
       media = resolved;
