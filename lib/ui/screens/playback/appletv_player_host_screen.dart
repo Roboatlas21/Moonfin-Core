@@ -222,7 +222,6 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         'title': l10n.requestSeriesOrMovie(l10n.series),
         'seasons': seasons,
         'labels': [for (final number in seasons) l10n.seasonChip(number)],
-        'selected': <int>[],
         'allLabel': l10n.allSeasons,
         'allEnabled': excludedSeasons.isEmpty,
         'submitLabel': l10n.submitRequest,

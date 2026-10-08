@@ -4203,7 +4203,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
         requestId = Self.intValue(options["requestId"]) ?? -1
         seasons = Self.intArray(options["seasons"])
         labels = options["labels"] as? [String] ?? []
-        selected = Set(Self.intArray(options["selected"])).intersection(seasons)
+        selected = []
         allLabel = options["allLabel"] as? String ?? ""
         allEnabled = options["allEnabled"] as? Bool ?? true
         submitLabel = options["submitLabel"] as? String ?? ""

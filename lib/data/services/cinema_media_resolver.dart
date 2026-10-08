@@ -59,12 +59,11 @@ abstract final class CinemaMediaResolver {
     required MediaServerClient client,
     required String itemId,
     required Map<String, dynamic> item,
-    CinemaMediaType? expectedMediaType,
   }) async {
     if (!_supported(item)) return null;
     final direct = directMedia(item);
     if (direct != null) return direct;
-    final type = expectedMediaType ?? _featureType(item);
+    final type = _featureType(item);
     try {
       final media = await client
           .resolveCinemaMedia(itemId, expectedMediaType: type)
