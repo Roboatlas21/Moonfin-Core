@@ -38,7 +38,6 @@ class SkipSegmentOverlay extends StatefulWidget {
   final bool isFocused;
   final bool handleActivationKeys;
   final Color? outlineColor;
-  final Color? countdownColor;
   final Color? focusRingColor;
   final bool inline;
   final double bottomInset;
@@ -58,7 +57,6 @@ class SkipSegmentOverlay extends StatefulWidget {
     this.isFocused = true,
     this.handleActivationKeys = true,
     this.outlineColor,
-    this.countdownColor,
     this.focusRingColor,
     this.inline = false,
     this.bottomInset = _fallbackBottomInset,
@@ -260,7 +258,6 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
                         const SizedBox(width: 13),
                         _CountdownRing(
                           progress: progress,
-                          color: widget.countdownColor,
                           center: numberInRing
                               ? Text(
                                   '$remainingSec',
@@ -305,11 +302,10 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
 }
 
 class _CountdownRing extends StatelessWidget {
-  const _CountdownRing({required this.progress, this.center, this.color});
+  const _CountdownRing({required this.progress, this.center});
 
   final double progress;
   final Widget? center;
-  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -324,9 +320,7 @@ class _CountdownRing extends StatelessWidget {
               value: progress.clamp(0.0, 1.0),
               strokeWidth: 3,
               backgroundColor: AppColorScheme.onSurface.withValues(alpha: 0.16),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                color ?? AppColorScheme.accent,
-              ),
+              valueColor: AlwaysStoppedAnimation<Color>(AppColorScheme.onSurface),
             ),
           ),
           ?center,

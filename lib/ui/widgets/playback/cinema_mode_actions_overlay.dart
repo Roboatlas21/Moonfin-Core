@@ -105,7 +105,6 @@ class CinemaModeActionsOverlay extends StatelessWidget {
               outlineColor: isTv
                   ? AppColorScheme.onSurface
                   : AppColorScheme.accent,
-              countdownColor: AppColorScheme.onSurface,
               focusRingColor: isTv ? AppColorScheme.accent : null,
               onSkip: controller.skip,
               onDismiss: onDismiss,
