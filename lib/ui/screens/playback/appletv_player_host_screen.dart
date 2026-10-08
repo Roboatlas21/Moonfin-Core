@@ -197,6 +197,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     SeerrTvDetails details,
     SeerrUser user,
     int? season,
+    Set<int> excludedSeasons,
     bool Function() isCurrent,
     CinemaTvSubmit submit,
   ) async {
@@ -213,7 +214,8 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       backend.dismissCinemaRequestOptions(requestId: requestId),
     );
 
-    final seasons = cinemaRequestableSeasons(details).toList()..sort();
+    final seasons = cinemaRequestableSeasons(details)
+        .difference(excludedSeasons).toList()..sort();
     final l10n = AppLocalizations.of(context);
     try {
       final pickerResult = backend.showCinemaRequestOptions({
@@ -223,6 +225,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         'labels': [for (final number in seasons) l10n.seasonChip(number)],
         'selected': [if (season != null) season],
         'allLabel': l10n.allSeasons,
+        'allEnabled': excludedSeasons.isEmpty,
         'submitLabel': l10n.submitRequest,
         'cancelLabel': l10n.cancel,
         'quotaBlockedLabel': l10n.requestErrorQuota,

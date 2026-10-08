@@ -40,6 +40,7 @@ Future<void> showSeerrRequestDialog({
   bool isContinuing = false,
   bool selectAllSeasons = true,
   bool showAdvancedOptions = true,
+  Set<int> cinemaExcludedSeasons = const {},
   SeerrCinemaSubmit? cinemaSubmit,
   ValueChanged<VoidCallback>? onDismissReady,
 }) async {
@@ -74,6 +75,7 @@ Future<void> showSeerrRequestDialog({
         isContinuing: isContinuing,
         selectAllSeasons: selectAllSeasons,
         showAdvancedOptions: showAdvancedOptions,
+        cinemaExcludedSeasons: cinemaExcludedSeasons,
         cinemaSubmit: cinemaSubmit,
       );
     },
@@ -92,6 +94,7 @@ class SeerrRequestDialog extends StatefulWidget {
   final bool isContinuing;
   final bool selectAllSeasons;
   final bool showAdvancedOptions;
+  final Set<int> cinemaExcludedSeasons;
   final SeerrCinemaSubmit? cinemaSubmit;
 
   /// Opens with just this season ticked, for a viewer who asked for one rather
@@ -110,6 +113,7 @@ class SeerrRequestDialog extends StatefulWidget {
     this.isContinuing = false,
     this.selectAllSeasons = true,
     this.showAdvancedOptions = true,
+    this.cinemaExcludedSeasons = const {},
     this.cinemaSubmit,
   });
 
@@ -182,15 +186,17 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     widget.numberOfSeasons,
   );
 
-  Set<int> get _requestableSeasons => _seasonNumbers.toSet().difference(
-    _quality.unavailableOrRequestedSeasons,
-  );
+  Set<int> get _requestableSeasons => _seasonNumbers.toSet().difference({
+    ..._quality.unavailableOrRequestedSeasons,
+    ...widget.cinemaExcludedSeasons,
+  });
 
   bool get _hasSeasonSelection =>
       widget.cinemaSubmit == null ||
       !widget.isTv ||
       (_allSeasons
-          ? _requestableSeasons.isNotEmpty
+          ? widget.cinemaExcludedSeasons.isEmpty &&
+              _requestableSeasons.isNotEmpty
           : _selectedSeasons.isNotEmpty &&
               _requestableSeasons.containsAll(_selectedSeasons));
 
@@ -374,7 +380,10 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
     final l10n = AppLocalizations.of(context);
     final seasonNumbers = _seasonNumbers;
     final quality = _quality;
-    final unselectable = quality.unavailableOrRequestedSeasons;
+    final unselectable = {
+      ...quality.unavailableOrRequestedSeasons,
+      ...widget.cinemaExcludedSeasons,
+    };
     final available = quality.availableSeasons;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -384,10 +393,12 @@ class _SeerrRequestDialogState extends State<SeerrRequestDialog> {
           value: _allSeasons,
           checkbox: true,
           autofocus: autofocusAll,
-          onChanged: (v) => setState(() {
-            _allSeasons = v;
-            if (_allSeasons) _selectedSeasons.clear();
-          }),
+          onChanged: widget.cinemaExcludedSeasons.isNotEmpty
+              ? null
+              : (v) => setState(() {
+                  _allSeasons = v;
+                  if (_allSeasons) _selectedSeasons.clear();
+                }),
         ),
         if (!_allSeasons && seasonNumbers.isNotEmpty)
           Padding(

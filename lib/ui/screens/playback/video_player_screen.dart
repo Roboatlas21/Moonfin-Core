@@ -546,6 +546,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     SeerrTvDetails details,
     SeerrUser user,
     int? season,
+    Set<int> excludedSeasons,
     bool Function() isCurrent,
     CinemaTvSubmit submit,
   ) async {
@@ -572,6 +573,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         is4k: false,
         season: season,
         isContinuing: cinemaSeriesIsContinuing(details),
+        cinemaExcludedSeasons: excludedSeasons,
         selectAllSeasons: false,
         showAdvancedOptions: false,
         onDismissReady: (dismiss) => session.dismissDialog = dismiss,

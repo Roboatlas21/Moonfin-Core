@@ -4203,6 +4203,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
     private let seasons: [Int]
     private let labels: [String]
     private let allLabel: String
+    private let allEnabled: Bool
     private let submitLabel: String
     private let cancelLabel: String
     private let quotaBlockedLabel: String
@@ -4222,6 +4223,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
         labels = options["labels"] as? [String] ?? []
         selected = Set(Self.intArray(options["selected"])).intersection(seasons)
         allLabel = options["allLabel"] as? String ?? ""
+        allEnabled = options["allEnabled"] as? Bool ?? true
         submitLabel = options["submitLabel"] as? String ?? ""
         cancelLabel = options["cancelLabel"] as? String ?? ""
         quotaBlockedLabel = options["quotaBlockedLabel"] as? String ?? ""
@@ -4286,7 +4288,8 @@ private final class CinemaRequestPicker: RemotePlayerList {
             content.text = row == submitRow ? submitLabel : cancelLabel
         }
 
-        content.textProperties.color = row == submitRow && !canSubmit ? .gray : .white
+        content.textProperties.color = (row == 0 && !allEnabled) ||
+            (row == submitRow && !canSubmit) ? .gray : .white
         cell.contentConfiguration = content
         cell.accessoryType = checked ? .checkmark : .none
         return cell
@@ -4300,6 +4303,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
             return
         }
         if row == 0 {
+            guard allEnabled else { return }
             allSeasons.toggle()
             selected.removeAll()
             tableView.reloadData()

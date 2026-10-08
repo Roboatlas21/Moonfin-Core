@@ -103,7 +103,10 @@ bool cinemaSeriesIsContinuing(SeerrTvDetails details) {
   return status.isNotEmpty && status != 'ended' && status != 'canceled';
 }
 
-CinemaSeerrState cinemaTvSeerrState(SeerrTvDetails details) {
+CinemaSeerrState cinemaTvSeerrState(
+  SeerrTvDetails details, {
+  Set<int> excludedSeasons = const {},
+}) {
   final status = details.mediaInfo?.status;
   if (status == SeerrMediaStatus.blocklisted ||
       (status != null && !{0, 1, 2, 3, 4, 5, 7}.contains(status))) {
@@ -113,7 +116,9 @@ CinemaSeerrState cinemaTvSeerrState(SeerrTvDetails details) {
   // season to request. Keep completed shows and fully covered seasons as status.
   if ((status != SeerrMediaStatus.available ||
           cinemaSeriesIsContinuing(details)) &&
-      cinemaRequestableSeasons(details).isNotEmpty) {
+      cinemaRequestableSeasons(details)
+          .difference(excludedSeasons)
+          .isNotEmpty) {
     return CinemaSeerrState.request;
   }
   final state = cinemaSeerrState(
@@ -122,7 +127,10 @@ CinemaSeerrState cinemaTvSeerrState(SeerrTvDetails details) {
           (r) => _activeStandardRequest(r, 'tv'),
         ) ?? false,
   );
-  return state == CinemaSeerrState.request ? CinemaSeerrState.hidden : state;
+  if (state != CinemaSeerrState.request) return state;
+  return excludedSeasons.isNotEmpty
+      ? CinemaSeerrState.requested
+      : CinemaSeerrState.hidden;
 }
 
 /// Validate the choice and submit exactly once from either platform. Confirm
@@ -133,11 +141,14 @@ Future<SeerrTvDetails?> submitCinemaTvRequest({
   required Map<String, dynamic> selection,
   required SeerrQuotaDetail? quota,
   required bool Function() isAllowed,
+  Set<int> excludedSeasons = const {},
 }) async {
   if (!isAllowed()) return null;
-  final requestable = cinemaRequestableSeasons(details);
+  final requestable = cinemaRequestableSeasons(details)
+      .difference(excludedSeasons);
   final choice = cinemaTvRequestSelection(selection, requestable, quota);
-  if (choice == null) {
+  // Until Seerr reflects a recent request, "all" could submit it again.
+  if (choice == null || (choice.allSeasons && excludedSeasons.isNotEmpty)) {
     throw StateError('Cinema series selection is no longer requestable');
   }
   final expected = choice.allSeasons ? requestable : choice.seasons!.toSet();
@@ -198,12 +209,14 @@ class CinemaModeController extends ChangeNotifier {
     SeerrTvDetails details,
     SeerrUser user,
     int? season,
+    Set<int> excludedSeasons,
     bool Function() isCurrent,
     CinemaTvSubmit submit,
   )?
   onRequestSeries;
   SeerrTvDetails? _tvDetails;
   SeerrUser? _user;
+  final Set<int> _submittedTvSeasons = {};
   int _generation = 0;
   Object? _account;
   bool _active = false;
@@ -248,6 +261,7 @@ class CinemaModeController extends ChangeNotifier {
     media = item == null ? null : CinemaMediaResolver.directMedia(item);
     _tvDetails = null;
     _user = null;
+    _submittedTvSeasons.clear();
     seerrState = CinemaSeerrState.hidden;
     _requestRepository = null;
     focusedAction = CinemaAction.skip;
@@ -316,7 +330,10 @@ class CinemaModeController extends ChangeNotifier {
               .timeout(const Duration(seconds: 10));
       if (!_current(ticket) || tv.id != id) return false;
       _tvDetails = tv;
-      seerrState = cinemaTvSeerrState(tv);
+      seerrState = cinemaTvSeerrState(
+        tv,
+        excludedSeasons: _submittedTvSeasons,
+      );
     } else {
       final movie = await repository
           .getMovieDetails(id)
@@ -486,23 +503,34 @@ class CinemaModeController extends ChangeNotifier {
     var acknowledged = false;
     _setSending(true);
     try {
-      final seasons = cinemaRequestableSeasons(details);
-      final season = seasons.contains(media?.season) ? media?.season : null;
+      final requestable = cinemaRequestableSeasons(details);
+      // Seerr can briefly return stale details after acknowledging a POST.
+      final excluded = requestable.intersection(_submittedTvSeasons);
+      final remaining = requestable.difference(excluded);
+      final season = remaining.contains(media?.season) ? media?.season : null;
       final confirmed = await onRequestSeries!(
         repository,
         details,
         user,
         season,
+        excluded,
         () => _current(ticket) && !_skipping,
         (selection, quota, isAllowed) async {
+          final choice = cinemaTvRequestSelection(selection, remaining, quota);
           final confirmed = await submitCinemaTvRequest(
             repository: repository,
             details: details,
             selection: selection,
             quota: quota,
             isAllowed: isAllowed,
+            excludedSeasons: excluded,
           );
-          if (isAllowed()) acknowledged = true;
+          if (_current(ticket) && isAllowed() && choice != null) {
+            _submittedTvSeasons.addAll(
+              choice.allSeasons ? remaining : choice.seasons!.toSet(),
+            );
+            acknowledged = true;
+          }
           return confirmed;
         },
       );
@@ -510,17 +538,14 @@ class CinemaModeController extends ChangeNotifier {
       // Reuse confirmed seasons or refresh after submit/cancel. A failed
       // status refresh must not be reported as a failed request.
       seerrState = acknowledged
-          ? CinemaSeerrState.requested
+          ? cinemaTvSeerrState(
+              details,
+              excludedSeasons: _submittedTvSeasons,
+            )
           : CinemaSeerrState.hidden;
       try {
         await _refreshStatus(repository, ticket, id, confirmedTv: confirmed);
       } catch (_) {}
-      // A stale Seerr response must not offer another request immediately.
-      if (_current(ticket) &&
-          acknowledged &&
-          seerrState == CinemaSeerrState.request) {
-        seerrState = CinemaSeerrState.requested;
-      }
     } catch (error) {
       if (!_current(ticket)) return;
       seerrState = CinemaSeerrState.hidden;
