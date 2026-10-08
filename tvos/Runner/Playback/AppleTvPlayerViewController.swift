@@ -148,8 +148,6 @@ final class AppleTvPlayerViewController: UIViewController {
     private var cinemaGeneration = 0
     private let cinemaRequest = UILabel()
     private let cinemaRequestPanel = UIVisualEffectView(effect: UIBlurEffect(style: .dark))
-    private let cinemaSkipFocus = UIView()
-    private let cinemaRequestFocus = UIView()
     private var skipBottomConstraint: NSLayoutConstraint?
     private weak var cinemaPicker: CinemaRequestPicker?
     private var pendingCinemaError: String?
@@ -424,13 +422,11 @@ final class AppleTvPlayerViewController: UIViewController {
         scrubber.progressTintColor = glassActive ? glassRangeProgress : accent
         channelBadge.backgroundColor = accent
         upNextLabel.textColor = accent
-        skipSegmentButton.layer.borderColor = (cinemaActive ? UIColor.white : accent).cgColor
+        skipSegmentButton.layer.borderColor = accent.cgColor
         skipSegmentIcon.tintColor = .white
         skipSegmentRingIcon.tintColor = .white
         skipSegmentRing.strokeColor = UIColor.white.cgColor
-        cinemaRequestPanel.layer.borderColor = UIColor.white.cgColor
-        cinemaSkipFocus.layer.borderColor = accent.cgColor
-        cinemaRequestFocus.layer.borderColor = accent.cgColor
+        cinemaRequestPanel.layer.borderColor = accent.cgColor
         nextUpPlayButton.backgroundColor = accent
     }
 
@@ -722,24 +718,6 @@ final class AppleTvPlayerViewController: UIViewController {
             cinemaRequest.topAnchor.constraint(equalTo: cinemaRequestPanel.contentView.topAnchor, constant: 32),
             cinemaRequest.bottomAnchor.constraint(equalTo: cinemaRequestPanel.contentView.bottomAnchor, constant: -32),
         ])
-        // Like Flutter's focus decoration: blue outer border, white inner capsule.
-        for (ring, capsule) in [
-            (cinemaSkipFocus, skipSegmentButton),
-            (cinemaRequestFocus, cinemaRequestPanel as UIView),
-        ] {
-            ring.translatesAutoresizingMaskIntoConstraints = false
-            ring.isUserInteractionEnabled = false
-            ring.layer.borderWidth = 4
-            ring.layer.cornerRadius = 63
-            ring.isHidden = true
-            view.insertSubview(ring, belowSubview: capsule)
-            NSLayoutConstraint.activate([
-                ring.leadingAnchor.constraint(equalTo: capsule.leadingAnchor, constant: -7),
-                ring.trailingAnchor.constraint(equalTo: capsule.trailingAnchor, constant: 7),
-                ring.topAnchor.constraint(equalTo: capsule.topAnchor, constant: -7),
-                ring.bottomAnchor.constraint(equalTo: capsule.bottomAnchor, constant: 7),
-            ])
-        }
     }
 
     func applyCinemaActions(_ args: [String: Any]) {
@@ -770,10 +748,11 @@ final class AppleTvPlayerViewController: UIViewController {
             }
         }
         restyleForTheme()
+        // One blue border per button; a slightly thicker border shows remote focus.
         let requestFocused = cinemaVisible && !cinemaRequestPanel.isHidden &&
             (args["requestFocused"] as? Bool ?? false)
-        cinemaRequestFocus.isHidden = !requestFocused
-        cinemaSkipFocus.isHidden = !cinemaVisible || requestFocused
+        cinemaRequestPanel.layer.borderWidth = requestFocused ? 6 : 4
+        skipSegmentButton.layer.borderWidth = cinemaVisible && !requestFocused ? 6 : 4
     }
 
     func presentCinemaRequestOptions(
