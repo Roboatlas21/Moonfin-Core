@@ -1630,6 +1630,18 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
       subtitle: l10n.settingsCinemaModeSubtitle,
       keywords: ['trailers before movie'],
     ),
+    automation.leaf(
+      'pref_cinema_mode_skip_min_duration_seconds',
+      l10n.cinemaMinimumIntroLength,
+      subtitle: l10n.cinemaMinimumIntroLengthDescription,
+      keywords: ['cinema trailer preroll minimum clip length skip request'],
+    ),
+    automation.leaf(
+      'pref_cinema_mode_skip_auto_hide',
+      l10n.cinemaAutoHideButtons,
+      subtitle: l10n.cinemaAutoHideButtonsDescription,
+      keywords: ['cinema trailer preroll auto hide skip request buttons'],
+    ),
     for (final type in configurableMediaSegmentTypes)
       automation.leaf(
         'media_segment_actions_${type.name}',
