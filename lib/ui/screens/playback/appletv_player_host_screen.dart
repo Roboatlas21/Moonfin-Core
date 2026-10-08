@@ -14,6 +14,7 @@ import '../../../data/repositories/seerr_repository.dart';
 import '../../../data/services/cinema_media_resolver.dart';
 import '../../../data/services/seerr/seerr_api_models.dart';
 import '../../../playback/cinema_mode_controller.dart';
+import '../../../playback/cinema_playback_source_guard.dart';
 import '../../../playback/cinema_series_picker_session.dart';
 import '../../widgets/playback/cinema_mode_actions_overlay.dart';
 import '../../../playback/subtitle_style.dart';
@@ -80,10 +81,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
 
   late final CinemaModeController _cinema;
   final _cinemaResolver = CinemaMediaResolver();
-  Object? _cinemaItem;
-  int _cinemaIndex = -1;
-  int? _cinemaSourceToken;
-  int? _cinemaPreviousSourceToken;
+  final _cinemaSource = CinemaPlaybackSourceGuard();
   CinemaSeriesPickerSession? _cinemaPicker;
   int _cinemaPickerId = DateTime.now().microsecondsSinceEpoch;
 
@@ -124,13 +122,8 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   void _startCinemaItem() {
     final queue = _manager?.queueService;
     final item = queue?.currentItem;
-    if (identical(item, _cinemaItem) && queue?.currentIndex == _cinemaIndex) {
-      return;
-    }
+    if (!_cinemaSource.enter(item, queue?.currentIndex ?? -1)) return;
     _cinemaPicker?.beginGrace();
-    _cinemaPreviousSourceToken = _cinemaSourceToken;
-    _cinemaItem = item;
-    _cinemaIndex = queue?.currentIndex ?? -1;
     final raw = _isCinema ? _rawDataForQueueItem(item) : null;
     final client = raw == null ? null : _clientForQueueItem(item);
     _cinema.enter(
@@ -149,15 +142,15 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   void _updateCinemaPlayback() {
     final manager = _manager;
     if (manager == null || !_isCinema) return;
-    final source = manager.bringupState;
-    if (source.phase != PlaybackBringupPhase.ready ||
-        !identical(_cinemaItem, manager.queueService.currentItem) ||
-        _cinemaIndex != manager.queueService.currentIndex ||
-        source.sessionToken == _cinemaPreviousSourceToken ||
-        source.itemId != _itemIdForQueueItem(manager.queueService.currentItem)) {
+    final item = manager.queueService.currentItem;
+    if (!_cinemaSource.observeReady(
+      item: item,
+      index: manager.queueService.currentIndex,
+      itemId: _itemIdForQueueItem(item),
+      source: manager.bringupState,
+    )) {
       return;
     }
-    _cinemaSourceToken = source.sessionToken;
     _cinema.updatePlayback(
       duration: manager.backend?.duration ?? Duration.zero,
       playing: manager.state.isPlaying,

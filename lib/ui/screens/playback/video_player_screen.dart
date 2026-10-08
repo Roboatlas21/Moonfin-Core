@@ -48,6 +48,7 @@ import '../../../data/viewmodels/seerr_media_detail_view_model.dart';
 import '../../../preference/seerr_preferences.dart';
 import '../../widgets/seerr/seerr_request_dialog.dart';
 import '../../../playback/cinema_mode_controller.dart';
+import '../../../playback/cinema_playback_source_guard.dart';
 import '../../../playback/cinema_series_picker_session.dart';
 import '../../widgets/playback/cinema_mode_actions_overlay.dart';
 import '../../../data/models/aggregated_item.dart';
@@ -325,10 +326,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   StreamSubscription<Duration>? _cinemaDurationSub;
   bool _cinemaWasVisible = false;
   CinemaAction _cinemaLastFocus = CinemaAction.skip;
-  int? _cinemaPreviousSourceToken;
-  int? _cinemaSourceToken;
-  Object? _cinemaQueueItem;
-  int _cinemaQueueIndex = -1;
+  final _cinemaSource = CinemaPlaybackSourceGuard();
   CinemaSeriesPickerSession? _seriesPickerSession;
 
   /// True when the auto-hide setting is on for the current segment.
@@ -500,16 +498,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   );
 
   void _startCinemaItem({bool initial = false}) {
-    if (!initial && identical(_cinemaQueueItem, _queue.currentItem) &&
-        _cinemaQueueIndex == _queue.currentIndex) {
+    final item = _queue.currentItem;
+    if (!_cinemaSource.enter(item, _queue.currentIndex, initial: initial)) {
       return;
     }
-    _cinemaQueueItem = _queue.currentItem;
-    _cinemaQueueIndex = _queue.currentIndex;
-    // The next source may already be ready when this notification arrives.
-    // Exclude only the source actually observed for the outgoing item.
-    _cinemaPreviousSourceToken = initial ? null : _cinemaSourceToken;
-    final item = _queue.currentItem;
+    if (!initial) _seriesPickerSession?.beginGrace();
     final raw = _isCurrentPreroll ? _rawDataForQueueItem(item) : null;
     final client = raw == null ? null : _clientForQueueItem(item);
     final id = _itemIdForQueueItem(item) ?? '';
@@ -635,15 +628,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _armPrerollSkipAfterPlaybackStarts() {
-    final source = _manager.bringupState;
-    if (!_isCurrentPreroll || source.phase != PlaybackBringupPhase.ready ||
-        !identical(_cinemaQueueItem, _queue.currentItem) ||
-        _cinemaQueueIndex != _queue.currentIndex ||
-        source.itemId != _itemIdForQueueItem(_queue.currentItem) ||
-        source.sessionToken == _cinemaPreviousSourceToken) {
+    final item = _queue.currentItem;
+    if (!_isCurrentPreroll ||
+        !_cinemaSource.observeReady(
+          item: item,
+          index: _queue.currentIndex,
+          itemId: _itemIdForQueueItem(item),
+          source: _manager.bringupState,
+        )) {
       return;
     }
-    _cinemaSourceToken = source.sessionToken;
     // PlayerState can still contain the outgoing file's duration during a
     // transition. Read the backend only after this item's open has completed.
     _cinema.updatePlayback(duration: _manager.backend?.duration ?? Duration.zero,
@@ -1163,13 +1157,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _syncMedia3VolumeBoostLevel();
       unawaited(_syncAutoHdrSwitching());
       final isPreroll = _isCurrentPreroll;
-      final currentItemChanged =
-          !identical(_cinemaQueueItem, _queue.currentItem) ||
-          _cinemaQueueIndex != _queue.currentIndex;
       _resetSkipSegmentAutoHide();
-      if (currentItemChanged) {
-        _seriesPickerSession?.beginGrace();
-      }
       _startCinemaItem();
       setState(() {
         _nextUpDismissed = false;
