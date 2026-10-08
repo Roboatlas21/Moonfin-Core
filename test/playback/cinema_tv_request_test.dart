@@ -9,7 +9,18 @@ import 'package:moonfin/playback/cinema_mode_controller.dart';
 class _Repo extends Fake implements SeerrRepository {
   int submissions = 0;
   int lookups = 0;
+  final submittedSeasons = <List<int>?>[];
   final post = Completer<SeerrRequest>();
+
+  @override
+  bool get isAvailable => true;
+
+  @override
+  Future<void> ensureInitialized({bool force = false}) async {}
+
+  @override
+  Future<SeerrUser> getCurrentUser() async =>
+      const SeerrUser(id: 5, permissions: SeerrPermission.requestTv);
   SeerrTvDetails refreshed = const SeerrTvDetails(id: 42);
 
   @override
@@ -27,6 +38,7 @@ class _Repo extends Fake implements SeerrRepository {
     expect(mediaType, 'tv');
     expect(is4k, false);
     submissions++;
+    submittedSeasons.add(seasons);
     return post.future;
   }
 
@@ -66,6 +78,59 @@ SeerrTvDetails _requestedSeasons(List<int> seasons) => SeerrTvDetails(
 );
 
 void main() {
+  test('accepted TV seasons do not hide Request More for other seasons', () async {
+    final repo = _Repo()..refreshed = _original;
+    repo.post.complete(const SeerrRequest(
+      id: 99,
+      type: 'tv',
+      status: SeerrRequest.statusApproved,
+    ));
+    final excludedAtPicker = <Set<int>>[];
+    final controller = CinemaModeController(
+      seerr: () async => repo,
+      accountKey: () => 'server/user',
+      onSkip: () async {},
+      onError: (error) => fail('Unexpected request failure: $error'),
+      onRequestSeries: (
+        repository,
+        details,
+        user,
+        season,
+        excluded,
+        isCurrent,
+        submit,
+      ) {
+        excludedAtPicker.add({...excluded});
+        return submit({
+          'allSeasons': false,
+          'seasons': <int>[excludedAtPicker.length + 1],
+        }, null, isCurrent);
+      },
+    );
+    try {
+      controller.enter(
+        item: {
+          'Type': 'Series',
+          'RunTimeTicks': 900000000,
+          'ProviderIds': {'Tmdb': '42'},
+        },
+        resolveMedia: () async => null,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.canRequest, isTrue);
+
+      await controller.request();
+      expect(controller.canRequest, isTrue);
+      await controller.request();
+
+      expect(excludedAtPicker, [<int>{}, <int>{2}]);
+      expect(repo.submittedSeasons, [[2], [3]]);
+      expect(controller.canRequest, isFalse);
+    } finally {
+      controller.dispose();
+    }
+  });
+
   test('Cinema All Seasons timeout confirms exactly the missing seasons', () {
     fakeAsync((clock) {
       final repo = _Repo();
