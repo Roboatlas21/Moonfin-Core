@@ -2252,6 +2252,13 @@ class MediaKitPlayerBackend extends PlayerBackend {
     bool isCurrentSelection() => _isLatestSubtitleSelection(generation);
     _subtitlesDisabled = false;
     try {
+      // A new video's audio can be ready before mpv has demuxed its embedded
+      // subtitles, especially when advancing from a Cinema Mode preroll.
+      // Wait for the requested track before reading the native track list.
+      if (!isExternalSubtitle) {
+        await waitForEmbeddedSubtitleCount(mpvTrackId);
+        if (!isCurrentSelection()) return;
+      }
       final native = _player.platform as NativePlayer;
       final trackListBefore = await _tryNativeGetProperty(native, 'track-list');
       if (!isCurrentSelection()) return;
