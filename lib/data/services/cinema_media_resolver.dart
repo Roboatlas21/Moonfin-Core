@@ -36,19 +36,10 @@ abstract final class CinemaMediaResolver {
     };
     final types = {?explicit, ?itemType};
     if (types.length > 1) return null;
-    // Only treat a TMDB ID without a media type as a movie when this trailer plays before a
-    // movie. Never guess that it belongs to a show.
-    final type = types.isNotEmpty
-        ? types.single
-        : (_featureType(item) == CinemaMediaType.movie ? 'movie' : null);
+    // Without an explicit type or item classification, intro pools must play
+    // movie trailers before movies and series trailers before episodes.
+    final type = types.isNotEmpty ? types.single : _featureType(item)?.name;
     if (type == null) return null;
-    // If a trailer is attached to another item, let the server identify its parent.
-    final owner = item['OwnerId']?.toString().replaceAll('-', '');
-    if (owner != null &&
-        owner.isNotEmpty &&
-        owner != '00000000000000000000000000000000') {
-      return null;
-    }
     return CinemaMedia.fromJson({
       'tmdbId': ids['tmdb'],
       'mediaType': type,

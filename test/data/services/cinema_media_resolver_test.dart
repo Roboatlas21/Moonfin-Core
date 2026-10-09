@@ -39,53 +39,65 @@ void main() {
     expect(direct('Video', {'Tmdb': '-4', 'TmdbMediaType': 'movie'}), isNull);
   });
 
-  test('movie context permits an unattached trailer without a server lookup', () async {
-    final item = <String, dynamic>{
-      'Type': 'Video',
-      'ProviderIds': {'Tmdb': '42'},
-      '__moonfinCinemaFeatureType': 'Movie',
-    };
+  test('untyped IDs use movie or episode playback context without a server lookup', () async {
     final client = _Client();
-    final media = await CinemaMediaResolver.resolve(
-      client: client,
-      itemId: 'trailer',
-      item: item,
-    );
-    expect(media?.type, CinemaMediaType.movie);
-    expect(media?.tmdbId, 42);
+    for (final (feature, expected) in [
+      ('Movie', CinemaMediaType.movie),
+      ('Episode', CinemaMediaType.tv),
+    ]) {
+      final media = await CinemaMediaResolver.resolve(
+        client: client,
+        itemId: 'trailer',
+        item: {
+          'Type': 'Video',
+          'ProviderIds': {'Tmdb': '42'},
+          '__moonfinCinemaFeatureType': feature,
+        },
+      );
+      expect(media?.tmdbId, 42);
+      expect(media?.type, expected);
+    }
     expect(client.calls, 0);
+  });
+
+  test('explicit type or item classification takes priority over playback context', () {
+    CinemaMedia? resolve(String type, Map<String, String> ids) =>
+        CinemaMediaResolver.directMedia({
+          'Type': type,
+          'ProviderIds': ids,
+          '__moonfinCinemaFeatureType': 'Episode',
+        });
 
     expect(
-      CinemaMediaResolver.directMedia({
-        ...item,
-        '__moonfinCinemaFeatureType': 'Episode',
-      }),
-      isNull,
+      resolve('Video', {'Tmdb': '42', 'TmdbMediaType': 'movie'})?.type,
+      CinemaMediaType.movie,
     );
+    expect(resolve('Movie', {'Tmdb': '42'})?.type, CinemaMediaType.movie);
     expect(
-      CinemaMediaResolver.directMedia({
-        ...item,
-        'OwnerId': '11111111-1111-1111-1111-111111111111',
-      }),
+      resolve('Series', {'Tmdb': '42', 'TmdbMediaType': 'movie'}),
       isNull,
     );
   });
 
-  test('an untyped TV trailer uses the server to identify its show', () async {
-    final client = _Client()
-      ..reply.complete(const CinemaMedia(42, CinemaMediaType.tv));
-    final media = await CinemaMediaResolver.resolve(
-      client: client,
-      itemId: 'trailer',
-      item: {
-        'Type': 'Video',
-        'ProviderIds': {'Tmdb': '42'},
-        '__moonfinCinemaFeatureType': 'Episode',
-      },
-    );
-    expect(media?.type, CinemaMediaType.tv);
-    expect(client.calls, 1);
-    expect(client.requestedType, CinemaMediaType.tv);
+  test('a missing TMDB ID uses the server with the movie or series context', () async {
+    for (final (feature, expected) in [
+      ('Movie', CinemaMediaType.movie),
+      ('Episode', CinemaMediaType.tv),
+    ]) {
+      final client = _Client()
+        ..reply.complete(CinemaMedia(42, expected));
+      final media = await CinemaMediaResolver.resolve(
+        client: client,
+        itemId: 'trailer',
+        item: {
+          'Type': 'Video',
+          '__moonfinCinemaFeatureType': feature,
+        },
+      );
+      expect(media?.type, expected);
+      expect(client.calls, 1);
+      expect(client.requestedType, expected);
+    }
   });
 
 }
