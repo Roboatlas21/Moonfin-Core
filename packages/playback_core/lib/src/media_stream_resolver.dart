@@ -41,11 +41,11 @@ abstract class MediaStreamResolver {
     final firstVideoHls = profiles.indexWhere(isVideoHls);
     if (firstVideoHls == -1) return deviceProfile;
 
-    var updated = <dynamic>[
+    final updated = <dynamic>[
       for (final entry in profiles)
         if (isVideoHls(entry))
           <String, dynamic>{
-            ...Map<String, dynamic>.from(entry as Map),
+            ...entry as Map,
             'SegmentLength': 3,
             'MinSegments': 1,
           }
@@ -59,12 +59,8 @@ abstract class MediaStreamResolver {
           entry['Container']?.toString().toLowerCase() == 'ts';
       final mpegTs = updated.where(isMpegTsHls).toList();
       if (mpegTs.isNotEmpty && !isMpegTsHls(updated[firstVideoHls])) {
-        final others = updated.where((e) => !isMpegTsHls(e)).toList();
-        updated = [
-          ...others.take(firstVideoHls),
-          ...mpegTs,
-          ...others.skip(firstVideoHls),
-        ];
+        updated.removeWhere(isMpegTsHls);
+        updated.insertAll(firstVideoHls, mpegTs);
       }
     }
 
