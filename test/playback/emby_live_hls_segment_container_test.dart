@@ -125,37 +125,23 @@ void main() {
       );
 
       final sent = result!['TranscodingProfiles'] as List;
-      expect(sent[0]['SegmentLength'], 3);
-      expect(sent[0]['MinSegments'], 1);
-      expect(sent[1]['SegmentLength'], 3);
-      expect(sent[1]['MinSegments'], 1);
-      expect(sent[2].containsKey('SegmentLength'), isFalse);
-      expect(sent[2].containsKey('MinSegments'), isFalse);
+      expect(sent.take(2), everyElement(containsPair('SegmentLength', 3)));
+      expect(sent.take(2), everyElement(containsPair('MinSegments', 1)));
+      expect(sent[2], (_appleStyleProfile()['TranscodingProfiles'] as List)[2]);
 
-      final original = profile['TranscodingProfiles'] as List;
-      expect(original[0].containsKey('SegmentLength'), isFalse);
-      expect(original[0].containsKey('MinSegments'), isFalse);
-      expect(original[1].containsKey('SegmentLength'), isFalse);
-      expect(original[1].containsKey('MinSegments'), isFalse);
+      expect(profile, _appleStyleProfile());
     });
 
-    test('leaves an Emby profile as sent for anything but a channel', () {
+    test('leaves non-Live TV profiles unchanged', () {
       final profile = _appleStyleProfile();
-      final result = MediaStreamResolver.prepareLiveHlsProfile(
-        profile,
-        isLiveChannel: false,
-        preferMpegTs: true,
-      );
-      expect(result, same(profile));
-    });
-
-    test('leaves a Jellyfin profile as sent for anything but a channel', () {
-      final profile = _appleStyleProfile();
-      final result = MediaStreamResolver.prepareLiveHlsProfile(
-        profile,
-        isLiveChannel: false,
-      );
-      expect(result, same(profile));
+      for (final preferMpegTs in [false, true]) {
+        final result = MediaStreamResolver.prepareLiveHlsProfile(
+          profile,
+          isLiveChannel: false,
+          preferMpegTs: preferMpegTs,
+        );
+        expect(result, same(profile));
+      }
     });
 
     test('keeps MPEG-TS first when it already leads', () {
@@ -263,11 +249,9 @@ void main() {
       final sent = api.lastBody!['DeviceProfile'] as Map<String, dynamic>;
       expect(_containers(sent), ['Video:ts', 'Video:mp4', 'Audio:ts']);
       final profiles = sent['TranscodingProfiles'] as List;
-      expect(profiles[0]['SegmentLength'], 3);
-      expect(profiles[0]['MinSegments'], 1);
-      expect(profiles[1]['SegmentLength'], 3);
-      expect(profiles[1]['MinSegments'], 1);
-      expect(profiles[2].containsKey('MinSegments'), isFalse);
+      expect(profiles.take(2), everyElement(containsPair('SegmentLength', 3)));
+      expect(profiles.take(2), everyElement(containsPair('MinSegments', 1)));
+      expect(profiles[2], (_appleStyleProfile()['TranscodingProfiles'] as List)[2]);
       expect(result.playMethod, StreamPlayMethod.transcode);
       expect(result.liveStreamId, 'ls1');
     });
@@ -285,8 +269,7 @@ void main() {
 
       final sent = api.lastBody!['DeviceProfile'] as Map<String, dynamic>;
       expect(_containers(sent), ['Video:mp4', 'Video:ts', 'Audio:ts']);
-      expect((sent['TranscodingProfiles'] as List).first.containsKey('MinSegments'), isFalse);
-      expect((sent['TranscodingProfiles'] as List).first.containsKey('SegmentLength'), isFalse);
+      expect(sent, _appleStyleProfile());
     });
 
     test('sends Jellyfin three-second Live TV HLS with one minimum segment', () async {
@@ -303,12 +286,9 @@ void main() {
       final sent = api.lastBody!['DeviceProfile'] as Map<String, dynamic>;
       expect(_containers(sent), ['Video:mp4', 'Video:ts', 'Audio:ts']);
       final profiles = sent['TranscodingProfiles'] as List;
-      expect(profiles[0]['SegmentLength'], 3);
-      expect(profiles[0]['MinSegments'], 1);
-      expect(profiles[1]['SegmentLength'], 3);
-      expect(profiles[1]['MinSegments'], 1);
-      expect(profiles[2].containsKey('SegmentLength'), isFalse);
-      expect(profiles[2].containsKey('MinSegments'), isFalse);
+      expect(profiles.take(2), everyElement(containsPair('SegmentLength', 3)));
+      expect(profiles.take(2), everyElement(containsPair('MinSegments', 1)));
+      expect(profiles[2], (_appleStyleProfile()['TranscodingProfiles'] as List)[2]);
     });
   });
 }
