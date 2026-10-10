@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:playback_core/playback_core.dart';
+import 'package:playback_emby/playback_emby.dart';
 import 'package:playback_jellyfin/playback_jellyfin.dart';
 import 'package:server_core/server_core.dart';
 
@@ -101,14 +102,14 @@ class _FakeClient extends Fake implements MediaServerClient {
 }
 
 void main() {
-  group('JellyfinMediaStreamResolver.preferMpegTsHlsForLive', () {
+  group('MediaStreamResolver.prepareLiveHlsProfile', () {
     test('moves the MPEG-TS HLS entry ahead of fMP4 for an Emby channel and '
         'leaves the caller\'s profile in its own order', () {
       final profile = _appleStyleProfile();
-      final result = JellyfinMediaStreamResolver.preferMpegTsHlsForLive(
+      final result = MediaStreamResolver.prepareLiveHlsProfile(
         profile,
         isLiveChannel: true,
-        serverType: ServerType.emby,
+        preferMpegTs: true,
       );
 
       expect(_containers(result), ['Video:ts', 'Video:mp4', 'Audio:ts']);
@@ -116,47 +117,70 @@ void main() {
       expect(_containers(profile), ['Video:mp4', 'Video:ts', 'Audio:ts']);
     });
 
-    test('leaves a Jellyfin channel profile as sent', () {
+    test('uses three-second segments with one minimum for Jellyfin Live TV HLS', () {
       final profile = _appleStyleProfile();
-      final result = JellyfinMediaStreamResolver.preferMpegTsHlsForLive(
+      final result = MediaStreamResolver.prepareLiveHlsProfile(
         profile,
         isLiveChannel: true,
-        serverType: ServerType.jellyfin,
       );
-      expect(result, same(profile));
+
+      final sent = result!['TranscodingProfiles'] as List;
+      expect(sent[0]['SegmentLength'], 3);
+      expect(sent[0]['MinSegments'], 1);
+      expect(sent[1]['SegmentLength'], 3);
+      expect(sent[1]['MinSegments'], 1);
+      expect(sent[2].containsKey('SegmentLength'), isFalse);
+      expect(sent[2].containsKey('MinSegments'), isFalse);
+
+      final original = profile['TranscodingProfiles'] as List;
+      expect(original[0].containsKey('SegmentLength'), isFalse);
+      expect(original[0].containsKey('MinSegments'), isFalse);
+      expect(original[1].containsKey('SegmentLength'), isFalse);
+      expect(original[1].containsKey('MinSegments'), isFalse);
     });
 
     test('leaves an Emby profile as sent for anything but a channel', () {
       final profile = _appleStyleProfile();
-      final result = JellyfinMediaStreamResolver.preferMpegTsHlsForLive(
+      final result = MediaStreamResolver.prepareLiveHlsProfile(
         profile,
         isLiveChannel: false,
-        serverType: ServerType.emby,
+        preferMpegTs: true,
       );
       expect(result, same(profile));
     });
 
-    test('leaves a profile that already leads with MPEG-TS as sent', () {
+    test('leaves a Jellyfin profile as sent for anything but a channel', () {
+      final profile = _appleStyleProfile();
+      final result = MediaStreamResolver.prepareLiveHlsProfile(
+        profile,
+        isLiveChannel: false,
+      );
+      expect(result, same(profile));
+    });
+
+    test('keeps MPEG-TS first when it already leads', () {
       final profile = _appleStyleProfile();
       final entries = profile['TranscodingProfiles'] as List;
       entries.insert(0, entries.removeAt(1));
-      final result = JellyfinMediaStreamResolver.preferMpegTsHlsForLive(
+      final result = MediaStreamResolver.prepareLiveHlsProfile(
         profile,
         isLiveChannel: true,
-        serverType: ServerType.emby,
+        preferMpegTs: true,
       );
-      expect(result, same(profile));
+      expect(_containers(result), ['Video:ts', 'Video:mp4', 'Audio:ts']);
+      expect((result!['TranscodingProfiles'] as List).first['MinSegments'], 1);
     });
 
-    test('leaves a profile with no MPEG-TS HLS entry as sent', () {
+    test('keeps a profile without MPEG-TS HLS available', () {
       final profile = _appleStyleProfile();
       (profile['TranscodingProfiles'] as List).removeAt(1);
-      final result = JellyfinMediaStreamResolver.preferMpegTsHlsForLive(
+      final result = MediaStreamResolver.prepareLiveHlsProfile(
         profile,
         isLiveChannel: true,
-        serverType: ServerType.emby,
+        preferMpegTs: true,
       );
-      expect(result, same(profile));
+      expect(_containers(result), ['Video:mp4', 'Audio:ts']);
+      expect((result!['TranscodingProfiles'] as List).first['SegmentLength'], 3);
     });
 
     test('keeps entries that come before the first HLS entry in place', () {
@@ -168,10 +192,10 @@ void main() {
         'Container': 'mp4',
         'Protocol': 'http',
       });
-      final result = JellyfinMediaStreamResolver.preferMpegTsHlsForLive(
+      final result = MediaStreamResolver.prepareLiveHlsProfile(
         profile,
         isLiveChannel: true,
-        serverType: ServerType.emby,
+        preferMpegTs: true,
       );
       expect(
         _containers(result),
@@ -185,10 +209,10 @@ void main() {
 
     test('a missing profile stays missing', () {
       expect(
-        JellyfinMediaStreamResolver.preferMpegTsHlsForLive(
+        MediaStreamResolver.prepareLiveHlsProfile(
           null,
           isLiveChannel: true,
-          serverType: ServerType.emby,
+          preferMpegTs: true,
         ),
         isNull,
       );
@@ -224,11 +248,11 @@ void main() {
     });
   });
 
-  group('JellyfinMediaStreamResolver.resolve', () {
-    test('sends Emby the MPEG-TS HLS entry first for a channel', () async {
+  group('Live TV PlaybackInfo profiles', () {
+    test('sends Emby 3-second Live TV HLS with MPEG-TS first', () async {
       final api = _FakePlaybackApi();
       final resolver =
-          JellyfinMediaStreamResolver(_FakeClient(ServerType.emby, api));
+          EmbyMediaStreamResolver(_FakeClient(ServerType.emby, api));
 
       final result = await resolver.resolve(
         <String, dynamic>{'Id': 'ch1', 'Type': 'TvChannel'},
@@ -238,6 +262,12 @@ void main() {
 
       final sent = api.lastBody!['DeviceProfile'] as Map<String, dynamic>;
       expect(_containers(sent), ['Video:ts', 'Video:mp4', 'Audio:ts']);
+      final profiles = sent['TranscodingProfiles'] as List;
+      expect(profiles[0]['SegmentLength'], 3);
+      expect(profiles[0]['MinSegments'], 1);
+      expect(profiles[1]['SegmentLength'], 3);
+      expect(profiles[1]['MinSegments'], 1);
+      expect(profiles[2].containsKey('MinSegments'), isFalse);
       expect(result.playMethod, StreamPlayMethod.transcode);
       expect(result.liveStreamId, 'ls1');
     });
@@ -245,7 +275,7 @@ void main() {
     test('sends Emby a movie profile unchanged', () async {
       final api = _FakePlaybackApi();
       final resolver =
-          JellyfinMediaStreamResolver(_FakeClient(ServerType.emby, api));
+          EmbyMediaStreamResolver(_FakeClient(ServerType.emby, api));
 
       await resolver.resolve(
         <String, dynamic>{'Id': 'm1', 'Type': 'Movie'},
@@ -255,9 +285,11 @@ void main() {
 
       final sent = api.lastBody!['DeviceProfile'] as Map<String, dynamic>;
       expect(_containers(sent), ['Video:mp4', 'Video:ts', 'Audio:ts']);
+      expect((sent['TranscodingProfiles'] as List).first.containsKey('MinSegments'), isFalse);
+      expect((sent['TranscodingProfiles'] as List).first.containsKey('SegmentLength'), isFalse);
     });
 
-    test('sends Jellyfin a channel profile unchanged', () async {
+    test('sends Jellyfin three-second Live TV HLS with one minimum segment', () async {
       final api = _FakePlaybackApi();
       final resolver =
           JellyfinMediaStreamResolver(_FakeClient(ServerType.jellyfin, api));
@@ -270,6 +302,13 @@ void main() {
 
       final sent = api.lastBody!['DeviceProfile'] as Map<String, dynamic>;
       expect(_containers(sent), ['Video:mp4', 'Video:ts', 'Audio:ts']);
+      final profiles = sent['TranscodingProfiles'] as List;
+      expect(profiles[0]['SegmentLength'], 3);
+      expect(profiles[0]['MinSegments'], 1);
+      expect(profiles[1]['SegmentLength'], 3);
+      expect(profiles[1]['MinSegments'], 1);
+      expect(profiles[2].containsKey('SegmentLength'), isFalse);
+      expect(profiles[2].containsKey('MinSegments'), isFalse);
     });
   });
 }

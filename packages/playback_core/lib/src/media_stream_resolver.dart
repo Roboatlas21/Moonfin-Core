@@ -22,6 +22,58 @@ abstract class MediaStreamResolver {
     }
   }
 
+  /// For Live TV, ask Jellyfin and Emby for 3-second HLS segments
+  /// with a one-segment minimum. Emby needs MPEG-TS before fMP4.
+  /// Keep the original device profile unchanged.
+  static Map<String, dynamic>? prepareLiveHlsProfile(
+    Map<String, dynamic>? deviceProfile, {
+    required bool isLiveChannel,
+    bool preferMpegTs = false,
+  }) {
+    if (deviceProfile == null || !isLiveChannel) return deviceProfile;
+    final profiles = deviceProfile['TranscodingProfiles'];
+    if (profiles is! List) return deviceProfile;
+
+    bool isVideoHls(dynamic entry) =>
+        entry is Map &&
+        entry['Type']?.toString() == 'Video' &&
+        entry['Protocol']?.toString().toLowerCase() == 'hls';
+    final firstVideoHls = profiles.indexWhere(isVideoHls);
+    if (firstVideoHls == -1) return deviceProfile;
+
+    var updated = <dynamic>[
+      for (final entry in profiles)
+        if (isVideoHls(entry))
+          <String, dynamic>{
+            ...Map<String, dynamic>.from(entry as Map),
+            'SegmentLength': 3,
+            'MinSegments': 1,
+          }
+        else
+          entry,
+    ];
+
+    if (preferMpegTs) {
+      bool isMpegTsHls(dynamic entry) =>
+          isVideoHls(entry) &&
+          entry['Container']?.toString().toLowerCase() == 'ts';
+      final mpegTs = updated.where(isMpegTsHls).toList();
+      if (mpegTs.isNotEmpty && !isMpegTsHls(updated[firstVideoHls])) {
+        final others = updated.where((e) => !isMpegTsHls(e)).toList();
+        updated = [
+          ...others.take(firstVideoHls),
+          ...mpegTs,
+          ...others.skip(firstVideoHls),
+        ];
+      }
+    }
+
+    return <String, dynamic>{
+      ...deviceProfile,
+      'TranscodingProfiles': updated,
+    };
+  }
+
   static String? resolveStaticMediaSourceId(
     dynamic mediaItem,
     String? mediaSourceId,
