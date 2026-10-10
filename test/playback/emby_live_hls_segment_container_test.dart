@@ -142,6 +142,7 @@ void main() {
         );
         expect(result, same(profile));
       }
+      expect(profile, _appleStyleProfile());
     });
 
     test('keeps MPEG-TS first when it already leads', () {
