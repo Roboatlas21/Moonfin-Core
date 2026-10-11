@@ -34,13 +34,52 @@ void main() {
 
     expect(inContext('Movie'), CinemaMediaType.movie);
     expect(inContext('Episode'), CinemaMediaType.tv);
+    for (final owner in ['', 0, '00000000-0000-0000-0000-000000000000']) {
+      expect(
+        CinemaMediaResolver.directMedia({
+          ...item,
+          'OwnerId': owner,
+          '__moonfinCinemaFeatureType': 'Movie',
+        })?.type,
+        CinemaMediaType.movie,
+      );
+    }
     expect(
       CinemaMediaResolver.directMedia({
         ...item,
+        'OwnerId': 'movie-owner',
         '__moonfinCinemaFeatureType': 'Episode',
         'ProviderIds': {'Tmdb': '42', 'TmdbMediaType': 'movie'},
       })?.type,
       CinemaMediaType.movie,
     );
   });
+
+  test('an attached trailer uses its owner before playback context', () async {
+    final item = <String, dynamic>{
+      'Type': 'Trailer',
+      'OwnerId': 'movie-owner',
+      'ProviderIds': {'Tmdb': '42'},
+      '__moonfinCinemaFeatureType': 'Episode',
+    };
+    expect(CinemaMediaResolver.directMedia(item), isNull);
+    final media = await CinemaMediaResolver.resolve(
+      client: _OwnerClient(),
+      itemId: 'trailer',
+      item: item,
+    );
+    expect(media?.tmdbId, 42);
+    expect(media?.type, CinemaMediaType.movie);
+  });
+}
+
+class _OwnerClient implements MediaServerClient {
+  @override
+  Future<CinemaMedia?> resolveCinemaMedia(
+    String itemId, {
+    CinemaMediaType? expectedMediaType,
+  }) async => const CinemaMedia(42, CinemaMediaType.movie);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
