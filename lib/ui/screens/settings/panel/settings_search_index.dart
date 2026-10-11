@@ -1631,6 +1631,11 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
       keywords: ['trailers before movie'],
     ),
     automation.leaf(
+      'pref_cinema_mode_skip_countdown',
+      '${l10n.settingsCinemaMode} — ${l10n.settingsMediaSegmentCountdown}',
+      keywords: ['cinema trailer preroll countdown progress bar timer'],
+    ),
+    automation.leaf(
       'pref_cinema_mode_skip_min_duration_seconds',
       l10n.cinemaMinimumIntroLength,
       subtitle: l10n.cinemaMinimumIntroLengthDescription,
