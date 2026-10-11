@@ -1637,7 +1637,7 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
     ),
     automation.leaf(
       'pref_cinema_mode_skip_min_duration_seconds',
-      l10n.cinemaMinimumIntroLength,
+      '${l10n.settingsCinemaMode} — ${l10n.cinemaMinimumIntroLength}',
       subtitle: l10n.cinemaMinimumIntroLengthDescription,
       keywords: ['cinema trailer preroll minimum clip length skip request'],
     ),
