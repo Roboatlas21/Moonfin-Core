@@ -80,8 +80,8 @@ abstract class MediaServerClient {
   /// Returns null on servers without the plugin.
   GamesApi? get gamesApi => null;
 
-  /// Optional Moonbase lookup for a trailer's movie or show. The expected type only narrows
-  /// filename matching.
+  /// Optional Moonbase lookup for a trailer's movie or show. The expected type is a fallback
+  /// when the trailer and its owner do not identify the type.
   Future<CinemaMedia?> resolveCinemaMedia(
     String itemId, {
     CinemaMediaType? expectedMediaType,

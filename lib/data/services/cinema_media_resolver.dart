@@ -35,23 +35,10 @@ abstract final class CinemaMediaResolver {
       _ => null,
     };
     final types = {?explicit, ?itemType};
-    if (types.length > 1) return null;
-    // Let the server check an attached trailer's owner before using playback context.
-    final owner = item['OwnerId']?.toString().replaceAll('-', '');
-    if (types.isEmpty &&
-        owner != null &&
-        owner.isNotEmpty &&
-        owner != '0' &&
-        owner != '00000000000000000000000000000000') {
-      return null;
-    }
-    // Without a known type or owner, intro pools must play
-    // movie trailers before movies and series trailers before episodes.
-    final type = types.isNotEmpty ? types.single : _featureType(item)?.name;
-    if (type == null) return null;
+    if (types.length != 1) return null;
     return CinemaMedia.fromJson({
       'tmdbId': ids['tmdb'],
-      'mediaType': type,
+      'mediaType': types.single,
     });
   }
 
