@@ -107,7 +107,8 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
               if (cinemaModeEnabled)
                 IntPickerPreferenceTile(
                   preference: UserPreferences.cinemaModeSkipMinDurationSeconds,
-                  title: l10n.cinemaMinimumIntroLength,
+                  title:
+                      '${l10n.settingsCinemaMode} — ${l10n.cinemaMinimumIntroLength}',
                   description: l10n.cinemaMinimumIntroLengthDescription,
                   icon: Icons.timelapse,
                   options: {
