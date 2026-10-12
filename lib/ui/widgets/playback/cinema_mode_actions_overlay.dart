@@ -88,8 +88,7 @@ class CinemaModeActionsOverlay extends StatelessWidget {
               ),
               const SizedBox(width: 12),
             ],
-            // Keep the dismiss button directly above Skip, even when the Request label or title
-            // changes.
+            // Keep the close button above Skip, even when the Request label changes.
             SkipSegmentOverlay(
               key: const ValueKey('cinema-skip'),
               inline: true,

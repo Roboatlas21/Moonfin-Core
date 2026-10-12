@@ -1,7 +1,7 @@
 import 'seerr_api_models.dart';
 
-/// Use the season numbers Seerr provides. Services can number seasons differently, especially
-/// for anime; only assume 1 through N when no season list is available.
+/// Use Seerr's season numbers. Only assume 1 through N when no list is available,
+/// since providers may number seasons differently.
 List<int> seerrSeasonNumbersOf(List<SeerrSeason> seasons, int fallbackCount) {
   final reported = seasons
       .where((s) => s.seasonNumber > 0)

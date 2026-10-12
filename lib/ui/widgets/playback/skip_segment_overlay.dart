@@ -75,8 +75,7 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
   @override
   void didUpdateWidget(SkipSegmentOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // When only the segment changes, reset its progress without reconnecting the position
-    // stream.
+    // A new segment resets progress; only a new position stream needs a resubscription.
     if (oldWidget.positionStream != widget.positionStream) {
       _unsubscribe();
       _subscribe();

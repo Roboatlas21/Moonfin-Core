@@ -28,7 +28,7 @@ typedef CinemaTvSubmit = Future<SeerrTvDetails?> Function(
   bool Function() isAllowed,
 );
 
-/// Seerr reports availability and requests separately for standard and 4K.
+/// Converts the status of one Seerr quality into a Cinema Mode button state.
 CinemaSeerrState cinemaSeerrState({
   int? mediaStatus,
   bool acknowledged = false,
@@ -44,8 +44,7 @@ CinemaSeerrState cinemaSeerrState({
   _ => CinemaSeerrState.hidden,
 };
 
-/// Check that the selected seasons can be requested. Keep "All Seasons" as its own option
-/// instead of turning it into a list.
+/// Validate the selected seasons and quota without expanding "All Seasons" into a list.
 ({bool allSeasons, List<int>? seasons})? cinemaTvRequestSelection(
   Map<String, dynamic> raw,
   Set<int> requestableSeasons,
@@ -210,8 +209,7 @@ typedef CinemaMovieSubmit = Future<void> Function(
   bool Function() isAllowed,
 );
 
-/// Manages when trailer actions appear and how they respond across devices. Seerr checks must
-/// never delay playback.
+/// Controls Skip and Request during trailers without letting Seerr lookups delay playback.
 class CinemaModeController extends ChangeNotifier {
   CinemaModeController({
     required this._seerr,
@@ -486,7 +484,7 @@ class CinemaModeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Only pass playback information for the current trailer, not the previous one.
+  /// Call this only after confirming the playback update belongs to the current trailer.
   void updatePlayback({required Duration duration, required bool playing}) {
     final wasVisible = visible;
     final wasPlaying = _playing;
@@ -594,8 +592,7 @@ class CinemaModeController extends ChangeNotifier {
       };
       Future<void> submit(bool is4k, bool Function() isAllowed) async {
         if (!isAllowed() || !requestable.remove(is4k)) return;
-        // The picker can outlive its trailer. Keep its original choices, but
-        // only update the controls if that trailer is still playing.
+        // The picker may stay open after its trailer ends. Only update that trailer's controls while it's still active.
         if (_current(ticket)) {
           if (!_canRequestQuality(is4k)) return;
           _submittedMovieQualities.add(is4k);

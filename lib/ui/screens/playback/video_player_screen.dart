@@ -500,7 +500,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final raw = _isCurrentPreroll ? _rawDataForQueueItem(item) : null;
     final client = raw == null ? null : _clientForQueueItem(item);
     final id = _itemIdForQueueItem(item) ?? '';
-    // Only look up the trailer's movie or show while Cinema Mode is active.
     _cinema.enter(
       item: raw,
       resolveMedia: () => client == null
@@ -648,8 +647,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         )) {
       return;
     }
-    // When playback changes items, PlayerState may still hold the previous video's duration.
-    // Read the new duration after the player opens the next item.
+    // After a trailer change, PlayerState may still have the previous item's duration.
+    // Use the new backend duration once playback is ready.
     _cinema.updatePlayback(duration: _manager.backend?.duration ?? Duration.zero,
       playing: _state.isPlaying);
   }

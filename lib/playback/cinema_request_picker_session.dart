@@ -1,7 +1,7 @@
 import 'dart:async';
 
-/// Lets a request picker stay open briefly after its trailer changes, but never
-/// beyond its player or account session.
+/// Keeps a request picker active briefly after the trailer changes, but only while the
+/// player and account stay the same.
 class CinemaRequestPickerSession {
   CinemaRequestPickerSession({
     required Object Function() accountKey,

@@ -111,8 +111,8 @@ Future<T?> showFocusRestoringDialog<T>({
                   null) {
             return KeyEventResult.ignored;
           }
-          // Back may be blocked while a dialog is submitting. Only mark it dismissed if it can
-          // actually close.
+          // Only mark Back as dismissed when the dialog can close.
+          // Submitting a request may block it.
           if (ModalRoute.of(dialogContext)?.popDisposition ==
               RoutePopDisposition.pop) {
             DialogBackSuppressor.markDismissed();

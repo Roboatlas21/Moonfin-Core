@@ -750,9 +750,6 @@ final class AppleTvPlayerViewController: UIViewController {
                 hideSkipSegment()
             }
         }
-        // Keep icons and countdowns in the foreground color.
-        // Use the accent outline on touch and to indicate focus on TV.
-        // Keep one 4-point outline; hide it for status-only Request labels.
         cinemaRequestFocused = requestEnabled && !cinemaRequestPanel.isHidden &&
             (args["requestFocused"] as? Bool ?? false)
         restyleForTheme()
@@ -4064,7 +4061,7 @@ protocol RemotePlayerNavigable: AnyObject {
 /// UIKit has no public way to trigger a UIAlertAction from code, so when a
 /// session remote command reaches an alert, this table replaces it with the
 /// same actions. Alerts driven by the Siri Remote stay native.
-/// Lets native player menus use the same Apple TV remote navigation and focus behavior.
+/// Shares focus and remote navigation between native player menus.
 private class RemotePlayerList: UITableViewController, RemotePlayerNavigable {
     var focusedRow = 0
     var rowCount: Int { 0 }
@@ -4125,7 +4122,6 @@ private class RemotePlayerList: UITableViewController, RemotePlayerNavigable {
     }
 }
 
-/// Show menu choices as a table so they work reliably with the Apple TV remote.
 private final class RemotePlayerMenu: RemotePlayerList {
     struct Entry {
         let action: UIAlertAction
@@ -4180,8 +4176,7 @@ private final class RemotePlayerMenu: RemotePlayerList {
     }
 }
 
-/// The Apple TV picker only shows the choices and returns what was selected. Dart checks the
-/// request and submits it.
+/// The Apple TV picker collects the selection; Dart validates and submits the request.
 private final class CinemaRequestPicker: RemotePlayerList {
     let requestId: Int
     private let isMovie: Bool
@@ -4350,7 +4345,7 @@ private final class CinemaRequestPicker: RemotePlayerList {
     func finish(_ value: [String: Any]?) {
         guard !answered else { return }
         answered = true
-        // Pass the choice to Dart immediately so a later quota update cannot change it.
+        // Send the selection to Dart before dismissing the picker.
         completion(value)
         if isBeingDismissed { return }
         if isBeingPresented || viewIfLoaded?.window == nil {

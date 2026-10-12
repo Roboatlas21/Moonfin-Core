@@ -1,7 +1,6 @@
 import 'package:playback_core/playback_core.dart';
 
-/// Tracks the current trailer so a late "ready" event from the previous one cannot start the
-/// next trailer.
+/// Keeps late playback-ready events from a previous trailer from updating the current trailer's controls.
 class CinemaPlaybackSourceGuard {
   Object? _item;
   int _index = -1;

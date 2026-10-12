@@ -64,8 +64,7 @@ Future<void> showSeerrRequestDialog({
       onDismissReady?.call(() {
         final navigator = route.navigator;
         if (navigator == null || !route.isActive) return;
-        // Close advanced-options dialogs first, then this request dialog. Do not accidentally
-        // close a newer dialog.
+        // Close this request dialog and anything it opened, without dismissing a newer dialog.
         navigator.popUntil((candidate) => identical(candidate, route));
         navigator.pop();
       });
