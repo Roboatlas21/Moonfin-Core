@@ -558,7 +558,9 @@ class CinemaModeController extends ChangeNotifier {
     final ticket = _generation;
     notifyListeners();
     unawaited(
-      _onSkip().catchError((Object _) {
+      _onSkip().catchError((Object _) {}).whenComplete(() {
+        // The player may ignore Skip while a transition is still running.
+        // Only restore controls if the same trailer is still active.
         if (!_current(ticket)) return;
         _skipping = false;
         _restartTimer();
