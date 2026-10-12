@@ -275,7 +275,11 @@ class CustomExternalListsService {
         final hasOldCache = decoded.any((item) =>
             item is Map && (!item.containsKey('backdropUrl') || !item.containsKey('officialRating')));
         final hasBuggyCache = items.any((item) => item.imdbId.isEmpty && item.tmdbId.isEmpty);
-        if (hasOldCache || hasBuggyCache) {
+        // Older plugins sent IMDb chart titles with the poster standing in for the backdrop
+        // and no TMDB id, so that copy is dropped to pick up both once the server has them.
+        final hasPosterBackdrops = items.any((item) =>
+            (item.backdropUrl ?? '').isNotEmpty && item.backdropUrl == item.posterUrl);
+        if (hasOldCache || hasBuggyCache || hasPosterBackdrops) {
           debugPrint('[CustomService] Invalid or buggy custom row cache detected, invalidating...');
           try {
             await file.delete();

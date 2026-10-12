@@ -1400,7 +1400,7 @@ class _SeerrSettingsDialogState extends State<_SeerrSettingsDialog> {
               ),
             ),
             Divider(color: AppColorScheme.onSurface.withAlpha(20)),
-            for (final option in PosterSize.values)
+            for (final option in PosterSize.gridValues)
               _settingsRadioTile(
                 label: _posterSizeLabel(option, l10n),
                 selected: current == option,
@@ -1426,7 +1426,7 @@ class _SeerrSettingsDialogState extends State<_SeerrSettingsDialog> {
     PosterSize.small => l10n.small,
     PosterSize.medium => l10n.medium,
     PosterSize.large => l10n.large,
-    PosterSize.extraLarge => l10n.extraLarge,
+    PosterSize.extraLarge || PosterSize.grandparents => l10n.extraLarge,
   };
 
   Widget _settingsRadioTile({

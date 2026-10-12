@@ -120,6 +120,21 @@ void main() {
       expect(items, hasLength(1));
     });
 
+    test('drops a row an older plugin sent with posters as backdrops', () async {
+      await service.saveCustomRowToCache(config, [
+        ImdbExternalListItem(
+          imdbId: 'tt1',
+          tmdbId: '',
+          title: 'Cached Film',
+          type: 'Movie',
+          posterUrl: 'https://m.media-amazon.com/poster.jpg',
+          backdropUrl: 'https://m.media-amazon.com/poster.jpg',
+        ),
+      ]);
+
+      expect(await service.loadCustomRowFromCache(config), isEmpty);
+    });
+
     test('an old row still answers when there is no server to ask', () async {
       await ageCacheBy(const Duration(days: 5));
 

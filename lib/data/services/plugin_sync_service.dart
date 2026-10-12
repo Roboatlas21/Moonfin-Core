@@ -65,7 +65,6 @@ class PluginSyncService extends ChangeNotifier {
   String? _pluginVersion;
   String? get pluginVersion => _pluginVersion;
 
-  String? _selectedCustomizationProfile;
   int _syncRetryCount = 0;
   Timer? _syncRetryTimer;
 
@@ -82,6 +81,12 @@ class PluginSyncService extends ChangeNotifier {
   bool get mdblistAvailable => _mdblistAvailable;
   bool _tmdbAvailable = false;
   bool get tmdbAvailable => _tmdbAvailable;
+
+  /// Whether the plugin can hand out the titled TMDB thumb for a title the
+  /// server doesn't have. An older plugin, or one without a TMDB key, can't.
+  bool _tmdbThumbsSupported = false;
+  bool get tmdbThumbsAvailable =>
+      _pluginAvailable && _tmdbAvailable && _tmdbThumbsSupported;
   bool _recommendationsSupported = false;
   bool get recommendationsSupported =>
       _pluginAvailable && _recommendationsSupported;
@@ -219,6 +224,7 @@ class PluginSyncService extends ChangeNotifier {
     _seerrInfoAvailable = false;
     _mdblistAvailable = false;
     _tmdbAvailable = false;
+    _tmdbThumbsSupported = false;
     _recommendationsSupported = false;
     _clientLogSupported = false;
     _activeThemeCacheServerId = null;
@@ -277,6 +283,8 @@ class PluginSyncService extends ChangeNotifier {
       _seerrEnabled = _readBool(pingResult, 'seerrEnabled') ?? false;
       _mdblistAvailable = _readBool(pingResult, 'mdblistAvailable') ?? false;
       _tmdbAvailable = _readBool(pingResult, 'tmdbAvailable') ?? false;
+      _tmdbThumbsSupported =
+          _readBool(pingResult, 'tmdbThumbsSupported') ?? false;
       _recommendationsSupported =
           _readBool(pingResult, 'recommendationsSupported') ?? false;
       // Older plugins leave this out, which reads as false and hides the button.
@@ -331,8 +339,13 @@ class PluginSyncService extends ChangeNotifier {
   }
 
   String get currentDeviceProfile => _profileName;
-  String get selectedCustomizationProfile =>
-      _selectedCustomizationProfile ?? _profileName;
+
+  /// The profile this device pulls from and pushes to. A picked profile stays
+  /// until the user picks again.
+  String get syncProfile {
+    final saved = _prefs.get(UserPreferences.pluginSyncProfile);
+    return supportedProfiles.contains(saved) ? saved : _profileName;
+  }
 
   bool isSyncInitializedForServer(
     MediaServerClient client, {
@@ -344,10 +357,24 @@ class PluginSyncService extends ChangeNotifier {
     return _prefs.get(syncInitializedPref);
   }
 
-  void setSelectedCustomizationProfile(String profile) {
+  /// Picking the device's own profile goes back to following it.
+  Future<void> setSyncProfile(String profile) async {
     if (!supportedProfiles.contains(profile)) return;
-    if (_selectedCustomizationProfile == profile) return;
-    _selectedCustomizationProfile = profile;
+    if (profile == syncProfile) return;
+    // Picking only changes where sync points. Without a snapshot the next
+    // preference write of any kind would push this device's settings over the
+    // picked profile, so only a real settings edit sends anything.
+    if (GetIt.instance.isRegistered<MediaServerClient>()) {
+      final client = GetIt.instance<MediaServerClient>();
+      _lastSyncedProfileJson[_snapshotKey(client, profile)] = jsonEncode(
+        _buildProfileFromLocal(),
+      );
+    }
+    if (profile == _profileName) {
+      await _prefs.removePreference(UserPreferences.pluginSyncProfile);
+    } else {
+      await _prefs.set(UserPreferences.pluginSyncProfile, profile);
+    }
     notifyListeners();
   }
 
@@ -385,9 +412,10 @@ class PluginSyncService extends ChangeNotifier {
             availability == _PluginAvailabilityStatus.available) {
           await _refreshCustomThemes(client, serverId: serverId);
 
-          final resolved = await _fetchResolvedProfile(client, _profileName);
+          final profile = syncProfile;
+          final resolved = await _fetchResolvedProfile(client, profile);
           if (resolved != null) {
-            await _applyServerSettings(client, _profileName, resolved);
+            await _applyServerSettings(client, profile, resolved);
           }
 
           unawaited(_startSettingsStream(client));
@@ -412,14 +440,15 @@ class PluginSyncService extends ChangeNotifier {
 
       await _refreshCustomThemes(client, serverId: serverId);
 
-      final resolved = await _fetchResolvedProfile(client, _profileName);
+      final profile = syncProfile;
+      final resolved = await _fetchResolvedProfile(client, profile);
       if (resolved == null) {
         return;
       }
 
       await _prefs.set(UserPreferences.pluginSyncEnabled, true);
 
-      await _applyServerSettings(client, _profileName, resolved);
+      await _applyServerSettings(client, profile, resolved);
       await _prefs.set(syncInitializedPref, true);
       unawaited(_startSettingsStream(client));
     } catch (_) {
@@ -557,12 +586,13 @@ class PluginSyncService extends ChangeNotifier {
       return;
     }
 
-    final resolved = await _fetchResolvedProfile(client, _profileName);
+    final profile = syncProfile;
+    final resolved = await _fetchResolvedProfile(client, profile);
     if (resolved == null) {
       return;
     }
 
-    await _applyServerSettings(client, _profileName, resolved);
+    await _applyServerSettings(client, profile, resolved);
     notifyListeners();
   }
 
@@ -708,7 +738,7 @@ class PluginSyncService extends ChangeNotifier {
   Future<void> _enableSeerrOnceSignedIn(MediaServerClient client) async {
     if (_prefs.get(UserPreferences.seerrEnabled)) return;
     _setLocalSeerrEnabled(true);
-    await pushSettingsForProfile(client, profile: selectedCustomizationProfile);
+    await pushSettings(client);
   }
 
   Future<void> pushSettings(
@@ -717,7 +747,7 @@ class PluginSyncService extends ChangeNotifier {
   }) async {
     await pushSettingsForProfile(
       client,
-      profile: selectedCustomizationProfile,
+      profile: syncProfile,
       force: force,
     );
   }

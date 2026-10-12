@@ -3439,7 +3439,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                   ),
                 ),
               ),
-              for (final size in PosterSize.values)
+              for (final size in PosterSize.gridValues)
                 _posterSizeRadioTile(vm, size),
             ],
             if (vm.isPlaylistBrowse) ...[
@@ -3535,7 +3535,8 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       PosterSize.small => AppLocalizations.of(context).small,
       PosterSize.medium => AppLocalizations.of(context).medium,
       PosterSize.large => AppLocalizations.of(context).large,
-      PosterSize.extraLarge => AppLocalizations.of(context).extraLarge,
+      PosterSize.extraLarge ||
+      PosterSize.grandparents => AppLocalizations.of(context).extraLarge,
     };
     return _DialogRadioTile(
       label: label,

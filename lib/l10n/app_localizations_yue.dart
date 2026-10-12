@@ -40,9 +40,6 @@ class AppLocalizationsYue extends AppLocalizations {
   String get animeMarkerRecap => 'Recap';
 
   @override
-  String get accountPreferences => '帳戶偏好設定';
-
-  @override
   String get interfaceLanguage => '介面語言';
 
   @override
@@ -532,7 +529,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get controller => 'Controller';
 
   @override
-  String get gamepadNavigation => 'Gamepad navigation';
+  String get gamepadNavigation => 'Gamepad Navigation';
 
   @override
   String get gamepadNavigationDescription =>
@@ -1524,6 +1521,9 @@ class AppLocalizationsYue extends AppLocalizations {
   String get searchingSubtitles => 'Searching for subtitles…';
 
   @override
+  String get fetchingSubtitles => 'Fetching subtitles';
+
+  @override
   String get downloadingSubtitle => 'Downloading subtitle…';
 
   @override
@@ -2155,7 +2155,7 @@ class AppLocalizationsYue extends AppLocalizations {
       'Inactive — could not start, using the standard path';
 
   @override
-  String get nativeHdrOutput => 'Native HDR output';
+  String get nativeHdrOutput => 'Native HDR Output';
 
   @override
   String get nativeHdrOutputDescription =>
@@ -2857,9 +2857,6 @@ class AppLocalizationsYue extends AppLocalizations {
   String get qualityStorage => '品質、儲存';
 
   @override
-  String get serverSyncAndPluginStatus => '伺服器同步和插件狀態';
-
-  @override
   String get mediaRequestIntegration => '媒體請求集成';
 
   @override
@@ -2891,9 +2888,6 @@ class AppLocalizationsYue extends AppLocalizations {
 
   @override
   String get videoAndSubtitles => '視訊和字幕';
-
-  @override
-  String get integrations => '整合';
 
   @override
   String get pluginAndRequests => '插件和請求';
@@ -3067,7 +3061,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get loadingAnimationSpeedUltra => 'Ultra';
 
   @override
-  String get showLoadingAnimationText => 'Show Text?';
+  String get showLoadingAnimationText => 'Show Text';
 
   @override
   String get loadingAnimationPreview => 'Preview';
@@ -3176,9 +3170,6 @@ class AppLocalizationsYue extends AppLocalizations {
   String get themeMusicVolume => '主題音樂音量';
 
   @override
-  String get themeMusicSettingsSubtitle => '詳細資料頁、主畫面列表同音量';
-
-  @override
   String percentValue(int value) {
     return '$value%';
   }
@@ -3199,7 +3190,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get detailsBackgroundBlur => '細節背景模糊';
 
   @override
-  String get detailsBackgroundOpacity => 'Details Background Opacity';
+  String get detailsBackgroundOpacity => 'Background Opacity';
 
   @override
   String pixelValue(int value) {
@@ -3243,14 +3234,14 @@ class AppLocalizationsYue extends AppLocalizations {
   String get autoCrop => '自動裁切';
 
   @override
-  String get cropBlackBars => 'Crop black bars';
+  String get cropBlackBars => 'Crop Black Bars';
 
   @override
   String get settingsCropBlackBarsDescription =>
       'Detect encoded letterbox bars after playback starts, crop them, then fill the screen. Recrop from the player zoom button.';
 
   @override
-  String get cropBlackBarsRecropInterval => 'Recrop interval';
+  String get cropBlackBarsRecropInterval => 'Recrop Interval';
 
   @override
   String get cropBlackBarsOnce => 'Once at start';
@@ -3801,7 +3792,7 @@ class AppLocalizationsYue extends AppLocalizations {
       'Manual (choose formats below)';
 
   @override
-  String get settingsAudioPassthroughOutput => 'Passthrough output';
+  String get settingsAudioPassthroughOutput => 'Passthrough Output';
 
   @override
   String get settingsAudioPassthroughOutputDescription =>
@@ -4161,23 +4152,7 @@ class AppLocalizationsYue extends AppLocalizations {
   }
 
   @override
-  String get customizationProfile => '客製化簡介';
-
-  @override
-  String get customizationProfileDescription =>
-      '選擇要載入、編輯和同步的設定檔。全域適用於任何地方，除非設備設定檔覆蓋它。綠點標記您目前的設備設定檔。';
-
-  @override
-  String get loadProfile => '負載曲線';
-
-  @override
   String get syncing => '正在同步...';
-
-  @override
-  String get syncToProfile => '同步到設定檔';
-
-  @override
-  String get resetProfile => 'Reset Profile';
 
   @override
   String resetProfileTitle(String profile) {
@@ -4232,7 +4207,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get wifiOnlyDownloads => '僅 WiFi 下載';
 
   @override
-  String get tvOfflineDownloads => 'Enable offline downloads';
+  String get tvOfflineDownloads => 'Enable Offline Downloads';
 
   @override
   String get tvOfflineDownloadsSubtitle =>
@@ -4504,12 +4479,6 @@ class AppLocalizationsYue extends AppLocalizations {
   String get seconds => '秒';
 
   @override
-  String get localPreviews => '本地預覽';
-
-  @override
-  String get localPreviewsDescription => '配置預告片、媒體和音訊預覽。';
-
-  @override
   String get mediaBarMode => '媒體欄風格';
 
   @override
@@ -4656,16 +4625,10 @@ class AppLocalizationsYue extends AppLocalizations {
   String get favoriteChannels => 'Favorite Channels';
 
   @override
-  String get homeSections => '首頁 欄目';
-
-  @override
   String get resetToDefaults => '重設為預設值';
 
   @override
   String get homeRowPosterSize => '主排海報尺寸';
-
-  @override
-  String get perRowImageTypeSelection => '每行影像類型選擇';
 
   @override
   String get configureImageTypeForEachRow => '為每個啟用的主行配置影像類型';
@@ -4695,14 +4658,11 @@ class AppLocalizationsYue extends AppLocalizations {
   String get fullScreenRowsDescription => '每個畫面淨係顯示一行主畫面列表';
 
   @override
-  String get homeRowsPadding => 'Home Row Padding';
+  String get homeRowsPadding => 'Row Padding';
 
   @override
   String get homeRowsPaddingDescription =>
       'Customize padding between home rows';
-
-  @override
-  String get perRowImageType => '每行圖像類型';
 
   @override
   String get perRowSettings => '每行設定';
@@ -4806,9 +4766,6 @@ class AppLocalizationsYue extends AppLocalizations {
 
   @override
   String get onlyShowRatedContent => '只顯示評分內容';
-
-  @override
-  String get showClock => '顯示時鐘';
 
   @override
   String get displayClockDuringScreensaver => '螢幕保護期間顯示時鐘';
@@ -4934,40 +4891,54 @@ class AppLocalizationsYue extends AppLocalizations {
   String get ratingSourcesDescription => '啟用並重新排序整個應用程式中顯示的評級來源';
 
   @override
-  String get pluginLabel => 'Moonbase 外掛程式';
-
-  @override
   String get pluginDetected => '偵測到插件';
 
   @override
   String get pluginNotDetected => '未偵測到插件';
 
   @override
-  String get pluginDetectedDescription => '檢測到伺服器插件。第一次找到外掛時會自動啟用同步。';
-
-  @override
   String get pluginNotDetectedDescription => '目前未偵測到伺服器插件。本地設定仍然使用其保存的值或內建預設值。';
 
   @override
-  String pluginStatusVersion(String status, String version) {
-    return '$status\n版本：$version';
+  String get pluginConnected => 'Connected';
+
+  @override
+  String pluginConnectedVersion(String version) {
+    return 'Connected, version $version';
   }
 
   @override
-  String get availableServices => '可用服務';
+  String get pluginSyncOn => 'Sync on';
 
   @override
-  String get serverPluginSync => '伺服器插件同步';
+  String get pluginSyncOff => 'Sync off';
 
   @override
-  String get syncSettingsWithPlugin => '與伺服器插件同步設定';
+  String get syncProfileDescription =>
+      'This device syncs with the profile you pick until you pick another.';
 
   @override
-  String get whatSyncControls => '同步控制什麼';
+  String get profileAppliesEverywhere => 'Applies everywhere';
 
   @override
-  String get syncControlsDescription =>
-      '同步僅控制插件支援的設定是否推送到伺服器或從伺服器拉出。啟用插件同步後，設定檔選擇和設定檔同步操作位於自訂設定中。';
+  String get profileOverridesGlobal => 'Overrides Global';
+
+  @override
+  String get profileThisDevice => 'This device';
+
+  @override
+  String get profileLoad => 'Load';
+
+  @override
+  String get profileLoadSubtitle => 'Server to this device';
+
+  @override
+  String get profileSaveSubtitle => 'This device to server';
+
+  @override
+  String resetNamedProfile(String profile) {
+    return 'Reset $profile Profile';
+  }
 
   @override
   String get recentRequests => '最近的請求';
@@ -5071,7 +5042,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get seerrNotifyIssuesSubtitle => '新問題、回覆同解決結果';
 
   @override
-  String get seerrNotifyNewMediaTitle => 'New media added';
+  String get seerrNotifyNewMediaTitle => 'New Media Added';
 
   @override
   String get seerrNotifyNewMediaSubtitle =>
@@ -5187,16 +5158,10 @@ class AppLocalizationsYue extends AppLocalizations {
   String get navbarStyleToolbarAppearance => '導覽列樣式、工具列按鈕、外觀';
 
   @override
-  String get reorderToggleHomeRows => '重新排序和切換主行';
-
-  @override
   String get featuredContentAppearance => '特色內容、外觀';
 
   @override
   String get posterSizeImageTypeFolderView => '海報尺寸、圖像類型、資料夾視圖';
-
-  @override
-  String get mdbListTmdbRatingSources => 'MDBList、TMDB 和評級來源';
 
   @override
   String gbValue(String value) {
@@ -9659,6 +9624,12 @@ class AppLocalizationsYue extends AppLocalizations {
   String get playerTooltipSeekForward => '向前尋求';
 
   @override
+  String get playerTooltipMinimize => 'Minimize player';
+
+  @override
+  String get miniPlayerOpenPlayer => 'Open player';
+
+  @override
   String get contextMenuMarkWatched => '標記為已觀看';
 
   @override
@@ -9697,37 +9668,13 @@ class AppLocalizationsYue extends AppLocalizations {
   String get settingsAdministrationSubtitle => '存取伺服器管理面板';
 
   @override
-  String get settingsAccountSecurity => '帳戶與安全';
-
-  @override
-  String get settingsAccountSecuritySubtitle => '身份驗證、PIN 碼和家長控制';
-
-  @override
-  String get settingsPersonalization => '個人化';
-
-  @override
-  String get settingsPersonalizationSubtitle => '主題、導航、主行和庫可見性';
-
-  @override
   String get settingsDynamicContent => '動態內容';
 
   @override
   String get settingsDynamicContentSubtitle => '媒體欄和視覺覆蓋';
 
   @override
-  String get settingsPlaybackSyncplay => '回放 & SyncPlay';
-
-  @override
-  String get settingsPlaybackSyncplaySubtitle => '音訊/視訊設定、字幕、下載和 SyncPlay 控件';
-
-  @override
-  String get settingsIntegrationsSubtitle => '插件同步、Seerr、評級等';
-
-  @override
   String get settingsAboutSubtitle => '應用程式版本、法律資訊和製作人員';
-
-  @override
-  String get settingsAuthenticationSection => '驗證';
 
   @override
   String get settingsSortServersBy => '伺服器排序依據';
@@ -9737,9 +9684,6 @@ class AppLocalizationsYue extends AppLocalizations {
 
   @override
   String get settingsAlphabetical => '按字母順序';
-
-  @override
-  String get settingsConnectionSection => '連線';
 
   @override
   String get settingsAllowSelfSignedCerts => '允許自簽憑證';
@@ -9753,9 +9697,6 @@ class AppLocalizationsYue extends AppLocalizations {
       'This server\'s certificate isn\'t trusted. If it\'s your own server and uses a self-signed or private certificate, you can allow it here.';
 
   @override
-  String get settingsPrivacyAndSafetySection => '隱私與安全';
-
-  @override
   String get itemBlockedByParentalControls => 'This isn\'t available';
 
   @override
@@ -9766,28 +9707,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get blockedRatingsUnrankedSection => 'Only blocks itself';
 
   @override
-  String get settingsBlockedRatings => '屏蔽評級';
-
-  @override
-  String get settingsGeneralStyle => '通用風格';
-
-  @override
-  String get settingsGeneralStyleSubtitle => '主題口音、背景、觀看指示器和主題音樂';
-
-  @override
-  String get settingsDetailsScreen => '詳細資料頁';
-
-  @override
-  String get settingsDetailsScreenSubtitle => '樣式、背景模糊同分頁行為';
-
-  @override
   String get settingsHomePage => '首頁';
-
-  @override
-  String get settingsHomePageSubtitle => '部分、圖像類型、疊加和媒體預覽';
-
-  @override
-  String get settingsLibrariesSubtitle => '庫可見性、資料夾視圖和多伺服器行為';
 
   @override
   String get settingsTwentyFourHourClock => '24 小時制';
@@ -9829,16 +9749,6 @@ class AppLocalizationsYue extends AppLocalizations {
 
   @override
   String get settingsSeasonalSurprise => '季節性驚喜';
-
-  @override
-  String get settingsMetadataAndRatings => '元數據和評級';
-
-  @override
-  String get settingsPluginScreenDescription =>
-      'Moonbase 支援伺服器端集成，包括附加評級來源、Seerr 請求和同步首選項。';
-
-  @override
-  String get settingsOfflineDownloads => '離線下載';
 
   @override
   String get useNativeEmulator => 'Native Emulation';
@@ -9974,52 +9884,19 @@ class AppLocalizationsYue extends AppLocalizations {
   String get settingsCheckForUpdatesSubtitle => '檢查最新的 Moonfin 版本';
 
   @override
-  String get settingsPoweredByFlutter => '由顫動提供支持';
-
-  @override
-  String settingsLicenseNoticesCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '# 則授權聲明',
-      one: '# 則授權聲明',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get settingsBoth => '兩個都';
 
   @override
   String get settingsShuffleContentTypeFilter => '隨機播放內容類型過濾器';
 
   @override
-  String get settingsVideoPlaybackPreferences => '影片播放首選項';
-
-  @override
-  String get settingsVideoPlaybackPreferencesSubtitle => '核心視訊引擎和串流品質設置';
-
-  @override
-  String get settingsAudioPreferences => '音訊首選項';
-
-  @override
   String get settingsAudioPreferencesSubtitle => '音軌、處理和直通選項';
-
-  @override
-  String get settingsAutomationAndQueue => '自動化和隊列';
 
   @override
   String get settingsAutomationAndQueueSubtitle => '自動播放和排序';
 
   @override
-  String get settingsOfflineDownloadsSubtitle => '下載品質、儲存限制和佇列大小';
-
-  @override
   String get settingsSyncplaySubtitle => '群組會話的同步邏輯';
-
-  @override
-  String get settingsAdvancedOptionsSubtitle =>
-      '專業的播放器功能。請謹慎使用，因為某些選項可能會導致播放問題';
 
   @override
   String get settingsSkipIntrosAndOutros => '跳過片頭和片尾？';
@@ -10446,21 +10323,6 @@ class AppLocalizationsYue extends AppLocalizations {
   String get homeRowsSection => '主畫面列表';
 
   @override
-  String get homeRowDisplay => '主畫面列表顯示';
-
-  @override
-  String get homeRowSections => '主畫面列表區段';
-
-  @override
-  String get homeRowToggles => '主畫面列表開關';
-
-  @override
-  String get homeRowTogglesSubtitle => '啟用或者停用以媒體庫為基礎嘅主畫面列表類別';
-
-  @override
-  String get homeRowTogglesDescription => '開以下嘅開關，就會喺主畫面區段度顯示對應嘅列表。';
-
-  @override
   String get rowsType => 'Rows Type';
 
   @override
@@ -10729,6 +10591,20 @@ class AppLocalizationsYue extends AppLocalizations {
   String get preferSdhSubtitlesSubtitle => '自動揀字幕嗰陣優先揀 SDH/CC 字幕軌。';
 
   @override
+  String get preferTextSubtitles => 'Prefer Text Subtitles';
+
+  @override
+  String get preferTextSubtitlesSubtitle =>
+      'Prioritize text-based subtitles (SRT, VTT) over image-based formats (PGS, VobSub).';
+
+  @override
+  String get preferExternalSubtitles => 'Prefer External Subtitles';
+
+  @override
+  String get preferExternalSubtitlesSubtitle =>
+      'Prioritize external subtitle files over embedded tracks.';
+
+  @override
   String get webDiagnostics => '網頁診斷';
 
   @override
@@ -10938,7 +10814,7 @@ class AppLocalizationsYue extends AppLocalizations {
   }
 
   @override
-  String get achievementsUnlockToasts => 'Unlock notifications';
+  String get achievementsUnlockToasts => 'Unlock Notifications';
 
   @override
   String get achievementsUnlockToastsSubtitle =>
@@ -11359,7 +11235,7 @@ class AppLocalizationsYue extends AppLocalizations {
       'See who\'s online and chat with people on this server';
 
   @override
-  String get friendsShowButton => 'Show friends button';
+  String get friendsShowButton => 'Show Friends Button';
 
   @override
   String get friendsShowButtonSubtitle =>
@@ -11522,35 +11398,35 @@ class AppLocalizationsYue extends AppLocalizations {
   }
 
   @override
-  String get friendsAppearOffline => 'Appear offline';
+  String get friendsAppearOffline => 'Appear Offline';
 
   @override
   String get friendsAppearOfflineSubtitle =>
       'Friends always see you as offline';
 
   @override
-  String get friendsHideNowPlaying => 'Hide what I\'m watching';
+  String get friendsHideNowPlaying => 'Hide What I\'m Watching';
 
   @override
   String get friendsHideNowPlayingSubtitle =>
       'Friends still see you online, but not what\'s playing';
 
   @override
-  String get friendsHideLastWatched => 'Hide my last watched';
+  String get friendsHideLastWatched => 'Hide My Last Watched';
 
   @override
   String get friendsHideLastWatchedSubtitle =>
       'Friends won\'t see what you watched last while you\'re offline';
 
   @override
-  String get friendsMessageNotifications => 'Message notifications';
+  String get friendsMessageNotifications => 'Message Notifications';
 
   @override
   String get friendsMessageNotificationsSubtitle =>
       'Show a banner when a friend messages you';
 
   @override
-  String get friendsMuteDuringPlayback => 'Mute during playback';
+  String get friendsMuteDuringPlayback => 'Mute During Playback';
 
   @override
   String get friendsMuteDuringPlaybackSubtitle =>
@@ -11930,9 +11806,6 @@ class AppLocalizationsYue extends AppLocalizations {
   String get missing => '缺少';
 
   @override
-  String get transcodingLimits => '轉碼限制';
-
-  @override
   String get clearAllArtworkButton => '確定要清除所有封面圖？';
 
   @override
@@ -12213,9 +12086,6 @@ class AppLocalizationsYue extends AppLocalizations {
   String get audiobookDelete => '刪除';
 
   @override
-  String get subtitlePreferences => '字幕偏好設定';
-
-  @override
   String get subtitlePreferencesDescription => '更改字幕模式、預設語言、外觀同算圖選項。';
 
   @override
@@ -12260,9 +12130,6 @@ class AppLocalizationsYue extends AppLocalizations {
   @override
   String get libraryWriteAccessReactiveBody =>
       '睇嚟 Jellyfin 更新唔到封面圖。你個媒體庫設定咗將封面圖直接存入媒體資料夾（「Save artwork into media folders」已經啟用）。呢個錯誤通常係因為 Jellyfin 伺服器程序冇權限將檔案寫入你嘅媒體目錄。';
-
-  @override
-  String get externalLists => '外部清單';
 
   @override
   String get replay => '重播';
@@ -12718,7 +12585,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get showAlphabeticalFilters => 'Show Alphabet';
 
   @override
-  String get personalRatingStyle => 'Personal rating style';
+  String get personalRatingStyle => 'Personal Rating Style';
 
   @override
   String get personalRatingThumbs => 'Like / dislike';
@@ -12842,24 +12709,21 @@ class AppLocalizationsYue extends AppLocalizations {
       'Trailers open in the YouTube app or browser instead of the built-in player';
 
   @override
-  String get hideDetailsMediaDescription =>
-      'Hide Media Description on Details Page';
+  String get hideDetailsMediaDescription => 'Hide Media Description';
 
   @override
   String get hideDetailsMediaDescriptionSubtitle =>
       'Hide the movie or episode descriptive text.';
 
   @override
-  String get detailUseSeriesThumbnails =>
-      'Use Series Thumbnails on Details Page';
+  String get detailUseSeriesThumbnails => 'Use Series Thumbnails';
 
   @override
   String get detailUseSeriesThumbnailsSubtitle =>
       'Replace all thumbnails on Classic details page with series thumbnail';
 
   @override
-  String get hideHomeMediaDescription =>
-      'Hide Media Description on Home Screen';
+  String get hideHomeMediaDescription => 'Hide Media Description';
 
   @override
   String get hideHomeMediaDescriptionSubtitle =>
@@ -12983,7 +12847,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get serverMessagesMarkAllRead => 'Mark all as read';
 
   @override
-  String get serverMessagesShowButton => 'Show messages button';
+  String get serverMessagesShowButton => 'Show Messages Button';
 
   @override
   String get serverMessagesShowButtonSubtitle =>
@@ -13048,14 +12912,14 @@ class AppLocalizationsYue extends AppLocalizations {
   String get smartDownloadsSection => 'Smart downloads';
 
   @override
-  String get smartDownloadsEnable => 'Download next episodes';
+  String get smartDownloadsEnable => 'Download Next Episodes';
 
   @override
   String get smartDownloadsEnableSubtitle =>
       'When you finish an episode on any device, Moonfin downloads the next ones. Downloaded episodes are deleted once watched.';
 
   @override
-  String get smartDownloadsKeepReady => 'Episodes to keep downloaded';
+  String get smartDownloadsKeepReady => 'Episodes to Keep Downloaded';
 
   @override
   String smartDownloadsKeepReadySubtitle(int count) {
@@ -13076,20 +12940,20 @@ class AppLocalizationsYue extends AppLocalizations {
   String get autoDownloadSection => 'Automatic downloads';
 
   @override
-  String get autoDownloadEnable => 'Enable automatic downloads';
+  String get autoDownloadEnable => 'Enable Automatic Downloads';
 
   @override
   String get autoDownloadEnableSubtitle =>
       'Downloads new episodes of the series you follow. Existing episodes can still be downloaded manually.';
 
   @override
-  String get autoDownloadKeepUnwatched => 'Keep unwatched episodes';
+  String get autoDownloadKeepUnwatched => 'Keep Unwatched Episodes';
 
   @override
   String get autoDownloadKeepAll => 'All';
 
   @override
-  String get autoDownloadDelete => 'Delete downloaded episodes';
+  String get autoDownloadDelete => 'Delete Downloaded Episodes';
 
   @override
   String get autoDownloadDeleteSubtitle =>
@@ -13108,7 +12972,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get autoDownloadDeleteAfterWeek => '1 week after watching';
 
   @override
-  String get autoDownloadBackgroundRefresh => 'Check in the background';
+  String get autoDownloadBackgroundRefresh => 'Check in the Background';
 
   @override
   String get autoDownloadBackgroundRefreshSubtitle =>
@@ -13123,7 +12987,7 @@ class AppLocalizationsYue extends AppLocalizations {
       'Background usage is restricted for Moonfin in Android Settings.';
 
   @override
-  String get autoDownloadCheckNow => 'Check now';
+  String get autoDownloadCheckNow => 'Check Now';
 
   @override
   String get autoDownloadChecking => 'Checking...';
@@ -13268,9 +13132,6 @@ class AppLocalizationsYue extends AppLocalizations {
   }
 
   @override
-  String get settingsAnimationSpeed => 'Animation Speed';
-
-  @override
   String get pageTransitions => 'Page Transitions';
 
   @override
@@ -13327,7 +13188,7 @@ class AppLocalizationsYue extends AppLocalizations {
   String get pageTransitionFadeLong => 'Long Fade';
 
   @override
-  String get siriRemoteSwipeSensitivity => 'Touchpad swipe sensitivity';
+  String get siriRemoteSwipeSensitivity => 'Touchpad Swipe Sensitivity';
 
   @override
   String get siriRemoteSwipeSensitivityDescription =>
@@ -13351,7 +13212,7 @@ class AppLocalizationsYue extends AppLocalizations {
 
   @override
   String get keepVideoClearOfDynamicIsland =>
-      'Keep video clear of the Dynamic Island';
+      'Keep Video Clear of the Dynamic Island';
 
   @override
   String get keepVideoClearOfDynamicIslandDescription =>
@@ -13405,6 +13266,135 @@ class AppLocalizationsYue extends AppLocalizations {
 
   @override
   String get navYou => 'You';
+
+  @override
+  String get detailsPage => 'Details Page';
+
+  @override
+  String get storageAndDownloads => 'Storage & Downloads';
+
+  @override
+  String get integrations => '整合';
+
+  @override
+  String get settingsSync => 'Settings Sync';
+
+  @override
+  String get settingsSyncSubtitle =>
+      'Moonbase plugin sync and customization profiles';
+
+  @override
+  String get navigationBar => 'Navigation Bar';
+
+  @override
+  String get homeRows => 'Rows';
+
+  @override
+  String get homeRowsSubtitle => 'Turn rows on or off and change their order';
+
+  @override
+  String get rowOptions => 'Row Options';
+
+  @override
+  String get rowOptionsSubtitle => 'Sorting and content for each row';
+
+  @override
+  String get imageTypePerRow => 'Image Type per Row';
+
+  @override
+  String get externalSources => 'External Sources';
+
+  @override
+  String get qualityAndDecoding => 'Quality & Decoding';
+
+  @override
+  String get qualityAndDecodingSubtitle =>
+      'Bitrate, resolution, decoding, HDR, and Dolby Vision';
+
+  @override
+  String get skippingAndAutoplay => 'Skipping & Autoplay';
+
+  @override
+  String get advancedPlayback => 'Advanced Playback';
+
+  @override
+  String get advancedPlaybackSubtitle =>
+      'Player routing, external players, and mpv';
+
+  @override
+  String get settingsAccountSubtitle =>
+      'Sign-in, PIN code, Kids Mode, parental controls, and settings sync';
+
+  @override
+  String get settingsGeneralSubtitle =>
+      'Language, clock, input, and performance';
+
+  @override
+  String get settingsAppearanceSubtitle =>
+      'Navigation, home screen, libraries, details page, and themes';
+
+  @override
+  String get settingsHomeScreenSubtitle =>
+      'Rows, media bar, looks, and external sources';
+
+  @override
+  String get settingsLibrariesEntrySubtitle =>
+      'Library visibility, order, and library pages';
+
+  @override
+  String get settingsDetailsPageSubtitle =>
+      'Layout, buttons, sections, ratings, and theme music';
+
+  @override
+  String get settingsPlaybackSubtitle =>
+      'Player, quality, audio, subtitles, skipping, and SyncPlay';
+
+  @override
+  String get settingsStorageSubtitle =>
+      'Downloads, storage location, and the image cache';
+
+  @override
+  String get settingsServicesSubtitle => 'Seerr and Achievement Badges';
+
+  @override
+  String get settingsSignInSection => 'Sign-in';
+
+  @override
+  String get settingsFamilySection => 'Family';
+
+  @override
+  String get settingsServersSection => 'Servers';
+
+  @override
+  String get settingsLanguageSection => 'Language';
+
+  @override
+  String get settingsInputSection => 'Input';
+
+  @override
+  String get settingsMotionSection => 'Motion';
+
+  @override
+  String get settingsContentsSection => 'Contents';
+
+  @override
+  String get settingsLooksSection => 'Looks';
+
+  @override
+  String get settingsAudioAndSubtitlesSection => 'Audio & Subtitles';
+
+  @override
+  String get settingsSkippingAndQueueSection => 'Skipping & Queue';
+
+  @override
+  String get settingsWatchTogetherSection => 'Watch Together';
+
+  @override
+  String get settingsAdvancedSection => 'Advanced';
+
+  @override
+  String get playerSettingsSubtitle =>
+      'Controls, seeking, player buttons, and trick play';
 }
 
 /// The translations for Yue Chinese Cantonese, as used in China (`yue_CN`).
@@ -15239,9 +15229,6 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get qualityStorage => '质量、储存';
 
   @override
-  String get serverSyncAndPluginStatus => '服务器同步和插件状态';
-
-  @override
   String get mediaRequestIntegration => '媒体请求集成';
 
   @override
@@ -15273,9 +15260,6 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
 
   @override
   String get videoAndSubtitles => '视频和字幕';
-
-  @override
-  String get integrations => '集成';
 
   @override
   String get pluginAndRequests => '插件和请求';
@@ -15820,20 +15804,7 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   }
 
   @override
-  String get customizationProfile => '定制简介';
-
-  @override
-  String get customizationProfileDescription =>
-      '选择要加载、编辑和同步的配置文件。全局适用于任何地方，除非设备配置文件覆盖它。绿点标记您当前的设备配置文件。';
-
-  @override
-  String get loadProfile => '负载曲线';
-
-  @override
   String get syncing => '正在同步...';
-
-  @override
-  String get syncToProfile => '同步到配置文件';
 
   @override
   String get profileSyncHidden => '配置文件同步隐藏';
@@ -16050,12 +16021,6 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get seconds => '秒';
 
   @override
-  String get localPreviews => '本地预览';
-
-  @override
-  String get localPreviewsDescription => '配置预告片、媒体和音频预览。';
-
-  @override
   String get mediaBarMode => '媒体栏风格';
 
   @override
@@ -16161,16 +16126,10 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get liveTV => '电视直播';
 
   @override
-  String get homeSections => '首页 栏目';
-
-  @override
   String get resetToDefaults => '重置为默认值';
 
   @override
   String get homeRowPosterSize => '主排海报尺寸';
-
-  @override
-  String get perRowImageTypeSelection => '每行图像类型选择';
 
   @override
   String get configureImageTypeForEachRow => '为每个启用的主行配置图像类型';
@@ -16180,9 +16139,6 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
 
   @override
   String get combineBothRows => '将两行合并为一个主页部分';
-
-  @override
-  String get perRowImageType => '每行图像类型';
 
   @override
   String get perRowSettings => '每行设置';
@@ -16285,9 +16241,6 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get onlyShowRatedContent => '只显示评分内容';
 
   @override
-  String get showClock => '显示时钟';
-
-  @override
   String get displayClockDuringScreensaver => '屏幕保护期间显示时钟';
 
   @override
@@ -16336,31 +16289,7 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get pluginNotDetected => '未检测到插件';
 
   @override
-  String get pluginDetectedDescription => '检测到服务器插件。第一次找到插件时会自动启用同步。';
-
-  @override
   String get pluginNotDetectedDescription => '当前未检测到服务器插件。本地设置仍然使用其保存的值或内置默认值。';
-
-  @override
-  String pluginStatusVersion(String status, String version) {
-    return '$status\nVersion: $version';
-  }
-
-  @override
-  String get availableServices => '可用服务';
-
-  @override
-  String get serverPluginSync => '服务器插件同步';
-
-  @override
-  String get syncSettingsWithPlugin => '与服务器插件同步设置';
-
-  @override
-  String get whatSyncControls => '同步控制什么';
-
-  @override
-  String get syncControlsDescription =>
-      '同步仅控制插件支持的设置是否推送到服务器或从服务器拉出。启用插件同步后，配置文件选择和配置文件同步操作位于自定义设置中。';
 
   @override
   String get recentRequests => '最近的请求';
@@ -16509,16 +16438,10 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get navbarStyleToolbarAppearance => '导航栏样式、工具栏按钮、外观';
 
   @override
-  String get reorderToggleHomeRows => '重新排序和切换主行';
-
-  @override
   String get featuredContentAppearance => '特色内容、外观';
 
   @override
   String get posterSizeImageTypeFolderView => '海报尺寸、图像类型、文件夹视图';
-
-  @override
-  String get mdbListTmdbRatingSources => 'MDBList、TMDB 和评级源';
 
   @override
   String gbValue(String value) {
@@ -19739,37 +19662,13 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get settingsAdministrationSubtitle => '访问服务器管理面板';
 
   @override
-  String get settingsAccountSecurity => '账户与安全';
-
-  @override
-  String get settingsAccountSecuritySubtitle => '身份验证、PIN 码和家长控制';
-
-  @override
-  String get settingsPersonalization => '个性化';
-
-  @override
-  String get settingsPersonalizationSubtitle => '主题、导航、主行和库可见性';
-
-  @override
   String get settingsDynamicContent => '动态内容';
 
   @override
   String get settingsDynamicContentSubtitle => '媒体栏和视觉覆盖';
 
   @override
-  String get settingsPlaybackSyncplay => '回放 & SyncPlay';
-
-  @override
-  String get settingsPlaybackSyncplaySubtitle => '音频/视频设置、字幕、下载和 SyncPlay 控件';
-
-  @override
-  String get settingsIntegrationsSubtitle => '插件同步、Seerr、评级等';
-
-  @override
   String get settingsAboutSubtitle => '应用程序版本、法律信息和制作人员';
-
-  @override
-  String get settingsAuthenticationSection => '验证';
 
   @override
   String get settingsSortServersBy => '服务器排序依据';
@@ -19781,25 +19680,7 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get settingsAlphabetical => '按字母顺序';
 
   @override
-  String get settingsPrivacyAndSafetySection => '隐私与安全';
-
-  @override
-  String get settingsBlockedRatings => '屏蔽评级';
-
-  @override
-  String get settingsGeneralStyle => '通用风格';
-
-  @override
-  String get settingsGeneralStyleSubtitle => '主题口音、背景、观看指示器和主题音乐';
-
-  @override
   String get settingsHomePage => '主页';
-
-  @override
-  String get settingsHomePageSubtitle => '部分、图像类型、叠加和媒体预览';
-
-  @override
-  String get settingsLibrariesSubtitle => '库可见性、文件夹视图和多服务器行为';
 
   @override
   String get settingsTwentyFourHourClock => '24 小时制';
@@ -19831,16 +19712,6 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
 
   @override
   String get settingsSeasonalSurprise => '季节性惊喜';
-
-  @override
-  String get settingsMetadataAndRatings => '元数据和评级';
-
-  @override
-  String get settingsPluginScreenDescription =>
-      'Moonbase 支持服务器端集成，包括附加评级源、Seerr 请求和同步首选项。';
-
-  @override
-  String get settingsOfflineDownloads => '离线下载';
 
   @override
   String get settingsHigh => '高的';
@@ -19907,52 +19778,19 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get settingsCheckForUpdatesSubtitle => '检查最新的 Moonfin 版本';
 
   @override
-  String get settingsPoweredByFlutter => '由颤动提供支持';
-
-  @override
-  String settingsLicenseNoticesCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '# license notices',
-      one: '# license notice',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get settingsBoth => '两个都';
 
   @override
   String get settingsShuffleContentTypeFilter => '随机播放内容类型过滤器';
 
   @override
-  String get settingsVideoPlaybackPreferences => '视频播放首选项';
-
-  @override
-  String get settingsVideoPlaybackPreferencesSubtitle => '核心视频引擎和流媒体质量设置';
-
-  @override
-  String get settingsAudioPreferences => '音频首选项';
-
-  @override
   String get settingsAudioPreferencesSubtitle => '音轨、处理和直通选项';
-
-  @override
-  String get settingsAutomationAndQueue => '自动化和队列';
 
   @override
   String get settingsAutomationAndQueueSubtitle => '自动播放和排序';
 
   @override
-  String get settingsOfflineDownloadsSubtitle => '下载质量、存储限制和队列大小';
-
-  @override
   String get settingsSyncplaySubtitle => '群组会话的同步逻辑';
-
-  @override
-  String get settingsAdvancedOptionsSubtitle =>
-      '专业的播放器功能。请谨慎使用，因为某些选项可能会导致播放问题';
 
   @override
   String get settingsSkipIntrosAndOutros => '跳过片头和片尾？';
@@ -20849,7 +20687,7 @@ class AppLocalizationsYueCn extends AppLocalizationsYue {
   String get whenFullscreen => 'When fullscreen';
 
   @override
-  String get transcodingLimits => 'Transcoding Limits';
+  String get integrations => '集成';
 }
 
 /// The translations for Yue Chinese Cantonese, as used in Hong Kong (`yue_HK`).
@@ -22685,9 +22523,6 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get qualityStorage => '品質、儲存';
 
   @override
-  String get serverSyncAndPluginStatus => '伺服器同步和插件狀態';
-
-  @override
   String get mediaRequestIntegration => '媒體請求集成';
 
   @override
@@ -22719,9 +22554,6 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
 
   @override
   String get videoAndSubtitles => '視訊和字幕';
-
-  @override
-  String get integrations => '整合';
 
   @override
   String get pluginAndRequests => '插件和請求';
@@ -23266,20 +23098,7 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   }
 
   @override
-  String get customizationProfile => '客製化簡介';
-
-  @override
-  String get customizationProfileDescription =>
-      '選擇要載入、編輯和同步的設定檔。全域適用於任何地方，除非設備設定檔覆蓋它。綠點標記您目前的設備設定檔。';
-
-  @override
-  String get loadProfile => '負載曲線';
-
-  @override
   String get syncing => '正在同步...';
-
-  @override
-  String get syncToProfile => '同步到設定檔';
 
   @override
   String get profileSyncHidden => '設定檔同步隱藏';
@@ -23496,12 +23315,6 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get seconds => '秒';
 
   @override
-  String get localPreviews => '本地預覽';
-
-  @override
-  String get localPreviewsDescription => '配置預告片、媒體和音訊預覽。';
-
-  @override
   String get mediaBarMode => '媒體欄風格';
 
   @override
@@ -23607,16 +23420,10 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get liveTV => '電視直播';
 
   @override
-  String get homeSections => '首頁 欄目';
-
-  @override
   String get resetToDefaults => '重設為預設值';
 
   @override
   String get homeRowPosterSize => '主排海報尺寸';
-
-  @override
-  String get perRowImageTypeSelection => '每行影像類型選擇';
 
   @override
   String get configureImageTypeForEachRow => '為每個啟用的主行配置影像類型';
@@ -23626,9 +23433,6 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
 
   @override
   String get combineBothRows => '將兩行合併為一個主頁部分';
-
-  @override
-  String get perRowImageType => '每行圖像類型';
 
   @override
   String get perRowSettings => '每行設定';
@@ -23731,9 +23535,6 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get onlyShowRatedContent => '只顯示評分內容';
 
   @override
-  String get showClock => '顯示時鐘';
-
-  @override
   String get displayClockDuringScreensaver => '螢幕保護期間顯示時鐘';
 
   @override
@@ -23782,31 +23583,7 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get pluginNotDetected => '未偵測到插件';
 
   @override
-  String get pluginDetectedDescription => '檢測到伺服器插件。第一次找到外掛時會自動啟用同步。';
-
-  @override
   String get pluginNotDetectedDescription => '目前未偵測到伺服器插件。本地設定仍然使用其保存的值或內建預設值。';
-
-  @override
-  String pluginStatusVersion(String status, String version) {
-    return '$status\nVersion: $version';
-  }
-
-  @override
-  String get availableServices => '可用服務';
-
-  @override
-  String get serverPluginSync => '伺服器插件同步';
-
-  @override
-  String get syncSettingsWithPlugin => '與伺服器插件同步設定';
-
-  @override
-  String get whatSyncControls => '同步控制什麼';
-
-  @override
-  String get syncControlsDescription =>
-      '同步僅控制插件支援的設定是否推送到伺服器或從伺服器拉出。啟用插件同步後，設定檔選擇和設定檔同步操作位於自訂設定中。';
 
   @override
   String get recentRequests => '最近的請求';
@@ -23955,16 +23732,10 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get navbarStyleToolbarAppearance => '導覽列樣式、工具列按鈕、外觀';
 
   @override
-  String get reorderToggleHomeRows => '重新排序和切換主行';
-
-  @override
   String get featuredContentAppearance => '特色內容、外觀';
 
   @override
   String get posterSizeImageTypeFolderView => '海報尺寸、圖像類型、資料夾視圖';
-
-  @override
-  String get mdbListTmdbRatingSources => 'MDBList、TMDB 和評級來源';
 
   @override
   String gbValue(String value) {
@@ -27185,37 +26956,13 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get settingsAdministrationSubtitle => '存取伺服器管理面板';
 
   @override
-  String get settingsAccountSecurity => '帳戶與安全';
-
-  @override
-  String get settingsAccountSecuritySubtitle => '身份驗證、PIN 碼和家長控制';
-
-  @override
-  String get settingsPersonalization => '個人化';
-
-  @override
-  String get settingsPersonalizationSubtitle => '主題、導航、主行和庫可見性';
-
-  @override
   String get settingsDynamicContent => '動態內容';
 
   @override
   String get settingsDynamicContentSubtitle => '媒體欄和視覺覆蓋';
 
   @override
-  String get settingsPlaybackSyncplay => '回放 & SyncPlay';
-
-  @override
-  String get settingsPlaybackSyncplaySubtitle => '音訊/視訊設定、字幕、下載和 SyncPlay 控件';
-
-  @override
-  String get settingsIntegrationsSubtitle => '插件同步、Seerr、評級等';
-
-  @override
   String get settingsAboutSubtitle => '應用程式版本、法律資訊和製作人員';
-
-  @override
-  String get settingsAuthenticationSection => '驗證';
 
   @override
   String get settingsSortServersBy => '伺服器排序依據';
@@ -27227,25 +26974,7 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get settingsAlphabetical => '按字母順序';
 
   @override
-  String get settingsPrivacyAndSafetySection => '隱私與安全';
-
-  @override
-  String get settingsBlockedRatings => '屏蔽評級';
-
-  @override
-  String get settingsGeneralStyle => '通用風格';
-
-  @override
-  String get settingsGeneralStyleSubtitle => '主題口音、背景、觀看指示器和主題音樂';
-
-  @override
   String get settingsHomePage => '首頁';
-
-  @override
-  String get settingsHomePageSubtitle => '部分、圖像類型、疊加和媒體預覽';
-
-  @override
-  String get settingsLibrariesSubtitle => '庫可見性、資料夾視圖和多伺服器行為';
 
   @override
   String get settingsTwentyFourHourClock => '24 小時制';
@@ -27277,16 +27006,6 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
 
   @override
   String get settingsSeasonalSurprise => '季節性驚喜';
-
-  @override
-  String get settingsMetadataAndRatings => '元數據和評級';
-
-  @override
-  String get settingsPluginScreenDescription =>
-      'Moonbase 支援伺服器端集成，包括附加評級來源、Seerr 請求和同步首選項。';
-
-  @override
-  String get settingsOfflineDownloads => '離線下載';
 
   @override
   String get settingsHigh => '高的';
@@ -27353,52 +27072,19 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get settingsCheckForUpdatesSubtitle => '檢查最新的 Moonfin 版本';
 
   @override
-  String get settingsPoweredByFlutter => '由顫動提供支持';
-
-  @override
-  String settingsLicenseNoticesCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '# license notices',
-      one: '# license notice',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get settingsBoth => '兩個都';
 
   @override
   String get settingsShuffleContentTypeFilter => '隨機播放內容類型過濾器';
 
   @override
-  String get settingsVideoPlaybackPreferences => '影片播放首選項';
-
-  @override
-  String get settingsVideoPlaybackPreferencesSubtitle => '核心視訊引擎和串流品質設置';
-
-  @override
-  String get settingsAudioPreferences => '音訊首選項';
-
-  @override
   String get settingsAudioPreferencesSubtitle => '音軌、處理和直通選項';
-
-  @override
-  String get settingsAutomationAndQueue => '自動化和隊列';
 
   @override
   String get settingsAutomationAndQueueSubtitle => '自動播放和排序';
 
   @override
-  String get settingsOfflineDownloadsSubtitle => '下載品質、儲存限制和佇列大小';
-
-  @override
   String get settingsSyncplaySubtitle => '群組會話的同步邏輯';
-
-  @override
-  String get settingsAdvancedOptionsSubtitle =>
-      '專業的播放器功能。請謹慎使用，因為某些選項可能會導致播放問題';
 
   @override
   String get settingsSkipIntrosAndOutros => '跳過片頭和片尾？';
@@ -28294,5 +27980,5 @@ class AppLocalizationsYueHk extends AppLocalizationsYue {
   String get whenFullscreen => 'When fullscreen';
 
   @override
-  String get transcodingLimits => 'Transcoding Limits';
+  String get integrations => '整合';
 }

@@ -354,6 +354,8 @@ class UserPreferences extends ChangeNotifier {
     'smart_downloads_enabled_at',
     'smart_downloads_played_since',
     'smart_downloads_applied_keep_ready',
+    // Per account but never synced: the profile this device syncs with.
+    'pref_plugin_sync_profile',
     // Newly synced settings. Anything that goes to the server profile has to be stored
     // per server and user, or one server's value is read back on the next.
     'all_genres_image_type',
@@ -552,6 +554,8 @@ class UserPreferences extends ChangeNotifier {
     'subtitles_use_embedded_styles',
     'subtitles_use_embedded_font_sizes',
     'prefer_sdh_subtitles',
+    'prefer_text_subtitles',
+    'prefer_external_subtitles',
     'app_theme_id',
     'pref_custom_theme_id',
     'pref_glass_quality',
@@ -820,14 +824,14 @@ class UserPreferences extends ChangeNotifier {
     if (containsPreference(libraryPosterSize, scopedOnly: true)) {
       return get(libraryPosterSize);
     }
-    return get(posterSize);
+    return get(posterSize).upToExtraLarge;
   }
 
   PosterSize resolvePlaylistPosterSize() {
     if (containsPreference(playlistPosterSize, scopedOnly: true)) {
       return get(playlistPosterSize);
     }
-    return get(posterSize);
+    return get(posterSize).upToExtraLarge;
   }
 
   /// The hardware audio capabilities last detected by the platform probe, or an
@@ -1095,13 +1099,13 @@ class UserPreferences extends ChangeNotifier {
   static final libraryPosterSize = EnumPreference(
     key: 'poster_size_library',
     defaultValue: PosterSize.medium,
-    values: PosterSize.values,
+    values: PosterSize.gridValues,
   );
 
   static final playlistPosterSize = EnumPreference(
     key: 'poster_size_playlist',
     defaultValue: PosterSize.medium,
-    values: PosterSize.values,
+    values: PosterSize.gridValues,
   );
 
   static final homeRowsStyle = EnumPreference(
@@ -1119,7 +1123,7 @@ class UserPreferences extends ChangeNotifier {
 
   static final modernHomeRowsPadding = Preference<int>(
     key: 'pref_modern_home_rows_padding',
-    defaultValue: 460,
+    defaultValue: 420,
   );
 
   static final classicHomeRowsPadding = Preference<int>(
@@ -2440,6 +2444,16 @@ class UserPreferences extends ChangeNotifier {
     defaultValue: false,
   );
 
+  static final preferTextSubtitles = Preference(
+    key: 'prefer_text_subtitles',
+    defaultValue: false,
+  );
+
+  static final preferExternalSubtitles = Preference(
+    key: 'prefer_external_subtitles',
+    defaultValue: false,
+  );
+
   static final mediaSegmentActions = Preference(
     key: 'media_segment_actions',
     defaultValue: 'intro:askToSkip,outro:askToSkip',
@@ -3145,6 +3159,13 @@ class UserPreferences extends ChangeNotifier {
   static final pluginSyncEnabled = Preference(
     key: 'pref_plugin_sync_enabled',
     defaultValue: false,
+  );
+
+  /// The settings profile this device pulls from and pushes to. Empty follows
+  /// the device's own profile.
+  static final pluginSyncProfile = Preference(
+    key: 'pref_plugin_sync_profile',
+    defaultValue: '',
   );
 
   static Preference<bool> pluginSyncInitializedForServer(String serverKey) =>

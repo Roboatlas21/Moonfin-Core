@@ -28,6 +28,7 @@ import '../../widgets/player_volume_control.dart';
 import '../../widgets/playback/playback_time_row.dart';
 import '../../widgets/playback/player_logo.dart';
 import '../../widgets/playback/seek_icons.dart';
+import '../../widgets/playback/track_picker.dart';
 import '../../widgets/playback/trickplay.dart';
 import '../../widgets/playback/trickplay_tile_image.dart';
 
@@ -39,7 +40,6 @@ import '../../widgets/aether_video_view.dart';
 import '../../../playback/playback_lifecycle_handler.dart';
 import '../../../playback/playback_profile_diagnostics.dart';
 import '../../../playback/hdr_stream_capability.dart';
-import '../../../auth/repositories/user_repository.dart';
 import '../../../auth/repositories/session_repository.dart';
 import '../../../data/repositories/seerr_repository.dart';
 import '../../../data/services/cinema_media_resolver.dart';
@@ -66,11 +66,10 @@ import '../../../data/services/media_segment_service.dart';
 import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/services/theme_music_service.dart';
 import '../../../platform/pip_service.dart';
+import '../../widgets/video_mini_player.dart';
 import '../../../preference/preference_constants.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../util/audio_labels.dart';
-import '../../../util/subtitle_track_logic.dart';
-import '../../../util/auto_hdr_switcher.dart';
 import '../../../util/episode_playability.dart';
 import '../../../util/player_edge_drag.dart';
 import '../../../playback/hdr_composition.dart';
@@ -102,16 +101,55 @@ import '../../widgets/syncplay/syncplay_player_button.dart';
 import '../../../syncplay/syncplay_manager.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../util/error_message.dart';
-import '../../widgets/playback/delay_footer.dart';
-import '../../widgets/progress_snack_bar.dart';
-import '../../../util/remote_subtitle_labels.dart';
-import '../../../util/subtitle_appearance_schedule.dart';
-import '../../../playback/delay_limits.dart';
 import '../../../playback/media3_player_backend.dart';
 import '../../../util/system_ui.dart';
 import 'playback_takeover.dart';
+import 'episode_browser.dart';
+import 'episode_browser_panel.dart';
 import 'osd_buttons.dart';
 import 'trickplay_housing_inset.dart';
+
+class _SubtitleLoadingSpinner extends StatefulWidget {
+  const _SubtitleLoadingSpinner();
+
+  @override
+  State<_SubtitleLoadingSpinner> createState() =>
+      _SubtitleLoadingSpinnerState();
+}
+
+class _SubtitleLoadingSpinnerState extends State<_SubtitleLoadingSpinner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      // Run Flutter's stock spinner at half speed.
+      duration: Duration(
+        milliseconds:
+            CircularProgressIndicator.defaultAnimationDuration.inMilliseconds *
+            2,
+      ),
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CircularProgressIndicator(
+      controller: _controller,
+      strokeWidth: 2,
+      color: Colors.white,
+    );
+  }
+}
 
 class VideoPlayerScreen extends StatefulWidget {
   const VideoPlayerScreen({super.key});
@@ -142,7 +180,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       ? GetIt.instance<MediaKitPlayerBackend>()
       : null;
   final _prefs = GetIt.instance<UserPreferences>();
-  final _autoHdrSwitcher = AutoHdrSwitcher();
+  // App lifetime and shared with the mini player, so minimizing does not
+  // flip the display out of HDR while the video carries on in the bar.
+  final _autoHdrSwitcher = VideoMiniPlayerController.instance.autoHdrSwitcher;
   final _clientFactory = GetIt.instance<MediaServerClientFactory>();
   final _castService = GetIt.instance<CastService>();
   final _nativeCast = GetIt.instance<NativeCastChannel>();
@@ -271,13 +311,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   final GlobalKey _topOverlayKey = GlobalKey();
   final GlobalKey _bottomOverlayKey = GlobalKey();
   late ZoomMode _zoomMode;
-  double _audioDelay = 0.0;
-  double _subtitleDelay = 0.0;
   bool _subtitleActive = false;
   int? _subtitleIndexBeforeQuickOff;
   bool _subtitleReapplyRetryScheduled = false;
   bool _isStopping = false;
   bool _readyToPop = false;
+  bool _isMinimizing = false;
   VoidCallback? _cancelPopAfterBackKeyUp;
   DateTime? _suppressTvLifecycleExitUntil;
   bool _isOsdLocked = false;
@@ -350,6 +389,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   StreamSubscription? _pipActionSub;
   StreamSubscription? _playingSub;
   StreamSubscription? _bufferingSub;
+  StreamSubscription<bool>? _subtitleLoadingSub;
+  Timer? _subtitleLoadingTimer;
+  bool _showSubtitleLoading = false;
   StreamSubscription<Map<String, dynamic>>? _castEventsSub;
   StreamSubscription<Map<String, dynamic>>? _dlnaEventsSub;
   StreamSubscription<Map<String, dynamic>>? _airPlayEventsSub;
@@ -360,6 +402,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   String? _trickplayMediaSourceId;
   String? _castPeopleItemId;
   List<Map<String, dynamic>> _castPeople = const [];
+  EpisodeBrowserController? _episodeBrowser;
+  ModalRoute<dynamic>? _episodeBrowserRoute;
   int _trickplayLoadGeneration = 0;
   static const int _trickplayFrameWidth = 320;
 
@@ -714,177 +758,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     });
   }
 
-  bool _canDownloadRemoteSubtitles(AggregatedItem item) {
-    final user = GetIt.instance<UserRepository>().currentUser;
-    final mediaType = item.rawData['MediaType'] as String?;
-    final isAudio =
-        item.type == 'Audio' ||
-        item.type == 'MusicAlbum' ||
-        item.type == 'AudioBook' ||
-        mediaType == 'Audio';
-
-    return (user?.canManageSubtitles ?? false) &&
-        item.mediaSources.isNotEmpty &&
-        item.type != 'Photo' &&
-        item.type != 'Book' &&
-        !isAudio;
-  }
-
-  Future<Map<String, dynamic>?> _awaitDownloadedSubtitle(
-    AggregatedItem currentItem,
-    Set<int> existingIndexes,
-  ) {
-    return awaitNewSubtitleStream(
-      client: _clientForItem(currentItem),
-      item: currentItem,
-      existingIndexes: existingIndexes,
-      keepGoing: () => mounted,
-    );
-  }
-
-  Future<void> _downloadRemoteSubtitles(
-    AggregatedItem item,
-    List<Map<String, dynamic>> subtitleStreams,
-    List<Map<String, dynamic>> audioStreams,
-  ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final client = _clientForItem(item);
-    final language = remoteSubtitleLanguage(subtitleStreams, audioStreams);
-
-    List<Map<String, dynamic>> results;
-    try {
-      results = await withProgressSnackBar(
-        messenger,
-        AppLocalizations.of(context).searchingSubtitles,
-        () =>
-            client.itemsApi.searchRemoteSubtitles(item.id, language: language),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            remoteSubtitleErrorMessage(
-              error,
-              AppLocalizations.of(context),
-              action: AppLocalizations.of(context).search,
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-
-    if (!mounted) return;
-    if (results.isEmpty) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            AppLocalizations.of(context).noRemoteSubtitlesFound(language),
-          ),
-        ),
-      );
-      return;
-    }
-
-    final l10n = AppLocalizations.of(context);
-    final result = await TrackSelectorDialog.show(
-      context,
-      title: l10n.downloadSubtitles,
-      options: results.map((subtitle) {
-        final label =
-            subtitle['Name'] as String? ??
-            subtitle['Author'] as String? ??
-            l10n.subtitles;
-        final subtitleText = remoteSubtitleDetails(subtitle, l10n);
-        return TrackOption(
-          label: label,
-          subtitle: subtitleText.isNotEmpty ? subtitleText : null,
-          subtitleMaxLines: 2,
-          badges: remoteSubtitleFlags(subtitle, l10n),
-        );
-      }).toList(),
-    );
-
-    if (!mounted || result == null || result >= results.length) return;
-
-    final subtitleId = results[result]['Id']?.toString();
-    if (subtitleId == null || subtitleId.isEmpty) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context).selectedSubtitleInvalid),
-        ),
-      );
-      return;
-    }
-
-    final existingIndexes = subtitleStreams
-        .map((stream) => stream['Index'] as int?)
-        .whereType<int>()
-        .toSet();
-
-    try {
-      final newStream = await withProgressSnackBar(
-        messenger,
-        AppLocalizations.of(context).downloadingSubtitle,
-        () async {
-          await client.itemsApi.downloadRemoteSubtitle(item.id, subtitleId);
-          return _awaitDownloadedSubtitle(item, existingIndexes);
-        },
-      );
-      if (!mounted) return;
-
-      if (newStream != null) {
-        final streamIndex = newStream['Index'] as int?;
-        if (streamIndex != null) {
-          unawaited(
-            _runSinglePlayerMutation(
-              'downloaded_subtitle_$streamIndex',
-              () => _manager.changeSubtitleTrack(
-                streamIndex,
-                refreshStreams: true,
-              ),
-            ).then((_) {
-              if (mounted) _syncSubtitleActive();
-            }),
-          );
-        }
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              AppLocalizations.of(context).subtitleDownloadedSelected(
-                newStream['DisplayTitle'] as String? ??
-                    newStream['Title'] as String? ??
-                    newStream['Language'] as String? ??
-                    AppLocalizations.of(context).unknown,
-              ),
-            ),
-          ),
-        );
-        return;
-      }
-
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context).subtitleDownloadedPending),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            remoteSubtitleErrorMessage(
-              error,
-              AppLocalizations.of(context),
-              action: AppLocalizations.of(context).download,
-            ),
-          ),
-        ),
-      );
-    }
-  }
-
   MediaSegmentService _createSegmentService([AggregatedItem? item]) {
     final client = item != null
         ? _clientForItem(item)
@@ -986,6 +859,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   Future<void> _syncAutoHdrSwitching() async {
     if (!PlatformDetection.isWindows) return;
+    // Leaving fullscreen on the way to the mini player must not drop the
+    // display out of HDR under the video that carries on there.
+    if (_isMinimizing) return;
     final behavior = _prefs.get(UserPreferences.autoHdrSwitchingBehavior);
     final switched = await _autoHdrSwitcher.sync(
       behavior: behavior,
@@ -1020,6 +896,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       releaseImageMemoryForPlayback();
       detachTextInputForPlayback();
     }
+    // Back from the mini player: take the HDR session it held, before the
+    // presenter claim below, so the window is never torn down in between.
+    VideoMiniPlayerController.instance.playerScreenOpened(this);
     final hdrBackend = _hdrBackend;
     if (hdrBackend != null) {
       // Engagement finishes at the tail of play(), after the last build, and
@@ -1154,6 +1033,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       }
     }
     _queueSub = _queue.queueChangedStream.listen((_) {
+      _closeEpisodeBrowser();
       _loadSegmentsForCurrentItem();
       _manager.suppressAutoNext = false;
       _consecutiveEpisodes++;
@@ -1191,6 +1071,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         PlatformDetection.isIOS;
 
     _displayPlaying = _state.isPlaying;
+    _subtitleLoadingSub = _state.subtitleLoadingStream.listen(
+      _onSubtitleLoadingChanged,
+    );
+    _onSubtitleLoadingChanged(_state.isSubtitleLoading);
     _playingSub = _state.playingStream.listen((playing) {
       _updateDisplayPlaying(playing);
       _armPrerollSkipAfterPlaybackStarts();
@@ -1259,10 +1143,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       GetIt.instance<PlaybackArbiter>().pipActive = false;
     }
     _screensaverPlayingSub?.cancel();
-    _screensaverController.setPlaybackActive(false);
+    // A minimized video keeps playing, and the mini bar keeps the display
+    // awake from here.
+    if (!_isMinimizing) _screensaverController.setPlaybackActive(false);
     _prefs.removeListener(_onPlaybackPrefsChanged);
     _syncPlayManager?.removeListener(_onSyncPlayChanged);
-    _manager.autoAdvanceEnabled = true;
+    // A minimized video keeps the autoplay setting this screen applied; the
+    // mini player resets it when it ends.
+    if (!_isMinimizing) _manager.autoAdvanceEnabled = true;
     WidgetsBinding.instance.removeObserver(this);
     if (PlatformDetection.isDesktop) {
       windowManager.removeListener(this);
@@ -1307,6 +1195,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     }
     _positionSub?.cancel();
     _queueSub?.cancel();
+    _episodeBrowser?.dispose();
     _backendSub?.cancel();
     _letterboxCropAppliedSub?.cancel();
     _letterboxCropGeometrySub?.cancel();
@@ -1316,6 +1205,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _pipActionSub?.cancel();
     _playingSub?.cancel();
     _bufferingSub?.cancel();
+    _subtitleLoadingSub?.cancel();
+    _subtitleLoadingTimer?.cancel();
     _castEventsSub?.cancel();
     _dlnaEventsSub?.cancel();
     _airPlayEventsSub?.cancel();
@@ -1334,7 +1225,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _tvSecondaryFocus.dispose();
     _tvTransportLastFocus.dispose();
     _tvSecondaryLastFocus.dispose();
-    unawaited(_autoHdrSwitcher.restore());
+    if (!_isMinimizing) unawaited(_autoHdrSwitcher.restore());
+    if (!_isMinimizing) TrackPicker.resetDelays();
     _themeMusicService.setExternalAudioActive(false);
     if (!PlatformDetection.isTV) _pipService.enableAutoPiP(false);
     if (_wasAlwaysOnTopOnEntry == false && _isAlwaysOnTop) {
@@ -2531,7 +2423,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _trickplayMediaSourceId = mediaSourceId;
     });
     if (_controlsVisible) {
-      _prefetchTrickplayDirectional(_state.position, forward: true);
+      // Precaching reads MediaQuery through the context, which initState
+      // can't do. Reopening a player whose item is already playing finds the
+      // info without awaiting anything, so this runs from initState then.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || generation != _trickplayLoadGeneration) return;
+        _prefetchTrickplayDirectional(_state.position, forward: true);
+      });
     }
   }
 
@@ -3152,6 +3050,50 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     unawaited(_manager.stop(userInitiated: false));
   }
 
+  /// Shrinks the player into the bar along the bottom of the app. Playback
+  /// keeps running and the bar's thumbnail takes the picture over, so this
+  /// leaves exactly like [_exitPlayback] minus the stop.
+  bool get _canMinimize =>
+      VideoMiniPlayerController.isSupported &&
+      !_isCurrentPreroll &&
+      _castService.activeKind == null &&
+      _bringupState.phase == PlaybackBringupPhase.ready;
+
+  Future<void> _minimizePlayer() async {
+    if (_isStopping || !_canMinimize) return;
+    setState(() {
+      _isStopping = true;
+    });
+    // Set before the awaits below: if the route goes away during them, the
+    // dispose that skips the stop still leaves a bar to control playback.
+    _isMinimizing = true;
+    VideoMiniPlayerController.instance.minimize(screen: this);
+    // The next up card goes with the screen, and a pending card would keep
+    // the manager from advancing on its own.
+    _manager.suppressAutoNext = false;
+    _showNextUp = false;
+    if (_wasAlwaysOnTopOnEntry == false && _isAlwaysOnTop) {
+      await _setAlwaysOnTop(false);
+    }
+    if (PlatformDetection.useDesktopUi &&
+        _wasDesktopFullscreenOnEntry == false) {
+      final isFullscreen = await FullscreenHelper.isFullscreen();
+      if (isFullscreen) {
+        await _setDesktopFullscreen(false);
+      }
+    }
+    await _restoreSystemUiForExit();
+    if (!mounted) return;
+    _dismissTopOverlayRouteIfAny();
+    setState(() {
+      _readyToPop = true;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _popPlayerRoute();
+    });
+  }
+
   void _popPlayerRoute() {
     // Newer Android sends the system back before the key up reaches here, and
     // that back has already popped the player.
@@ -3343,16 +3285,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   // stale target the next time play is pressed, so it is dropped here and
   // the seek goes straight through.
   Future<void> _seekDirect(Duration target) {
-    if (_pendingScrubSeekTarget != null || _isPausedScrubActive || _isSeeking) {
-      _scrubSeekCommitId++;
-      _pendingScrubSeekTarget = null;
-      _isPausedScrubActive = false;
-      final resume = _wasPlayingBeforeScrubPause;
-      _wasPlayingBeforeScrubPause = false;
-      if (resume) unawaited(_manager.resume());
-      if (mounted) setState(() => _isSeeking = false);
-    }
+    _dropScrubSession(resume: true);
     return _manager.seekTo(target);
+  }
+
+  void _dropScrubSession({required bool resume}) {
+    if (_pendingScrubSeekTarget == null &&
+        !_isPausedScrubActive &&
+        !_isSeeking) {
+      return;
+    }
+    _scrubSeekCommitId++;
+    _pendingScrubSeekTarget = null;
+    _isPausedScrubActive = false;
+    final wasPlaying = _wasPlayingBeforeScrubPause;
+    _wasPlayingBeforeScrubPause = false;
+    if (resume && wasPlaying) unawaited(_manager.resume());
+    if (mounted) setState(() => _isSeeking = false);
   }
 
   void _seekRelative(int ms, {bool showControls = true}) {
@@ -3673,11 +3622,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   void _resetSeekAcceleration() {
     _seekDirection = null;
     _seekRepeatCount = 0;
-  }
-
-  String _formatDelay(double seconds) {
-    if (seconds == 0) return AppLocalizations.of(context).none;
-    return '${seconds >= 0 ? '+' : ''}${(seconds * 1000).round()} ms';
   }
 
   SubtitleViewConfiguration _buildSubtitleConfig() =>
@@ -4313,6 +4257,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           ),
                         _buildBottomOverlay(context),
                       ],
+                      // The controls carry the indicator while they're up.
+                      // Once they hide it stays in the corner, since the wait
+                      // can outlast the controls by minutes.
+                      if (_showSubtitleLoading &&
+                          !hideOsdForPreroll &&
+                          (!_controlsVisible || _isOsdLocked) &&
+                          !_isBringupInProgress(_bringupState.phase))
+                        Positioned(
+                          left: AppSpacing.spaceLg,
+                          right: AppSpacing.spaceLg,
+                          bottom:
+                              MediaQuery.of(context).padding.bottom +
+                              AppSpacing.spaceLg,
+                          child: _buildSubtitleLoadingIndicator(
+                            standalone: true,
+                          ),
+                        ),
                       _buildBufferingIndicator(),
                       _buildVolumeOverlay(),
                       if (PlatformDetection.useMobileUi)
@@ -4366,7 +4327,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                               : null,
                           timeoutMs: _prefs.get(UserPreferences.nextUpTimeout),
                           onPlayNext: _handleNextUpPlay,
-                          onDismiss: _handleNextUpCancel,
+                          // TV dismisses with Back, so its X exits the player.
+                          onDismiss: PlatformDetection.isTV
+                              ? _handleNextUpCancel
+                              : _handleNextUpDismiss,
                           onTimeout:
                               _prefs.get(UserPreferences.autoplayNextEpisode)
                               ? _handleNextUpPlay
@@ -4660,6 +4624,73 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     );
   }
 
+  void _onSubtitleLoadingChanged(bool loading) {
+    _subtitleLoadingTimer?.cancel();
+    _subtitleLoadingTimer = null;
+    if (!mounted) return;
+    if (!loading) {
+      if (_showSubtitleLoading) setState(() => _showSubtitleLoading = false);
+    } else if (!_showSubtitleLoading) {
+      // A cached subtitle shouldn't flash the indicator.
+      _subtitleLoadingTimer = Timer(const Duration(milliseconds: 500), () {
+        _subtitleLoadingTimer = null;
+        if (mounted) setState(() => _showSubtitleLoading = true);
+      });
+    }
+  }
+
+  Widget _buildSubtitleLoadingIndicator({bool standalone = false}) {
+    Widget status = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: AppTypography.fontSizeLg,
+          height: AppTypography.fontSizeLg,
+          child: _SubtitleLoadingSpinner(),
+        ),
+        const SizedBox(width: AppSpacing.spaceSm),
+        Flexible(
+          child: Text(
+            AppLocalizations.of(context).fetchingSubtitles,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: AppTypography.fontSizeXs,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+    if (standalone) {
+      // Without the controls' gradient behind it, it needs its own backing to
+      // stay readable over a bright picture.
+      status = DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black54,
+          borderRadius: AppRadius.circular(14),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.spaceMd,
+            vertical: AppSpacing.spaceXs,
+          ),
+          child: status,
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.spaceLg),
+      child: IgnorePointer(
+        child: Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: status,
+        ),
+      ),
+    );
+  }
+
   Widget _buildPausedDescriptionOverlay() {
     if (!_prefs.get(UserPreferences.showDescriptionOnPause)) {
       return const SizedBox.shrink();
@@ -4854,6 +4885,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               ),
             const SizedBox(width: AppSpacing.spaceSm),
             Expanded(child: _buildTitleInfo()),
+            if (_canMinimize)
+              IconButton(
+                onPressed: _minimizePlayer,
+                tooltip: l10n.playerTooltipMinimize,
+                icon: AdaptiveIcon(
+                  Icons.picture_in_picture_alt_rounded,
+                  color: Colors.white,
+                  size: 30 * _osdButtonScale,
+                ),
+              ),
             if (PlatformDetection.useMobileUi &&
                 _prefs.get(UserPreferences.osdLockEnabled))
               IconButton(
@@ -5258,6 +5299,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                     return Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (_showSubtitleLoading &&
+                            !_isBringupInProgress(_bringupState.phase)) ...[
+                          _buildSubtitleLoadingIndicator(),
+                          const SizedBox(height: AppSpacing.spaceMd),
+                        ],
                         if (hasAboveRow)
                           Padding(
                             padding: const EdgeInsets.only(
@@ -5868,13 +5914,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             ((_itemIdForQueueItem(item)?.isNotEmpty) ?? false);
         final isFavorite = canFavorite && _queueItemIsFavorite(item);
         final hasChapters = item is AggregatedItem && item.chapters.isNotEmpty;
+        final canBrowse = _canBrowseEpisodes(item);
         final hasCast = _hasCastCrew(item);
         final playbackStreams = _currentPlaybackMediaStreams();
         final hasSubtitleStreams = playbackStreams.any(
           (s) => s['Type'] == 'Subtitle',
         );
         final canDownloadRemoteSubtitles =
-            item is AggregatedItem && _canDownloadRemoteSubtitles(item);
+            item is AggregatedItem && TrackPicker.canDownloadRemoteSubtitles(item);
         final showSubtitleButton =
             hasSubtitleStreams || canDownloadRemoteSubtitles;
         final subtitleButtonIcon =
@@ -5949,6 +5996,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
               size: secondaryIconSize,
               extent: secondaryExtent,
               tooltip: l10n.chapters,
+            ),
+          if (canBrowse && shows(OsdButton.episodes))
+            OsdButton.episodes: _controlButton(
+              Icons.video_library_outlined,
+              onPressed: _showEpisodes,
+              size: secondaryIconSize,
+              extent: secondaryExtent,
+              tooltip: l10n.episodes,
             ),
           if (showSubtitleButton && shows(OsdButton.subtitles))
             OsdButton.subtitles: _controlButton(
@@ -7338,165 +7393,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _showTrackSelector({required bool audio}) {
-    final l10n = AppLocalizations.of(context);
-    final resolution = _manager.currentResolution;
-    final streamType = audio ? 'Audio' : 'Subtitle';
-    final item = _queue.currentItem;
-    final offlineMeta = _manager.currentOfflineMetadata;
-    final allStreams =
-        resolution?.mediaStreams ??
-        (offlineMeta?['MediaStreams'] as List?)?.cast<Map<String, dynamic>>() ??
-        const <Map<String, dynamic>>[];
-    final streams = allStreams.where((s) => s['Type'] == streamType).toList();
-    final displaySubtitleStreams = audio
-        ? const <Map<String, dynamic>>[]
-        : sortedSubtitleStreams(streams);
-    final optionStreams = audio ? streams : displaySubtitleStreams;
-    final audioStreams = allStreams.where((s) => s['Type'] == 'Audio').toList();
-    final canDownloadRemote =
-        !audio && item is AggregatedItem && _canDownloadRemoteSubtitles(item);
-
-    unawaited(() async {
-      final int? currentStreamIndex;
-      if (audio) {
-        currentStreamIndex =
-            _manager.audioStreamIndex ??
-            streams.where((s) => s['IsDefault'] == true).firstOrNull?['Index']
-                as int?;
-      } else {
-        final subIdx = await _manager.getSubtitleStreamIndexAsync();
-        currentStreamIndex =
-            subIdx ??
-            streams.where((s) => s['IsDefault'] == true).firstOrNull?['Index']
-                as int?;
-      }
-      final isSubsOff = !audio && currentStreamIndex == -1;
-
-      final options = <TrackOption>[
-        if (!audio) TrackOption(label: l10n.off),
-        ...optionStreams.asMap().entries.map((entry) {
-          final index = entry.key;
-          final trackNumber = index + 1;
-          final s = entry.value;
-          final displayTitle = s['DisplayTitle'] as String?;
-          final title = s['Title'] as String?;
-          final language = s['Language'] as String?;
-          final codec = s['Codec'] as String?;
-          final label =
-              displayTitle ??
-              title ??
-              language ??
-              l10n.streamTypeFallback(streamType, index + 1);
-          final subtitle = audio
-              ? [
-                  if (language != null && displayTitle != null) language,
-                  if (codec != null) codec.toUpperCase(),
-                  if (s['Channels'] != null) '${s['Channels']}ch',
-                ].join(' · ')
-              : (() {
-                  final subtitleType =
-                      ((codec == null || codec.isEmpty) ? 'Unknown' : codec)
-                          .toUpperCase();
-                  final deliveryMethod = (s['DeliveryMethod'] as String?)
-                      ?.trim()
-                      .toLowerCase();
-                  final location = s['IsExternal'] == true
-                      ? 'External'
-                      : (deliveryMethod == 'embed' ? 'Embedded' : 'Internal');
-                  return '$subtitleType · $location';
-                })();
-          return TrackOption(
-            label: '$trackNumber - $label',
-            subtitle: subtitle.isNotEmpty ? subtitle : null,
-            scrollLabel: true,
-            scrollSubtitle: true,
-          );
-        }),
-        if (canDownloadRemote)
-          TrackOption(
-            label: l10n.downloadSubtitlesLabel,
-            subtitle: l10n.searchOpenSubtitlesPlugin,
-          ),
-      ];
-
-      final int? selectedIndex;
-      if (audio) {
-        final idx = currentStreamIndex != null
-            ? streams.indexWhere((s) => s['Index'] == currentStreamIndex)
-            : -1;
-        selectedIndex = idx >= 0 ? idx : null;
-      } else {
-        if (isSubsOff || (currentStreamIndex == null && streams.isNotEmpty)) {
-          selectedIndex = 0;
-        } else if (currentStreamIndex != null) {
-          final idx = optionStreams.indexWhere(
-            (s) => s['Index'] == currentStreamIndex,
-          );
-          selectedIndex = idx >= 0 ? idx + 1 : null;
-        } else {
-          selectedIndex = null;
-        }
-      }
-
-      if (!mounted) return;
-
-      final backend = _activeBackend;
-      final delayLimits = delayLimitsFor(backend, audio: audio);
-      final result = await TrackSelectorDialog.show(
+    unawaited(
+      TrackPicker.show(
         context,
-        title: audio ? l10n.audioTrack : l10n.subtitleTrack,
-        options: options,
-        selectedIndex: selectedIndex,
+        manager: _manager,
+        audio: audio,
+        clientFor: _clientForItem,
         useRootNavigator: false,
-        footer: delayLimits == null
-            ? null
-            : DelayFooter(
-                initialDelay: audio
-                    ? _audioDelay
-                    : backend is Media3PlayerBackend
-                    ? backend.subtitleDelaySeconds
-                    : _subtitleDelay,
-                label: audio ? l10n.audioDelay : l10n.subtitleDelay,
-                minDelay: delayLimits.$1,
-                maxDelay: delayLimits.$2,
-                onDelayChanged: (d) => _applyDelay(audio: audio, delay: d),
-                formatDelay: _formatDelay,
-              ),
-      );
-      if (result == null || !mounted) return;
-      if (!audio) {
-        if (result == 0) {
-          await _runSinglePlayerMutation(
-            'subtitles_off',
-            _manager.disableSubtitles,
-          );
-          _syncSubtitleActive();
-          return;
-        }
-        final streamIdx = result - 1;
-        if (canDownloadRemote && streamIdx == streams.length) {
-          await _downloadRemoteSubtitles(item, streams, audioStreams);
-          return;
-        }
-        if (streamIdx < optionStreams.length) {
-          final streamIndex =
-              optionStreams[streamIdx]['Index'] as int? ?? streamIdx;
-          await _runSinglePlayerMutation(
-            'subtitle_$streamIndex',
-            () => _manager.changeSubtitleTrack(streamIndex),
-          );
-          _syncSubtitleActive();
-        }
-      } else {
-        if (result < streams.length) {
-          final streamIndex = streams[result]['Index'] as int? ?? result;
-          await _runSinglePlayerMutation(
-            'audio_$streamIndex',
-            () => _manager.changeAudioTrack(streamIndex),
-          );
-        }
-      }
-    }());
+        runMutation: _runSinglePlayerMutation,
+        onSubtitlesChanged: () {
+          if (mounted) _syncSubtitleActive();
+        },
+      ),
+    );
     _showControls();
   }
 
@@ -7705,6 +7614,63 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _seekDirect(Duration(microseconds: ticks ~/ 10));
     }());
     _showControls();
+  }
+
+  bool _canBrowseEpisodes(dynamic item) => canBrowseEpisodes(
+    item,
+    offline: _manager.isOfflinePlayback,
+    inSyncPlay: _syncPlayManager?.state.enabled == true,
+  );
+
+  void _showEpisodes() {
+    final item = _queue.currentItem;
+    if (item is! AggregatedItem || !_canBrowseEpisodes(item)) return;
+    final client = _clientForItem(item);
+    final existing = _episodeBrowser;
+    final browser = existing != null && existing.isFor(item)
+        ? existing
+        : EpisodeBrowserController(client: client, playing: item);
+    if (!identical(browser, existing)) {
+      existing?.dispose();
+      _episodeBrowser = browser;
+    }
+    browser.open(item);
+    unawaited(() async {
+      final picked = await showStyledPlayerDialog<AggregatedItem>(
+        context,
+        title: item.seriesName ?? AppLocalizations.of(context).episodes,
+        maxWidth: 760,
+        builder: (dialogCtx) {
+          _episodeBrowserRoute = ModalRoute.of(dialogCtx);
+          return EpisodeBrowserPanel(
+            controller: browser,
+            imageApi: client.imageApi,
+            onSelect: (episode) {
+              _episodeBrowserRoute = null;
+              Navigator.of(dialogCtx).pop(episode);
+            },
+          );
+        },
+      );
+      _episodeBrowserRoute = null;
+      browser.close();
+      if (picked == null || !mounted || picked.id == browser.playing.id) return;
+      // A scrub left pending on this episode would commit its target on the
+      // next one the moment play is pressed.
+      _dropScrubSession(resume: false);
+      // The pick was made in the dialog, out of reach of the player's own
+      // key handling, so it counts as the viewer being here now.
+      if (await browser.play(_manager, picked)) _noteViewerActivity();
+    }());
+    _showControls();
+  }
+
+  /// A new item starting takes the browser with it, so it never offers the
+  /// last one as the episode that's playing.
+  void _closeEpisodeBrowser() {
+    final route = _episodeBrowserRoute;
+    _episodeBrowserRoute = null;
+    if (route != null && route.isActive) route.navigator?.removeRoute(route);
   }
 
   bool _hasCastCrew(dynamic item) {
@@ -8044,16 +8010,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         _ => l10n.cast,
       };
       _showThrottledCastError(l10n.castActionFailed(label, describeError(e, l10n)));
-    }
-  }
-
-  void _applyDelay({required bool audio, required double delay}) {
-    if (audio) {
-      _audioDelay = delay;
-      _manager.backend?.setAudioDelay(delay);
-    } else {
-      _subtitleDelay = delay;
-      _manager.backend?.setSubtitleDelay(delay);
     }
   }
 

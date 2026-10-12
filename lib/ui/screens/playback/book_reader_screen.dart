@@ -138,13 +138,11 @@ class _BookReaderScreenState extends State<BookReaderScreen>
 
   bool get _epubIsRtl => Directionality.of(context) == TextDirection.rtl;
 
-  ReaderThemeColors get _fixedLayoutChromeColors => ReaderThemeColors(
-    background: _invertFixedLayout
-        ? const Color(0xFFF2F2F2)
-        : const Color(0xFF0A0A0A),
-    foreground: _invertFixedLayout ? const Color(0xFF1A1A1A) : Colors.white,
-    link: const Color(0xFF6FA8FF),
-    isDark: !_invertFixedLayout,
+  static const _fixedLayoutChromeColors = ReaderThemeColors(
+    background: Color(0xFF0A0A0A),
+    foreground: Colors.white,
+    link: Color(0xFF6FA8FF),
+    isDark: true,
   );
 
   Widget _readerDimWarmthOverlay() {
@@ -1887,34 +1885,20 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     return chapters;
   }
 
+  static const _fixedLayoutInvertMatrix = <double>[
+    -1, 0, 0, 0, 255,
+    0, -1, 0, 0, 255,
+    0, 0, -1, 0, 255,
+    0, 0, 0, 1, 0,
+  ];
+
   Widget _maybeInvertFixedLayout(Widget child) {
     if (!_invertFixedLayout) {
       return child;
     }
 
     return ColorFiltered(
-      colorFilter: const ColorFilter.matrix(<double>[
-        -1,
-        0,
-        0,
-        0,
-        255,
-        0,
-        -1,
-        0,
-        0,
-        255,
-        0,
-        0,
-        -1,
-        0,
-        255,
-        0,
-        0,
-        0,
-        1,
-        0,
-      ]),
+      colorFilter: const ColorFilter.matrix(_fixedLayoutInvertMatrix),
       child: child,
     );
   }
@@ -2134,7 +2118,7 @@ class _BookReaderScreenState extends State<BookReaderScreen>
     final title = item?.name ?? l10n.bookReader;
 
     return Scaffold(
-      backgroundColor: _invertFixedLayout ? Colors.white : Colors.black,
+      backgroundColor: Colors.black,
       body: _loadingContent
           ? const Center(child: CircularProgressIndicator())
           : _comicEntries.isEmpty

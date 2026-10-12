@@ -280,12 +280,6 @@ abstract class AppLocalizations {
   /// **'Recap'**
   String get animeMarkerRecap;
 
-  /// Section header for account preferences settings
-  ///
-  /// In en, this message translates to:
-  /// **'ACCOUNT PREFERENCES'**
-  String get accountPreferences;
-
   /// Label for the app interface language setting
   ///
   /// In en, this message translates to:
@@ -739,7 +733,7 @@ abstract class AppLocalizations {
   /// Label for the detail screen setting to show stream/codec technical details
   ///
   /// In en, this message translates to:
-  /// **'Show Technical Details?'**
+  /// **'Show Technical Details'**
   String get showTechnicalDetails;
 
   /// Explanation under the show technical details setting
@@ -781,7 +775,7 @@ abstract class AppLocalizations {
   /// Label for the toggle that controls whether similar suggestions are capped by target media parental rating
   ///
   /// In en, this message translates to:
-  /// **'Apply Parental Rating Cap?'**
+  /// **'Apply Rating Limit to Recommendations'**
   String get recommendationsApplyParentalRatingCap;
 
   /// Explanation under the parental rating cap setting toggle
@@ -967,7 +961,7 @@ abstract class AppLocalizations {
   /// Settings label for preferring the native system keyboard instead of the custom TV keyboard
   ///
   /// In en, this message translates to:
-  /// **'Prefer system keyboard'**
+  /// **'Prefer System Keyboard'**
   String get keyboardPreferSystemIme;
 
   /// Settings subtitle for the system keyboard preference
@@ -985,7 +979,7 @@ abstract class AppLocalizations {
   /// Settings label for the switch that lets a game controller move focus and select items
   ///
   /// In en, this message translates to:
-  /// **'Gamepad navigation'**
+  /// **'Gamepad Navigation'**
   String get gamepadNavigation;
 
   /// Settings subtitle for the gamepad navigation switch
@@ -2770,6 +2764,12 @@ abstract class AppLocalizations {
   /// **'Searching for subtitles…'**
   String get searchingSubtitles;
 
+  /// Playback status shown while the selected subtitle file is loading
+  ///
+  /// In en, this message translates to:
+  /// **'Fetching subtitles'**
+  String get fetchingSubtitles;
+
   /// Shown while a chosen subtitle is downloaded and the server is picking it up
   ///
   /// In en, this message translates to:
@@ -3829,7 +3829,7 @@ abstract class AppLocalizations {
   /// Settings label for sending HDR to the display untouched
   ///
   /// In en, this message translates to:
-  /// **'Native HDR output'**
+  /// **'Native HDR Output'**
   String get nativeHdrOutput;
 
   /// Settings description for native HDR output
@@ -5014,12 +5014,6 @@ abstract class AppLocalizations {
   /// **'Quality, storage'**
   String get qualityStorage;
 
-  /// Plugin settings description
-  ///
-  /// In en, this message translates to:
-  /// **'Server sync and plugin status'**
-  String get serverSyncAndPluginStatus;
-
   /// Seerr settings description
   ///
   /// In en, this message translates to:
@@ -5085,12 +5079,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Video and subtitles'**
   String get videoAndSubtitles;
-
-  /// Integrations section title
-  ///
-  /// In en, this message translates to:
-  /// **'Integrations'**
-  String get integrations;
 
   /// Integrations section description
   ///
@@ -5431,7 +5419,7 @@ abstract class AppLocalizations {
   /// Setting toggle for showing loading animation text
   ///
   /// In en, this message translates to:
-  /// **'Show Text?'**
+  /// **'Show Text'**
   String get showLoadingAnimationText;
 
   /// Label for loading animation preview window
@@ -5644,12 +5632,6 @@ abstract class AppLocalizations {
   /// **'Theme Music Volume'**
   String get themeMusicVolume;
 
-  /// Subtitle for the Theme Music settings sub-category tile
-  ///
-  /// In en, this message translates to:
-  /// **'Detail pages, home rows, and volume'**
-  String get themeMusicSettingsSubtitle;
-
   /// Percentage display
   ///
   /// In en, this message translates to:
@@ -5683,13 +5665,13 @@ abstract class AppLocalizations {
   /// Setting for details background blur
   ///
   /// In en, this message translates to:
-  /// **'Details Background Blur'**
+  /// **'Background Blur'**
   String get detailsBackgroundBlur;
 
   /// Setting for details background opacity on modern screens
   ///
   /// In en, this message translates to:
-  /// **'Details Background Opacity'**
+  /// **'Background Opacity'**
   String get detailsBackgroundOpacity;
 
   /// Pixel value display
@@ -5725,7 +5707,7 @@ abstract class AppLocalizations {
   /// Setting title for the mouse scroll wheel action during playback
   ///
   /// In en, this message translates to:
-  /// **'Mouse scroll wheel'**
+  /// **'Mouse Scroll Wheel'**
   String get settingsScrollWheelAction;
 
   /// Description for the mouse scroll wheel action setting
@@ -5773,7 +5755,7 @@ abstract class AppLocalizations {
   /// Setting to detect and crop encoded letterbox/pillarbox bars
   ///
   /// In en, this message translates to:
-  /// **'Crop black bars'**
+  /// **'Crop Black Bars'**
   String get cropBlackBars;
 
   /// Description for the crop black bars playback setting
@@ -5785,7 +5767,7 @@ abstract class AppLocalizations {
   /// Setting for how often to re-detect encoded letterbox bars
   ///
   /// In en, this message translates to:
-  /// **'Recrop interval'**
+  /// **'Recrop Interval'**
   String get cropBlackBarsRecropInterval;
 
   /// Letterbox recrop interval: detect once after playback starts
@@ -6829,7 +6811,7 @@ abstract class AppLocalizations {
   /// Title of the RAW-vs-IEC passthrough packer selector (Android TV, Media3 engine)
   ///
   /// In en, this message translates to:
-  /// **'Passthrough output'**
+  /// **'Passthrough Output'**
   String get settingsAudioPassthroughOutput;
 
   /// No description provided for @settingsAudioPassthroughOutputDescription.
@@ -7069,7 +7051,7 @@ abstract class AppLocalizations {
   /// Label for hardware decoding toggle
   ///
   /// In en, this message translates to:
-  /// **'Hardware decoding'**
+  /// **'Hardware Decoding'**
   String get hardwareDecoding;
 
   /// Description for hardware decoding toggle
@@ -7504,41 +7486,11 @@ abstract class AppLocalizations {
   /// **'Synced local settings to {profile} profile.'**
   String syncedSettingsToProfile(String profile);
 
-  /// Setting for customization profile
-  ///
-  /// In en, this message translates to:
-  /// **'Customization Profile'**
-  String get customizationProfile;
-
-  /// Description for customization profile
-  ///
-  /// In en, this message translates to:
-  /// **'Choose the profile to load, edit, and sync. Global applies everywhere unless a device profile overrides it. The green dot marks your current device profile.'**
-  String get customizationProfileDescription;
-
-  /// Button to load a profile
-  ///
-  /// In en, this message translates to:
-  /// **'Load Profile'**
-  String get loadProfile;
-
   /// Label while syncing
   ///
   /// In en, this message translates to:
   /// **'Syncing...'**
   String get syncing;
-
-  /// Button to sync to a profile
-  ///
-  /// In en, this message translates to:
-  /// **'Sync Profile'**
-  String get syncToProfile;
-
-  /// Button to reset a profile to defaults
-  ///
-  /// In en, this message translates to:
-  /// **'Reset Profile'**
-  String get resetProfile;
 
   /// Title of the dialog confirming a profile reset
   ///
@@ -7627,7 +7579,7 @@ abstract class AppLocalizations {
   /// TV-only toggle in the Offline Downloads settings: offer download actions on item pages
   ///
   /// In en, this message translates to:
-  /// **'Enable offline downloads'**
+  /// **'Enable Offline Downloads'**
   String get tvOfflineDownloads;
 
   /// Subtitle for the TV-only offline downloads toggle
@@ -7639,7 +7591,7 @@ abstract class AppLocalizations {
   /// No description provided for @reportDownloadsActivity.
   ///
   /// In en, this message translates to:
-  /// **'Show downloads on the server'**
+  /// **'Show Downloads on the Server'**
   String get reportDownloadsActivity;
 
   /// No description provided for @reportDownloadsActivitySubtitle.
@@ -7705,7 +7657,7 @@ abstract class AppLocalizations {
   /// Setting for saving to downloads folder
   ///
   /// In en, this message translates to:
-  /// **'Save to Downloads folder'**
+  /// **'Save to Downloads Folder'**
   String get saveToDownloadsFolder;
 
   /// Description for downloads folder visibility
@@ -8146,18 +8098,6 @@ abstract class AppLocalizations {
   /// **'seconds'**
   String get seconds;
 
-  /// Local previews settings screen title
-  ///
-  /// In en, this message translates to:
-  /// **'Local Previews'**
-  String get localPreviews;
-
-  /// Description for local previews settings
-  ///
-  /// In en, this message translates to:
-  /// **'Configure trailer, media, and audio previews.'**
-  String get localPreviewsDescription;
-
   /// Setting for choosing media bar style
   ///
   /// In en, this message translates to:
@@ -8446,12 +8386,6 @@ abstract class AppLocalizations {
   /// **'Favorite Channels'**
   String get favoriteChannels;
 
-  /// Settings title for home sections
-  ///
-  /// In en, this message translates to:
-  /// **'Home Sections'**
-  String get homeSections;
-
   /// Tooltip for reset to defaults button
   ///
   /// In en, this message translates to:
@@ -8463,12 +8397,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Home Row Poster Size'**
   String get homeRowPosterSize;
-
-  /// Setting for per-row image type selection
-  ///
-  /// In en, this message translates to:
-  /// **'Per Row Image Type Selection'**
-  String get perRowImageTypeSelection;
 
   /// Description for per-row image type selection
   ///
@@ -8509,7 +8437,7 @@ abstract class AppLocalizations {
   /// Setting for full screen home rows
   ///
   /// In en, this message translates to:
-  /// **'Expanded Home Rows'**
+  /// **'Expanded Rows'**
   String get fullScreenRows;
 
   /// Description for full screen home rows
@@ -8521,7 +8449,7 @@ abstract class AppLocalizations {
   /// Title for home rows padding setting
   ///
   /// In en, this message translates to:
-  /// **'Home Row Padding'**
+  /// **'Row Padding'**
   String get homeRowsPadding;
 
   /// Description for home rows padding setting
@@ -8529,12 +8457,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Customize padding between home rows'**
   String get homeRowsPaddingDescription;
-
-  /// Title for per-row image type screen
-  ///
-  /// In en, this message translates to:
-  /// **'Per Row Image Type'**
-  String get perRowImageType;
 
   /// Section title for per-row settings
   ///
@@ -8733,12 +8655,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Only show rated content'**
   String get onlyShowRatedContent;
-
-  /// Setting for showing clock
-  ///
-  /// In en, this message translates to:
-  /// **'Show Clock'**
-  String get showClock;
 
   /// Description for show clock
   ///
@@ -8986,12 +8902,6 @@ abstract class AppLocalizations {
   /// **'Enable and reorder the rating sources shown throughout the app'**
   String get ratingSourcesDescription;
 
-  /// Settings title for plugin
-  ///
-  /// In en, this message translates to:
-  /// **'Moonbase Plugin'**
-  String get pluginLabel;
-
   /// Status when plugin is detected
   ///
   /// In en, this message translates to:
@@ -9004,53 +8914,83 @@ abstract class AppLocalizations {
   /// **'Plugin Not Detected'**
   String get pluginNotDetected;
 
-  /// Description when plugin is detected
-  ///
-  /// In en, this message translates to:
-  /// **'Server plugin detected. Sync is enabled automatically the first time the plugin is found.'**
-  String get pluginDetectedDescription;
-
   /// Description when plugin is not detected
   ///
   /// In en, this message translates to:
   /// **'Server plugin is not currently detected. Local settings still use their saved values or built-in defaults.'**
   String get pluginNotDetectedDescription;
 
-  /// Plugin status with version
+  /// Status line on the Settings Sync screen when the server plugin answers
   ///
   /// In en, this message translates to:
-  /// **'{status}\nVersion: {version}'**
-  String pluginStatusVersion(String status, String version);
+  /// **'Connected'**
+  String get pluginConnected;
 
-  /// Section title for available services
+  /// Status line on the Settings Sync screen with the server plugin's version
   ///
   /// In en, this message translates to:
-  /// **'Available Services'**
-  String get availableServices;
+  /// **'Connected, version {version}'**
+  String pluginConnectedVersion(String version);
 
-  /// Setting for server plugin sync
+  /// Caption under the settings sync switch while sync is on
   ///
   /// In en, this message translates to:
-  /// **'Server Plugin Sync'**
-  String get serverPluginSync;
+  /// **'Sync on'**
+  String get pluginSyncOn;
 
-  /// Description for server plugin sync
+  /// Caption under the settings sync switch while sync is off
   ///
   /// In en, this message translates to:
-  /// **'Sync settings with the server plugin'**
-  String get syncSettingsWithPlugin;
+  /// **'Sync off'**
+  String get pluginSyncOff;
 
-  /// Info title for sync explanation
+  /// Caption above the settings profile cards on the Settings Sync screen
   ///
   /// In en, this message translates to:
-  /// **'What sync controls'**
-  String get whatSyncControls;
+  /// **'This device syncs with the profile you pick until you pick another.'**
+  String get syncProfileDescription;
 
-  /// Description of what sync controls
+  /// Subtitle of the Global settings profile card
   ///
   /// In en, this message translates to:
-  /// **'Sync only controls whether plugin-backed settings are pushed to and pulled from the server. Profile selection and profile sync actions are in Customization settings when plugin sync is enabled.'**
-  String get syncControlsDescription;
+  /// **'Applies everywhere'**
+  String get profileAppliesEverywhere;
+
+  /// Subtitle of the Desktop, Mobile and TV settings profile cards
+  ///
+  /// In en, this message translates to:
+  /// **'Overrides Global'**
+  String get profileOverridesGlobal;
+
+  /// Marks the settings profile card that matches the current device
+  ///
+  /// In en, this message translates to:
+  /// **'This device'**
+  String get profileThisDevice;
+
+  /// Button that replaces this device's settings with the chosen profile from the server
+  ///
+  /// In en, this message translates to:
+  /// **'Load'**
+  String get profileLoad;
+
+  /// Line under the Load button saying which way the settings go
+  ///
+  /// In en, this message translates to:
+  /// **'Server to this device'**
+  String get profileLoadSubtitle;
+
+  /// Line under the Save button saying which way the settings go
+  ///
+  /// In en, this message translates to:
+  /// **'This device to server'**
+  String get profileSaveSubtitle;
+
+  /// Button that resets the chosen settings profile, for example Reset TV Profile
+  ///
+  /// In en, this message translates to:
+  /// **'Reset {profile} Profile'**
+  String resetNamedProfile(String profile);
 
   /// Seerr row: recent requests
   ///
@@ -9217,7 +9157,7 @@ abstract class AppLocalizations {
   /// Title for the toggle that notifies approvers of new Seerr requests
   ///
   /// In en, this message translates to:
-  /// **'New request notifications'**
+  /// **'New Request Notifications'**
   String get seerrNotifyNewRequestsTitle;
 
   /// Subtitle for the new request notifications toggle
@@ -9229,7 +9169,7 @@ abstract class AppLocalizations {
   /// Title for the toggle that notifies a requester about approvals, declines, and library availability
   ///
   /// In en, this message translates to:
-  /// **'Request updates'**
+  /// **'Request Updates'**
   String get seerrNotifyLibraryAddedTitle;
 
   /// Subtitle for the library-added notifications toggle
@@ -9241,7 +9181,7 @@ abstract class AppLocalizations {
   /// Title for the issue notifications toggle
   ///
   /// In en, this message translates to:
-  /// **'Issue updates'**
+  /// **'Issue Updates'**
   String get seerrNotifyIssuesTitle;
 
   /// Subtitle for the issue notifications toggle
@@ -9253,7 +9193,7 @@ abstract class AppLocalizations {
   /// Title for the toggle that notifies about anything newly added to the server library, not just requested media
   ///
   /// In en, this message translates to:
-  /// **'New media added'**
+  /// **'New Media Added'**
   String get seerrNotifyNewMediaTitle;
 
   /// Subtitle for the new media notifications toggle
@@ -9460,12 +9400,6 @@ abstract class AppLocalizations {
   /// **'Navbar style, toolbar buttons, appearance'**
   String get navbarStyleToolbarAppearance;
 
-  /// Home sections settings subtitle
-  ///
-  /// In en, this message translates to:
-  /// **'Reorder and toggle both library and external-based home rows'**
-  String get reorderToggleHomeRows;
-
   /// Media bar settings subtitle
   ///
   /// In en, this message translates to:
@@ -9477,12 +9411,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Poster size, image type, folder view'**
   String get posterSizeImageTypeFolderView;
-
-  /// Ratings settings subtitle
-  ///
-  /// In en, this message translates to:
-  /// **'MDBList, TMDB, and rating sources'**
-  String get mdbListTmdbRatingSources;
 
   /// Gigabyte value display
   ///
@@ -9499,13 +9427,13 @@ abstract class AppLocalizations {
   /// No description provided for @imageCacheLimit.
   ///
   /// In en, this message translates to:
-  /// **'Image cache limit'**
+  /// **'Image Cache Limit'**
   String get imageCacheLimit;
 
   /// No description provided for @clearImageCache.
   ///
   /// In en, this message translates to:
-  /// **'Clear image cache'**
+  /// **'Clear Image Cache'**
   String get clearImageCache;
 
   /// No description provided for @imageCacheCleared.
@@ -17614,6 +17542,18 @@ abstract class AppLocalizations {
   /// **'Seek forward'**
   String get playerTooltipSeekForward;
 
+  /// Tooltip label for shrinking the video player into the mini player bar so the viewer can keep browsing
+  ///
+  /// In en, this message translates to:
+  /// **'Minimize player'**
+  String get playerTooltipMinimize;
+
+  /// Tooltip label for returning from the video mini player bar to the full player
+  ///
+  /// In en, this message translates to:
+  /// **'Open player'**
+  String get miniPlayerOpenPlayer;
+
   /// Context menu action to mark an item as watched
   ///
   /// In en, this message translates to:
@@ -17686,30 +17626,6 @@ abstract class AppLocalizations {
   /// **'Access the server administration panel'**
   String get settingsAdministrationSubtitle;
 
-  /// No description provided for @settingsAccountSecurity.
-  ///
-  /// In en, this message translates to:
-  /// **'Account & Security'**
-  String get settingsAccountSecurity;
-
-  /// No description provided for @settingsAccountSecuritySubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Authentication, PIN code, and parental controls'**
-  String get settingsAccountSecuritySubtitle;
-
-  /// No description provided for @settingsPersonalization.
-  ///
-  /// In en, this message translates to:
-  /// **'Personalization'**
-  String get settingsPersonalization;
-
-  /// No description provided for @settingsPersonalizationSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Theme, navigation, home rows, and library visibility'**
-  String get settingsPersonalizationSubtitle;
-
   /// No description provided for @settingsDynamicContent.
   ///
   /// In en, this message translates to:
@@ -17722,35 +17638,11 @@ abstract class AppLocalizations {
   /// **'Media Bar and visual overlays'**
   String get settingsDynamicContentSubtitle;
 
-  /// No description provided for @settingsPlaybackSyncplay.
-  ///
-  /// In en, this message translates to:
-  /// **'Playback & SyncPlay'**
-  String get settingsPlaybackSyncplay;
-
-  /// No description provided for @settingsPlaybackSyncplaySubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Audio/video settings, subtitles, downloads, and SyncPlay controls'**
-  String get settingsPlaybackSyncplaySubtitle;
-
-  /// No description provided for @settingsIntegrationsSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Plugin sync, Seerr, ratings, and more'**
-  String get settingsIntegrationsSubtitle;
-
   /// No description provided for @settingsAboutSubtitle.
   ///
   /// In en, this message translates to:
   /// **'App version, legal information, and credits'**
   String get settingsAboutSubtitle;
-
-  /// No description provided for @settingsAuthenticationSection.
-  ///
-  /// In en, this message translates to:
-  /// **'AUTHENTICATION'**
-  String get settingsAuthenticationSection;
 
   /// No description provided for @settingsSortServersBy.
   ///
@@ -17770,16 +17662,10 @@ abstract class AppLocalizations {
   /// **'Alphabetical'**
   String get settingsAlphabetical;
 
-  /// Section header for server connection settings
-  ///
-  /// In en, this message translates to:
-  /// **'CONNECTION'**
-  String get settingsConnectionSection;
-
   /// Setting to trust self-signed TLS certificates
   ///
   /// In en, this message translates to:
-  /// **'Allow self-signed certificates'**
+  /// **'Allow Self-Signed Certificates'**
   String get settingsAllowSelfSignedCerts;
 
   /// Description for the allow self-signed certificates setting
@@ -17793,12 +17679,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This server\'s certificate isn\'t trusted. If it\'s your own server and uses a self-signed or private certificate, you can allow it here.'**
   String get untrustedServerCertificate;
-
-  /// No description provided for @settingsPrivacyAndSafetySection.
-  ///
-  /// In en, this message translates to:
-  /// **'PRIVACY & SAFETY'**
-  String get settingsPrivacyAndSafetySection;
 
   /// Shown instead of a title whose rating the viewer has blocked. Deliberately says nothing about what the title is.
   ///
@@ -17818,53 +17698,11 @@ abstract class AppLocalizations {
   /// **'Only blocks itself'**
   String get blockedRatingsUnrankedSection;
 
-  /// No description provided for @settingsBlockedRatings.
-  ///
-  /// In en, this message translates to:
-  /// **'Blocked Ratings'**
-  String get settingsBlockedRatings;
-
-  /// No description provided for @settingsGeneralStyle.
-  ///
-  /// In en, this message translates to:
-  /// **'General Style'**
-  String get settingsGeneralStyle;
-
-  /// No description provided for @settingsGeneralStyleSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Theme accents, backdrops, and watched indicators'**
-  String get settingsGeneralStyleSubtitle;
-
-  /// No description provided for @settingsDetailsScreen.
-  ///
-  /// In en, this message translates to:
-  /// **'Details Screen'**
-  String get settingsDetailsScreen;
-
-  /// No description provided for @settingsDetailsScreenSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Style, background blur, and tab behavior'**
-  String get settingsDetailsScreenSubtitle;
-
   /// No description provided for @settingsHomePage.
   ///
   /// In en, this message translates to:
   /// **'Home Page'**
   String get settingsHomePage;
-
-  /// No description provided for @settingsHomePageSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Sections, image types, overlays, and media previews'**
-  String get settingsHomePageSubtitle;
-
-  /// No description provided for @settingsLibrariesSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Library visibility, folder view, and multi-server behavior'**
-  String get settingsLibrariesSubtitle;
 
   /// No description provided for @settingsTwentyFourHourClock.
   ///
@@ -17943,24 +17781,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Seasonal Surprise'**
   String get settingsSeasonalSurprise;
-
-  /// No description provided for @settingsMetadataAndRatings.
-  ///
-  /// In en, this message translates to:
-  /// **'Metadata & Ratings'**
-  String get settingsMetadataAndRatings;
-
-  /// No description provided for @settingsPluginScreenDescription.
-  ///
-  /// In en, this message translates to:
-  /// **'Moonbase powers server-side integrations including additional rating sources, Seerr requests, and synced preferences.'**
-  String get settingsPluginScreenDescription;
-
-  /// No description provided for @settingsOfflineDownloads.
-  ///
-  /// In en, this message translates to:
-  /// **'Offline Downloads'**
-  String get settingsOfflineDownloads;
 
   /// Settings toggle title. When on, retro games run through native libretro emulator cores instead of the EmulatorJS browser-based emulator.
   ///
@@ -18202,18 +18022,6 @@ abstract class AppLocalizations {
   /// **'Check for the latest Moonfin release'**
   String get settingsCheckForUpdatesSubtitle;
 
-  /// No description provided for @settingsPoweredByFlutter.
-  ///
-  /// In en, this message translates to:
-  /// **'Powered by Flutter'**
-  String get settingsPoweredByFlutter;
-
-  /// Plural label for number of license notices
-  ///
-  /// In en, this message translates to:
-  /// **'{count, plural, one {# license notice} other {# license notices}}'**
-  String settingsLicenseNoticesCount(int count);
-
   /// Option label to show both progress bar and countdown timer on media segment countdown overlay
   ///
   /// In en, this message translates to:
@@ -18226,35 +18034,11 @@ abstract class AppLocalizations {
   /// **'Shuffle Content Type Filter'**
   String get settingsShuffleContentTypeFilter;
 
-  /// No description provided for @settingsVideoPlaybackPreferences.
-  ///
-  /// In en, this message translates to:
-  /// **'Video Playback Preferences'**
-  String get settingsVideoPlaybackPreferences;
-
-  /// No description provided for @settingsVideoPlaybackPreferencesSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Core video engine and streaming quality settings'**
-  String get settingsVideoPlaybackPreferencesSubtitle;
-
-  /// No description provided for @settingsAudioPreferences.
-  ///
-  /// In en, this message translates to:
-  /// **'Audio Preferences'**
-  String get settingsAudioPreferences;
-
   /// No description provided for @settingsAudioPreferencesSubtitle.
   ///
   /// In en, this message translates to:
   /// **'Audio tracks, processing, and passthrough options'**
   String get settingsAudioPreferencesSubtitle;
-
-  /// No description provided for @settingsAutomationAndQueue.
-  ///
-  /// In en, this message translates to:
-  /// **'Automation & Queue'**
-  String get settingsAutomationAndQueue;
 
   /// No description provided for @settingsAutomationAndQueueSubtitle.
   ///
@@ -18262,23 +18046,11 @@ abstract class AppLocalizations {
   /// **'Automated playback and sequencing'**
   String get settingsAutomationAndQueueSubtitle;
 
-  /// No description provided for @settingsOfflineDownloadsSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Download quality, storage limits, and queue size'**
-  String get settingsOfflineDownloadsSubtitle;
-
   /// No description provided for @settingsSyncplaySubtitle.
   ///
   /// In en, this message translates to:
   /// **'Synchronization logic for group sessions'**
   String get settingsSyncplaySubtitle;
-
-  /// No description provided for @settingsAdvancedOptionsSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Specialized player features. Use with caution, as some options may cause playback issues'**
-  String get settingsAdvancedOptionsSubtitle;
 
   /// No description provided for @settingsSkipIntrosAndOutros.
   ///
@@ -18781,7 +18553,7 @@ abstract class AppLocalizations {
   /// Setting title: skip silent audio segments during playback
   ///
   /// In en, this message translates to:
-  /// **'Skip silence'**
+  /// **'Skip Silence'**
   String get skipSilenceTitle;
 
   /// Setting subtitle for skip silence
@@ -18793,7 +18565,7 @@ abstract class AppLocalizations {
   /// Setting title: allow equalizer apps to attach to Media3
   ///
   /// In en, this message translates to:
-  /// **'Allow external audio effects'**
+  /// **'Allow External Audio Effects'**
   String get allowExternalAudioEffectsTitle;
 
   /// Setting subtitle for external audio effects
@@ -18817,7 +18589,7 @@ abstract class AppLocalizations {
   /// Setting title: enable tunneled video playback (advanced)
   ///
   /// In en, this message translates to:
-  /// **'Enable tunneling'**
+  /// **'Enable Tunneling'**
   String get enableTunnelingTitle;
 
   /// Setting subtitle for enable tunneling
@@ -18829,7 +18601,7 @@ abstract class AppLocalizations {
   /// Setting title: force DV P7 streams to the HDR10 strip path
   ///
   /// In en, this message translates to:
-  /// **'Always play Dolby Vision profile 7 as HDR10'**
+  /// **'Always Play Dolby Vision Profile 7 as HDR10'**
   String get mapDolbyVisionP7Title;
 
   /// Setting subtitle for forcing the DV P7 strip path
@@ -18841,7 +18613,7 @@ abstract class AppLocalizations {
   /// Setting title: apply colours/positioning from the subtitle track
   ///
   /// In en, this message translates to:
-  /// **'Use embedded subtitle styles'**
+  /// **'Use Embedded Subtitle Styles'**
   String get subtitlesUseEmbeddedStyles;
 
   /// Setting subtitle for embedded styles toggle
@@ -18853,7 +18625,7 @@ abstract class AppLocalizations {
   /// Setting title: apply font sizes from the subtitle track
   ///
   /// In en, this message translates to:
-  /// **'Use embedded subtitle font sizes'**
+  /// **'Use Embedded Subtitle Font Sizes'**
   String get subtitlesUseEmbeddedFontSizes;
 
   /// Setting subtitle for embedded font sizes toggle
@@ -18877,7 +18649,7 @@ abstract class AppLocalizations {
   /// Setting title to show/hide backdrops when browsing library pages
   ///
   /// In en, this message translates to:
-  /// **'Hide Backdrops while Browsing?'**
+  /// **'Hide Backdrops While Browsing'**
   String get hideBackdropsInLibraries;
 
   /// Label for setting to toggle detailed or minimal subrow on library pages
@@ -18979,7 +18751,7 @@ abstract class AppLocalizations {
   /// No description provided for @savedThemesTitle.
   ///
   /// In en, this message translates to:
-  /// **'Saved themes'**
+  /// **'Saved Themes'**
   String get savedThemesTitle;
 
   /// No description provided for @savedThemesDescription.
@@ -19053,36 +18825,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Home Rows'**
   String get homeRowsSection;
-
-  /// No description provided for @homeRowDisplay.
-  ///
-  /// In en, this message translates to:
-  /// **'Home Row Display'**
-  String get homeRowDisplay;
-
-  /// No description provided for @homeRowSections.
-  ///
-  /// In en, this message translates to:
-  /// **'Home Row Sections'**
-  String get homeRowSections;
-
-  /// No description provided for @homeRowToggles.
-  ///
-  /// In en, this message translates to:
-  /// **'Home Row Toggles'**
-  String get homeRowToggles;
-
-  /// No description provided for @homeRowTogglesSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Enable or disable library-based home row categories'**
-  String get homeRowTogglesSubtitle;
-
-  /// No description provided for @homeRowTogglesDescription.
-  ///
-  /// In en, this message translates to:
-  /// **'Enable the following toggles to display the rows in Home Sections.'**
-  String get homeRowTogglesDescription;
 
   /// No description provided for @rowsType.
   ///
@@ -19453,13 +19195,13 @@ abstract class AppLocalizations {
   /// No description provided for @cardSize.
   ///
   /// In en, this message translates to:
-  /// **'Home Row Card Display Size'**
+  /// **'Card Size'**
   String get cardSize;
 
   /// No description provided for @externalPlayerApp.
   ///
   /// In en, this message translates to:
-  /// **'External player app'**
+  /// **'External Player App'**
   String get externalPlayerApp;
 
   /// No description provided for @externalPlayerAppDescription.
@@ -19555,7 +19297,7 @@ abstract class AppLocalizations {
   /// No description provided for @preferSoftwareDecoders.
   ///
   /// In en, this message translates to:
-  /// **'Prefer software decoders'**
+  /// **'Prefer Software Decoders'**
   String get preferSoftwareDecoders;
 
   /// No description provided for @preferSoftwareDecodersSubtitle.
@@ -19567,7 +19309,7 @@ abstract class AppLocalizations {
   /// No description provided for @useExternalPlayer.
   ///
   /// In en, this message translates to:
-  /// **'Always use external player'**
+  /// **'Always Use External Player'**
   String get useExternalPlayer;
 
   /// No description provided for @useExternalPlayerSubtitle.
@@ -19585,7 +19327,7 @@ abstract class AppLocalizations {
   /// No description provided for @preferSdhSubtitles.
   ///
   /// In en, this message translates to:
-  /// **'Prefer SDH subtitles'**
+  /// **'Prefer SDH Subtitles'**
   String get preferSdhSubtitles;
 
   /// No description provided for @preferSdhSubtitlesSubtitle.
@@ -19593,6 +19335,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Prioritize SDH/CC subtitle tracks when auto-selecting.'**
   String get preferSdhSubtitlesSubtitle;
+
+  /// No description provided for @preferTextSubtitles.
+  ///
+  /// In en, this message translates to:
+  /// **'Prefer Text Subtitles'**
+  String get preferTextSubtitles;
+
+  /// No description provided for @preferTextSubtitlesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Prioritize text-based subtitles (SRT, VTT) over image-based formats (PGS, VobSub).'**
+  String get preferTextSubtitlesSubtitle;
+
+  /// No description provided for @preferExternalSubtitles.
+  ///
+  /// In en, this message translates to:
+  /// **'Prefer External Subtitles'**
+  String get preferExternalSubtitles;
+
+  /// No description provided for @preferExternalSubtitlesSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Prioritize external subtitle files over embedded tracks.'**
+  String get preferExternalSubtitlesSubtitle;
 
   /// No description provided for @webDiagnostics.
   ///
@@ -19981,7 +19747,7 @@ abstract class AppLocalizations {
   /// Switch that shows a notification when the user unlocks a badge
   ///
   /// In en, this message translates to:
-  /// **'Unlock notifications'**
+  /// **'Unlock Notifications'**
   String get achievementsUnlockToasts;
 
   /// Subtitle of the unlock notifications switch
@@ -20695,7 +20461,7 @@ abstract class AppLocalizations {
   /// Navigation setting that adds a Friends button
   ///
   /// In en, this message translates to:
-  /// **'Show friends button'**
+  /// **'Show Friends Button'**
   String get friendsShowButton;
 
   /// Subtitle of the setting that adds a Friends button
@@ -20935,7 +20701,7 @@ abstract class AppLocalizations {
   /// Privacy setting that always shows the user as offline
   ///
   /// In en, this message translates to:
-  /// **'Appear offline'**
+  /// **'Appear Offline'**
   String get friendsAppearOffline;
 
   /// Subtitle of the Appear offline setting
@@ -20947,7 +20713,7 @@ abstract class AppLocalizations {
   /// Privacy setting that hides what is playing
   ///
   /// In en, this message translates to:
-  /// **'Hide what I\'m watching'**
+  /// **'Hide What I\'m Watching'**
   String get friendsHideNowPlaying;
 
   /// Subtitle of the Hide what I am watching setting
@@ -20959,7 +20725,7 @@ abstract class AppLocalizations {
   /// Privacy setting that hides the last played item while offline
   ///
   /// In en, this message translates to:
-  /// **'Hide my last watched'**
+  /// **'Hide My Last Watched'**
   String get friendsHideLastWatched;
 
   /// Subtitle of the Hide my last watched setting
@@ -20971,7 +20737,7 @@ abstract class AppLocalizations {
   /// Setting that shows a banner for new chat messages
   ///
   /// In en, this message translates to:
-  /// **'Message notifications'**
+  /// **'Message Notifications'**
   String get friendsMessageNotifications;
 
   /// Subtitle of the Message notifications setting
@@ -20983,7 +20749,7 @@ abstract class AppLocalizations {
   /// Setting that hides new message banners while a video or game plays
   ///
   /// In en, this message translates to:
-  /// **'Mute during playback'**
+  /// **'Mute During Playback'**
   String get friendsMuteDuringPlayback;
 
   /// Subtitle of the Mute during playback setting
@@ -21664,12 +21430,6 @@ abstract class AppLocalizations {
   /// **'Missing'**
   String get missing;
 
-  /// No description provided for @transcodingLimits.
-  ///
-  /// In en, this message translates to:
-  /// **'Transcoding Limits'**
-  String get transcodingLimits;
-
   /// No description provided for @clearAllArtworkButton.
   ///
   /// In en, this message translates to:
@@ -22162,12 +21922,6 @@ abstract class AppLocalizations {
   /// **'Delete'**
   String get audiobookDelete;
 
-  /// Title for the subtitle preferences settings section
-  ///
-  /// In en, this message translates to:
-  /// **'Subtitle Preferences'**
-  String get subtitlePreferences;
-
   /// Description for the subtitle preferences settings section
   ///
   /// In en, this message translates to:
@@ -22245,12 +21999,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'It looks like Jellyfin failed to update the artwork. Your library is configured to save artwork directly into the media folders (\'Save artwork into media folders\' is enabled). This error typically occurs when the Jellyfin server process does not have permission to write files into your media directories.'**
   String get libraryWriteAccessReactiveBody;
-
-  /// No description provided for @externalLists.
-  ///
-  /// In en, this message translates to:
-  /// **'External Lists'**
-  String get externalLists;
 
   /// No description provided for @replay.
   ///
@@ -23062,7 +22810,7 @@ abstract class AppLocalizations {
   /// Selects how personal ratings are displayed and entered on media details.
   ///
   /// In en, this message translates to:
-  /// **'Personal rating style'**
+  /// **'Personal Rating Style'**
   String get personalRatingStyle;
 
   /// Personal rating style using like and dislike actions.
@@ -23296,7 +23044,7 @@ abstract class AppLocalizations {
   /// Setting title to hide media description on details screen
   ///
   /// In en, this message translates to:
-  /// **'Hide Media Description on Details Page'**
+  /// **'Hide Media Description'**
   String get hideDetailsMediaDescription;
 
   /// Description for setting to hide media description on details page
@@ -23308,7 +23056,7 @@ abstract class AppLocalizations {
   /// Setting title to replace thumbnails on Classic details page with series thumbnail
   ///
   /// In en, this message translates to:
-  /// **'Use Series Thumbnails on Details Page'**
+  /// **'Use Series Thumbnails'**
   String get detailUseSeriesThumbnails;
 
   /// Description for setting to use series thumbnails on Classic details page
@@ -23320,7 +23068,7 @@ abstract class AppLocalizations {
   /// Setting title to hide media description on home screen
   ///
   /// In en, this message translates to:
-  /// **'Hide Media Description on Home Screen'**
+  /// **'Hide Media Description'**
   String get hideHomeMediaDescription;
 
   /// Description for setting to hide media description on home screen
@@ -23548,7 +23296,7 @@ abstract class AppLocalizations {
   /// Setting that shows or hides the messages button in the menu
   ///
   /// In en, this message translates to:
-  /// **'Show messages button'**
+  /// **'Show Messages Button'**
   String get serverMessagesShowButton;
 
   /// Explains the setting that shows or hides the messages button
@@ -23638,7 +23386,7 @@ abstract class AppLocalizations {
   /// Switch that swaps a watched downloaded episode for the next episodes of the series
   ///
   /// In en, this message translates to:
-  /// **'Download next episodes'**
+  /// **'Download Next Episodes'**
   String get smartDownloadsEnable;
 
   /// Explains the smart downloads switch, including that watched episodes are deleted
@@ -23650,7 +23398,7 @@ abstract class AppLocalizations {
   /// Setting for how many unwatched episodes of a series stay downloaded after one is watched
   ///
   /// In en, this message translates to:
-  /// **'Episodes to keep downloaded'**
+  /// **'Episodes to Keep Downloaded'**
   String get smartDownloadsKeepReady;
 
   /// Subtitle under the episodes to keep ready setting
@@ -23674,7 +23422,7 @@ abstract class AppLocalizations {
   /// Master switch for auto-download subscriptions
   ///
   /// In en, this message translates to:
-  /// **'Enable automatic downloads'**
+  /// **'Enable Automatic Downloads'**
   String get autoDownloadEnable;
 
   /// Explains the master switch
@@ -23686,7 +23434,7 @@ abstract class AppLocalizations {
   /// Setting that caps how many unwatched episodes per series stay downloaded
   ///
   /// In en, this message translates to:
-  /// **'Keep unwatched episodes'**
+  /// **'Keep Unwatched Episodes'**
   String get autoDownloadKeepUnwatched;
 
   /// Option meaning no cap on kept unwatched episodes
@@ -23698,7 +23446,7 @@ abstract class AppLocalizations {
   /// Setting that picks how soon an auto-downloaded episode is removed after it was watched
   ///
   /// In en, this message translates to:
-  /// **'Delete downloaded episodes'**
+  /// **'Delete Downloaded Episodes'**
   String get autoDownloadDelete;
 
   /// Explains the delete-after-watching setting
@@ -23734,7 +23482,7 @@ abstract class AppLocalizations {
   /// Setting that lets the system wake the app to check for new episodes
   ///
   /// In en, this message translates to:
-  /// **'Check in the background'**
+  /// **'Check in the Background'**
   String get autoDownloadBackgroundRefresh;
 
   /// Explains the background refresh setting
@@ -23758,7 +23506,7 @@ abstract class AppLocalizations {
   /// Button that runs a subscription check immediately
   ///
   /// In en, this message translates to:
-  /// **'Check now'**
+  /// **'Check Now'**
   String get autoDownloadCheckNow;
 
   /// Subtitle while a subscription check is running
@@ -23921,12 +23669,6 @@ abstract class AppLocalizations {
   /// **'{count, plural, =1{{name} needs {size}.} other{{count} episodes are waiting for space.}} Free up space or raise the download limit.'**
   String autoDownloadStorageFullBody(int count, String name, String size);
 
-  /// Section header in General Style settings for configuring motion and transition speeds
-  ///
-  /// In en, this message translates to:
-  /// **'Animation Speed'**
-  String get settingsAnimationSpeed;
-
   /// Setting title for adjusting the speed of page navigation transitions
   ///
   /// In en, this message translates to:
@@ -24032,7 +23774,7 @@ abstract class AppLocalizations {
   /// Apple TV settings label for how far a swipe on the Siri Remote touchpad moves the focus highlight
   ///
   /// In en, this message translates to:
-  /// **'Touchpad swipe sensitivity'**
+  /// **'Touchpad Swipe Sensitivity'**
   String get siriRemoteSwipeSensitivity;
 
   /// Apple TV settings subtitle for the Siri Remote touchpad swipe sensitivity option
@@ -24074,7 +23816,7 @@ abstract class AppLocalizations {
   /// iPhone playback setting that holds the picture back from the camera housing in landscape
   ///
   /// In en, this message translates to:
-  /// **'Keep video clear of the Dynamic Island'**
+  /// **'Keep Video Clear of the Dynamic Island'**
   String get keepVideoClearOfDynamicIsland;
 
   /// Description for the iPhone setting that keeps video clear of the Dynamic Island
@@ -24172,6 +23914,240 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'You'**
   String get navYou;
+
+  /// Settings entry and screen for options that shape the details page
+  ///
+  /// In en, this message translates to:
+  /// **'Details Page'**
+  String get detailsPage;
+
+  /// Settings root entry and screen for downloads, storage location and the image cache
+  ///
+  /// In en, this message translates to:
+  /// **'Storage & Downloads'**
+  String get storageAndDownloads;
+
+  /// Settings root entry and screen for connected integrations such as Seerr and Achievement Badges
+  ///
+  /// In en, this message translates to:
+  /// **'Integrations'**
+  String get integrations;
+
+  /// Settings screen for syncing settings through the Moonbase plugin
+  ///
+  /// In en, this message translates to:
+  /// **'Settings Sync'**
+  String get settingsSync;
+
+  /// Subtitle for the Settings Sync entry
+  ///
+  /// In en, this message translates to:
+  /// **'Moonbase plugin sync and customization profiles'**
+  String get settingsSyncSubtitle;
+
+  /// Settings screen for the navigation bar style and buttons
+  ///
+  /// In en, this message translates to:
+  /// **'Navigation Bar'**
+  String get navigationBar;
+
+  /// Settings entry and screen for turning Home rows on or off and ordering them
+  ///
+  /// In en, this message translates to:
+  /// **'Rows'**
+  String get homeRows;
+
+  /// Subtitle for the Home rows entry
+  ///
+  /// In en, this message translates to:
+  /// **'Turn rows on or off and change their order'**
+  String get homeRowsSubtitle;
+
+  /// Settings screen with sorting and content options for each Home row
+  ///
+  /// In en, this message translates to:
+  /// **'Row Options'**
+  String get rowOptions;
+
+  /// Subtitle for the Row Options entry
+  ///
+  /// In en, this message translates to:
+  /// **'Sorting and content for each row'**
+  String get rowOptionsSubtitle;
+
+  /// Settings entry and screen for choosing the image type of each Home row
+  ///
+  /// In en, this message translates to:
+  /// **'Image Type per Row'**
+  String get imageTypePerRow;
+
+  /// Section header on the Home Screen settings screen for rows that come from IMDb, TMDB, calendars, Seerr and custom lists
+  ///
+  /// In en, this message translates to:
+  /// **'External Sources'**
+  String get externalSources;
+
+  /// Settings screen for streaming limits, decoding, HDR and Dolby Vision
+  ///
+  /// In en, this message translates to:
+  /// **'Quality & Decoding'**
+  String get qualityAndDecoding;
+
+  /// Subtitle for the Quality & Decoding entry
+  ///
+  /// In en, this message translates to:
+  /// **'Bitrate, resolution, decoding, HDR, and Dolby Vision'**
+  String get qualityAndDecodingSubtitle;
+
+  /// Settings screen for media segment skipping, cinema mode and autoplay
+  ///
+  /// In en, this message translates to:
+  /// **'Skipping & Autoplay'**
+  String get skippingAndAutoplay;
+
+  /// Settings screen for advanced player routing, external players and mpv
+  ///
+  /// In en, this message translates to:
+  /// **'Advanced Playback'**
+  String get advancedPlayback;
+
+  /// Subtitle for the Advanced Playback entry
+  ///
+  /// In en, this message translates to:
+  /// **'Player routing, external players, and mpv'**
+  String get advancedPlaybackSubtitle;
+
+  /// Subtitle for the Account settings root entry
+  ///
+  /// In en, this message translates to:
+  /// **'Sign-in, PIN code, Kids Mode, parental controls, and settings sync'**
+  String get settingsAccountSubtitle;
+
+  /// Subtitle for the General settings root entry
+  ///
+  /// In en, this message translates to:
+  /// **'Language, clock, input, and performance'**
+  String get settingsGeneralSubtitle;
+
+  /// Subtitle for the Appearance settings root entry
+  ///
+  /// In en, this message translates to:
+  /// **'Navigation, home screen, libraries, details page, and themes'**
+  String get settingsAppearanceSubtitle;
+
+  /// Subtitle for the Home Screen entry on the Appearance settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Rows, media bar, looks, and external sources'**
+  String get settingsHomeScreenSubtitle;
+
+  /// Subtitle for the Libraries entry on the Appearance settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Library visibility, order, and library pages'**
+  String get settingsLibrariesEntrySubtitle;
+
+  /// Subtitle for the Details Page entry on the Appearance settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Layout, buttons, sections, ratings, and theme music'**
+  String get settingsDetailsPageSubtitle;
+
+  /// Subtitle for the Playback settings root entry
+  ///
+  /// In en, this message translates to:
+  /// **'Player, quality, audio, subtitles, skipping, and SyncPlay'**
+  String get settingsPlaybackSubtitle;
+
+  /// Subtitle for the Storage & Downloads settings root entry
+  ///
+  /// In en, this message translates to:
+  /// **'Downloads, storage location, and the image cache'**
+  String get settingsStorageSubtitle;
+
+  /// Subtitle for the Services settings root entry
+  ///
+  /// In en, this message translates to:
+  /// **'Seerr and Achievement Badges'**
+  String get settingsServicesSubtitle;
+
+  /// Section header on the Account settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Sign-in'**
+  String get settingsSignInSection;
+
+  /// Section header on the Account settings screen for Kids Mode and parental controls
+  ///
+  /// In en, this message translates to:
+  /// **'Family'**
+  String get settingsFamilySection;
+
+  /// Section header on the Account settings screen for server list and certificate options
+  ///
+  /// In en, this message translates to:
+  /// **'Servers'**
+  String get settingsServersSection;
+
+  /// Section header on the General settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Language'**
+  String get settingsLanguageSection;
+
+  /// Section header on the General settings screen for keyboard, remote and pointer options
+  ///
+  /// In en, this message translates to:
+  /// **'Input'**
+  String get settingsInputSection;
+
+  /// Section header on the Appearance settings screen for animation speeds
+  ///
+  /// In en, this message translates to:
+  /// **'Motion'**
+  String get settingsMotionSection;
+
+  /// Section header on the Home Screen settings screen for the rows, row options and media bar
+  ///
+  /// In en, this message translates to:
+  /// **'Contents'**
+  String get settingsContentsSection;
+
+  /// Section header on the Home Screen settings screen for how rows and cards look
+  ///
+  /// In en, this message translates to:
+  /// **'Looks'**
+  String get settingsLooksSection;
+
+  /// Section header on the Playback settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Audio & Subtitles'**
+  String get settingsAudioAndSubtitlesSection;
+
+  /// Section header on the Playback settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Skipping & Queue'**
+  String get settingsSkippingAndQueueSection;
+
+  /// Section header on the Playback settings screen for SyncPlay
+  ///
+  /// In en, this message translates to:
+  /// **'Watch Together'**
+  String get settingsWatchTogetherSection;
+
+  /// Section header on the Playback settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Advanced'**
+  String get settingsAdvancedSection;
+
+  /// Subtitle for the Player entry on the Playback settings screen
+  ///
+  /// In en, this message translates to:
+  /// **'Controls, seeking, player buttons, and trick play'**
+  String get playerSettingsSubtitle;
 }
 
 class _AppLocalizationsDelegate

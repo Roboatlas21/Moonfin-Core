@@ -1382,7 +1382,7 @@ class _DisplaySettingsDialogState extends State<_DisplaySettingsDialog> {
             if (vm.imageType != ImageType.banner) ...[
               Divider(color: dividerColor),
               _sectionHeader(AppLocalizations.of(context).posterSize),
-              for (final size in PosterSize.values)
+              for (final size in PosterSize.gridValues)
                 _posterSizeRadioTile(vm, size),
             ],
           ],
@@ -1451,7 +1451,7 @@ class _DisplaySettingsDialogState extends State<_DisplaySettingsDialog> {
       PosterSize.small => l10n.small,
       PosterSize.medium => l10n.medium,
       PosterSize.large => l10n.large,
-      PosterSize.extraLarge => l10n.extraLarge,
+      PosterSize.extraLarge || PosterSize.grandparents => l10n.extraLarge,
     };
     return InkWell(
       onTap: () => vm.setPosterSize(size),

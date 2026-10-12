@@ -40,9 +40,6 @@ class AppLocalizationsLt extends AppLocalizations {
   String get animeMarkerRecap => 'Recap';
 
   @override
-  String get accountPreferences => 'PASKYROS NUOSTATOS';
-
-  @override
   String get interfaceLanguage => 'Sąsajos kalba';
 
   @override
@@ -538,7 +535,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get controller => 'Controller';
 
   @override
-  String get gamepadNavigation => 'Gamepad navigation';
+  String get gamepadNavigation => 'Gamepad Navigation';
 
   @override
   String get gamepadNavigationDescription =>
@@ -1566,6 +1563,9 @@ class AppLocalizationsLt extends AppLocalizations {
   String get searchingSubtitles => 'Searching for subtitles…';
 
   @override
+  String get fetchingSubtitles => 'Fetching subtitles';
+
+  @override
   String get downloadingSubtitle => 'Downloading subtitle…';
 
   @override
@@ -2202,7 +2202,7 @@ class AppLocalizationsLt extends AppLocalizations {
       'Inactive — could not start, using the standard path';
 
   @override
-  String get nativeHdrOutput => 'Native HDR output';
+  String get nativeHdrOutput => 'Native HDR Output';
 
   @override
   String get nativeHdrOutputDescription =>
@@ -2917,10 +2917,6 @@ class AppLocalizationsLt extends AppLocalizations {
   String get qualityStorage => 'Kokybė, sandėliavimas';
 
   @override
-  String get serverSyncAndPluginStatus =>
-      'Serverio sinchronizavimas ir papildinio būsena';
-
-  @override
   String get mediaRequestIntegration => 'Žiniasklaidos užklausų integravimas';
 
   @override
@@ -2953,9 +2949,6 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get videoAndSubtitles => 'Video ir subtitrai';
-
-  @override
-  String get integrations => 'Integracijos';
 
   @override
   String get pluginAndRequests => 'Papildinys ir užklausos';
@@ -3134,7 +3127,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get loadingAnimationSpeedUltra => 'Ultra';
 
   @override
-  String get showLoadingAnimationText => 'Show Text?';
+  String get showLoadingAnimationText => 'Show Text';
 
   @override
   String get loadingAnimationPreview => 'Preview';
@@ -3244,10 +3237,6 @@ class AppLocalizationsLt extends AppLocalizations {
   String get themeMusicVolume => 'Tema Muzikos tomas';
 
   @override
-  String get themeMusicSettingsSubtitle =>
-      'Išsamios informacijos puslapiai, pradžios ekrano eilutės ir garsumas';
-
-  @override
   String percentValue(int value) {
     return '$value%';
   }
@@ -3270,7 +3259,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get detailsBackgroundBlur => 'Išsami informacija Fono suliejimas';
 
   @override
-  String get detailsBackgroundOpacity => 'Details Background Opacity';
+  String get detailsBackgroundOpacity => 'Background Opacity';
 
   @override
   String pixelValue(int value) {
@@ -3315,14 +3304,14 @@ class AppLocalizationsLt extends AppLocalizations {
   String get autoCrop => 'Automatinis apkarpymas';
 
   @override
-  String get cropBlackBars => 'Crop black bars';
+  String get cropBlackBars => 'Crop Black Bars';
 
   @override
   String get settingsCropBlackBarsDescription =>
       'Detect encoded letterbox bars after playback starts, crop them, then fill the screen. Recrop from the player zoom button.';
 
   @override
-  String get cropBlackBarsRecropInterval => 'Recrop interval';
+  String get cropBlackBarsRecropInterval => 'Recrop Interval';
 
   @override
   String get cropBlackBarsOnce => 'Once at start';
@@ -3886,7 +3875,7 @@ class AppLocalizationsLt extends AppLocalizations {
       'Manual (choose formats below)';
 
   @override
-  String get settingsAudioPassthroughOutput => 'Passthrough output';
+  String get settingsAudioPassthroughOutput => 'Passthrough Output';
 
   @override
   String get settingsAudioPassthroughOutputDescription =>
@@ -4264,23 +4253,7 @@ class AppLocalizationsLt extends AppLocalizations {
   }
 
   @override
-  String get customizationProfile => 'Tinkinimo profilis';
-
-  @override
-  String get customizationProfileDescription =>
-      'Pasirinkite profilį, kurį norite įkelti, redaguoti ir sinchronizuoti. Visuotinis taikomas visur, nebent įrenginio profilis jo nepaiso. Žalias taškas žymi dabartinį įrenginio profilį.';
-
-  @override
-  String get loadProfile => 'Įkelti profilį';
-
-  @override
   String get syncing => 'Sinchronizuojama...';
-
-  @override
-  String get syncToProfile => 'Sinchronizuoti su profiliu';
-
-  @override
-  String get resetProfile => 'Reset Profile';
 
   @override
   String resetProfileTitle(String profile) {
@@ -4336,7 +4309,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get wifiOnlyDownloads => 'Atsisiuntimai tik per WiFi';
 
   @override
-  String get tvOfflineDownloads => 'Enable offline downloads';
+  String get tvOfflineDownloads => 'Enable Offline Downloads';
 
   @override
   String get tvOfflineDownloadsSubtitle =>
@@ -4618,13 +4591,6 @@ class AppLocalizationsLt extends AppLocalizations {
   String get seconds => 'sekundžių';
 
   @override
-  String get localPreviews => 'Vietinės peržiūros';
-
-  @override
-  String get localPreviewsDescription =>
-      'Konfigūruokite anonsą, mediją ir garso peržiūras.';
-
-  @override
   String get mediaBarMode => 'Medijos juostos stilius';
 
   @override
@@ -4776,17 +4742,10 @@ class AppLocalizationsLt extends AppLocalizations {
   String get favoriteChannels => 'Favorite Channels';
 
   @override
-  String get homeSections => 'Pagrindinis skyrius';
-
-  @override
   String get resetToDefaults => 'Atstatyti į numatytuosius nustatymus';
 
   @override
   String get homeRowPosterSize => 'Namų eilutės plakato dydis';
-
-  @override
-  String get perRowImageTypeSelection =>
-      'Vaizdo tipo pasirinkimas pagal eilutę';
 
   @override
   String get configureImageTypeForEachRow =>
@@ -4819,14 +4778,11 @@ class AppLocalizationsLt extends AppLocalizations {
       'Rodyti tik po vieną pradžios ekrano eilutę';
 
   @override
-  String get homeRowsPadding => 'Home Row Padding';
+  String get homeRowsPadding => 'Row Padding';
 
   @override
   String get homeRowsPaddingDescription =>
       'Customize padding between home rows';
-
-  @override
-  String get perRowImageType => 'Eilutės vaizdo tipas';
 
   @override
   String get perRowSettings => 'Eilučių nustatymai';
@@ -4937,9 +4893,6 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get onlyShowRatedContent => 'Rodyti tik įvertintą turinį';
-
-  @override
-  String get showClock => 'Rodyti laikrodį';
 
   @override
   String get displayClockDuringScreensaver =>
@@ -5069,43 +5022,55 @@ class AppLocalizationsLt extends AppLocalizations {
       'Įgalinkite ir pertvarkykite įvertinimo šaltinius, rodomus visoje programoje';
 
   @override
-  String get pluginLabel => 'Moonbase papildinys';
-
-  @override
   String get pluginDetected => 'Papildinys aptiktas';
 
   @override
   String get pluginNotDetected => 'Papildinys neaptiktas';
 
   @override
-  String get pluginDetectedDescription =>
-      'Aptiktas serverio papildinys. Sinchronizavimas įjungiamas automatiškai, kai pirmą kartą randamas papildinys.';
-
-  @override
   String get pluginNotDetectedDescription =>
       'Serverio papildinys šiuo metu neaptiktas. Vietiniai nustatymai vis tiek naudoja išsaugotas vertes arba įtaisytuosius numatytuosius nustatymus.';
 
   @override
-  String pluginStatusVersion(String status, String version) {
-    return '$status\nVersija: $version';
+  String get pluginConnected => 'Connected';
+
+  @override
+  String pluginConnectedVersion(String version) {
+    return 'Connected, version $version';
   }
 
   @override
-  String get availableServices => 'Galimos paslaugos';
+  String get pluginSyncOn => 'Sync on';
 
   @override
-  String get serverPluginSync => 'Serverio papildinio sinchronizavimas';
+  String get pluginSyncOff => 'Sync off';
 
   @override
-  String get syncSettingsWithPlugin =>
-      'Sinchronizuoti nustatymus su serverio papildiniu';
+  String get syncProfileDescription =>
+      'This device syncs with the profile you pick until you pick another.';
 
   @override
-  String get whatSyncControls => 'Kokie sinchronizavimo valdikliai';
+  String get profileAppliesEverywhere => 'Applies everywhere';
 
   @override
-  String get syncControlsDescription =>
-      'Sinchronizavimas tik valdo, ar papildinio palaikomi nustatymai siunčiami į serverį ir ištraukiami iš jo. Profilio pasirinkimas ir profilio sinchronizavimo veiksmai yra tinkinimo nustatymuose, kai įgalintas papildinio sinchronizavimas.';
+  String get profileOverridesGlobal => 'Overrides Global';
+
+  @override
+  String get profileThisDevice => 'This device';
+
+  @override
+  String get profileLoad => 'Load';
+
+  @override
+  String get profileLoadSubtitle => 'Server to this device';
+
+  @override
+  String get profileSaveSubtitle => 'This device to server';
+
+  @override
+  String resetNamedProfile(String profile) {
+    return 'Reset $profile Profile';
+  }
 
   @override
   String get recentRequests => 'Naujausi prašymai';
@@ -5216,7 +5181,7 @@ class AppLocalizationsLt extends AppLocalizations {
       'Naujos problemos, atsakymai ir sprendimai';
 
   @override
-  String get seerrNotifyNewMediaTitle => 'New media added';
+  String get seerrNotifyNewMediaTitle => 'New Media Added';
 
   @override
   String get seerrNotifyNewMediaSubtitle =>
@@ -5342,18 +5307,11 @@ class AppLocalizationsLt extends AppLocalizations {
       'Naršymo juostos stilius, įrankių juostos mygtukai, išvaizda';
 
   @override
-  String get reorderToggleHomeRows =>
-      'Pertvarkyti ir perjungti pagrindines eilutes';
-
-  @override
   String get featuredContentAppearance => 'Teminis turinys, išvaizda';
 
   @override
   String get posterSizeImageTypeFolderView =>
       'Plakato dydis, vaizdo tipas, aplanko vaizdas';
-
-  @override
-  String get mdbListTmdbRatingSources => 'MDBList, TMDB ir reitingų šaltiniai';
 
   @override
   String gbValue(String value) {
@@ -9989,6 +9947,12 @@ class AppLocalizationsLt extends AppLocalizations {
   String get playerTooltipSeekForward => 'Siekite pirmyn';
 
   @override
+  String get playerTooltipMinimize => 'Minimize player';
+
+  @override
+  String get miniPlayerOpenPlayer => 'Open player';
+
+  @override
   String get contextMenuMarkWatched => 'Pažymėti kaip žiūrėtą';
 
   @override
@@ -10029,20 +9993,6 @@ class AppLocalizationsLt extends AppLocalizations {
       'Prisijunkite prie serverio administravimo skydelio';
 
   @override
-  String get settingsAccountSecurity => 'Paskyra ir sauga';
-
-  @override
-  String get settingsAccountSecuritySubtitle =>
-      'Autentifikavimas, PIN kodas ir tėvų kontrolė';
-
-  @override
-  String get settingsPersonalization => 'Personalizavimas';
-
-  @override
-  String get settingsPersonalizationSubtitle =>
-      'Tema, naršymas, pagrindinės eilutės ir bibliotekos matomumas';
-
-  @override
   String get settingsDynamicContent => 'Dinaminis turinys';
 
   @override
@@ -10050,22 +10000,8 @@ class AppLocalizationsLt extends AppLocalizations {
       'Medijos juosta ir vaizdinės perdangos';
 
   @override
-  String get settingsPlaybackSyncplay => 'Atkūrimas ir SyncPlay';
-
-  @override
-  String get settingsPlaybackSyncplaySubtitle =>
-      'Garso / vaizdo nustatymai, subtitrai, atsisiuntimai ir „SyncPlay“ valdikliai';
-
-  @override
-  String get settingsIntegrationsSubtitle =>
-      'Papildinio sinchronizavimas, „Seerr“, įvertinimai ir kt';
-
-  @override
   String get settingsAboutSubtitle =>
       'Programos versija, teisinė informacija ir kreditai';
-
-  @override
-  String get settingsAuthenticationSection => 'AUTENTIKAVIMAS';
 
   @override
   String get settingsSortServersBy => 'Rūšiuoti serverius pagal';
@@ -10075,9 +10011,6 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get settingsAlphabetical => 'Abėcėlinis';
-
-  @override
-  String get settingsConnectionSection => 'RYŠYS';
 
   @override
   String get settingsAllowSelfSignedCerts =>
@@ -10092,9 +10025,6 @@ class AppLocalizationsLt extends AppLocalizations {
       'This server\'s certificate isn\'t trusted. If it\'s your own server and uses a self-signed or private certificate, you can allow it here.';
 
   @override
-  String get settingsPrivacyAndSafetySection => 'PRIVATUMAS IR SAUGA';
-
-  @override
   String get itemBlockedByParentalControls => 'This isn\'t available';
 
   @override
@@ -10105,32 +10035,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get blockedRatingsUnrankedSection => 'Only blocks itself';
 
   @override
-  String get settingsBlockedRatings => 'Užblokuoti įvertinimai';
-
-  @override
-  String get settingsGeneralStyle => 'Bendras stilius';
-
-  @override
-  String get settingsGeneralStyleSubtitle =>
-      'Teminiai akcentai, fonai, žiūrimi indikatoriai ir teminė muzika';
-
-  @override
-  String get settingsDetailsScreen => 'Išsamios informacijos ekranas';
-
-  @override
-  String get settingsDetailsScreenSubtitle =>
-      'Stilius, fono suliejimas ir skirtukų veikimas';
-
-  @override
   String get settingsHomePage => 'Pagrindinis puslapis';
-
-  @override
-  String get settingsHomePageSubtitle =>
-      'Skyriai, vaizdų tipai, perdangos ir medijos peržiūros';
-
-  @override
-  String get settingsLibrariesSubtitle =>
-      'Bibliotekos matomumas, aplankų rodinys ir kelių serverių veikimas';
 
   @override
   String get settingsTwentyFourHourClock => '24 valandų laikrodis';
@@ -10180,16 +10085,6 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get settingsSeasonalSurprise => 'Sezoninė staigmena';
-
-  @override
-  String get settingsMetadataAndRatings => 'Metaduomenys ir įvertinimai';
-
-  @override
-  String get settingsPluginScreenDescription =>
-      '„Moonbase“ teikia serverio integraciją, įskaitant papildomus įvertinimo šaltinius, „Seerr“ užklausas ir sinchronizuojamas nuostatas.';
-
-  @override
-  String get settingsOfflineDownloads => 'Atsisiuntimai neprisijungus';
 
   @override
   String get useNativeEmulator => 'Native Emulation';
@@ -10332,60 +10227,22 @@ class AppLocalizationsLt extends AppLocalizations {
       'Patikrinkite naujausią „Moonfin“ leidimą';
 
   @override
-  String get settingsPoweredByFlutter => 'Maitinamas Flutter';
-
-  @override
-  String settingsLicenseNoticesCount(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '# licencijos pranešimų',
-      many: '# licencijos pranešimo',
-      few: '# licencijos pranešimai',
-      one: '# licencijos pranešimas',
-    );
-    return '$_temp0';
-  }
-
-  @override
   String get settingsBoth => 'Abu';
 
   @override
   String get settingsShuffleContentTypeFilter => 'Maišyti turinio tipo filtras';
 
   @override
-  String get settingsVideoPlaybackPreferences =>
-      'Vaizdo įrašų atkūrimo nuostatos';
-
-  @override
-  String get settingsVideoPlaybackPreferencesSubtitle =>
-      'Pagrindiniai vaizdo įrašų variklio ir srautinio perdavimo kokybės nustatymai';
-
-  @override
-  String get settingsAudioPreferences => 'Garso nuostatos';
-
-  @override
   String get settingsAudioPreferencesSubtitle =>
       'Garso takeliai, apdorojimas ir perdavimo parinktys';
-
-  @override
-  String get settingsAutomationAndQueue => 'Automatika ir eilė';
 
   @override
   String get settingsAutomationAndQueueSubtitle =>
       'Automatizuotas atkūrimas ir seka';
 
   @override
-  String get settingsOfflineDownloadsSubtitle =>
-      'Atsisiuntimo kokybė, saugyklos apribojimai ir eilės dydis';
-
-  @override
   String get settingsSyncplaySubtitle =>
       'Grupinių užsiėmimų sinchronizavimo logika';
-
-  @override
-  String get settingsAdvancedOptionsSubtitle =>
-      'Specializuotos grotuvo savybės. Naudokite atsargiai, nes kai kurios parinktys gali sukelti atkūrimo problemų';
 
   @override
   String get settingsSkipIntrosAndOutros => 'Praleisti įžangas ir pabaigas?';
@@ -10848,23 +10705,6 @@ class AppLocalizationsLt extends AppLocalizations {
   String get homeRowsSection => 'Pradžios eilutės';
 
   @override
-  String get homeRowDisplay => 'Pradžios ekrano eilučių rodymas';
-
-  @override
-  String get homeRowSections => 'Pradžios ekrano eilučių skiltys';
-
-  @override
-  String get homeRowToggles => 'Pradžios ekrano eilučių jungikliai';
-
-  @override
-  String get homeRowTogglesSubtitle =>
-      'Įjunkite arba išjunkite bibliotekomis pagrįstas pradžios ekrano eilučių kategorijas';
-
-  @override
-  String get homeRowTogglesDescription =>
-      'Įjunkite toliau esančius jungiklius, kad eilutės būtų rodomos pradžios ekrano skiltyse.';
-
-  @override
   String get rowsType => 'Eilučių tipas';
 
   @override
@@ -11151,6 +10991,20 @@ class AppLocalizationsLt extends AppLocalizations {
       'Automatinio pasirinkimo metu pirmenybę teikite SDH/CC subtitrų takeliams.';
 
   @override
+  String get preferTextSubtitles => 'Prefer Text Subtitles';
+
+  @override
+  String get preferTextSubtitlesSubtitle =>
+      'Prioritize text-based subtitles (SRT, VTT) over image-based formats (PGS, VobSub).';
+
+  @override
+  String get preferExternalSubtitles => 'Prefer External Subtitles';
+
+  @override
+  String get preferExternalSubtitlesSubtitle =>
+      'Prioritize external subtitle files over embedded tracks.';
+
+  @override
   String get webDiagnostics => 'Interneto diagnostika';
 
   @override
@@ -11372,7 +11226,7 @@ class AppLocalizationsLt extends AppLocalizations {
   }
 
   @override
-  String get achievementsUnlockToasts => 'Unlock notifications';
+  String get achievementsUnlockToasts => 'Unlock Notifications';
 
   @override
   String get achievementsUnlockToastsSubtitle =>
@@ -11793,7 +11647,7 @@ class AppLocalizationsLt extends AppLocalizations {
       'See who\'s online and chat with people on this server';
 
   @override
-  String get friendsShowButton => 'Show friends button';
+  String get friendsShowButton => 'Show Friends Button';
 
   @override
   String get friendsShowButtonSubtitle =>
@@ -11956,35 +11810,35 @@ class AppLocalizationsLt extends AppLocalizations {
   }
 
   @override
-  String get friendsAppearOffline => 'Appear offline';
+  String get friendsAppearOffline => 'Appear Offline';
 
   @override
   String get friendsAppearOfflineSubtitle =>
       'Friends always see you as offline';
 
   @override
-  String get friendsHideNowPlaying => 'Hide what I\'m watching';
+  String get friendsHideNowPlaying => 'Hide What I\'m Watching';
 
   @override
   String get friendsHideNowPlayingSubtitle =>
       'Friends still see you online, but not what\'s playing';
 
   @override
-  String get friendsHideLastWatched => 'Hide my last watched';
+  String get friendsHideLastWatched => 'Hide My Last Watched';
 
   @override
   String get friendsHideLastWatchedSubtitle =>
       'Friends won\'t see what you watched last while you\'re offline';
 
   @override
-  String get friendsMessageNotifications => 'Message notifications';
+  String get friendsMessageNotifications => 'Message Notifications';
 
   @override
   String get friendsMessageNotificationsSubtitle =>
       'Show a banner when a friend messages you';
 
   @override
-  String get friendsMuteDuringPlayback => 'Mute during playback';
+  String get friendsMuteDuringPlayback => 'Mute During Playback';
 
   @override
   String get friendsMuteDuringPlaybackSubtitle =>
@@ -12380,9 +12234,6 @@ class AppLocalizationsLt extends AppLocalizations {
   String get missing => 'Trūksta';
 
   @override
-  String get transcodingLimits => 'Perkodavimo ribos';
-
-  @override
   String get clearAllArtworkButton => 'Išvalyti visus viršelius?';
 
   @override
@@ -12664,9 +12515,6 @@ class AppLocalizationsLt extends AppLocalizations {
   String get audiobookDelete => 'Ištrinti';
 
   @override
-  String get subtitlePreferences => 'Subtitrų nuostatos';
-
-  @override
   String get subtitlePreferencesDescription =>
       'Keiskite subtitrų režimus, numatytąsias kalbas, išvaizdą ir atvaizdavimo parinktis.';
 
@@ -12713,9 +12561,6 @@ class AppLocalizationsLt extends AppLocalizations {
   @override
   String get libraryWriteAccessReactiveBody =>
       'Panašu, kad Jellyfin nepavyko atnaujinti viršelio. Jūsų biblioteka sukonfigūruota įrašyti viršelius tiesiai į medijos aplankus (įjungta parinktis „Įrašyti viršelius į medijos aplankus“). Ši klaida paprastai atsiranda, kai Jellyfin serverio procesas neturi leidimo įrašyti failų į jūsų medijos katalogus.';
-
-  @override
-  String get externalLists => 'Išoriniai sąrašai';
 
   @override
   String get replay => 'Paleisti iš naujo';
@@ -13183,7 +13028,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get showAlphabeticalFilters => 'Show Alphabet';
 
   @override
-  String get personalRatingStyle => 'Personal rating style';
+  String get personalRatingStyle => 'Personal Rating Style';
 
   @override
   String get personalRatingThumbs => 'Like / dislike';
@@ -13307,24 +13152,21 @@ class AppLocalizationsLt extends AppLocalizations {
       'Trailers open in the YouTube app or browser instead of the built-in player';
 
   @override
-  String get hideDetailsMediaDescription =>
-      'Hide Media Description on Details Page';
+  String get hideDetailsMediaDescription => 'Hide Media Description';
 
   @override
   String get hideDetailsMediaDescriptionSubtitle =>
       'Hide the movie or episode descriptive text.';
 
   @override
-  String get detailUseSeriesThumbnails =>
-      'Use Series Thumbnails on Details Page';
+  String get detailUseSeriesThumbnails => 'Use Series Thumbnails';
 
   @override
   String get detailUseSeriesThumbnailsSubtitle =>
       'Replace all thumbnails on Classic details page with series thumbnail';
 
   @override
-  String get hideHomeMediaDescription =>
-      'Hide Media Description on Home Screen';
+  String get hideHomeMediaDescription => 'Hide Media Description';
 
   @override
   String get hideHomeMediaDescriptionSubtitle =>
@@ -13448,7 +13290,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get serverMessagesMarkAllRead => 'Mark all as read';
 
   @override
-  String get serverMessagesShowButton => 'Show messages button';
+  String get serverMessagesShowButton => 'Show Messages Button';
 
   @override
   String get serverMessagesShowButtonSubtitle =>
@@ -13513,14 +13355,14 @@ class AppLocalizationsLt extends AppLocalizations {
   String get smartDownloadsSection => 'Smart downloads';
 
   @override
-  String get smartDownloadsEnable => 'Download next episodes';
+  String get smartDownloadsEnable => 'Download Next Episodes';
 
   @override
   String get smartDownloadsEnableSubtitle =>
       'When you finish an episode on any device, Moonfin downloads the next ones. Downloaded episodes are deleted once watched.';
 
   @override
-  String get smartDownloadsKeepReady => 'Episodes to keep downloaded';
+  String get smartDownloadsKeepReady => 'Episodes to Keep Downloaded';
 
   @override
   String smartDownloadsKeepReadySubtitle(int count) {
@@ -13541,20 +13383,20 @@ class AppLocalizationsLt extends AppLocalizations {
   String get autoDownloadSection => 'Automatic downloads';
 
   @override
-  String get autoDownloadEnable => 'Enable automatic downloads';
+  String get autoDownloadEnable => 'Enable Automatic Downloads';
 
   @override
   String get autoDownloadEnableSubtitle =>
       'Downloads new episodes of the series you follow. Existing episodes can still be downloaded manually.';
 
   @override
-  String get autoDownloadKeepUnwatched => 'Keep unwatched episodes';
+  String get autoDownloadKeepUnwatched => 'Keep Unwatched Episodes';
 
   @override
   String get autoDownloadKeepAll => 'All';
 
   @override
-  String get autoDownloadDelete => 'Delete downloaded episodes';
+  String get autoDownloadDelete => 'Delete Downloaded Episodes';
 
   @override
   String get autoDownloadDeleteSubtitle =>
@@ -13573,7 +13415,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get autoDownloadDeleteAfterWeek => '1 week after watching';
 
   @override
-  String get autoDownloadBackgroundRefresh => 'Check in the background';
+  String get autoDownloadBackgroundRefresh => 'Check in the Background';
 
   @override
   String get autoDownloadBackgroundRefreshSubtitle =>
@@ -13588,7 +13430,7 @@ class AppLocalizationsLt extends AppLocalizations {
       'Background usage is restricted for Moonfin in Android Settings.';
 
   @override
-  String get autoDownloadCheckNow => 'Check now';
+  String get autoDownloadCheckNow => 'Check Now';
 
   @override
   String get autoDownloadChecking => 'Checking...';
@@ -13733,9 +13575,6 @@ class AppLocalizationsLt extends AppLocalizations {
   }
 
   @override
-  String get settingsAnimationSpeed => 'Animation Speed';
-
-  @override
   String get pageTransitions => 'Page Transitions';
 
   @override
@@ -13792,7 +13631,7 @@ class AppLocalizationsLt extends AppLocalizations {
   String get pageTransitionFadeLong => 'Long Fade';
 
   @override
-  String get siriRemoteSwipeSensitivity => 'Touchpad swipe sensitivity';
+  String get siriRemoteSwipeSensitivity => 'Touchpad Swipe Sensitivity';
 
   @override
   String get siriRemoteSwipeSensitivityDescription =>
@@ -13816,7 +13655,7 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get keepVideoClearOfDynamicIsland =>
-      'Keep video clear of the Dynamic Island';
+      'Keep Video Clear of the Dynamic Island';
 
   @override
   String get keepVideoClearOfDynamicIslandDescription =>
@@ -13870,4 +13709,133 @@ class AppLocalizationsLt extends AppLocalizations {
 
   @override
   String get navYou => 'You';
+
+  @override
+  String get detailsPage => 'Details Page';
+
+  @override
+  String get storageAndDownloads => 'Storage & Downloads';
+
+  @override
+  String get integrations => 'Integracijos';
+
+  @override
+  String get settingsSync => 'Settings Sync';
+
+  @override
+  String get settingsSyncSubtitle =>
+      'Moonbase plugin sync and customization profiles';
+
+  @override
+  String get navigationBar => 'Navigation Bar';
+
+  @override
+  String get homeRows => 'Rows';
+
+  @override
+  String get homeRowsSubtitle => 'Turn rows on or off and change their order';
+
+  @override
+  String get rowOptions => 'Row Options';
+
+  @override
+  String get rowOptionsSubtitle => 'Sorting and content for each row';
+
+  @override
+  String get imageTypePerRow => 'Image Type per Row';
+
+  @override
+  String get externalSources => 'External Sources';
+
+  @override
+  String get qualityAndDecoding => 'Quality & Decoding';
+
+  @override
+  String get qualityAndDecodingSubtitle =>
+      'Bitrate, resolution, decoding, HDR, and Dolby Vision';
+
+  @override
+  String get skippingAndAutoplay => 'Skipping & Autoplay';
+
+  @override
+  String get advancedPlayback => 'Advanced Playback';
+
+  @override
+  String get advancedPlaybackSubtitle =>
+      'Player routing, external players, and mpv';
+
+  @override
+  String get settingsAccountSubtitle =>
+      'Sign-in, PIN code, Kids Mode, parental controls, and settings sync';
+
+  @override
+  String get settingsGeneralSubtitle =>
+      'Language, clock, input, and performance';
+
+  @override
+  String get settingsAppearanceSubtitle =>
+      'Navigation, home screen, libraries, details page, and themes';
+
+  @override
+  String get settingsHomeScreenSubtitle =>
+      'Rows, media bar, looks, and external sources';
+
+  @override
+  String get settingsLibrariesEntrySubtitle =>
+      'Library visibility, order, and library pages';
+
+  @override
+  String get settingsDetailsPageSubtitle =>
+      'Layout, buttons, sections, ratings, and theme music';
+
+  @override
+  String get settingsPlaybackSubtitle =>
+      'Player, quality, audio, subtitles, skipping, and SyncPlay';
+
+  @override
+  String get settingsStorageSubtitle =>
+      'Downloads, storage location, and the image cache';
+
+  @override
+  String get settingsServicesSubtitle => 'Seerr and Achievement Badges';
+
+  @override
+  String get settingsSignInSection => 'Sign-in';
+
+  @override
+  String get settingsFamilySection => 'Family';
+
+  @override
+  String get settingsServersSection => 'Servers';
+
+  @override
+  String get settingsLanguageSection => 'Language';
+
+  @override
+  String get settingsInputSection => 'Input';
+
+  @override
+  String get settingsMotionSection => 'Motion';
+
+  @override
+  String get settingsContentsSection => 'Contents';
+
+  @override
+  String get settingsLooksSection => 'Looks';
+
+  @override
+  String get settingsAudioAndSubtitlesSection => 'Audio & Subtitles';
+
+  @override
+  String get settingsSkippingAndQueueSection => 'Skipping & Queue';
+
+  @override
+  String get settingsWatchTogetherSection => 'Watch Together';
+
+  @override
+  String get settingsAdvancedSection => 'Advanced';
+
+  @override
+  String get playerSettingsSubtitle =>
+      'Controls, seeking, player buttons, and trick play';
 }

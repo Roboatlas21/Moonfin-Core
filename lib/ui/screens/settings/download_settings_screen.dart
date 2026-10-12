@@ -34,6 +34,7 @@ import '../../widgets/focus/dpad_list_tile.dart';
 import '../../widgets/focus/request_initial_focus.dart';
 import '../../widgets/settings/clean_settings_typography.dart';
 import '../../widgets/settings/preference_tiles.dart';
+import '../../widgets/settings/settings_section_header.dart';
 
 class DownloadSettingsScreen extends ConsumerWidget {
   const DownloadSettingsScreen({super.key});
@@ -54,19 +55,17 @@ class DownloadSettingsScreen extends ConsumerWidget {
     final tvOfflineDownloads = prefs.get(UserPreferences.tvOfflineDownloads);
     final storage = ref.watch(storageUsedProvider);
     final l10n = AppLocalizations.of(context);
+    final downloads = PlatformDetection.supportsOfflineDownloads;
 
     return withCleanSettingsTypography(
       context,
       Scaffold(
-        appBar: buildSettingsAppBar(
-          context,
-          Text(l10n.settingsOfflineDownloads),
-        ),
+        appBar: buildSettingsAppBar(context, Text(l10n.storageAndDownloads)),
         body: ListView(
           children: [
             // The discovery point for the whole feature on TV: the panel
             // stays reachable while the item-page actions wait for opt-in.
-            if (PlatformDetection.isTV)
+            if (PlatformDetection.isTV && downloads)
               adaptiveListSection(
                 children: [
                   DpadSwitchListTile(
@@ -80,132 +79,130 @@ class DownloadSettingsScreen extends ConsumerWidget {
                   ),
                 ],
               ),
-            _Section(title: l10n.quality),
-            adaptiveListSection(
-              children: [
-                DpadListTile(
-                  autofocus: true,
-                  useSettingsIconShell: true,
-                  leading: const Icon(Icons.high_quality),
-                  title: Text(l10n.defaultDownloadQuality),
-                  subtitle: Text(_qualityLabel(qualityName)),
-                  onTap: () => showQualityPicker(context, prefs, qualityName),
-                ),
-              ],
-            ),
+            if (downloads) ...[
+              SettingsSectionHeader(l10n.quality),
+              adaptiveListSection(
+                children: [
+                  DpadListTile(
+                    autofocus: true,
+                    useSettingsIconShell: true,
+                    leading: const Icon(Icons.high_quality),
+                    title: Text(l10n.defaultDownloadQuality),
+                    subtitle: Text(_qualityLabel(qualityName)),
+                    onTap: () => showQualityPicker(context, prefs, qualityName),
+                  ),
+                ],
+              ),
 
-            _Section(title: l10n.network),
-            adaptiveListSection(
-              children: [
-                if (!PlatformDetection.useDesktopUi)
-                  DpadSwitchListTile(
-                    useSettingsIconShell: true,
-                    secondary: const Icon(Icons.wifi),
-                    title: Text(l10n.wifiOnlyDownloads),
-                    subtitle: Text(l10n.onlyDownloadOnWifi),
-                    value: wifiOnly,
-                    onChanged: (v) =>
-                        prefs.set(UserPreferences.downloadWifiOnly, v),
-                  ),
-                if (!PlatformDetection.isWeb)
-                  DpadSwitchListTile(
-                    useSettingsIconShell: true,
-                    secondary: const Icon(Icons.podcasts),
-                    title: Text(l10n.reportDownloadsActivity),
-                    subtitle: Text(l10n.reportDownloadsActivitySubtitle),
-                    value: reportActivity,
-                    onChanged: (v) =>
-                        prefs.set(UserPreferences.reportDownloadsAsActivity, v),
-                  ),
-                DpadListTile(
-                  useSettingsIconShell: true,
-                  leading: const Icon(Icons.queue),
-                  title: Text(l10n.settingsConcurrentDownloads),
-                  subtitle: Text(l10n.settingsConcurrentDownloadsDescription),
-                  trailing: Text('$concurrentCount'),
-                  onTap: () =>
-                      _pickConcurrentDownloads(context, prefs, concurrentCount),
-                ),
-              ],
-            ),
-            if (GetIt.instance.isRegistered<AutoDownloadService>()) ...[
-              _Section(title: l10n.smartDownloadsSection),
-              _SmartDownloadsSettings(
-                prefs: prefs,
-                service: GetIt.instance<AutoDownloadService>(),
-              ),
-              _Section(title: l10n.autoDownloadSection),
-              _AutoDownloadSettings(
-                prefs: prefs,
-                service: GetIt.instance<AutoDownloadService>(),
-              ),
-            ],
-            _Section(title: l10n.storage),
-            adaptiveListSection(
-              children: [
-                storage.when(
-                  // Reporting only. Managing storage means the downloads list,
-                  // which is where this screen is reached from, so offering a
-                  // way back to it just walks in a circle.
-                  data: (bytes) => DpadListTile(
-                    useSettingsIconShell: true,
-                    leading: const Icon(Icons.storage),
-                    title: Text(l10n.storageUsed),
-                    subtitle: Text(formatBytes(bytes)),
-                  ),
-                  loading: () => PlatformDetection.isTV
-                      ? DpadListTile(
-                          useSettingsIconShell: true,
-                          leading: const Icon(Icons.storage),
-                          title: Text(l10n.storageUsed),
-                          subtitle: Text(l10n.calculating),
-                        )
-                      : ListTile(
-                          leading: const Icon(Icons.storage),
-                          title: Text(l10n.storageUsed),
-                          subtitle: Text(l10n.calculating),
-                        ),
-                  error: (_, _) => const SizedBox.shrink(),
-                ),
-                DpadListTile(
-                  useSettingsIconShell: true,
-                  leading: const Icon(Icons.data_usage),
-                  title: Text(l10n.storageLimit),
-                  subtitle: Text(
-                    storageLimitMb == 0
-                        ? l10n.noLimit
-                        : l10n.gbValue(
-                            (storageLimitMb / 1024).toStringAsFixed(1),
-                          ),
-                  ),
-                  onTap: () =>
-                      showStorageLimitPicker(context, prefs, storageLimitMb),
-                ),
-                if (PlatformDetection.isAndroid)
-                  DpadSwitchListTile(
-                    useSettingsIconShell: true,
-                    secondary: const Icon(Icons.folder_open),
-                    title: Text(l10n.saveToDownloadsFolder),
-                    subtitle: Text(l10n.downloadsVisibleToOtherApps),
-                    value: customPath == 'mediastore',
-                    onChanged: (v) => _toggleMediaStore(context, prefs, v),
-                  ),
-                if (PlatformDetection.useDesktopUi ||
-                    (PlatformDetection.isAndroid && customPath != 'mediastore'))
+              SettingsSectionHeader(l10n.network),
+              adaptiveListSection(
+                children: [
+                  if (!PlatformDetection.useDesktopUi)
+                    DpadSwitchListTile(
+                      useSettingsIconShell: true,
+                      secondary: const Icon(Icons.wifi),
+                      title: Text(l10n.wifiOnlyDownloads),
+                      subtitle: Text(l10n.onlyDownloadOnWifi),
+                      value: wifiOnly,
+                      onChanged: (v) =>
+                          prefs.set(UserPreferences.downloadWifiOnly, v),
+                    ),
+                  if (!PlatformDetection.isWeb)
+                    DpadSwitchListTile(
+                      useSettingsIconShell: true,
+                      secondary: const Icon(Icons.podcasts),
+                      title: Text(l10n.reportDownloadsActivity),
+                      subtitle: Text(l10n.reportDownloadsActivitySubtitle),
+                      value: reportActivity,
+                      onChanged: (v) =>
+                          prefs.set(UserPreferences.reportDownloadsAsActivity, v),
+                    ),
                   DpadListTile(
                     useSettingsIconShell: true,
-                    leading: const Icon(Icons.folder_special),
-                    title: Text(l10n.downloadLocation),
-                    subtitle: Text(
-                      customPath.isEmpty ? l10n.defaultLabel : customPath,
-                    ),
-                    onTap: () => PlatformDetection.isAndroid
-                        ? _pickAndroidLocation(context, prefs, customPath)
-                        : _pickFolder(context, prefs),
+                    leading: const Icon(Icons.queue),
+                    title: Text(l10n.settingsConcurrentDownloads),
+                    subtitle: Text(l10n.settingsConcurrentDownloadsDescription),
+                    trailing: Text('$concurrentCount'),
+                    onTap: () =>
+                        _pickConcurrentDownloads(context, prefs, concurrentCount),
                   ),
+                ],
+              ),
+              if (GetIt.instance.isRegistered<AutoDownloadService>()) ...[
+                SettingsSectionHeader(l10n.smartDownloadsSection),
+                _SmartDownloadsSettings(
+                  prefs: prefs,
+                  service: GetIt.instance<AutoDownloadService>(),
+                ),
+                SettingsSectionHeader(l10n.autoDownloadSection),
+                _AutoDownloadSettings(
+                  prefs: prefs,
+                  service: GetIt.instance<AutoDownloadService>(),
+                ),
+              ],
+            ],
+            SettingsSectionHeader(l10n.storage),
+            adaptiveListSection(
+              children: [
+                if (downloads) ...[
+                  storage.when(
+                    // Reporting only, since storage is managed from the
+                    // downloads list.
+                    data: (bytes) => DpadListTile(
+                      useSettingsIconShell: true,
+                      leading: const Icon(Icons.storage),
+                      title: Text(l10n.storageUsed),
+                      subtitle: Text(formatBytes(bytes)),
+                    ),
+                    loading: () => DpadListTile(
+                      useSettingsIconShell: true,
+                      leading: const Icon(Icons.storage),
+                      title: Text(l10n.storageUsed),
+                      subtitle: Text(l10n.calculating),
+                    ),
+                    error: (_, _) => const SizedBox.shrink(),
+                  ),
+                  DpadListTile(
+                    useSettingsIconShell: true,
+                    leading: const Icon(Icons.data_usage),
+                    title: Text(l10n.storageLimit),
+                    subtitle: Text(
+                      storageLimitMb == 0
+                          ? l10n.noLimit
+                          : l10n.gbValue(
+                              (storageLimitMb / 1024).toStringAsFixed(1),
+                            ),
+                    ),
+                    onTap: () =>
+                        showStorageLimitPicker(context, prefs, storageLimitMb),
+                  ),
+                  if (PlatformDetection.isAndroid)
+                    DpadSwitchListTile(
+                      useSettingsIconShell: true,
+                      secondary: const Icon(Icons.folder_open),
+                      title: Text(l10n.saveToDownloadsFolder),
+                      subtitle: Text(l10n.downloadsVisibleToOtherApps),
+                      value: customPath == 'mediastore',
+                      onChanged: (v) => _toggleMediaStore(context, prefs, v),
+                    ),
+                  if (PlatformDetection.useDesktopUi ||
+                      (PlatformDetection.isAndroid && customPath != 'mediastore'))
+                    DpadListTile(
+                      useSettingsIconShell: true,
+                      leading: const Icon(Icons.folder_special),
+                      title: Text(l10n.downloadLocation),
+                      subtitle: Text(
+                        customPath.isEmpty ? l10n.defaultLabel : customPath,
+                      ),
+                      onTap: () => PlatformDetection.isAndroid
+                          ? _pickAndroidLocation(context, prefs, customPath)
+                          : _pickFolder(context, prefs),
+                    ),
+                ],
                 if (!PlatformDetection.isWeb) ...[
                   DpadListTile(
                     useSettingsIconShell: true,
+                    autofocus: !downloads,
                     leading: const Icon(Icons.image_outlined),
                     title: Text(l10n.imageCacheLimit),
                     subtitle: Text(
@@ -227,23 +224,25 @@ class DownloadSettingsScreen extends ConsumerWidget {
               ],
             ),
 
-            _Section(title: l10n.dangerZone),
-            adaptiveListSection(
-              children: [
-                DpadListTile(
-                  useSettingsIconShell: true,
-                  leading: Icon(
-                    Icons.delete_forever,
-                    color: AppColorScheme.statusRequested,
+            if (downloads) ...[
+              SettingsSectionHeader(l10n.dangerZone),
+              adaptiveListSection(
+                children: [
+                  DpadListTile(
+                    useSettingsIconShell: true,
+                    leading: Icon(
+                      Icons.delete_forever,
+                      color: AppColorScheme.statusRequested,
+                    ),
+                    title: Text(
+                      l10n.clearAllDownloads,
+                      style: TextStyle(color: AppColorScheme.statusRequested),
+                    ),
+                    onTap: () => _confirmClearAll(context),
                   ),
-                  title: Text(
-                    l10n.clearAllDownloads,
-                    style: TextStyle(color: AppColorScheme.statusRequested),
-                  ),
-                  onTap: () => _confirmClearAll(context),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -760,26 +759,6 @@ class DownloadSettingsScreen extends ConsumerWidget {
   }
 }
 
-class _Section extends StatelessWidget {
-  final String title;
-  const _Section({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: Theme.of(context).colorScheme.primary,
-        ),
-      ),
-    );
-  }
-}
-
 /// The smart downloads switch and how many episodes it keeps ready. It has
 /// no Check now of its own, since the one in automatic downloads runs both.
 class _SmartDownloadsSettings extends StatelessWidget {
@@ -955,7 +934,7 @@ class _AutoDownloadSettingsState extends State<_AutoDownloadSettings> {
             ),
           ],
         ),
-        _Section(title: l10n.autoDownloadFollowedSeries),
+        SettingsSectionHeader(l10n.autoDownloadFollowedSeries),
         StreamBuilder<List<AutoDownloadSubscription>>(
           stream: _subscriptions,
           builder: (context, snapshot) {

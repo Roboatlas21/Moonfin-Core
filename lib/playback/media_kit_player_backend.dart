@@ -20,6 +20,7 @@ import 'letterbox_croppers.dart';
 import 'mpv_letterbox_crop.dart';
 import 'mpv_frame_sample.dart';
 import 'mpv_frame_sampler.dart';
+import 'pending_subtitle_choice.dart';
 import 'server_transcode_capabilities.dart';
 
 class _ParsedMpvConfCacheEntry {
@@ -174,7 +175,8 @@ class _MediaKitDeviceProfileCapabilities {
   }
 }
 
-class MediaKitPlayerBackend extends PlayerBackend {
+class MediaKitPlayerBackend extends PlayerBackend
+    implements SubtitleLoadingBackend {
   static const Duration _linuxHwdecFirstFrameTimeout = Duration(
     milliseconds: 1500,
   );
@@ -233,14 +235,41 @@ class MediaKitPlayerBackend extends PlayerBackend {
   // pass can tell a fresh source apart from a choice it must not undo.
   bool _subtitlesDisabled = false;
 
+  String? _selectedExternalSubtitleUrl;
+  bool _isSubtitleLoading = false;
+  final _subtitleLoadingStream = StreamController<bool>.broadcast();
+
+  @override
+  bool get isSubtitleLoading => _isSubtitleLoading;
+
+  @override
+  Stream<bool> get subtitleLoadingStream => _subtitleLoadingStream.stream;
+
+  void _setSubtitleLoading(bool loading) {
+    if (_isDisposed || _isSubtitleLoading == loading) return;
+    _isSubtitleLoading = loading;
+    _subtitleLoadingStream.add(loading);
+  }
+
+  void _setSelectedExternalSubtitle(String? url) {
+    _selectedExternalSubtitleUrl = url;
+    _setSubtitleLoading(url != null);
+  }
+
+  bool _isSelectedExternalSubtitle(String url) =>
+      _selectedExternalSubtitleUrl == url;
+
   // Bumped by every subtitle choice and every new or stopped source, so a
   // selection or retry still waiting on mpv can tell it was replaced.
   int _subtitleSelectionGeneration = 0;
-  // Every external subtitle sub-added, with its title and language for a
-  // retry. It's kept after its source ends, so a late failure from a previous
-  // source still reads as a subtitle error rather than a video error.
-  final _externalSubtitles = <String, ({String? title, String? language})>{};
+
+  // Retained after a source ends so late mpv failures still read as subtitle
+  // errors. The generation distinguishes that history from URLs registered
+  // by the current source.
+  final _externalSubtitles =
+      <String, ({String? title, String? language, int sourceGeneration})>{};
   final _externalSubtitleLoads = <String, Future<void>>{};
+  final _pendingSubtitleChoice = PendingSubtitleChoice();
 
   static const _externalSubtitleRetries = 5;
   static const _externalSubtitleRetryDelay = Duration(seconds: 10);
@@ -248,6 +277,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
   void _resetSubtitleState() {
     _subtitleSelectionGeneration++;
     _externalSubtitleLoads.clear();
+    _pendingSubtitleChoice.nextSource();
   }
 
   bool _isLatestSubtitleSelection(int generation) =>
@@ -740,6 +770,10 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _liveStartupGate = null;
 
     _resetSubtitleState();
+    _setSelectedExternalSubtitle(
+      payload['selectedExternalSubtitleUrl'] as String?,
+    );
+    final subtitleGeneration = _subtitleSelectionGeneration;
     final media = Media(url);
     _currentUrl = media.uri;
     _isStale = true;
@@ -781,7 +815,14 @@ class MediaKitPlayerBackend extends PlayerBackend {
     // Whatever mpv reported for the previous title must not answer for this
     // one; the listener repopulates it once this file is loaded.
     _decodedVideoParams = null;
-    await _player.open(media, play: !openPaused);
+    try {
+      await _player.open(media, play: !openPaused);
+    } catch (_) {
+      if (_isLatestSubtitleSelection(subtitleGeneration)) {
+        _setSelectedExternalSubtitle(null);
+      }
+      rethrow;
+    }
     if (!_ownsPlayback(generation)) return;
 
     if (gateLiveVideo) {
@@ -864,6 +905,23 @@ class MediaKitPlayerBackend extends PlayerBackend {
     return _maybeEngageNativeHdr();
   }
 
+  /// Moves the native HDR session from one presenter to another without
+  /// touching mpv, so the video player screen can hand it to the mini player
+  /// and take it back. Releasing instead would swap mpv to the texture and
+  /// back, a black frame each way, and the window would have to be rebuilt.
+  ///
+  /// Only the current presenter can hand over; anything else is ignored.
+  /// Returns whether the session moved.
+  bool transferNativeHdrPresenter({
+    required Object from,
+    required Object to,
+  }) {
+    if (!identical(hdrOutput.presenter, from)) return false;
+    hdrOutput.presenter = to;
+    hdrOutput.window.transferOwnership(from: from, to: to);
+    return true;
+  }
+
   /// Hands the native HDR path back when the presenting screen goes away.
   ///
   /// mpv returns to media_kit's texture output, subtitles are re-asserted
@@ -914,8 +972,9 @@ class MediaKitPlayerBackend extends PlayerBackend {
   /// The two can differ: drag the window onto an SDR monitor mid-playback and
   /// the screen shows SDR while the session stays engaged. The monitor's own
   /// HDR state is the authority - whichever side does the conversion, an SDR
-  /// display is not showing HDR - and mpv's `target-params`, its account of
-  /// the output target after every conversion, refines it where available.
+  /// display is not showing HDR - and mpv's `video-target-params`, its
+  /// account of the output target after every conversion, refines it where
+  /// available.
   ///
   /// Null when there is nothing to say (not engaged, no native player), so
   /// callers can fall back to the session-level status.
@@ -977,7 +1036,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
   Future<(bool?, bool?)> _readHdrOutputState(NativePlayer native) async {
     final (displayHdr, gamma) = await (
       AutoHdrSwitcher.displayHdrState(),
-      _tryNativeGetProperty(native, 'target-params/gamma'),
+      _tryNativeGetProperty(native, 'video-target-params/gamma'),
     ).wait;
     final bool? outputtingHdr = gamma == null
         ? null
@@ -1981,6 +2040,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
   Future<void> stop() async {
     ++_playbackGeneration;
     _resetSubtitleState();
+    _setSelectedExternalSubtitle(null);
     _isStale = true;
     // An earlier open() may still emit playing=true before stop() finishes.
     _liveStartupGate = false;
@@ -2250,6 +2310,9 @@ class MediaKitPlayerBackend extends PlayerBackend {
     if (mpvTrackId < 1) return;
     final generation = ++_subtitleSelectionGeneration;
     bool isCurrentSelection() => _isLatestSubtitleSelection(generation);
+    _setSelectedExternalSubtitle(
+      isExternalSubtitle ? externalSubtitleUrl : null,
+    );
     _subtitlesDisabled = false;
     try {
       final native = _player.platform as NativePlayer;
@@ -2288,19 +2351,29 @@ class MediaKitPlayerBackend extends PlayerBackend {
         await _nativeSetProperty(native, 'secondary-sid', 'no');
         if (!isCurrentSelection()) return;
         if (isExternalSubtitle && externalSubtitleUrl != null) {
-          unawaited(
-            _retryExternalSubtitle(
-              externalSubtitleUrl,
-              isCurrentSelection: isCurrentSelection,
-              selectTrack: () => setSubtitleTrack(
-                mpvTrackId,
-                isBitmapSubtitle: isBitmapSubtitle,
-                subtitleCodec: subtitleCodec,
-                isExternalSubtitle: true,
-                externalSubtitleUrl: externalSubtitleUrl,
-              ),
-            ),
+          Future<void> selectTrack() => setSubtitleTrack(
+            mpvTrackId,
+            isBitmapSubtitle: isBitmapSubtitle,
+            subtitleCodec: subtitleCodec,
+            isExternalSubtitle: true,
+            externalSubtitleUrl: externalSubtitleUrl,
           );
+          if (_externalSubtitles[externalSubtitleUrl]?.sourceGeneration !=
+              _pendingSubtitleChoice.source) {
+            _pendingSubtitleChoice.hold(
+              externalSubtitleUrl,
+              isCurrent: isCurrentSelection,
+              select: selectTrack,
+            );
+          } else {
+            unawaited(
+              _retryExternalSubtitle(
+                externalSubtitleUrl,
+                isCurrentSelection: isCurrentSelection,
+                selectTrack: selectTrack,
+              ),
+            );
+          }
         }
         return;
       }
@@ -2341,12 +2414,19 @@ class MediaKitPlayerBackend extends PlayerBackend {
       await _nativeSetProperty(native, 'sub-ass', 'yes');
       if (!isCurrentSelection()) return;
       await _applyAssOverrideMode();
+      if (!isCurrentSelection()) return;
+      // Startup can still be waiting on other sub-adds after this file loads.
+      // Finish here so the indicator stays visible until its selection is applied.
+      if (isExternalSubtitle) _setSubtitleLoading(false);
       _subtitleDebug(
         'set track=$mpvTrackId sid_requested=$sidToApply sid_after=$sidAfter '
         'codec=$subtitleCodec external=$isExternalSubtitle '
         'bitmap=$isBitmapSubtitle mpv_sub_tracks=${subEntries.length}',
       );
     } catch (e) {
+      if (isExternalSubtitle && isCurrentSelection()) {
+        _setSubtitleLoading(false);
+      }
       _subtitleDebug('set track=$mpvTrackId threw: $e');
     }
   }
@@ -2369,8 +2449,15 @@ class MediaKitPlayerBackend extends PlayerBackend {
     required Future<void> Function() selectTrack,
   }) async {
     final scheme = Uri.tryParse(url)?.scheme;
-    if (!_externalSubtitles.containsKey(url) ||
-        (scheme != 'http' && scheme != 'https')) {
+    if (scheme != 'http' && scheme != 'https') {
+      if (isCurrentSelection() && _isSelectedExternalSubtitle(url)) {
+        _setSubtitleLoading(false);
+      }
+      return;
+    }
+    if (!_externalSubtitles.containsKey(url)) {
+      // The background add hasn't reached this subtitle yet. It stays
+      // loading until the held choice selects it.
       return;
     }
     final native = _player.platform as NativePlayer;
@@ -2384,7 +2471,12 @@ class MediaKitPlayerBackend extends PlayerBackend {
         await selectTrack();
         return;
       }
-      if (retries++ == _externalSubtitleRetries) return;
+      if (retries++ == _externalSubtitleRetries) {
+        if (isCurrentSelection() && _isSelectedExternalSubtitle(url)) {
+          _setSubtitleLoading(false);
+        }
+        return;
+      }
       await Future<void>.delayed(_externalSubtitleRetryDelay);
       if (!isCurrentSelection()) return;
       await _addExternalSubtitle(url);
@@ -2434,6 +2526,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
   @override
   Future<void> setEmbeddedCaptionTrack(int id) async {
     if (id <= 0 || id > _ccTrackSids.length) return;
+    _setSelectedExternalSubtitle(null);
     final generation = ++_subtitleSelectionGeneration;
     _subtitlesDisabled = false;
     final platform = _player.platform;
@@ -2450,6 +2543,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
 
   @override
   Future<void> disableSubtitleTrack() async {
+    _setSelectedExternalSubtitle(null);
     final generation = ++_subtitleSelectionGeneration;
     _subtitlesDisabled = true;
     await _player.setSubtitleTrack(SubtitleTrack.no());
@@ -2535,8 +2629,15 @@ class MediaKitPlayerBackend extends PlayerBackend {
     String? language,
     String? codec,
   }) async {
-    _externalSubtitles[url] = (title: title, language: language);
+    final sourceGeneration = _pendingSubtitleChoice.source;
+    _externalSubtitles[url] = (
+      title: title,
+      language: language,
+      sourceGeneration: sourceGeneration,
+    );
     await _addExternalSubtitle(url);
+    await _pendingSubtitleChoice.added(url, sourceGeneration);
+
     _subtitleDebug(
       'sub-add title=$title lang=$language codec=$codec '
       'mpv_sub_tracks=${_realSubtitleTrackCount(_player.state.tracks.subtitle)}',
@@ -2721,6 +2822,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
 
   @override
   void dispose() {
+    _setSelectedExternalSubtitle(null);
     _isDisposed = true;
     ++_playbackGeneration;
     _liveStartupGate = null;
@@ -2731,6 +2833,7 @@ class MediaKitPlayerBackend extends PlayerBackend {
     _videoParamsSub?.cancel();
     _tracksChangedController.close();
     _playingGateChangedController.close();
+    _subtitleLoadingStream.close();
     _player.dispose();
   }
 }

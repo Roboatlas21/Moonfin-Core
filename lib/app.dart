@@ -43,6 +43,7 @@ import 'ui/theme/app_theme.dart';
 import 'ui/theme/app_theme_controller.dart';
 import 'ui/widgets/app_update_banner.dart';
 import 'ui/widgets/cast_mini_player.dart';
+import 'ui/widgets/video_mini_player.dart';
 import 'ui/screens/settings/achievements_screen.dart';
 import 'ui/widgets/floating_notification.dart';
 import 'ui/widgets/offline_banner.dart';
@@ -267,10 +268,7 @@ class _MoonfinAppState extends State<MoonfinApp> {
                 final hidePlayer =
                     path.startsWith('/player/') ||
                     path == '/live-tv/player' ||
-                    path == '/' ||
-                    path == '/server-select' ||
-                    path == '/server' ||
-                    path == '/login';
+                    Destinations.isSignedOutRoute(path);
 
                 final overlay = Overlay(
                   initialEntries: [
@@ -299,6 +297,7 @@ class _MoonfinAppState extends State<MoonfinApp> {
                             ),
                             if (!hidePlayer)
                               const RepaintBoundary(child: CastMiniPlayer()),
+                            if (!hidePlayer) const VideoMiniPlayer(),
                           ],
                         );
                         final glass = AppColorScheme.isGlass;
@@ -311,11 +310,14 @@ class _MoonfinAppState extends State<MoonfinApp> {
                           fit: StackFit.expand,
                           children: [
                             Positioned.fill(
-                              child: glass
-                                  ? GlassBackdrop(
-                                      animated: GlassSettings.animatedBackdrop,
-                                    )
-                                  : const SizedBox.shrink(),
+                              child: VideoMiniPlayerHoleClip(
+                                child: glass
+                                    ? GlassBackdrop(
+                                        animated:
+                                            GlassSettings.animatedBackdrop,
+                                      )
+                                    : const SizedBox.shrink(),
+                              ),
                             ),
                             shell,
                             if (PlatformDetection.isTV) const ScreensaverHost(),
@@ -939,11 +941,10 @@ class _GlobalShortcutScopeState extends State<_GlobalShortcutScope>
 
   @override
   void onWindowEvent(String eventName) {
-    if (eventName == 'maximize') {
-      _isMaximized = true;
-    } else if (eventName == 'unmaximize') {
-      _isMaximized = false;
-    }
+    _isMaximized = FullscreenHelper.maximizedAfterWindowEvent(
+      eventName,
+      _isMaximized,
+    );
     if (eventName == 'move' ||
         eventName == 'resize' ||
         eventName == 'moved' ||

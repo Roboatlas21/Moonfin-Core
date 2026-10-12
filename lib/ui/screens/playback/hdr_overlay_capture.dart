@@ -210,7 +210,15 @@ class HdrVideoGeometry extends StatefulWidget {
     required this.onGeometry,
     required this.onDetached,
     this.showVideo = true,
+    this.followsPosition = false,
   });
+
+  /// Whether to re-measure after every frame rather than only on relayout.
+  ///
+  /// A fixed-size view (the mini player's thumbnail) keeps its constraints
+  /// when the window resizes, so its LayoutBuilder never rebuilds even though
+  /// the view itself moved, and the window would stay where it was.
+  final bool followsPosition;
 
   /// Whether the native window should be on screen at all.
   ///
@@ -239,6 +247,8 @@ class _HdrVideoGeometryState extends State<HdrVideoGeometry> {
   Rect? _last;
 
   bool? _lastShown;
+
+  bool _following = false;
 
   void _report() {
     if (!widget.showVideo) {
@@ -270,6 +280,34 @@ class _HdrVideoGeometryState extends State<HdrVideoGeometry> {
     _last = rect;
     _lastShown = true;
     widget.onGeometry(rect);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.followsPosition) _startFollowing();
+  }
+
+  @override
+  void didUpdateWidget(HdrVideoGeometry oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.followsPosition) _startFollowing();
+  }
+
+  void _startFollowing() {
+    if (_following) return;
+    _following = true;
+    WidgetsBinding.instance.addPostFrameCallback(_follow);
+  }
+
+  // Rides frames that happen anyway, so it never schedules one of its own.
+  void _follow(Duration _) {
+    if (!mounted || !widget.followsPosition) {
+      _following = false;
+      return;
+    }
+    _report();
+    WidgetsBinding.instance.addPostFrameCallback(_follow);
   }
 
   @override

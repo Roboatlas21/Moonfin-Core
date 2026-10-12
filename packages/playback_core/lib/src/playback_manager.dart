@@ -833,6 +833,14 @@ class PlaybackManager implements AudioOwnable {
       mediaStreams,
       externalSubtitles,
     );
+    // Seed the requested subtitle before opening the source: mpv's startup
+    // selection waits for the background subtitle add pass to finish.
+    final selectedExternalSubtitleUrl =
+        subtitleStreamIndex != null &&
+            _isSubtitleDeliveredExternally(subtitleStreamIndex) &&
+            !_subtitleIsBurnedIntoVideo(subtitleStreamIndex)
+        ? _externalSubtitleUrlForStream(subtitleStreamIndex)
+        : null;
 
     return <String, dynamic>{
       'url': url,
@@ -875,6 +883,8 @@ class PlaybackManager implements AudioOwnable {
           normalizationGainDb ??
           MediaStreamResolver.extractNormalizationGainDb(mediaStreams),
       if (declaredSubtitles.isNotEmpty) 'externalSubtitles': declaredSubtitles,
+      if (selectedExternalSubtitleUrl != null)
+        'selectedExternalSubtitleUrl': selectedExternalSubtitleUrl,
     };
   }
 
@@ -1170,6 +1180,15 @@ class PlaybackManager implements AudioOwnable {
   }
 
   void _bindStreams(PlayerBackend backend) {
+    final subtitleLoader = backend is SubtitleLoadingBackend
+        ? backend as SubtitleLoadingBackend
+        : null;
+    state.setSubtitleLoading(subtitleLoader?.isSubtitleLoading ?? false);
+    if (subtitleLoader != null) {
+      _streamSubs.add(
+        subtitleLoader.subtitleLoadingStream.listen(state.setSubtitleLoading),
+      );
+    }
     _streamSubs.addAll([
       backend.positionStream.listen((pos) {
         state.setPosition(pos);
@@ -2086,17 +2105,23 @@ class PlaybackManager implements AudioOwnable {
     // SyncPlay handshake wants the player at the group's position without a
     // frame of playback until the group's own Unpause.
     bool autoPlay = true,
+    // True for a switch made from inside the player, such as picking another
+    // episode, so the audio and subtitle picks carry over the way they do onto
+    // the next episode. The track arguments are ignored then.
+    bool carryTrackSelections = false,
   }) async {
     _abandonLiveRecovery('the viewer tuned somewhere else');
     _viewerPaused = false;
     _clearPendingItemOverrides();
     _vetoedAudioCodecs.clear();
-    _lastItemId = null;
-    _lastExplicitAudioLanguage = null;
-    _lastExplicitAudioIndex = null;
-    _lastExplicitAudioTitle = null;
-    _lastExplicitSubtitleLanguage = null;
-    _lastExplicitSubtitleEnabled = null;
+    if (!carryTrackSelections) {
+      _lastItemId = null;
+      _lastExplicitAudioLanguage = null;
+      _lastExplicitAudioIndex = null;
+      _lastExplicitAudioTitle = null;
+      _lastExplicitSubtitleLanguage = null;
+      _lastExplicitSubtitleEnabled = null;
+    }
     _isAutoNexting = false;
     _isManualNexting = false;
     suppressAutoNext = false;
@@ -2129,10 +2154,12 @@ class PlaybackManager implements AudioOwnable {
     );
     await _stopAndReportCurrent();
     _resetBackendSelectionLock();
-    _audioStreamIndex = audioStreamIndex;
-    _subtitleStreamIndex = subtitleStreamIndex;
-    _audioSelectionExplicit = audioSelectionExplicit;
-    _subtitleSelectionExplicit = subtitleSelectionExplicit;
+    if (!carryTrackSelections) {
+      _audioStreamIndex = audioStreamIndex;
+      _subtitleStreamIndex = subtitleStreamIndex;
+      _audioSelectionExplicit = audioSelectionExplicit;
+      _subtitleSelectionExplicit = subtitleSelectionExplicit;
+    }
     _mediaSourceId = mediaSourceId;
     _forceTranscodeForQueue = !enableDirectPlay && !enableDirectStream;
     _directPlayAllowedForQueue = enableDirectPlay;

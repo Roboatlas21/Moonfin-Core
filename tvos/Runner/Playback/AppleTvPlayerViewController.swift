@@ -12,6 +12,7 @@ struct PromptStrings {
     var stillWatchingBody = "Playback has been paused. Are you still watching?"
     var stillWatchingContinue = "Continue"
     var stillWatchingStop = "Stop"
+    var fetchingSubtitles = "Fetching subtitles"
 
     func endsIn(_ time: String) -> String {
         endsInTemplate.replacingOccurrences(of: "{time}", with: time)
@@ -81,6 +82,10 @@ final class AppleTvPlayerViewController: UIViewController {
     var onSyncplayLeave: (() -> Void)?
     var onSyncplayIgnoreWait: ((Bool) -> Void)?
     var onOpenCastPerson: ((String) -> Void)?
+    var onOpenEpisodes: (() -> Void)?
+    var onSelectEpisodesSeason: ((String) -> Void)?
+    var onSelectEpisode: ((String) -> Void)?
+    var onEpisodesClosed: (() -> Void)?
     var baseSubtitlePos = 92
     private var didAttachSurface = false
     private var updateTimer: Timer?
@@ -99,6 +104,8 @@ final class AppleTvPlayerViewController: UIViewController {
     private var canFavorite = false
     private var isFavorite = false
     private var canDownloadSubtitles = false
+    private var canBrowseEpisodes = false
+    private weak var episodeBrowser: EpisodeBrowserViewController?
     /// The searching / downloading alert. Dart raises and clears it, so both
     /// halves of the flow report their own ending instead of the search one
     /// falling through to "No Subtitles Found" whatever went wrong.
@@ -172,6 +179,12 @@ final class AppleTvPlayerViewController: UIViewController {
     private let loadingOverlay = UIView()
     private let loadingSpinner = UIActivityIndicatorView(style: .large)
     private var loadingDismissed = false
+    private let subtitleLoadingPill = UIView()
+    private let subtitleLoadingSpinner = UIActivityIndicatorView(style: .medium)
+    private let subtitleLoadingLabel = UILabel()
+    private var subtitleLoadingSince: CFTimeInterval?
+    private var subtitleLoadingAboveOsd: NSLayoutConstraint?
+    private var subtitleLoadingInCorner: NSLayoutConstraint?
 
     private var isLive = false
     private var liveProgram:
@@ -217,8 +230,8 @@ final class AppleTvPlayerViewController: UIViewController {
     private enum Zone { case scrubber, buttons }
     private enum ControlId {
         case prev, skipBack, playPause, skipForward, next
-        case speed, chapters, subtitles, audio, cast, quality, zoom, info, channels, favorite
-        case guide, syncplay
+        case speed, chapters, episodes, subtitles, audio, cast, quality, zoom, info
+        case channels, favorite, guide, syncplay
     }
     private var focusedZone: Zone = .buttons
     private var focusedControlIndex = 0
@@ -411,9 +424,11 @@ final class AppleTvPlayerViewController: UIViewController {
         if let v = args["stillWatchingBody"] as? String { promptStrings.stillWatchingBody = v }
         if let v = args["stillWatchingContinue"] as? String { promptStrings.stillWatchingContinue = v }
         if let v = args["stillWatchingStop"] as? String { promptStrings.stillWatchingStop = v }
+        if let v = args["fetchingSubtitles"] as? String { promptStrings.fetchingSubtitles = v }
         if isViewLoaded {
             upNextLabel.text = promptStrings.upNext.uppercased()
             nextUpPlayLabel.text = promptStrings.playNext
+            subtitleLoadingLabel.text = promptStrings.fetchingSubtitles
         }
     }
 
@@ -576,6 +591,7 @@ final class AppleTvPlayerViewController: UIViewController {
         setupLiveOverlays()
         setupSkipSegment()
         setupCinemaRequest()
+        setupSubtitleLoadingPill()
         setupLoadingOverlay()
     }
 
@@ -596,6 +612,80 @@ final class AppleTvPlayerViewController: UIViewController {
             loadingSpinner.centerYAnchor.constraint(equalTo: loadingOverlay.centerYAnchor),
         ])
         loadingSpinner.startAnimating()
+    }
+
+    // Shown while the chosen external subtitle downloads, which takes a while
+    // when the server has to extract it first. It sits above the controls when
+    // they're up and drops to the corner when they hide, so it stays in view
+    // for the whole wait.
+    private func setupSubtitleLoadingPill() {
+        subtitleLoadingPill.translatesAutoresizingMaskIntoConstraints = false
+        subtitleLoadingPill.backgroundColor = UIColor(white: 0, alpha: 0.55)
+        subtitleLoadingPill.layer.cornerRadius = 16
+        subtitleLoadingPill.isHidden = true
+        view.addSubview(subtitleLoadingPill)
+
+        subtitleLoadingSpinner.color = .white
+        subtitleLoadingSpinner.hidesWhenStopped = true
+        subtitleLoadingLabel.font = .systemFont(ofSize: 26, weight: .semibold)
+        subtitleLoadingLabel.textColor = UIColor(white: 1, alpha: 0.85)
+        subtitleLoadingLabel.text = promptStrings.fetchingSubtitles
+
+        let row = UIStackView(arrangedSubviews: [subtitleLoadingSpinner, subtitleLoadingLabel])
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 12
+        subtitleLoadingPill.addSubview(row)
+
+        let aboveOsd = subtitleLoadingPill.bottomAnchor.constraint(
+            equalTo: aboveRow.topAnchor, constant: -16)
+        subtitleLoadingAboveOsd = aboveOsd
+        subtitleLoadingInCorner = subtitleLoadingPill.bottomAnchor.constraint(
+            equalTo: view.bottomAnchor, constant: -56)
+        NSLayoutConstraint.activate([
+            subtitleLoadingPill.leadingAnchor.constraint(
+                equalTo: view.leadingAnchor, constant: 90),
+            aboveOsd,
+            row.leadingAnchor.constraint(equalTo: subtitleLoadingPill.leadingAnchor, constant: 18),
+            row.trailingAnchor.constraint(
+                equalTo: subtitleLoadingPill.trailingAnchor, constant: -22),
+            row.topAnchor.constraint(equalTo: subtitleLoadingPill.topAnchor, constant: 10),
+            row.bottomAnchor.constraint(equalTo: subtitleLoadingPill.bottomAnchor, constant: -10),
+        ])
+    }
+
+    private func updateSubtitleLoadingPill(osdShown: Bool) {
+        let now = CACurrentMediaTime()
+        if loadingDismissed && player.isSubtitleLoading {
+            if subtitleLoadingSince == nil { subtitleLoadingSince = now }
+        } else {
+            subtitleLoadingSince = nil
+        }
+        // A cached subtitle answers inside half a second and shouldn't flash it.
+        let show = subtitleLoadingSince.map { now - $0 >= 0.5 } ?? false
+        if subtitleLoadingPill.isHidden == show {
+            subtitleLoadingPill.isHidden = !show
+            if show {
+                subtitleLoadingSpinner.startAnimating()
+            } else {
+                subtitleLoadingSpinner.stopAnimating()
+            }
+        }
+        guard let aboveOsd = subtitleLoadingAboveOsd,
+            let inCorner = subtitleLoadingInCorner,
+            aboveOsd.isActive != osdShown
+        else { return }
+        if osdShown {
+            inCorner.isActive = false
+            aboveOsd.isActive = true
+        } else {
+            aboveOsd.isActive = false
+            inCorner.isActive = true
+        }
+        if show {
+            UIView.animate(withDuration: 0.25) { self.view.layoutIfNeeded() }
+        }
     }
 
     private func updateLoadingOverlay() {
@@ -1127,6 +1217,7 @@ final class AppleTvPlayerViewController: UIViewController {
         case .next: return "forward.end.fill"
         case .speed: return "gauge.with.dots.needle.67percent"
         case .chapters: return "list.bullet"
+        case .episodes: return "rectangle.stack"
         case .subtitles: return "captions.bubble"
         case .audio: return "speaker.wave.2"
         case .cast: return "person.2"
@@ -1171,6 +1262,7 @@ final class AppleTvPlayerViewController: UIViewController {
         switch id {
         case .speed: return "speed"
         case .chapters: return "chapters"
+        case .episodes: return "episodes"
         case .subtitles: return "subtitles"
         case .audio: return "audio"
         case .cast: return "castAndCrew"
@@ -1230,6 +1322,7 @@ final class AppleTvPlayerViewController: UIViewController {
             if canFavorite { secondary.append(.favorite) }
             secondary.append(.speed)
             if chapters.count > 1 { secondary.append(.chapters) }
+            if canBrowseEpisodes { secondary.append(.episodes) }
             if !subtitleTracks.isEmpty || canDownloadSubtitles { secondary.append(.subtitles) }
             if audioTracks.count > 1 { secondary.append(.audio) }
             if hasCast { secondary.append(.cast) }
@@ -1281,6 +1374,7 @@ final class AppleTvPlayerViewController: UIViewController {
         canFavorite = (args["canFavorite"] as? Bool) ?? false
         isFavorite = (args["isFavorite"] as? Bool) ?? false
         canDownloadSubtitles = (args["canDownloadSubtitles"] as? Bool) ?? false
+        canBrowseEpisodes = (args["canBrowseEpisodes"] as? Bool) ?? false
         // A push that carries no arrangement leaves the one already in hand
         // alone rather than emptying the row.
         if let osdButtons = args["osdButtons"] as? [String] {
@@ -2064,6 +2158,8 @@ final class AppleTvPlayerViewController: UIViewController {
             presentSpeedMenu()
         case .chapters:
             presentChapterMenu()
+        case .episodes:
+            onOpenEpisodes?()
         case .subtitles:
             presentSubtitleMenu()
         case .audio:
@@ -2200,6 +2296,7 @@ final class AppleTvPlayerViewController: UIViewController {
         case .next: return "Next"
         case .speed: return "Playback Speed"
         case .chapters: return "Chapters"
+        case .episodes: return "Episodes"
         case .subtitles: return "Subtitles"
         case .audio: return "Audio"
         case .cast: return "Cast & Crew"
@@ -2903,16 +3000,11 @@ final class AppleTvPlayerViewController: UIViewController {
             else { return nil }
             return v
         }
-        func pair(_ a: String, _ b: String) -> String? {
-            guard let first = value(a) else { return nil }
-            return "\(first) / \(value(b) ?? "?")"
-        }
 
         var rows: [(label: String, value: String)] = []
         if let v = value("backend") { rows.append(("Playback Path", v)) }
-        if let v = pair("source_format", "video_format") {
-            rows.append(("Source / Output Format", v))
-        }
+        if let v = value("source_format") { rows.append(("Source Format", v)) }
+        if let v = value("output_format") { rows.append(("Output Format", v)) }
         if let v = value("dv_profile") { rows.append(("Dolby Vision", v)) }
         if let v = value("source_fps") { rows.append(("Source FPS", v)) }
         if let v = value("source_bitrate") { rows.append(("Source Bitrate", v)) }
@@ -2940,6 +3032,42 @@ final class AppleTvPlayerViewController: UIViewController {
         if let v = value("last_error") { rows.append(("Last Error", v)) }
 
         return rows
+    }
+
+    /// Dart's answer to the `openEpisodes` the Episodes button sends.
+    func showEpisodeBrowser(_ args: [String: Any]) {
+        let content = EpisodeBrowserContent(args)
+        if let browser = episodeBrowser {
+            browser.update(content)
+            return
+        }
+        // Something else already holds the screen, so Dart is told the browser
+        // closed rather than left waiting on one that never opened.
+        guard presentedViewController == nil else {
+            onEpisodesClosed?()
+            return
+        }
+        let browser = EpisodeBrowserViewController(content: content, theme: carouselTheme)
+        browser.onSelectSeason = { [weak self] seasonId in
+            self?.onSelectEpisodesSeason?(seasonId)
+        }
+        browser.onSelectEpisode = { [weak self] episodeId in
+            self?.onSelectEpisode?(episodeId)
+        }
+        browser.onClosed = { [weak self] in
+            self?.onEpisodesClosed?()
+        }
+        browser.modalPresentationStyle = .overFullScreen
+        episodeBrowser = browser
+        present(browser, animated: true)
+    }
+
+    func updateEpisodeBrowser(_ args: [String: Any]) {
+        episodeBrowser?.update(EpisodeBrowserContent(args))
+    }
+
+    func hideEpisodeBrowser() {
+        episodeBrowser?.dismiss(animated: true)
     }
 
     private func presentCastPanel() {
@@ -3168,6 +3296,7 @@ final class AppleTvPlayerViewController: UIViewController {
             !osdDismissed && !nextUpVisible
             && (isPaused() || scrubTargetMs != nil || scrubFrozenMs != nil
                 || (CACurrentMediaTime() - lastShowAt < 4.0))
+        updateSubtitleLoadingPill(osdShown: shouldShow)
         let visible = osdContainer.alpha > 0.5
         if shouldShow && !visible {
             setSubtitlesRaised(true)

@@ -9078,7 +9078,7 @@
     "@animeMarkerSubbed": {
         "description": "Badge on an anime episode or season whose only audio is Japanese, so it is watched with subtitles"
     },
-    "animeMarkerDubbed": "Apelidado",
+    "animeMarkerDubbed": "Dublado",
     "@animeMarkerDubbed": {
         "description": "Badge on an anime episode or season that has an audio track in a language other than Japanese"
     },

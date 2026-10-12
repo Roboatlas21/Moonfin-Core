@@ -142,4 +142,66 @@ void main() {
 
     expect(profilePosts(), isNotEmpty);
   });
+
+  group('sync profile', () {
+    test('follows the device profile until one is picked', () {
+      expect(service.syncProfile, service.currentDeviceProfile);
+    });
+
+    test('picking a profile pushes nothing by itself', () async {
+      await service.setSyncProfile('global');
+      await settle();
+
+      expect(profilePosts(), isEmpty);
+    });
+
+    test('a write to an unsynced preference after a pick pushes nothing', () async {
+      await service.setSyncProfile('global');
+      await prefs.set(UserPreferences.setupWizardVersionForServer('srv1'), 2);
+      await settle();
+
+      expect(profilePosts(), isEmpty);
+    });
+
+    test('a picked profile is stored and takes the next push', () async {
+      await service.setSyncProfile('global');
+
+      expect(prefs.get(UserPreferences.pluginSyncProfile), 'global');
+      expect(service.syncProfile, 'global');
+
+      await prefs.set(UserPreferences.use24HourClock, true);
+      await settle();
+
+      expect(profilePosts(), ['POST /Moonfin/Settings/Profile/global']);
+    });
+
+    test('picking the device profile goes back to following it', () async {
+      await service.setSyncProfile('global');
+      await service.setSyncProfile(service.currentDeviceProfile);
+
+      expect(prefs.get(UserPreferences.pluginSyncProfile), isEmpty);
+      expect(service.syncProfile, service.currentDeviceProfile);
+    });
+
+    test('an unknown stored profile falls back to the device', () async {
+      await prefs.set(UserPreferences.pluginSyncProfile, 'roku');
+
+      expect(service.syncProfile, service.currentDeviceProfile);
+    });
+
+    test('sign in and server updates read the picked profile', () async {
+      await service.setSyncProfile('global');
+
+      await service.syncOnLogin(client, serverId: 'srv1');
+      await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+
+      final reads = adapter.requests
+          .where((r) => r.contains('/Moonfin/Settings/Resolved/'))
+          .toList();
+      expect(reads, [
+        'GET /Moonfin/Settings/Resolved/global',
+        'GET /Moonfin/Settings/Resolved/global',
+      ]);
+    });
+  });
 }

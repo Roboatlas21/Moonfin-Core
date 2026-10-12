@@ -84,6 +84,29 @@ class TmdbRepository {
     return '${_client.baseUrl}/Moonfin/Tmdb/StudioImage/$companyId?${_client.serverType.tokenQueryParam}=$token';
   }
 
+  /// The plugin's titled wide image for a movie or show the server doesn't
+  /// have. [type] is movie or tv, and [imdbId] only counts when there is no
+  /// [tmdbId].
+  String? thumbUrl({required String type, String? tmdbId, String? imdbId}) {
+    final token = _client.accessToken;
+    if (token == null) return null;
+    final MapEntry<String, String> id;
+    if (tmdbId != null && tmdbId.isNotEmpty) {
+      id = MapEntry('tmdbId', tmdbId);
+    } else if (imdbId != null && imdbId.isNotEmpty) {
+      id = MapEntry('imdbId', imdbId);
+    } else {
+      return null;
+    }
+    return Uri.parse('${_client.baseUrl}/Moonfin/Tmdb/Thumb').replace(
+      queryParameters: {
+        'type': type,
+        id.key: id.value,
+        _client.serverType.tokenQueryParam: token,
+      },
+    ).toString();
+  }
+
   Future<double?> getEpisodeRating({
     required String tmdbId,
     required int season,

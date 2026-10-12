@@ -56,6 +56,37 @@ String normalizeServerBaseUrl(String input) {
   );
 }
 
+/// [resolvedAddress] with its host in the Unicode spelling the user typed, or
+/// null when [enteredAddress] doesn't spell that same host in Unicode.
+///
+/// Typed Punycode is never decoded, so a lookalike entered as xn-- stays
+/// encoded.
+String? serverDisplayAddress({
+  required String enteredAddress,
+  required String resolvedAddress,
+}) {
+  final entered = enteredAddress.trim();
+  final enteredUri = Uri.tryParse(
+    _schemeRegex.hasMatch(entered) ? entered : 'https://$entered',
+  );
+  final resolvedUri = Uri.tryParse(resolvedAddress);
+  if (enteredUri == null || resolvedUri == null) return null;
+
+  String enteredHost;
+  try {
+    enteredHost = Uri.decodeComponent(enteredUri.host);
+  } catch (_) {
+    return null;
+  }
+
+  if (!enteredHost.runes.any((rune) => rune > 0x7f) ||
+      _normalizeServerHost(enteredUri.host) != resolvedUri.host) {
+    return null;
+  }
+
+  return resolvedAddress.replaceFirst(resolvedUri.host, enteredHost);
+}
+
 String _normalizeServerHost(String host) {
   if (host.isEmpty) return host;
 

@@ -678,7 +678,36 @@ class HomeViewModel extends ChangeNotifier {
     }).toList();
   }
 
-  bool _rowBelongsToConfig(HomeRow row, HomeSectionConfig cfg) {
+  /// The section in [configs] that built [row], or null when none of them did.
+  ///
+  /// Built-in rows are keyed by what they show rather than by their section's
+  /// stable id, so this asks each section the same question the row
+  /// reconciliation asks.
+  static HomeSectionConfig? sectionConfigForRow(
+    HomeRow row,
+    List<HomeSectionConfig> configs,
+  ) {
+    // The merged calendar comes from the Radarr section when that one is on
+    // and from the Sonarr section otherwise, the way the two loaders split it.
+    if (row.id == 'merged_calendar') {
+      return configs.firstWhereOrNull(
+            (c) =>
+                c.isBuiltin &&
+                c.enabled &&
+                c.type == HomeSectionType.radarrCalendar,
+          ) ??
+          configs.firstWhereOrNull(
+            (c) => c.isBuiltin && c.type == HomeSectionType.sonarrCalendar,
+          );
+    }
+    // The media bar matches recently released rows too, but it never builds
+    // a row of its own.
+    return configs.firstWhereOrNull(
+      (c) => c.type != HomeSectionType.mediaBar && _rowBelongsToConfig(row, c),
+    );
+  }
+
+  static bool _rowBelongsToConfig(HomeRow row, HomeSectionConfig cfg) {
     if (cfg.isPluginDynamic) {
       return row.id == cfg.stableId;
     }
@@ -735,7 +764,8 @@ class HomeViewModel extends ChangeNotifier {
         return row.rowType == HomeRowType.audioPlaylists;
       case HomeSectionType.liveTv:
         return row.rowType == HomeRowType.liveTv ||
-            row.rowType == HomeRowType.liveTvOnNow;
+            row.rowType == HomeRowType.liveTvOnNow ||
+            row.rowType == HomeRowType.liveTvFavorites;
       case HomeSectionType.activeRecordings:
         return row.rowType == HomeRowType.activeRecordings;
       case HomeSectionType.seerrShortcuts:
@@ -2896,7 +2926,7 @@ class HomeViewModel extends ChangeNotifier {
             'Type': item.type,
             'Overview': '',
             'PosterPath': item.posterUrl ?? '',
-            'BackdropPath': item.backdropUrl ?? item.posterUrl ?? '',
+            'BackdropPath': item.backdropUrl ?? '',
             'ProductionYear': item.year,
             'SeerrMediaType': item.type == 'Series' ? 'tv' : 'movie',
             'OfficialRating': item.officialRating,
@@ -2962,7 +2992,7 @@ class HomeViewModel extends ChangeNotifier {
             'Type': item.type,
             'Overview': '',
             'PosterPath': item.posterUrl ?? '',
-            'BackdropPath': item.backdropUrl ?? item.posterUrl ?? '',
+            'BackdropPath': item.backdropUrl ?? '',
             'ProductionYear': item.year,
             'SeerrMediaType': item.type == 'Series' ? 'tv' : 'movie',
             'OfficialRating': item.officialRating,
@@ -3075,7 +3105,7 @@ class HomeViewModel extends ChangeNotifier {
           'Type': 'Movie',
           'Overview': raw['overview'] ?? '',
           'PosterPath': poster ?? '',
-          'BackdropPath': raw['backdropUrl'] ?? poster ?? '',
+          'BackdropPath': raw['backdropUrl'] ?? '',
           'ProductionYear': raw['productionYear'],
           'CommunityRating': raw['rating'],
           'Genres': raw['genres'],

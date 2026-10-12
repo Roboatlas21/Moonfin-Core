@@ -23,8 +23,6 @@ import '../../../util/extensions.dart';
 import '../../../util/focus/scroll_utils.dart';
 import '../../../util/platform_detection.dart';
 import '../../navigation/route_lifecycle_observer.dart';
-import '../../widgets/overlay_sheet.dart';
-import '../../widgets/poster_size_settings_dialog.dart';
 import '../../widgets/skeleton/skeleton_shimmer.dart';
 import '../../widgets/settings/clean_settings_typography.dart';
 import '../../widgets/settings/preference_tiles.dart';
@@ -84,9 +82,7 @@ BoxDecoration _homeSectionTileDecoration(
 }
 
 class HomeSectionsScreen extends StatefulWidget {
-  final bool showGeneralOptions;
-
-  const HomeSectionsScreen({super.key, this.showGeneralOptions = true});
+  const HomeSectionsScreen({super.key});
 
   @override
   State<HomeSectionsScreen> createState() => _HomeSectionsScreenState();
@@ -96,8 +92,6 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen>
     with RouteAware {
   final _prefs = GetIt.instance<UserPreferences>();
   ModalRoute<dynamic>? _observedRoute;
-  static const _rowsTypeDescription =
-      'Classic keeps per-row image type and info overlay. Modern uses portrait-to-backdrop rows.';
   late List<HomeSectionConfig> _sections;
   HomeSectionConfig? _mediaBarConfig;
   final _focusNodes = <FocusNode>[];
@@ -1701,35 +1695,8 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen>
         HomeSectionType.none => l10n.none,
       };
 
-  String _posterSizeLabel(PosterSize size, AppLocalizations l10n) =>
-      switch (size) {
-        PosterSize.small => l10n.small,
-        PosterSize.medium => l10n.medium,
-        PosterSize.large => l10n.large,
-        PosterSize.extraLarge => l10n.extraLarge,
-      };
-
-  String _rowsStyleLabel(HomeRowsStyle style) => switch (style) {
-    HomeRowsStyle.v1 => 'Classic',
-    HomeRowsStyle.v2 => 'Modern',
-  };
-
-  Future<void> _showPosterSizeDialog() async {
-    await showFocusRestoringDialog<void>(
-      context: context,
-      builder: (ctx) => withCleanSettingsTypography(
-        ctx,
-        PosterSizeSettingsDialog(
-          prefs: _prefs,
-          onChanged: () => setState(() {}),
-        ),
-      ),
-    );
-  }
-
   Widget _buildLoadingOverlay(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     return Positioned.fill(
       child: AnimatedOpacity(
         opacity: _isLoading ? 1.0 : 0.0,
@@ -1749,42 +1716,6 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen>
               physics: const NeverScrollableScrollPhysics(),
               padding: const EdgeInsets.only(top: 8, bottom: 32),
               children: [
-                if (widget.showGeneralOptions)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: colorScheme.surfaceContainerLow.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        children: const [
-                          Row(
-                            children: [
-                              SkeletonBox(width: 24, height: 24, borderRadius: BorderRadius.all(Radius.circular(6))),
-                              SizedBox(width: 16),
-                              Expanded(
-                                child: SkeletonBox(width: 180, height: 16, borderRadius: BorderRadius.all(Radius.circular(4))),
-                              ),
-                              SkeletonBox(width: 44, height: 24, borderRadius: BorderRadius.all(Radius.circular(12))),
-                            ],
-                          ),
-                          SizedBox(height: 16),
-                          Row(
-                            children: [
-                              SkeletonBox(width: 24, height: 24, borderRadius: BorderRadius.all(Radius.circular(6))),
-                              SizedBox(width: 16),
-                              Expanded(
-                                child: SkeletonBox(width: 160, height: 16, borderRadius: BorderRadius.all(Radius.circular(4))),
-                              ),
-                              SkeletonBox(width: 44, height: 24, borderRadius: BorderRadius.all(Radius.circular(12))),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
                 for (int i = 0; i < 9; i++)
                   Padding(
                     padding: _kHomeSectionTileOuterPadding,
@@ -1861,7 +1792,7 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen>
       Scaffold(
         appBar: buildSettingsAppBar(
           context,
-          Text(l10n.homeSections),
+          Text(l10n.homeRows),
           actions: [
             IconButton(
               icon: const Icon(Icons.restore),
@@ -1899,71 +1830,11 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen>
     );
   }
 
-  Widget _buildHeader(AppLocalizations l10n) {
-    return Column(
-      children: [
-        ListTile(
-          leading: const Icon(Icons.photo_size_select_large),
-          title: Text(l10n.cardSize),
-          subtitle: Text(
-            _posterSizeLabel(_prefs.get(UserPreferences.posterSize), l10n),
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: _showPosterSizeDialog,
-        ),
-        const Divider(),
-        EnumPreferenceTile<HomeRowsStyle>(
-          preference: UserPreferences.homeRowsStyle,
-          title: l10n.rowsType,
-          icon: Icons.view_carousel,
-          description: _rowsTypeDescription,
-          labelOf: _rowsStyleLabel,
-          onChanged: () {
-            setState(() {});
-            _pushSyncSettings();
-          },
-        ),
-        if (_prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2) ...[
-          const Divider(),
-          SwitchListTile.adaptive(
-            secondary: const Icon(Icons.photo_library_outlined),
-            title: Text(l10n.modernCardsOnMyMediaRow),
-            subtitle: Text(l10n.modernCardsOnMyMediaRowDescription),
-            value: _prefs.get(UserPreferences.modernCardsOnMyMediaRow),
-            onChanged: (value) async {
-              await _prefs.set(UserPreferences.modernCardsOnMyMediaRow, value);
-              setState(() {});
-              _pushSyncSettings();
-            },
-          ),
-        ],
-        const Divider(),
-        SwitchListTile.adaptive(
-          secondary: const Icon(Icons.merge_type),
-          title: Text(l10n.mergeContinueWatchingAndNextUp),
-          subtitle: Text(l10n.combineBothRows),
-          value: _prefs.get(UserPreferences.mergeContinueWatchingNextUp),
-          onChanged: (value) {
-            _setMergeContinueWatchingNextUp(value);
-            if (value) {
-              setState(_enforceMergeAdjacency);
-              _save();
-            } else {
-              setState(() {});
-            }
-          },
-        ),
-      ],
-    );
-  }
-
   Widget _buildReorderableList(AppLocalizations l10n) {
     final visibleIndices = _visibleSectionIndices();
     final items = [for (final i in visibleIndices) _sections[i]];
     return CustomScrollView(
       slivers: [
-        if (widget.showGeneralOptions)
-          SliverToBoxAdapter(child: _buildHeader(l10n)),
         ReorderableAnimatedListImpl<HomeSectionConfig>(
           items: items,
           dragStartDelay: PlatformDetection.useMobileUi
@@ -2454,8 +2325,6 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen>
     return CustomScrollView(
       cacheExtent: 3000.0,
       slivers: [
-        if (widget.showGeneralOptions)
-          SliverToBoxAdapter(child: _buildHeader(l10n)),
         ReorderableAnimatedListImpl<HomeSectionConfig>(
           items: items,
           scrollDirection: Axis.vertical,

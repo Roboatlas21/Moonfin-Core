@@ -8014,6 +8014,9 @@ class DetailActionButtonsState extends State<DetailActionButtons> {
       preferredLanguage: preferredLanguage,
       fallbackLanguage: prefs.get(UserPreferences.fallbackSubtitleLanguage),
       preferSdh: prefs.get(UserPreferences.preferSdhSubtitles),
+      preferTextSubtitles: prefs.get(UserPreferences.preferTextSubtitles),
+      preferExternalSubtitles:
+          prefs.get(UserPreferences.preferExternalSubtitles),
       pgsDirectPlay: prefs.get(UserPreferences.pgsDirectPlay),
       assDirectPlay: prefs.get(UserPreferences.assDirectPlay),
       preferredAudioLanguage: prefs.get(UserPreferences.defaultAudioLanguage),
@@ -15422,7 +15425,7 @@ class FilmographyRow extends StatelessWidget {
         prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2;
     final rowScale = isRowsV2 ? 2.0 : 1.0;
 
-    final posterSize = prefs.get(UserPreferences.posterSize);
+    final posterSize = prefs.get(UserPreferences.posterSize).upToExtraLarge;
     final cardHeight =
         posterSize.portraitHeight.toDouble() * platformScale * rowScale;
 
@@ -15535,7 +15538,7 @@ class SeerrAppearancesRow extends StatelessWidget {
         prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2;
     final rowScale = isRowsV2 ? 2.0 : 1.0;
 
-    final posterSize = prefs.get(UserPreferences.posterSize);
+    final posterSize = prefs.get(UserPreferences.posterSize).upToExtraLarge;
     final cardHeight =
         posterSize.portraitHeight.toDouble() * platformScale * rowScale;
 
@@ -15624,7 +15627,7 @@ class SeerrCrewCreditsRow extends StatelessWidget {
         prefs.get(UserPreferences.homeRowsStyle) == HomeRowsStyle.v2;
     final rowScale = isRowsV2 ? 2.0 : 1.0;
 
-    final posterSize = prefs.get(UserPreferences.posterSize);
+    final posterSize = prefs.get(UserPreferences.posterSize).upToExtraLarge;
     final cardHeight =
         posterSize.portraitHeight.toDouble() * platformScale * rowScale;
 

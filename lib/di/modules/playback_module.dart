@@ -47,10 +47,6 @@ import '../../util/subtitle_track_logic.dart';
 
 final _getIt = GetIt.instance;
 
-const _nextSeasonEpisodeFields =
-    'Type,UserData,SeriesName,ParentIndexNumber,IndexNumber,SeriesId,SeasonId,'
-    'MediaSources,MediaStreams,RunTimeTicks,Chapters';
-
 bool _needsDolbyVisionFallback(StreamResolutionResult resolution) {
   for (final stream in resolution.mediaStreams) {
     if (HdrStreamCapability.needsDolbyVisionFallback(stream)) {
@@ -192,7 +188,7 @@ Future<List<AggregatedItem>> _fetchSeasonEpisodes({
   final data = await client.itemsApi.getEpisodes(
     seriesId,
     seasonId: seasonId,
-    fields: _nextSeasonEpisodeFields,
+    fields: kSeasonQueueEpisodeFields,
   );
   final rawItems = (data['Items'] as List?) ?? const [];
   final episodes = _mapServerItemsToAggregated(rawItems, serverId);
@@ -685,6 +681,10 @@ void registerPlaybackModule() {
           prefs.get(UserPreferences.fallbackSubtitleLanguage) as String? ?? '',
       preferSdh:
           prefs.get(UserPreferences.preferSdhSubtitles) as bool? ?? false,
+      preferTextSubtitles:
+          prefs.get(UserPreferences.preferTextSubtitles) as bool? ?? false,
+      preferExternalSubtitles:
+          prefs.get(UserPreferences.preferExternalSubtitles) as bool? ?? false,
       pgsDirectPlay: prefs.get(UserPreferences.pgsDirectPlay) as bool? ?? false,
       assDirectPlay: prefs.get(UserPreferences.assDirectPlay) as bool? ?? false,
       preferredAudioLanguage:

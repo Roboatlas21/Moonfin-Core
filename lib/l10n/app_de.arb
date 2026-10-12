@@ -3833,7 +3833,7 @@
     "@trakt": {
         "description": "Rating source: Trakt"
     },
-    "letterboxd": "Briefkastend",
+    "letterboxd": "Letterboxd",
     "@letterboxd": {
         "description": "Rating source: Letterboxd"
     },
@@ -10608,5 +10608,147 @@
     "animeMarkerMixed": "Gemischte Folge",
     "@animeMarkerMixed": {
         "description": "Badge on an anime episode that mixes source material with filler, so it still contains story"
+    },
+    "spotlightFileDetails": "Dateidetails",
+    "@spotlightFileDetails": {
+        "description": "Title of the spotlight summary card that opens the file details modal"
+    },
+    "detailScreenStyleNouveau": "Nouveau",
+    "@detailScreenStyleNouveau": {
+        "description": "Detail screen style option: nouveau full-screen layout with integrated sections"
+    },
+    "detailScreenStyleMinimalist": "minimal",
+    "@detailScreenStyleMinimalist": {
+        "description": "Detail screen style option: artwork, one play button and the episodes, and the style Kids Mode always shows"
+    },
+    "uiScaleGrandparents": "Großeltern",
+    "@uiScaleGrandparents": {
+        "description": "UI scaling option above extra large"
+    },
+    "uiScaleGreatGrandparents": "Urgroßeltern",
+    "@uiScaleGreatGrandparents": {
+        "description": "UI scaling option above Grandparents"
+    },
+    "fetchingSubtitles": "Untertitel werden geladen",
+    "@fetchingSubtitles": {
+        "description": "Playback status shown while the selected subtitle file is loading"
+    },
+    "downloadSizeTotal": "{size} insgesamt",
+    "@downloadSizeTotal": {
+        "description": "Exact total file size of a batch of original files, e.g. '12.4 GB total'",
+        "placeholders": {
+            "size": {
+                "type": "String"
+            }
+        }
+    },
+    "keyboardShortcutsPlayerHint": "Drücke ? oder F1 währen ein video läuft um diese Liste zu sehen ohne das Video zu beenden",
+    "@keyboardShortcutsPlayerHint": {
+        "description": "Footnote on the keyboard shortcuts settings screen"
+    },
+    "keyboardShortcutsSectionPlayerScope": "Während ein Video offen ist, beim abspielen oder Pause.",
+    "@keyboardShortcutsSectionPlayerScope": {
+        "description": "Under the Video player section title: when those keys apply"
+    },
+    "keyboardShortcutsSectionReader": "Buch und Comic Leser",
+    "@keyboardShortcutsSectionReader": {
+        "description": "Keyboard shortcut section for the ebook and comic reader"
+    },
+    "keyboardShortcutsSectionReaderScope": "Während des lesens von Buch oder Comic",
+    "@keyboardShortcutsSectionReaderScope": {
+        "description": "Under the reader section title: when those keys apply"
+    },
+    "shortcutMoveFocus": "Zwischen Dingen hin und her wechseln",
+    "@shortcutMoveFocus": {
+        "description": "What the arrow keys do outside the player"
+    },
+    "shortcutActivate": "Öffne das ausgewählte",
+    "@shortcutActivate": {
+        "description": "What Enter does outside the player"
+    },
+    "shortcutMpvStats": "MPV Statistiken an oder aus",
+    "@shortcutMpvStats": {
+        "description": "Player shortcut action, Windows only"
+    },
+    "shortcutRecropBlackBars": "Schwarze Balken zuschneiden",
+    "@shortcutRecropBlackBars": {
+        "description": "Player shortcut to run letterbox crop detection now"
+    },
+    "shortcutLeaveFullscreenOrStop": "Vollbild verlassen oder Stop wenn nicht Vollbild",
+    "@shortcutLeaveFullscreenOrStop": {
+        "description": "What Esc does in the player"
+    },
+    "shortcutStopPlayback": "Stop wiedergabe",
+    "@shortcutStopPlayback": {
+        "description": "Player shortcut action"
+    },
+    "shortcutShowShortcuts": "Zeige diese Liste",
+    "@shortcutShowShortcuts": {
+        "description": "What ? and F1 do in the player"
+    },
+    "shortcutNextPage": "Nächste Seite",
+    "@shortcutNextPage": {
+        "description": "Reader shortcut action"
+    },
+    "shortcutPreviousPage": "Vorherige Seite",
+    "@shortcutPreviousPage": {
+        "description": "Reader shortcut action"
+    },
+    "animeMarkerRecap": "Rückblick",
+    "@animeMarkerRecap": {
+        "description": "Badge on an anime episode that recaps earlier episodes"
+    },
+    "detailScreenStyleSpotlight": "Rampenlicht",
+    "@detailScreenStyleSpotlight": {
+        "description": "Detail screen style option: the hero-first layout with summary cards that open grid modals"
+    },
+    "spotlightMoreActions": "Mehr Aktionen",
+    "@spotlightMoreActions": {
+        "description": "Tooltip/semantics of the spotlight ellipsis button and the title of the overflow actions menu it opens"
+    },
+    "shortcutLastPage": "Letzte Seite, Oder Ende vom Kapitel",
+    "@shortcutLastPage": {
+        "description": "Reader shortcut action"
+    },
+    "shortcutResetZoom": "Zoom Zurücksetzen (comics)",
+    "@shortcutResetZoom": {
+        "description": "Reader shortcut action"
+    },
+    "hdrOutput": "HDR Ausgabe",
+    "@hdrOutput": {
+        "description": "Stream info label for whether HDR is reaching the display untouched"
+    },
+    "hdrOutputActive": "Aktiv — {format}",
+    "@hdrOutputActive": {
+        "description": "Stream info value when HDR passthrough is running, e.g. 'Active — HDR10 (PQ, BT.2020)'",
+        "placeholders": {
+            "format": {
+                "type": "String"
+            }
+        }
+    },
+    "hdrOutputDisplayNotHdr": "Inaktiv — Display ist nicht im HDR Modus",
+    "@hdrOutputDisplayNotHdr": {
+        "description": "Stream info value when the display has not been switched into HDR"
+    },
+    "nativeHdrOutput": "Native HDR Ausgabe",
+    "@nativeHdrOutput": {
+        "description": "Settings label for sending HDR to the display untouched"
+    },
+    "guideRepeatBadge": "Wiederholen",
+    "@guideRepeatBadge": {
+        "description": "Short badge label shown on a rerun in the guide hero band"
+    },
+    "recordCurrentEpisode": "Diese Folge aufnehmen",
+    "@recordCurrentEpisode": {
+        "description": "Live TV player action to record only the current episode"
+    },
+    "activeDownloads": "Aktive Downloads",
+    "@activeDownloads": {
+        "description": "Tab title for downloads that are transferring or queued"
+    },
+    "savedMediaNoDownloads": "Noch nichts gespeichert",
+    "@savedMediaNoDownloads": {
+        "description": "Empty state title when no downloads are on the device"
     }
 }

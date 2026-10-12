@@ -122,11 +122,17 @@ enum PosterSize {
   small(portraitHeight: 120, landscapeHeight: 88),
   medium(portraitHeight: 150, landscapeHeight: 110),
   large(portraitHeight: 180, landscapeHeight: 132),
-  extraLarge(portraitHeight: 210, landscapeHeight: 154);
+  extraLarge(portraitHeight: 210, landscapeHeight: 154),
+  grandparents(portraitHeight: 300, landscapeHeight: 220);
 
   const PosterSize({required this.portraitHeight, required this.landscapeHeight});
   final int portraitHeight;
   final int landscapeHeight;
+
+  /// Every size but Grandparents, which only the Classic home rows draw.
+  static const gridValues = [small, medium, large, extraLarge];
+
+  PosterSize get upToExtraLarge => this == grandparents ? extraLarge : this;
 }
 
 enum FavoritesViewStyle {

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
@@ -155,6 +156,27 @@ void main() {
     await tester.pump();
   }
 
+  Future<void> showNextUp(WidgetTester tester) async {
+    manager.queueService.setQueue([
+      const AggregatedItem(
+        id: 'one',
+        serverId: 'server',
+        rawData: {'Type': 'Episode', 'Name': 'One'},
+      ),
+      const AggregatedItem(
+        id: 'two',
+        serverId: 'server',
+        rawData: {'Type': 'Episode', 'Name': 'Two'},
+      ),
+    ]);
+    await tester.pump();
+    manager.state.setPosition(
+      const Duration(minutes: 29, seconds: 59, milliseconds: 800),
+    );
+    await tester.pump();
+    await tester.pump();
+  }
+
   testWidgets(
     'normal player remote reveals mounted controls and Select runs once',
     (tester) async {
@@ -196,24 +218,7 @@ void main() {
     (tester) async {
       await open(tester);
       await tap(tester, 'MoveDown');
-      manager.queueService.setQueue([
-        const AggregatedItem(
-          id: 'one',
-          serverId: 'server',
-          rawData: {'Type': 'Episode', 'Name': 'One'},
-        ),
-        const AggregatedItem(
-          id: 'two',
-          serverId: 'server',
-          rawData: {'Type': 'Episode', 'Name': 'Two'},
-        ),
-      ]);
-      await tester.pump();
-      manager.state.setPosition(
-        const Duration(minutes: 29, seconds: 59, milliseconds: 800),
-      );
-      await tester.pump();
-      await tester.pump();
+      await showNextUp(tester);
       expect(find.byType(NextUpOverlay), findsOneWidget);
       final nextUp = tester.widget<NextUpOverlay>(find.byType(NextUpOverlay));
       expect(nextUp.focusNode?.hasFocus, isTrue);
@@ -225,6 +230,39 @@ void main() {
       await tap(tester, 'Select');
       expect(manager.advances, 1);
       expect(manager.pauses, 0);
+      await tester.pumpWidget(const SizedBox());
+    },
+    variant: TargetPlatformVariant({
+      TargetPlatform.android,
+      TargetPlatform.iOS,
+      TargetPlatform.windows,
+    }),
+  );
+
+  testWidgets(
+    'Next Up close button dismisses the card and keeps the episode playing',
+    (tester) async {
+      await open(tester);
+      await showNextUp(tester);
+      expect(find.byType(NextUpOverlay), findsOneWidget);
+      expect(manager.suppressAutoNext, isTrue);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NextUpOverlay),
+          matching: find.byIcon(Icons.close_rounded),
+        ),
+      );
+      // On touch layouts the tap only lands once the double tap window ends.
+      await tester.pump(kDoubleTapTimeout);
+      await tester.pump();
+
+      expect(find.byType(NextUpOverlay), findsNothing);
+      expect(
+        manager.suppressAutoNext,
+        isFalse,
+        reason: 'the episode ends on its own once the card is dismissed',
+      );
       await tester.pumpWidget(const SizedBox());
     },
     variant: TargetPlatformVariant({

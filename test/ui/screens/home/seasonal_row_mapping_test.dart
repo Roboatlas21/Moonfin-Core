@@ -72,6 +72,7 @@ void main() {
     expect(suggestion.officialRating, 'G');
     expect(suggestion.rawData['SeerrMediaType'], 'movie');
     expect(suggestion.rawData['PosterPath'], '/poster.jpg');
+    expect(suggestion.rawData['BackdropPath'], '/backdrop.jpg');
     expect(suggestion.rawData['ProviderIds'], {'Imdb': 'tt0338348', 'Tmdb': '10719'});
     expect(suggestion.rawData['ProductionYear'], 2004);
     expect(suggestion.overview, 'A boy rides a train to the North Pole.');
@@ -86,6 +87,16 @@ void main() {
     ]);
 
     expect(map(body)!.suggestions.single.officialRating, isNull);
+  });
+
+  test('a suggestion with no backdrop leaves it empty instead of using the poster', () {
+    final body = _body(suggestions: [
+      {'id': 1, 'name': 'No Backdrop', 'type': 'Movie', 'posterUrl': '/poster.jpg', 'providerIds': {'Tmdb': '1'}},
+    ]);
+    final suggestion = map(body)!.suggestions.single;
+
+    expect(suggestion.rawData['PosterPath'], '/poster.jpg');
+    expect(suggestion.rawData['BackdropPath'], '');
   });
 
   test('a holiday with nothing to show means no row', () {

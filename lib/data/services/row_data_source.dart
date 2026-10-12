@@ -2283,7 +2283,7 @@ class RowDataSource {
                 'Type': item.type,
                 'Overview': '',
                 'PosterPath': item.posterUrl ?? '',
-                'BackdropPath': item.backdropUrl ?? item.posterUrl ?? '',
+                'BackdropPath': item.backdropUrl ?? '',
                 'ProductionYear': item.year,
                 'SeerrMediaType': item.type == 'Series' ? 'tv' : 'movie',
                 'UserRating': item.userRating ?? '',
