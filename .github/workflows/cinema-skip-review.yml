@@ -1,0 +1,35 @@
+name: Temporary Cinema Skip review
+on:
+  push:
+    branches: [review/cinema-skip-regression-20261014]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect regression harness and segment handler
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for p in Path('test').rglob('*.dart'):
+              text = p.read_text()
+              if 'CinemaSkip' in text or ('VideoPlayerScreen' in text and 'Preroll' in text):
+                  print('TEST FILE:', p)
+          p = Path('lib/ui/screens/playback/video_player_screen.dart')
+          lines = p.read_text().splitlines()
+          for index, line in enumerate(lines):
+              if 'void _checkSegments(' in line:
+                  print('\nSEGMENT HANDLER AT', index + 1)
+                  for offset, content in enumerate(lines[index:index+130], index+1):
+                      print(f'{offset}: {content}')
+          PY
+      - name: Export source for local patch preparation
+        run: git archive --format=zip -o cinema-skip-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cinema-skip-source
+          path: cinema-skip-source.zip
+          retention-days: 1
