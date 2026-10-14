@@ -3593,24 +3593,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       }
 
       if (event is KeyRepeatEvent) {
-        final isBackKey = event.logicalKey.isBackKey;
-        if (isBackKey) {
-          return KeyEventResult.handled;
-        }
-
-        switch (event.logicalKey) {
-          case LogicalKeyboardKey.mediaPlay:
-          case LogicalKeyboardKey.mediaPause:
-          case LogicalKeyboardKey.mediaPlayPause:
-          case LogicalKeyboardKey.space:
-          case LogicalKeyboardKey.enter:
-          case LogicalKeyboardKey.select:
-          case LogicalKeyboardKey.mediaFastForward:
-          case LogicalKeyboardKey.mediaRewind:
-            return KeyEventResult.handled;
-          default:
-            return KeyEventResult.handled;
-        }
+        return KeyEventResult.handled;
       }
 
       return KeyEventResult.ignored;

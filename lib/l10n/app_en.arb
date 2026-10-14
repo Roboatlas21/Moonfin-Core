@@ -13041,6 +13041,7 @@
   "cinemaSkipPrerollsDescription": "Show a Skip button during Cinema Mode pre-rolls. Off by default.",
   "cinemaMinimumIntroLength": "Minimum clip length to show Skip",
   "cinemaMinimumIntroLengthDescription": "Show Skip only for Cinema Mode pre-rolls at least this long.",
+  "cinemaSkipCountdown": "Cinema Skip countdown",
   "cinemaAutoHideButtons": "Auto-hide Skip button",
   "cinemaAutoHideButtonsDescription": "Hide Skip after this many seconds of playback. Off disables automatic hiding.",
   "detailsPage": "Details Page",

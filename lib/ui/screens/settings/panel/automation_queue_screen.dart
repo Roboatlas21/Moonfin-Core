@@ -127,7 +127,7 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                 ),
                 EnumPreferenceTile<MediaSegmentCountdown>(
                   preference: UserPreferences.cinemaModeSkipCountdown,
-                  title: l10n.settingsMediaSegmentCountdown,
+                  title: l10n.cinemaSkipCountdown,
                   icon: Icons.timer_outlined,
                   labelOf: countdownLabel,
                 ),

@@ -1626,7 +1626,7 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
     ),
     automation.leaf(
       'pref_cinema_mode_skip_countdown',
-      l10n.settingsMediaSegmentCountdown,
+      l10n.cinemaSkipCountdown,
       keywords: ['cinema trailer preroll skip countdown progress timer'],
     ),
     for (final type in configurableMediaSegmentTypes)

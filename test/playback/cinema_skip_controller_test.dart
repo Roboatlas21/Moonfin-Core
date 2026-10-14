@@ -85,6 +85,79 @@ void main() {
     });
   });
 
+  test('pausing suspends auto-hide and resuming starts a fresh timeout', () {
+    fakeAsync((clock) {
+      final controller = CinemaSkipController(onSkip: () async {});
+      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
+      controller.enter({'Id': 'trailer', 'RunTimeTicks': 900000000});
+      controller.updatePlayback(
+        duration: const Duration(seconds: 90),
+        playing: true,
+      );
+      clock.elapse(const Duration(seconds: 9));
+      expect(controller.visible, isTrue);
+
+      controller.updatePlayback(duration: Duration.zero, playing: false);
+      clock.elapse(const Duration(minutes: 1));
+      expect(controller.visible, isTrue);
+
+      controller.updatePlayback(duration: Duration.zero, playing: true);
+      clock.elapse(const Duration(seconds: 9));
+      expect(controller.visible, isTrue);
+      clock.elapse(const Duration(seconds: 1));
+      expect(controller.visible, isFalse);
+      controller.dispose();
+    });
+  });
+
+  test('playback duration makes a clip without runtime metadata eligible', () {
+    final controller = CinemaSkipController(onSkip: () async {});
+    addTearDown(controller.dispose);
+    controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 0);
+    controller.enter({'Id': 'trailer'});
+    expect(controller.duration, Duration.zero);
+    expect(controller.eligible, isFalse);
+    expect(controller.visible, isFalse);
+
+    controller.updatePlayback(duration: Duration.zero, playing: true);
+    expect(controller.visible, isFalse);
+    controller.updatePlayback(
+      duration: const Duration(seconds: 30),
+      playing: true,
+    );
+    expect(controller.duration, const Duration(seconds: 30));
+    expect(controller.eligible, isTrue);
+    expect(controller.visible, isTrue);
+
+    // A temporary zero duration must not discard the runtime already learned.
+    controller.updatePlayback(duration: Duration.zero, playing: true);
+    expect(controller.duration, const Duration(seconds: 30));
+    expect(controller.visible, isTrue);
+  });
+
+  test('disposing during a pending Skip prevents late notifications', () {
+    fakeAsync((clock) {
+      final pending = Completer<void>();
+      var notifications = 0;
+      final controller = CinemaSkipController(onSkip: () => pending.future);
+      controller.configure(enabled: true, minimumSeconds: 0, autoHideSeconds: 10);
+      controller.enter({'Id': 'trailer'});
+      controller.updatePlayback(
+        duration: const Duration(seconds: 30),
+        playing: true,
+      );
+      controller.addListener(() => notifications++);
+      controller.skip();
+      expect(notifications, 1);
+      controller.dispose();
+
+      pending.complete();
+      clock.flushMicrotasks();
+      clock.elapse(const Duration(seconds: 20));
+      expect(notifications, 1);
+    });
+  });
+
   test('remote Back hides, Right reveals, and Select activates once', () {
     fakeAsync((clock) {
       var skips = 0;
