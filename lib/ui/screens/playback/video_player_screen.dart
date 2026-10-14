@@ -41,7 +41,6 @@ import '../../../playback/playback_lifecycle_handler.dart';
 import '../../../playback/playback_profile_diagnostics.dart';
 import '../../../playback/hdr_stream_capability.dart';
 import '../../../playback/cinema_skip_controller.dart';
-import '../../../playback/cinema_playback_source_guard.dart';
 import '../../../data/models/aggregated_item.dart';
 import '../../../data/repositories/item_mutation_repository.dart';
 import '../../../data/models/media_segment.dart';
@@ -351,7 +350,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   MediaSegment? _skipSegment;
   Duration? _skipTo;
   late final CinemaSkipController _cinemaSkip;
-  final _cinemaSkipSource = CinemaPlaybackSourceGuard();
   StreamSubscription<Duration>? _cinemaSkipDurationSub;
   bool _cinemaSkipWasVisible = false;
 
@@ -518,31 +516,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     autoHideSeconds: _prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds,
   );
 
-  void _startCinemaSkip({bool initial = false}) {
+  void _syncCinemaSkip({bool initial = false}) {
     final item = _queue.currentItem;
-    if (!_cinemaSkipSource.enter(item, _queue.currentIndex, initial: initial)) {
-      return;
-    }
-    _cinemaSkip.enter(
-      _isCurrentPreroll ? _rawDataForQueueItem(item) : null,
-    );
-    _updateCinemaSkipPlayback();
-  }
-
-  void _updateCinemaSkipPlayback() {
-    if (!_isCurrentPreroll) return;
-    final item = _queue.currentItem;
-    if (!_cinemaSkipSource.observeReady(
+    final data = _rawDataForQueueItem(item);
+    _cinemaSkip.synchronize(
       item: item,
       index: _queue.currentIndex,
+      preroll: data?['__moonfinIsPreroll'] == true ? data : null,
       itemId: _itemIdForQueueItem(item),
       source: _manager.bringupState,
-    )) {
-      return;
-    }
-    _cinemaSkip.updatePlayback(
       duration: _manager.backend?.duration ?? Duration.zero,
       playing: _state.isPlaying,
+      initial: initial,
     );
   }
 
@@ -738,10 +723,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     super.initState();
     _cinemaSkip = CinemaSkipController(onSkip: _manager.nextInQueue);
     _configureCinemaSkip();
-    _startCinemaSkip(initial: true);
+    _syncCinemaSkip(initial: true);
     _cinemaSkip.addListener(_onCinemaSkipChanged);
     _cinemaSkipDurationSub = _state.durationStream.listen(
-      (_) => _updateCinemaSkipPlayback(),
+      (_) => _syncCinemaSkip(),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _isCinemaSkipVisible) _focusTvSkipSegment();
@@ -800,7 +785,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (state.phase == PlaybackBringupPhase.ready) {
         _applySubtitleStyle(force: true);
       }
-      _updateCinemaSkipPlayback();
+      _syncCinemaSkip();
     });
     _syncPlayManager?.addListener(_onSyncPlayChanged);
     _prefs.addListener(_onPlaybackPrefsChanged);
@@ -896,7 +881,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _syncMedia3VolumeBoostLevel();
       unawaited(_syncAutoHdrSwitching());
       final isPreroll = _isCurrentPreroll;
-      _startCinemaSkip();
+      _syncCinemaSkip();
       _resetSkipSegmentAutoHide();
       setState(() {
         _nextUpDismissed = false;
@@ -932,7 +917,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _onSubtitleLoadingChanged(_state.isSubtitleLoading);
     _playingSub = _state.playingStream.listen((playing) {
       _updateDisplayPlaying(playing);
-      _updateCinemaSkipPlayback();
+      _syncCinemaSkip();
       // The hide timer passes over a player that hasn't started yet, so a
       // start or resume slower than its delay needs it armed again here.
       if (playing && _controlsVisible && !_isSeeking) {

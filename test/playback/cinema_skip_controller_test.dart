@@ -3,8 +3,52 @@ import 'dart:async';
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/playback/cinema_skip_controller.dart';
+import 'package:playback_core/playback_core.dart';
 
 void main() {
+  test('a new trailer rejects stale playback readiness even with the same item ID', () {
+    final controller = CinemaSkipController(onSkip: () async {});
+    addTearDown(controller.dispose);
+    controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 0);
+    final first = Object();
+    final second = Object();
+    final trailer = {'RunTimeTicks': '900000000'};
+
+    void sync(Object item, int index, PlaybackBringupState source, Duration duration,
+        {bool initial = false}) {
+      controller.synchronize(
+        item: item,
+        index: index,
+        preroll: trailer,
+        itemId: 'trailer',
+        source: source,
+        duration: duration,
+        playing: true,
+        initial: initial,
+      );
+    }
+
+    PlaybackBringupState ready(String id, int token) => PlaybackBringupState(
+      phase: PlaybackBringupPhase.ready,
+      sessionToken: token,
+      itemId: id,
+    );
+
+    sync(first, 0, ready('trailer', 7), const Duration(seconds: 50), initial: true);
+    expect(controller.duration, const Duration(seconds: 50));
+    expect(controller.generation, 1);
+    sync(first, 0, ready('trailer', 7), const Duration(seconds: 50));
+    expect(controller.generation, 1);
+
+    sync(second, 1, ready('trailer', 7), const Duration(seconds: 30));
+    expect(controller.generation, 2);
+    expect(controller.duration, const Duration(seconds: 90));
+    sync(second, 1, ready('other', 8), const Duration(seconds: 30));
+    expect(controller.duration, const Duration(seconds: 90));
+    sync(second, 1, ready('trailer', 8), const Duration(seconds: 30));
+    expect(controller.duration, const Duration(seconds: 30));
+  });
+
   test('skipping stays opt-in and respects minimum clip length', () {
     final controller = CinemaSkipController(onSkip: () async {});
     addTearDown(controller.dispose);

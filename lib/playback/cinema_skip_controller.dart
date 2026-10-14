@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:playback_core/playback_core.dart';
 
 /// Optional Skip control for Cinema Mode pre-rolls; no trailer lookup or Seerr.
 class CinemaSkipController extends ChangeNotifier {
@@ -9,6 +10,10 @@ class CinemaSkipController extends ChangeNotifier {
 
   final Future<void> Function() _onSkip;
   Timer? _hideTimer;
+  Object? _queueItem;
+  int _queueIndex = -1;
+  int? _lastReadyToken;
+  int? _previousReadyToken;
   Duration? _metadataDuration;
   Duration? _playerDuration;
   int _generation = 0;
@@ -47,6 +52,36 @@ class CinemaSkipController extends ChangeNotifier {
     _autoHideSeconds = autoHideSeconds;
     _restartTimer();
     notifyListeners();
+  }
+
+  /// Reconcile queue changes and playback readiness in one place, shared by
+  /// Flutter playback and the native Apple TV host.
+  void synchronize({
+    required Object? item,
+    required int index,
+    required Map<String, dynamic>? preroll,
+    required String? itemId,
+    required PlaybackBringupState source,
+    required Duration duration,
+    required bool playing,
+    bool initial = false,
+  }) {
+    if (initial || !identical(item, _queueItem) || index != _queueIndex) {
+      _previousReadyToken = initial ? null : _lastReadyToken;
+      _queueItem = item;
+      _queueIndex = index;
+      enter(preroll);
+    }
+    // Ignore a ready event from the outgoing pre-roll, even if its item ID
+    // matches the next pre-roll. Only the new playback session can update it.
+    if (preroll == null ||
+        source.phase != PlaybackBringupPhase.ready ||
+        source.itemId != itemId ||
+        source.sessionToken == _previousReadyToken) {
+      return;
+    }
+    _lastReadyToken = source.sessionToken;
+    updatePlayback(duration: duration, playing: playing);
   }
 
   void enter(Map<String, dynamic>? item) {
