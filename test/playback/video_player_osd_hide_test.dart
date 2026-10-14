@@ -182,7 +182,10 @@ void main() {
 
     // Use actual key events: dismissing the focused button must leave the
     // player listening for the next remote press without popping the route.
-    await tester.sendKeyEvent(LogicalKeyboardKey.goBack);
+    await tester.sendKeyEvent(
+      LogicalKeyboardKey.goBack,
+      physicalKey: PhysicalKeyboardKey.escape,
+    );
     await tester.pumpAndSettle();
     expect(skip, findsNothing);
     expect(find.byType(VideoPlayerScreen), findsOneWidget);

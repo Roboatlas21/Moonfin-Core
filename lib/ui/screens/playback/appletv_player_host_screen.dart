@@ -208,12 +208,13 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     _configureCinemaSkip();
     _syncCinemaSkip();
     _cinemaSkip.addListener(_syncCinemaSkipButton);
-    _loadSegmentsForCurrentItem();
     if (GetIt.instance.isRegistered<SyncPlayManager>()) {
       _syncPlay = GetIt.instance<SyncPlayManager>();
       _syncPlay!.addListener(_onSyncPlayChanged);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _loadSegmentsForCurrentItem();
       _pushMetadata();
       _pushSubtitleStyle();
       _pushThemeConfig();
@@ -1682,6 +1683,14 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       case 'pause':
         unawaited(manager.pause());
       case 'seek':
+        // Only system Forward Skip advances a Cinema pre-roll. Explicit
+        // position seeks and backward skips retain their normal behavior.
+        if (action['isForwardSkip'] == true &&
+            _isCinemaPreroll &&
+            _cinemaSkip.enabled) {
+          _cinemaSkip.skip(requireVisible: false);
+          return;
+        }
         final positionMs = (action['positionMs'] as num?)?.toInt();
         if (positionMs != null) {
           unawaited(manager.seekTo(Duration(milliseconds: positionMs)));

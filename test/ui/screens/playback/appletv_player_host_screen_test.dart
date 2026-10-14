@@ -19,6 +19,7 @@ class _MockPlaybackManager extends Mock implements PlaybackManager {}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() => registerFallbackValue(Duration.zero));
 
   late _MockPlaybackManager manager;
   late QueueService queue;
@@ -129,6 +130,118 @@ void main() {
     await prefs.set(UserPreferences.cinemaModeSkipEnabled, false);
     await select(generation);
     verifyNever(() => manager.pause());
+    await tester.pumpWidget(const SizedBox());
+  });
+
+
+  testWidgets('system Forward Skip is distinct from seeking on Apple TV', (
+    tester,
+  ) async {
+    const control = MethodChannel('moonfin/appletv_video_control');
+    const events = MethodChannel('moonfin/appletv_video_events');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(control, (call) async {
+      calls.add(call);
+      return null;
+    });
+    messenger.setMockMethodCallHandler(events, (_) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(control, null);
+      messenger.setMockMethodCallHandler(events, null);
+    });
+
+    SharedPreferences.setMockInitialValues({});
+    final store = PreferenceStore();
+    await store.init();
+    final prefs = UserPreferences(store);
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    final backend = AppleTvBackend(prefs);
+    addTearDown(backend.dispose);
+    GetIt.instance.registerSingleton<UserPreferences>(prefs);
+    GetIt.instance.registerSingleton<AppleTvBackend>(backend);
+    when(() => manager.isOfflinePlayback).thenReturn(false);
+    when(() => manager.playbackDeferredToExternalPlayer).thenReturn(false);
+    when(() => manager.seekTo(any())).thenAnswer((_) async {});
+    when(() => manager.nextInQueue()).thenAnswer((_) async => queue.next());
+    queue.setQueue([
+      {'Id': 'short', '__moonfinIsPreroll': true, 'RunTimeTicks': 50000000},
+      {'Id': 'long', '__moonfinIsPreroll': true, 'RunTimeTicks': 900000000},
+      {'Id': 'movie', 'RunTimeTicks': 900000000},
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const AppleTvPlayerHostScreen(),
+      ),
+    );
+    await tester.pump();
+
+    Future<void> send(Map<String, Object> action) async {
+      await messenger.handlePlatformMessage(
+        events.name,
+        const StandardMethodCodec().encodeSuccessEnvelope(action),
+        (_) {},
+      );
+      await tester.pump();
+    }
+
+    // An ordinary position seek remains a seek during Cinema Mode.
+    await send({'event': 'seek', 'positionMs': 8000});
+    verify(() => manager.seekTo(const Duration(seconds: 8))).called(1);
+    verifyNever(() => manager.nextInQueue());
+
+    // A system Forward Skip advances even when the clip is below the minimum.
+    await send({
+      'event': 'seek',
+      'positionMs': 30000,
+      'isForwardSkip': true,
+    });
+    verify(() => manager.nextInQueue()).called(1);
+    expect(queue.currentIndex, 1);
+    verifyNever(() => manager.seekTo(const Duration(seconds: 30)));
+
+    // Back-hidden controls must not stop system Fast Forward from skipping.
+    final cinema = calls.lastWhere((call) => call.method == 'setCinemaSkipState')
+        .arguments as Map;
+    await send({
+      'event': 'cinemaSkipAction',
+      'action': 'hide',
+      'generation': cinema['generation'] as int,
+    });
+    await tester.pump(const Duration(milliseconds: 400));
+    await send({
+      'event': 'seek',
+      'positionMs': 35000,
+      'isForwardSkip': true,
+    });
+    verify(() => manager.nextInQueue()).called(1);
+    expect(queue.currentIndex, 2);
+    verifyNever(() => manager.seekTo(const Duration(seconds: 35)));
+
+    // Without a Cinema pre-roll, Fast Forward keeps seeking as before.
+    await send({
+      'event': 'seek',
+      'positionMs': 13000,
+      'isForwardSkip': true,
+    });
+    verify(() => manager.seekTo(const Duration(seconds: 13))).called(1);
+
+    // Opting out also restores the original interval-seek behavior.
+    queue.setQueue([
+      {'Id': 'disabled', '__moonfinIsPreroll': true, 'RunTimeTicks': 900000000},
+    ]);
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, false);
+    await tester.pump();
+    await send({
+      'event': 'seek',
+      'positionMs': 14000,
+      'isForwardSkip': true,
+    });
+    verify(() => manager.seekTo(const Duration(seconds: 14))).called(1);
+    // The host schedules one metadata refresh 300 ms after normal seek events.
+    await tester.pump(const Duration(seconds: 1));
     await tester.pumpWidget(const SizedBox());
   });
 
