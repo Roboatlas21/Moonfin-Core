@@ -1,0 +1,229 @@
+diff --git a/lib/ui/screens/playback/video_player_screen.dart b/lib/ui/screens/playback/video_player_screen.dart
+index c52952e..b46b477 100644
+--- a/lib/ui/screens/playback/video_player_screen.dart
++++ b/lib/ui/screens/playback/video_player_screen.dart
+@@ -2504,6 +2504,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
+   }
+ 
+   void _checkSegments(Duration position) {
++    if (_isCurrentPreroll && _cinemaSkip.enabled) return;
++
+     final result = _segmentService.checkPosition(position);
+     final replaceSkipOutroWithNextUp = _prefs.get(
+       UserPreferences.replaceSkipOutroWithNextUp,
+diff --git a/test/playback/video_player_osd_hide_test.dart b/test/playback/video_player_osd_hide_test.dart
+index d0d9629..04f5f3b 100644
+--- a/test/playback/video_player_osd_hide_test.dart
++++ b/test/playback/video_player_osd_hide_test.dart
+@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:get_it/get_it.dart';
++import 'package:go_router/go_router.dart';
+ import 'package:jellyfin_preference/jellyfin_preference.dart';
+ import 'package:playback_core/playback_core.dart';
+ import 'package:server_core/server_core.dart';
+ import 'package:shared_preferences/shared_preferences.dart';
+ 
++import 'package:moonfin/data/models/aggregated_item.dart';
+ import 'package:moonfin/data/services/cast/cast_service.dart';
+ import 'package:moonfin/data/services/cast/cast_target.dart';
+ import 'package:moonfin/data/services/cast/native_airplay_channel.dart';
+@@ -20,8 +22,20 @@ import 'package:moonfin/playback/playback_lifecycle_handler.dart';
+ import 'package:moonfin/preference/user_preferences.dart';
+ import 'package:moonfin/ui/screens/playback/video_player_screen.dart';
+ import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
++import 'package:moonfin/ui/widgets/playback/skip_segment_overlay.dart';
++import 'package:moonfin/util/platform_detection.dart';
++
++import '../util/media_segment_fakes.dart';
+ 
+ class _Client extends Fake implements MediaServerClient {
++  final items = FakeItemsApi();
++
++  @override
++  ItemsApi get itemsApi => items;
++
++  @override
++  TrickplayApi? get trickplayApi => null;
++
+   @override
+   ServerType get serverType => ServerType.jellyfin;
+ }
+@@ -53,6 +67,8 @@ class _Lifecycle extends Fake implements PlaybackLifecycleHandler {}
+ class _PlaybackManager extends PlaybackManager {
+   int nextCalls = 0;
+   int nextInQueueCalls = 0;
++  int stopCalls = 0;
++  final seeks = <Duration>[];
+ 
+   @override
+   Future<void> next() async {
+@@ -62,11 +78,24 @@ class _PlaybackManager extends PlaybackManager {
+   @override
+   Future<void> nextInQueue() async {
+     nextInQueueCalls++;
++    state.setPosition(Duration.zero);
++    queueService.next();
++  }
++
++  @override
++  Future<void> seekTo(Duration position) async {
++    seeks.add(position);
++  }
++
++  @override
++  Future<void> stop({bool userInitiated = true}) async {
++    stopCalls++;
+   }
+ }
+ 
+ void main() {
+   late _PlaybackManager manager;
++  late _Client client;
+   late PipService pip;
+ 
+   setUp(() async {
+@@ -76,7 +105,8 @@ void main() {
+     manager = _PlaybackManager();
+     GetIt.instance.registerSingleton<PlaybackManager>(manager);
+     GetIt.instance.registerSingleton<UserPreferences>(UserPreferences(store));
+-    GetIt.instance.registerSingleton<MediaServerClient>(_Client());
++    client = _Client();
++    GetIt.instance.registerSingleton<MediaServerClient>(client);
+     GetIt.instance.registerSingleton<MediaServerClientFactory>(_Factory());
+     GetIt.instance.registerSingleton<CastService>(_Cast());
+     GetIt.instance.registerSingleton<NativeCastChannel>(NativeCastChannel());
+@@ -92,6 +122,7 @@ void main() {
+   });
+ 
+   tearDown(() async {
++    PlatformDetection.setTvMode(false);
+     manager.dispose();
+     pip.dispose();
+     await GetIt.instance.reset();
+@@ -125,6 +156,124 @@ void main() {
+     });
+   }
+ 
++  Future<void> pumpPlayer(WidgetTester tester) async {
++    final router = GoRouter(
++      initialLocation: '/player',
++      routes: [
++        GoRoute(
++          path: '/',
++          builder: (_, _) => const SizedBox(),
++          routes: [
++            GoRoute(
++              path: 'player',
++              builder: (_, _) => const VideoPlayerScreen(),
++            ),
++          ],
++        ),
++      ],
++    );
++    addTearDown(router.dispose);
++    await tester.pumpWidget(
++      MaterialApp.router(
++        routerConfig: router,
++        localizationsDelegates: AppLocalizations.localizationsDelegates,
++        supportedLocales: const [Locale('en')],
++      ),
++    );
++    await tester.pumpAndSettle();
++  }
++
++  testWidgets('visible Cinema Skip handles Back, Right and Select on TV', (
++    tester,
++  ) async {
++    PlatformDetection.setTvMode(true);
++    await GetIt.instance<UserPreferences>().set(
++      UserPreferences.cinemaModeSkipEnabled, true,
++    );
++    manager.queueService.setQueue([
++      {'Id': 'first', '__moonfinIsPreroll': true, 'RunTimeTicks': 600000000},
++      {'Id': 'second', '__moonfinIsPreroll': true, 'RunTimeTicks': 300000000},
++    ]);
++    manager.state.setPosition(const Duration(seconds: 20));
++    await pumpPlayer(tester);
++    final skip = find.byType(SkipSegmentOverlay);
++    final first = tester.widget<SkipSegmentOverlay>(skip);
++    expect(first.focusNode!.hasFocus, isTrue);
++    expect(first.segment.itemId, 'first');
++    expect(find.byType(Slider), findsNothing);
++
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pumpAndSettle();
++    expect(skip, findsNothing);
++    expect(find.byType(VideoPlayerScreen), findsOneWidget);
++    expect(manager.stopCalls, 0);
++    expect(manager.queueService.currentIndex, 0);
++
++    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
++    await tester.pumpAndSettle();
++    expect(tester.widget<SkipSegmentOverlay>(skip).focusNode!.hasFocus, isTrue);
++
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
++    await tester.pumpAndSettle();
++    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.select);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
++    await tester.pumpAndSettle();
++    expect(manager.nextInQueueCalls, 1);
++    expect(manager.nextCalls, 0);
++    expect(manager.queueService.currentIndex, 1);
++    final second = tester.widget<SkipSegmentOverlay>(skip);
++    expect(second.key, isNot(first.key));
++    expect(second.segment.itemId, 'second');
++    expect(second.segment.end, const Duration(seconds: 30));
++    expect(second.initialPosition, Duration.zero);
++    expect(second.focusNode!.hasFocus, isTrue);
++    expect(find.byType(Slider), findsNothing);
++    expect(manager.stopCalls, 0);
++    await tester.pumpWidget(const SizedBox());
++  });
++
++  for (final (preroll, enabled) in [(true, true), (true, false), (false, true)]) {
++    for (final type in ['Intro', 'Outro']) {
++      testWidgets('$type auto-skip: preroll=$preroll, Cinema Skip=$enabled', (
++        tester,
++      ) async {
++        PlatformDetection.setTvMode(true);
++        final prefs = GetIt.instance<UserPreferences>();
++        await prefs.set(UserPreferences.cinemaModeSkipEnabled, enabled);
++        await prefs.set(UserPreferences.mediaSegmentActions, 'intro:skip,outro:skip');
++        client.items.segments = [
++          segmentJson(id: 'segment', type: type, startMs: 1000, endMs: 4000),
++        ];
++        manager.queueService.setQueue([
++          AggregatedItem(
++            id: 'ep1',
++            serverId: 'server',
++            rawData: {
++              'Id': 'ep1',
++              '__moonfinIsPreroll': preroll,
++              // Short clips must also suppress ordinary segment actions.
++              'RunTimeTicks': 50000000,
++            },
++          ),
++        ]);
++        await pumpPlayer(tester);
++        manager.state.setPosition(const Duration(seconds: 2));
++        await tester.pumpAndSettle();
++
++        final suppressed = preroll && enabled;
++        expect(manager.seeks, !suppressed && type == 'Intro'
++            ? [const Duration(seconds: 4)] : isEmpty);
++        expect(manager.stopCalls, !suppressed && type == 'Outro' ? 1 : 0);
++        expect(manager.nextInQueueCalls, 0);
++        if (suppressed) {
++          expect(find.byType(VideoPlayerScreen), findsOneWidget);
++          expect(find.byType(SkipSegmentOverlay), findsNothing);
++        }
++        await tester.pumpWidget(const SizedBox());
++      });
++    }
++  }
++
+   // Issue #1688: a resume that takes longer than the hide delay to start
+   // playing left the controls up until a key was pressed.
+   testWidgets('controls hide after a start slower than the hide delay', (

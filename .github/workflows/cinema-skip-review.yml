@@ -3,33 +3,61 @@ on:
   push:
     branches: [review/cinema-skip-regression-20261014]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  inspect:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect regression harness and segment handler
+      - name: Apply focused patch to the expected feature head
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          for p in Path('test').rglob('*.dart'):
-              text = p.read_text()
-              if 'CinemaSkip' in text or ('VideoPlayerScreen' in text and 'Preroll' in text):
-                  print('TEST FILE:', p)
-          p = Path('lib/ui/screens/playback/video_player_screen.dart')
-          lines = p.read_text().splitlines()
-          for index, line in enumerate(lines):
-              if 'void _checkSegments(' in line:
-                  print('\nSEGMENT HANDLER AT', index + 1)
-                  for offset, content in enumerate(lines[index:index+130], index+1):
-                      print(f'{offset}: {content}')
-          PY
-      - name: Export source for local patch preparation
-        run: git archive --format=zip -o cinema-skip-source.zip HEAD
-      - uses: actions/upload-artifact@v4
+          cp .github/cinema-skip-review.patch "$RUNNER_TEMP/cinema-skip-review.patch"
+          git fetch origin feat/cinema-mode-skip-only
+          test "$(git rev-parse FETCH_HEAD)" = 61d01902d2f1478c9b4c1ba54a8a7d3e33e342fc
+          git checkout --detach 61d01902d2f1478c9b4c1ba54a8a7d3e33e342fc
+          git apply --check "$RUNNER_TEMP/cinema-skip-review.patch"
+          git apply "$RUNNER_TEMP/cinema-skip-review.patch"
+          git diff --check
+      - uses: subosito/flutter-action@v2
         with:
-          name: cinema-skip-source
-          path: cinema-skip-source.zip
-          retention-days: 1
+          flutter-version: '3.47.2'
+          cache: true
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Run focused regression tests
+        run: |
+          flutter test --no-pub --reporter expanded \
+            test/playback/video_player_osd_hide_test.dart \
+            test/playback/cinema_skip_controller_test.dart \
+            test/ui/screens/playback/appletv_player_host_screen_test.dart \
+            test/playback/skip_segment_dismiss_test.dart \
+            test/data/services/media_segment_service_test.dart
+      - name: Analyze changed Dart files
+        run: |
+          flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings \
+            lib/ui/screens/playback/video_player_screen.dart \
+            test/playback/video_player_osd_hide_test.dart
+      - name: Prove segment regressions fail without the guard
+        run: |
+          cp lib/ui/screens/playback/video_player_screen.dart "$RUNNER_TEMP/video_player_screen.fixed.dart"
+          git checkout -- lib/ui/screens/playback/video_player_screen.dart
+          set +e
+          flutter test --no-pub --reporter expanded test/playback/video_player_osd_hide_test.dart --plain-name 'auto-skip: preroll=true, Cinema Skip=true'
+          result=$?
+          set -e
+          cp "$RUNNER_TEMP/video_player_screen.fixed.dart" lib/ui/screens/playback/video_player_screen.dart
+          test "$result" -ne 0
+      - name: Publish validated additional commit to a temporary result branch
+        run: |
+          git diff --check
+          git add lib/ui/screens/playback/video_player_screen.dart test/playback/video_player_osd_hide_test.dart
+          python3 - <<'PY'
+          import subprocess
+          paths = subprocess.check_output(['git','diff','--cached','--name-only'],text=True).splitlines()
+          assert set(paths) == {'lib/ui/screens/playback/video_player_screen.dart', 'test/playback/video_player_osd_hide_test.dart'}, paths
+          PY
+          git -c user.name="$(git show -s --format=%an HEAD)" -c user.email="$(git show -s --format=%ae HEAD)" commit -m "fix: Isolate Cinema Skip from segment actions and cover TV controls"
+          test "$(git rev-parse HEAD^)" = 61d01902d2f1478c9b4c1ba54a8a7d3e33e342fc
+          git push origin HEAD:refs/heads/review/cinema-skip-validated-20261014
+          git show --stat --oneline HEAD
