@@ -40,6 +40,8 @@ import '../../widgets/aether_video_view.dart';
 import '../../../playback/playback_lifecycle_handler.dart';
 import '../../../playback/playback_profile_diagnostics.dart';
 import '../../../playback/hdr_stream_capability.dart';
+import '../../../playback/cinema_skip_controller.dart';
+import '../../../playback/cinema_playback_source_guard.dart';
 import '../../../data/models/aggregated_item.dart';
 import '../../../data/repositories/item_mutation_repository.dart';
 import '../../../data/models/media_segment.dart';
@@ -348,6 +350,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   MediaSegment? _skipSegment;
   Duration? _skipTo;
+  late final CinemaSkipController _cinemaSkip;
+  final _cinemaSkipSource = CinemaPlaybackSourceGuard();
+  StreamSubscription<Duration>? _cinemaSkipDurationSub;
+  bool _cinemaSkipWasVisible = false;
 
   /// True when the auto-hide setting is on for the current segment.
   bool _skipSegmentAutoHideEnabled = false;
@@ -502,6 +508,52 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   bool get _isCurrentPreroll => _isPrerollQueueItem(_queue.currentItem);
+
+  bool get _isCinemaSkipVisible =>
+      _isCurrentPreroll && _cinemaSkip.visible;
+
+  void _configureCinemaSkip() => _cinemaSkip.configure(
+    enabled: _prefs.get(UserPreferences.cinemaModeSkipEnabled),
+    minimumSeconds: _prefs.get(UserPreferences.cinemaModeSkipMinDurationSeconds),
+    autoHideSeconds: _prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds,
+  );
+
+  void _startCinemaSkip({bool initial = false}) {
+    final item = _queue.currentItem;
+    if (!_cinemaSkipSource.enter(item, _queue.currentIndex, initial: initial)) {
+      return;
+    }
+    _cinemaSkip.enter(
+      _isCurrentPreroll ? _rawDataForQueueItem(item) : null,
+    );
+    _updateCinemaSkipPlayback();
+  }
+
+  void _updateCinemaSkipPlayback() {
+    if (!_isCurrentPreroll) return;
+    final item = _queue.currentItem;
+    if (!_cinemaSkipSource.observeReady(
+      item: item,
+      index: _queue.currentIndex,
+      itemId: _itemIdForQueueItem(item),
+      source: _manager.bringupState,
+    )) {
+      return;
+    }
+    _cinemaSkip.updatePlayback(
+      duration: _manager.backend?.duration ?? Duration.zero,
+      playing: _state.isPlaying,
+    );
+  }
+
+  void _onCinemaSkipChanged() {
+    if (!mounted) return;
+    final nowVisible = _isCinemaSkipVisible;
+    final shown = nowVisible && !_cinemaSkipWasVisible;
+    _cinemaSkipWasVisible = nowVisible;
+    setState(() {});
+    if (shown) _focusTvSkipSegment();
+  }
 
   bool _queueItemIsFavorite(dynamic item) {
     if (item is AggregatedItem) {
@@ -684,6 +736,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   @override
   void initState() {
     super.initState();
+    _cinemaSkip = CinemaSkipController(onSkip: _manager.nextInQueue);
+    _configureCinemaSkip();
+    _startCinemaSkip(initial: true);
+    _cinemaSkip.addListener(_onCinemaSkipChanged);
+    _cinemaSkipDurationSub = _state.durationStream.listen(
+      (_) => _updateCinemaSkipPlayback(),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _isCinemaSkipVisible) _focusTvSkipSegment();
+    });
     FocusManager.instance.addListener(_restoreOverlayFocus);
     if (PlatformDetection.isTV || PlatformDetection.isMobile) {
       // The decoder wants every megabyte a constrained box has, and a stale
@@ -738,6 +800,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (state.phase == PlaybackBringupPhase.ready) {
         _applySubtitleStyle(force: true);
       }
+      _updateCinemaSkipPlayback();
     });
     _syncPlayManager?.addListener(_onSyncPlayChanged);
     _prefs.addListener(_onPlaybackPrefsChanged);
@@ -833,6 +896,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _syncMedia3VolumeBoostLevel();
       unawaited(_syncAutoHdrSwitching());
       final isPreroll = _isCurrentPreroll;
+      _startCinemaSkip();
       _resetSkipSegmentAutoHide();
       setState(() {
         _nextUpDismissed = false;
@@ -848,6 +912,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       });
       if (isPreroll) {
         _hideTimer?.cancel();
+        if (_isCinemaSkipVisible) _focusTvSkipSegment();
       }
     });
 
@@ -867,6 +932,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _onSubtitleLoadingChanged(_state.isSubtitleLoading);
     _playingSub = _state.playingStream.listen((playing) {
       _updateDisplayPlaying(playing);
+      _updateCinemaSkipPlayback();
       // The hide timer passes over a player that hasn't started yet, so a
       // start or resume slower than its delay needs it armed again here.
       if (playing && _controlsVisible && !_isSeeking) {
@@ -947,6 +1013,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _cancelTvTemporarySpeedHold();
     _hideTimer?.cancel();
     _skipSegmentAutoHideTimer?.cancel();
+    _cinemaSkipDurationSub?.cancel();
+    _cinemaSkip.removeListener(_onCinemaSkipChanged);
+    _cinemaSkip.dispose();
     _displayPlayingDebounce?.cancel();
     _endsAtTicker?.cancel();
     _volumeOverlayTimer?.cancel();
@@ -2396,6 +2465,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onPlaybackPrefsChanged() {
+    _configureCinemaSkip();
     _syncMediaQueuingPreference();
     if (!mounted) return;
     _applySubtitleStyle();
@@ -2771,6 +2841,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// runs it stays up on its own; afterwards it rides along with the OSD.
   /// With auto-hide off it stays up until the segment ends.
   bool get _isSkipSegmentButtonVisible =>
+      !_isCinemaSkipVisible &&
       _skipSegment != null &&
       (!_skipSegmentAutoHideEnabled ||
           _skipSegmentAutoHidePending ||
@@ -2978,9 +3049,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _focusTvSkipSegment({int attempt = 0}) {
-    if (!PlatformDetection.isTV || _skipSegment == null) return;
+    if (!PlatformDetection.isTV ||
+        (_skipSegment == null && !_isCinemaSkipVisible)) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _skipSegment == null) return;
+      if (!mounted || (_skipSegment == null && !_isCinemaSkipVisible)) return;
       _tvSkipSegmentFocus.requestFocus();
 
       if (!_tvSkipSegmentFocus.hasFocus && attempt < 8) {
@@ -2998,7 +3070,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _focusNextUpPlay();
       return;
     }
-    if (_isSkipSegmentButtonVisible) {
+    if (_isSkipSegmentButtonVisible || _isCinemaSkipVisible) {
       _focusTvSkipSegment();
       return;
     }
@@ -3024,6 +3096,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   void _toggleControls() {
     if (_isCurrentPreroll) {
       _syncPrerollOsdState();
+      _cinemaSkip.reveal();
       return;
     }
     if (_isOsdLocked) {
@@ -3474,7 +3547,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         final isBackKey = event.logicalKey.isBackKey;
 
         if (isBackKey) {
-          if (!_isBackNavigationSuppressed()) {
+          if (_isCinemaSkipVisible) {
+            _suppressBackNavigation(duration: const Duration(milliseconds: 500));
+            _cinemaSkip.hide();
+          } else if (!_isBackNavigationSuppressed()) {
             _exitPlayback();
           }
           return KeyEventResult.handled;
@@ -3489,9 +3565,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             return KeyEventResult.handled;
           case LogicalKeyboardKey.mediaPlayPause:
           case LogicalKeyboardKey.space:
+            _togglePlayPause();
+            return KeyEventResult.handled;
           case LogicalKeyboardKey.enter:
           case LogicalKeyboardKey.select:
-            _togglePlayPause();
+            if (_cinemaSkip.eligible) {
+              _cinemaSkip.activate();
+            } else {
+              _togglePlayPause();
+            }
+            return KeyEventResult.handled;
+
+          case LogicalKeyboardKey.arrowRight:
+            _cinemaSkip.reveal();
             return KeyEventResult.handled;
 
           case LogicalKeyboardKey.mediaFastForward:
@@ -3923,6 +4009,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         if (_isBackNavigationSuppressed()) {
           return;
         }
+        if (_isCinemaSkipVisible) {
+          _suppressBackNavigation(duration: const Duration(milliseconds: 500));
+          _cinemaSkip.hide();
+          return;
+        }
         if (_showNextUp) {
           _handleNextUpDismiss();
           return;
@@ -3974,12 +4065,15 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                   ? _handleScrollSignal
                   : null,
               child: MouseRegion(
-                cursor: PlatformDetection.useDesktopUi && !_controlsVisible
+                cursor: PlatformDetection.useDesktopUi &&
+                        !_controlsVisible && !_isCinemaSkipVisible
                     ? SystemMouseCursors.none
                     : SystemMouseCursors.basic,
                 onHover: (_) {
                   if (PlatformDetection.useDesktopUi) {
-                    if (_controlsVisible) {
+                    if (_isCurrentPreroll) {
+                      _cinemaSkip.reveal();
+                    } else if (_controlsVisible) {
                       _scheduleHide();
                     } else {
                       _showControls();
@@ -4084,6 +4178,32 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                   TrickplayPreviewLayout
                                       .verticalTravelBottomMargin) +
                               AppSpacing.spaceXs,
+                        ),
+                      if (_isCinemaSkipVisible)
+                        SkipSegmentOverlay(
+                          key: ValueKey('cinema-preroll-${_cinemaSkip.generation}'),
+                          segment: MediaSegment(
+                            id: '__cinema_preroll__${_cinemaSkip.generation}',
+                            itemId: _itemIdForQueueItem(_queue.currentItem) ?? '',
+                            type: MediaSegmentType.preview,
+                            start: Duration.zero,
+                            end: _cinemaSkip.duration,
+                          ),
+                          actionLabel: AppLocalizations.of(context).settingsSkip,
+                          countdownStyle: _prefs.get(UserPreferences.cinemaModeSkipCountdown),
+                          focusNode: _tvSkipSegmentFocus,
+                          onSkip: _cinemaSkip.skip,
+                          onDismiss: _cinemaSkip.hide,
+                          positionStream: _state.positionStream,
+                          initialPosition: _state.position,
+                          rightInset: 24.0 +
+                              (PlatformDetection.isMobile && !PlatformDetection.isTV
+                                  ? MediaQuery.viewPaddingOf(context).right
+                                  : 0),
+                          bottomInset: MediaQuery.viewPaddingOf(context).bottom +
+                              (PlatformDetection.isMobile && !PlatformDetection.isTV
+                                  ? 16
+                                  : 24),
                         ),
                       if (_showNextUp && _nextUpItem != null)
                         NextUpOverlay(

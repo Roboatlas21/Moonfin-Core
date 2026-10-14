@@ -54,6 +54,8 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final cinemaEnabled = _prefs.get(UserPreferences.cinemaModeEnabled) ||
+        _prefs.get(UserPreferences.cinemaModeEpisodesEnabled);
     final nextUpBehavior = _prefs.get(UserPreferences.nextUpBehavior);
     final mediaSegmentActions = _prefs.get(UserPreferences.mediaSegmentActions);
     final segmentActions = parseMediaSegmentActions(mediaSegmentActions);
@@ -85,6 +87,48 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                 subtitle: l10n.settingsCinemaModeEpisodesSubtitle,
                 icon: Icons.live_tv,
               ),
+              if (cinemaEnabled)
+                SwitchPreferenceTile(
+                  preference: UserPreferences.cinemaModeSkipEnabled,
+                  title: l10n.cinemaSkipPrerolls,
+                  subtitle: l10n.cinemaSkipPrerollsDescription,
+                  icon: Icons.skip_next,
+                ),
+              if (cinemaEnabled &&
+                  _prefs.get(UserPreferences.cinemaModeSkipEnabled)) ...[
+                IntPickerPreferenceTile(
+                  preference: UserPreferences.cinemaModeSkipMinDurationSeconds,
+                  title: l10n.cinemaMinimumIntroLength,
+                  description: l10n.cinemaMinimumIntroLengthDescription,
+                  icon: Icons.timelapse,
+                  options: {
+                    0: l10n.noLimit,
+                    for (var seconds = 5; seconds <= 60; seconds += 5)
+                      seconds: l10n.secondsValue(seconds),
+                  },
+                ),
+                EnumPreferenceTile<MediaSegmentAutoHide>(
+                  preference: UserPreferences.cinemaModeSkipAutoHide,
+                  title: l10n.cinemaAutoHideButtons,
+                  description: l10n.cinemaAutoHideButtonsDescription,
+                  icon: Icons.visibility_off_outlined,
+                  labelOf: (v) => switch (v) {
+                    MediaSegmentAutoHide.off => l10n.off,
+                    _ => l10n.secondsValue(v.seconds),
+                  },
+                ),
+                EnumPreferenceTile<MediaSegmentCountdown>(
+                  preference: UserPreferences.cinemaModeSkipCountdown,
+                  title: l10n.settingsMediaSegmentCountdown,
+                  icon: Icons.timer_outlined,
+                  labelOf: (v) => switch (v) {
+                    MediaSegmentCountdown.progressBar => l10n.settingsProgressBar,
+                    MediaSegmentCountdown.timer => l10n.settingsTimer,
+                    MediaSegmentCountdown.both => l10n.settingsBoth,
+                    MediaSegmentCountdown.none => l10n.settingsNone,
+                  },
+                ),
+              ],
               // Every type writes to the one preference, so each tile is
               // keyed on the current value. The tiles seed their notifier in
               // initState, so without the key a tile left over from the

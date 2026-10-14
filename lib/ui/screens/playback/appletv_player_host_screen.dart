@@ -18,6 +18,8 @@ import '../../../data/services/media_segment_service.dart';
 import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/repositories/item_mutation_repository.dart';
 import '../../../auth/repositories/user_repository.dart';
+import '../../../playback/cinema_skip_controller.dart';
+import '../../../playback/cinema_playback_source_guard.dart';
 import '../../../playback/appletv_backend.dart';
 import '../../../playback/playback_profile_diagnostics.dart';
 import '../../../syncplay/syncplay_manager.dart';
@@ -74,6 +76,80 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   PlaybackBringupState _bringupState = const PlaybackBringupState.idle();
   EpisodeBrowserController? _episodeBrowser;
   bool _episodeBrowserShown = false;
+  late final CinemaSkipController _cinemaSkip;
+  final _cinemaSkipSource = CinemaPlaybackSourceGuard();
+  String? _cinemaSkipStateKey;
+
+  bool get _isCinemaPreroll =>
+      _rawDataForQueueItem(_manager?.queueService.currentItem)?['__moonfinIsPreroll'] ==
+      true;
+
+  void _configureCinemaSkip() {
+    final prefs = _prefsListened;
+    if (prefs == null) return;
+    _cinemaSkip.configure(
+      enabled: prefs.get(UserPreferences.cinemaModeSkipEnabled),
+      minimumSeconds: prefs.get(UserPreferences.cinemaModeSkipMinDurationSeconds),
+      autoHideSeconds: prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds,
+    );
+  }
+
+  void _startCinemaSkip({bool initial = false}) {
+    final manager = _manager;
+    final item = manager?.queueService.currentItem;
+    if (manager == null ||
+        !_cinemaSkipSource.enter(item, manager.queueService.currentIndex, initial: initial)) {
+      return;
+    }
+    _cinemaSkip.enter(_isCinemaPreroll ? _rawDataForQueueItem(item) : null);
+    _updateCinemaSkipPlayback();
+  }
+
+  void _updateCinemaSkipPlayback() {
+    final manager = _manager;
+    if (manager == null || !_isCinemaPreroll) return;
+    final item = manager.queueService.currentItem;
+    if (!_cinemaSkipSource.observeReady(
+      item: item,
+      index: manager.queueService.currentIndex,
+      itemId: _itemIdForQueueItem(item),
+      source: manager.bringupState,
+    )) {
+      return;
+    }
+    _cinemaSkip.updatePlayback(
+      duration: manager.backend?.duration ?? Duration.zero,
+      playing: manager.state.isPlaying,
+    );
+  }
+
+  void _syncCinemaSkipButton() {
+    final backend = _backend;
+    if (!mounted || backend == null) return;
+    // Keep eligibility even when auto-hide or Back hides the button so the
+    // Apple TV remote can reveal it without showing the regular player OSD.
+    final active = _isCinemaPreroll && _cinemaSkip.eligible;
+    final visible = active && _cinemaSkip.visible;
+    final prefs = _prefsListened;
+    final countdown = prefs == null
+        ? MediaSegmentCountdown.progressBar.name
+        : prefs.get(UserPreferences.cinemaModeSkipCountdown).name;
+    final generation = _cinemaSkip.generation;
+    final durationMs = _cinemaSkip.duration.inMilliseconds;
+    final label = AppLocalizations.of(context).settingsSkip;
+    final stateKey =
+        '$active:$visible:$generation:$durationMs:$countdown:$label';
+    if (_cinemaSkipStateKey == stateKey) return;
+    _cinemaSkipStateKey = stateKey;
+    unawaited(backend.setCinemaSkipState({
+      'active': active,
+      'visible': visible,
+      'generation': generation,
+      'skipLabel': label,
+      'durationMs': durationMs,
+      'countdownStyle': countdown,
+    }));
+  }
 
   AppleTvBackend? get _backend {
     try {
@@ -94,6 +170,9 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   @override
   void initState() {
     super.initState();
+    _cinemaSkip = CinemaSkipController(
+      onSkip: () => _manager?.nextInQueue() ?? Future<void>.value(),
+    );
     try {
       _screensaverController = GetIt.instance<ScreensaverController>();
     } catch (_) {}
@@ -115,6 +194,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
           setState(() => _bringupState = state);
         }
         _pushMetadata();
+        _updateCinemaSkipPlayback();
         if (state.phase == PlaybackBringupPhase.ready) {
           _pushSubtitleStyle(force: true);
         }
@@ -122,12 +202,16 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         // here. The per-item guard makes repeat events a no-op.
         _loadSegmentsForCurrentItem();
       });
-      _screensaverPlayingSub = manager.state.playingStream.listen(
-        (playing) => _screensaverController?.setPlaybackActive(playing),
-      );
-      _positionSub = manager.state.positionStream.listen(
-        (position) => _prompts?.onPositionTick(position, manager.state.duration),
-      );
+      _screensaverPlayingSub = manager.state.playingStream.listen((playing) {
+        _screensaverController?.setPlaybackActive(playing);
+        _updateCinemaSkipPlayback();
+      });
+      _positionSub = manager.state.positionStream.listen((position) {
+        if (!_isCinemaPreroll || !_cinemaSkip.enabled) {
+          _prompts?.onPositionTick(position, manager.state.duration);
+        }
+        _updateCinemaSkipPlayback();
+      });
     }
     try {
       final prefs = GetIt.instance<UserPreferences>();
@@ -145,6 +229,9 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       _lastTimeSlots = _timeSlotsSnapshot(prefs);
       prefs.addListener(_onPrefsChanged);
     } catch (_) {}
+    _configureCinemaSkip();
+    _startCinemaSkip(initial: true);
+    _cinemaSkip.addListener(_syncCinemaSkipButton);
     _loadSegmentsForCurrentItem();
     if (GetIt.instance.isRegistered<SyncPlayManager>()) {
       _syncPlay = GetIt.instance<SyncPlayManager>();
@@ -156,6 +243,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       _pushThemeConfig();
       _pushPromptStrings();
       _pushTimeSlots();
+      _syncCinemaSkipButton();
     });
   }
 
@@ -743,6 +831,8 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   void _onPrefsChanged() {
     final prefs = _prefsListened;
     if (prefs == null) return;
+    _configureCinemaSkip();
+    _syncCinemaSkipButton();
     _pushSubtitleStyle();
     final slots = _timeSlotsSnapshot(prefs);
     if (slots != _lastTimeSlots) {
@@ -1602,6 +1692,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   void _onQueueChanged() {
     _closeEpisodeBrowser(hideNative: true);
     _prompts?.onQueueChanged();
+    _startCinemaSkip();
     _loadSegmentsForCurrentItem();
     _pushMetadata();
   }
@@ -1637,8 +1728,26 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         _prompts?.handleNextUpCancel();
       case 'nextUpDismiss':
         _prompts?.handleNextUpDismiss();
+      case 'cinemaSkipAction':
+        if (!_isCinemaPreroll ||
+            !_cinemaSkip.eligible ||
+            action['generation'] != _cinemaSkip.generation) {
+          return;
+        }
+        switch (action['action']) {
+          case 'hide':
+            _cinemaSkip.hide();
+          case 'reveal':
+            _cinemaSkip.reveal();
+          case 'activate':
+            _cinemaSkip.activate();
+        }
+        return;
       case 'skipSegment':
-        _prompts?.handleSkipSegment();
+        // A regular segment event must not advance an active Cinema pre-roll.
+        if (!_isCinemaPreroll || !_cinemaSkip.enabled) {
+          _prompts?.handleSkipSegment();
+        }
       case 'next':
         unawaited(manager.next());
       case 'previous':
@@ -1726,6 +1835,8 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
 
   @override
   void dispose() {
+    _cinemaSkip.removeListener(_syncCinemaSkipButton);
+    _cinemaSkip.dispose();
     _trickplayLoadGeneration++;
     _exitSub?.cancel();
     _queueSub?.cancel();
