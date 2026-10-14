@@ -10,6 +10,7 @@ import 'package:playback_core/playback_core.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:moonfin/auth/repositories/user_repository.dart';
 import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/models/media_segment.dart';
 import 'package:moonfin/data/services/cast/cast_service.dart';
@@ -348,6 +349,9 @@ void main() {
   testWidgets('Cinema Skip blocks stale segment press and restores it for main feature', (
     tester,
   ) async {
+    final users = UserRepository();
+    GetIt.instance.registerSingleton<UserRepository>(users);
+    addTearDown(users.dispose);
     final prefs = GetIt.instance<UserPreferences>();
     await prefs.set(UserPreferences.cinemaModeSkipEnabled, false);
     await prefs.set(UserPreferences.mediaSegmentActions, 'intro:askToSkip');
