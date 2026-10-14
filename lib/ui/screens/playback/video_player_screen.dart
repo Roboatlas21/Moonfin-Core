@@ -2401,6 +2401,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _onPositionUpdate(Duration position) {
+    if (position.inSeconds == 6) {
+      debugPrint('SEG_DIAG position input mounted=$mounted seeking=$_isSeeking restoring=$_isRestoringPosition');
+    }
     if (!mounted || _isSeeking || _isRestoringPosition) return;
     if (PlatformDetection.useNativeVideoSurface) {
       _syncSubtitleActive();
@@ -2505,8 +2508,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   void _checkSegments(Duration position) {
     // Cinema Skip owns pre-roll controls, including automatic segment actions.
+    if (position.inSeconds == 6) {
+      debugPrint('SEG_DIAG preroll=$_isCurrentPreroll cinema=${_cinemaSkip.enabled} loaded=${_segmentService.segments.length} pref=${_prefs.get(UserPreferences.mediaSegmentActions)} suppressed=${_areSeekPromptsSuppressed()}');
+    }
     if (_isCurrentPreroll && _cinemaSkip.enabled) return;
     final result = _segmentService.checkPosition(position);
+    if (position.inSeconds == 6) {
+      debugPrint('SEG_DIAG result action=${result.action} shouldAsk=${result.shouldAsk} isNew=${result.isNew} segment=${result.segment?.type}');
+    }
     final replaceSkipOutroWithNextUp = _prefs.get(
       UserPreferences.replaceSkipOutroWithNextUp,
     );
