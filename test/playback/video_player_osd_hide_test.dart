@@ -50,15 +50,30 @@ class _Screensaver extends Fake implements ScreensaverController {
 
 class _Lifecycle extends Fake implements PlaybackLifecycleHandler {}
 
+class _PlaybackManager extends PlaybackManager {
+  int nextCalls = 0;
+  int nextInQueueCalls = 0;
+
+  @override
+  Future<void> next() async {
+    nextCalls++;
+  }
+
+  @override
+  Future<void> nextInQueue() async {
+    nextInQueueCalls++;
+  }
+}
+
 void main() {
-  late PlaybackManager manager;
+  late _PlaybackManager manager;
   late PipService pip;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     final store = PreferenceStore();
     await store.init();
-    manager = PlaybackManager();
+    manager = _PlaybackManager();
     GetIt.instance.registerSingleton<PlaybackManager>(manager);
     GetIt.instance.registerSingleton<UserPreferences>(UserPreferences(store));
     GetIt.instance.registerSingleton<MediaServerClient>(_Client());
@@ -81,6 +96,34 @@ void main() {
     pip.dispose();
     await GetIt.instance.reset();
   });
+
+  for (final enabled in [false, true]) {
+    testWidgets('pre-roll Fast Forward with Cinema Skip enabled=$enabled', (
+      tester,
+    ) async {
+      await GetIt.instance<UserPreferences>().set(
+        UserPreferences.cinemaModeSkipEnabled, enabled,
+      );
+      // Below the minimum length, so no visible button can handle the key.
+      manager.queueService.setQueue([
+        {'Id': 'intro', '__moonfinIsPreroll': true, 'RunTimeTicks': 50000000},
+      ]);
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: const [Locale('en')],
+          home: const VideoPlayerScreen(),
+        ),
+      );
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
+      await tester.pump();
+
+      expect(manager.nextInQueueCalls, enabled ? 1 : 0);
+      expect(manager.nextCalls, enabled ? 0 : 1);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
   // Issue #1688: a resume that takes longer than the hide delay to start
   // playing left the controls up until a key was pressed.

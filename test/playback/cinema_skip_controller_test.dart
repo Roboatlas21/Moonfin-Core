@@ -143,4 +143,77 @@ void main() {
       controller.dispose();
     });
   });
+
+  test('Fast Forward skips short and hidden clips only when enabled', () {
+    fakeAsync((clock) {
+      var skips = 0;
+      final controller = CinemaSkipController(onSkip: () async {
+        skips++;
+      });
+      controller.enter({'RunTimeTicks': 50000000});
+      controller.skip(requireVisible: false);
+      expect(skips, 0);
+
+      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
+      expect(controller.eligible, isFalse);
+      controller.skip();
+      expect(skips, 0);
+      controller.skip(requireVisible: false);
+      clock.flushMicrotasks();
+      expect(skips, 1);
+
+      clock.elapse(const Duration(milliseconds: 400));
+      controller.enter({'RunTimeTicks': 900000000});
+      controller.hide();
+      controller.skip();
+      expect(skips, 1);
+      controller.skip(requireVisible: false);
+      clock.flushMicrotasks();
+      expect(skips, 2);
+      controller.dispose();
+    });
+  });
+
+  test('rapid Skip presses cannot advance two successive pre-rolls', () {
+    fakeAsync((clock) {
+      var skips = 0;
+      final controller = CinemaSkipController(onSkip: () async {
+        skips++;
+      });
+      controller.configure(enabled: true, minimumSeconds: 0, autoHideSeconds: 0);
+      controller.enter({'Id': 'first'});
+      controller.skip();
+      clock.flushMicrotasks();
+      controller.enter({'Id': 'second'});
+      clock.elapse(const Duration(milliseconds: 399));
+      controller.skip();
+      expect(skips, 1);
+      clock.elapse(const Duration(milliseconds: 1));
+      controller.skip();
+      clock.flushMicrotasks();
+      expect(skips, 2);
+      controller.dispose();
+    });
+  });
+
+  test('a failed Skip restores the current control and permits a retry', () {
+    fakeAsync((clock) {
+      var attempts = 0;
+      final controller = CinemaSkipController(onSkip: () {
+        attempts++;
+        if (attempts == 1) throw StateError('transition failed');
+        return Future<void>.value();
+      });
+      controller.configure(enabled: true, minimumSeconds: 0, autoHideSeconds: 0);
+      controller.enter({'Id': 'trailer'});
+      controller.skip();
+      clock.flushMicrotasks();
+      expect(controller.visible, isTrue);
+      clock.elapse(const Duration(milliseconds: 400));
+      controller.skip();
+      clock.flushMicrotasks();
+      expect(attempts, 2);
+      controller.dispose();
+    });
+  });
 }
