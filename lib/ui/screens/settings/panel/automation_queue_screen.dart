@@ -162,6 +162,11 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
               if (promptsForAnySegment)
                 EnumPreferenceTile<MediaSegmentAutoHide>(
                   preference: UserPreferences.mediaSegmentAutoHide,
+                  values: const [
+                    MediaSegmentAutoHide.s5,
+                    MediaSegmentAutoHide.s10,
+                    MediaSegmentAutoHide.off,
+                  ],
                   title: l10n.settingsSkipButtonAutoHide,
                   description: l10n.settingsSkipButtonAutoHideDescription,
                   icon: Icons.visibility_off_outlined,

@@ -351,7 +351,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   Duration? _skipTo;
   late final CinemaSkipController _cinemaSkip;
   StreamSubscription<Duration>? _cinemaSkipDurationSub;
-  bool _cinemaSkipWasVisible = false;
 
   /// True when the auto-hide setting is on for the current segment.
   bool _skipSegmentAutoHideEnabled = false;
@@ -532,11 +531,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   void _onCinemaSkipChanged() {
     if (!mounted) return;
-    final nowVisible = _isCinemaSkipVisible;
-    final shown = nowVisible && !_cinemaSkipWasVisible;
-    _cinemaSkipWasVisible = nowVisible;
     setState(() {});
-    if (shown) _focusTvSkipSegment();
+    if (_isCinemaSkipVisible) _focusTvSkipSegment();
   }
 
   bool _queueItemIsFavorite(dynamic item) {
@@ -896,7 +892,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       });
       if (isPreroll) {
         _hideTimer?.cancel();
-        if (_isCinemaSkipVisible) _focusTvSkipSegment();
       }
     });
 

@@ -76,7 +76,6 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   EpisodeBrowserController? _episodeBrowser;
   bool _episodeBrowserShown = false;
   late final CinemaSkipController _cinemaSkip;
-  String? _cinemaSkipStateKey;
 
   bool get _isCinemaPreroll =>
       _rawDataForQueueItem(_manager?.queueService.currentItem)?['__moonfinIsPreroll'] ==
@@ -114,24 +113,16 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     // Keep Cinema controls active for the whole pre-roll when opted in,
     // including short clips and when auto-hide or Back hides the Skip button.
     final active = _isCinemaPreroll && _cinemaSkip.enabled;
-    final visible = active && _cinemaSkip.visible;
     final prefs = _prefsListened;
     final countdown = prefs == null
         ? MediaSegmentCountdown.progressBar.name
         : prefs.get(UserPreferences.cinemaModeSkipCountdown).name;
-    final generation = _cinemaSkip.generation;
-    final durationMs = _cinemaSkip.duration.inMilliseconds;
-    final label = AppLocalizations.of(context).settingsSkip;
-    final stateKey =
-        '$active:$visible:$generation:$durationMs:$countdown:$label';
-    if (_cinemaSkipStateKey == stateKey) return;
-    _cinemaSkipStateKey = stateKey;
     unawaited(backend.setCinemaSkipState({
       'active': active,
-      'visible': visible,
-      'generation': generation,
-      'skipLabel': label,
-      'durationMs': durationMs,
+      'visible': active && _cinemaSkip.visible,
+      'generation': _cinemaSkip.generation,
+      'skipLabel': AppLocalizations.of(context).settingsSkip,
+      'durationMs': _cinemaSkip.duration.inMilliseconds,
       'countdownStyle': countdown,
     }));
   }
@@ -1715,7 +1706,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         _prompts?.handleNextUpDismiss();
       case 'cinemaSkipAction':
         if (!_isCinemaPreroll ||
-            !_cinemaSkip.eligible ||
+            !_cinemaSkip.enabled ||
             action['generation'] != _cinemaSkip.generation) {
           return;
         }
@@ -1725,7 +1716,13 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
           case 'reveal':
             _cinemaSkip.reveal();
           case 'activate':
-            _cinemaSkip.activate();
+            if (_cinemaSkip.eligible) {
+              _cinemaSkip.activate();
+            } else {
+              unawaited(
+                manager.state.isPlaying ? manager.pause() : manager.resume(),
+              );
+            }
         }
         return;
       case 'skipSegment':
