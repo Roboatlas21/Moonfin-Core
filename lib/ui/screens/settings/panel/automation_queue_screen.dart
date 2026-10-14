@@ -54,6 +54,17 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    String countdownLabel(MediaSegmentCountdown value) => switch (value) {
+      MediaSegmentCountdown.progressBar => l10n.settingsProgressBar,
+      MediaSegmentCountdown.timer => l10n.settingsTimer,
+      MediaSegmentCountdown.both => l10n.settingsBoth,
+      MediaSegmentCountdown.none => l10n.settingsNone,
+    };
+    String autoHideLabel(MediaSegmentAutoHide value) =>
+        value == MediaSegmentAutoHide.off
+            ? l10n.off
+            : l10n.secondsValue(value.seconds);
+
     final cinemaEnabled = _prefs.get(UserPreferences.cinemaModeEnabled) ||
         _prefs.get(UserPreferences.cinemaModeEpisodesEnabled);
     final nextUpBehavior = _prefs.get(UserPreferences.nextUpBehavior);
@@ -112,21 +123,13 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                   title: l10n.cinemaAutoHideButtons,
                   description: l10n.cinemaAutoHideButtonsDescription,
                   icon: Icons.visibility_off_outlined,
-                  labelOf: (v) => switch (v) {
-                    MediaSegmentAutoHide.off => l10n.off,
-                    _ => l10n.secondsValue(v.seconds),
-                  },
+                  labelOf: autoHideLabel,
                 ),
                 EnumPreferenceTile<MediaSegmentCountdown>(
                   preference: UserPreferences.cinemaModeSkipCountdown,
                   title: l10n.settingsMediaSegmentCountdown,
                   icon: Icons.timer_outlined,
-                  labelOf: (v) => switch (v) {
-                    MediaSegmentCountdown.progressBar => l10n.settingsProgressBar,
-                    MediaSegmentCountdown.timer => l10n.settingsTimer,
-                    MediaSegmentCountdown.both => l10n.settingsBoth,
-                    MediaSegmentCountdown.none => l10n.settingsNone,
-                  },
+                  labelOf: countdownLabel,
                 ),
               ],
               // Every type writes to the one preference, so each tile is
@@ -154,13 +157,7 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                   preference: UserPreferences.mediaSegmentCountdown,
                   title: l10n.settingsMediaSegmentCountdown,
                   icon: Icons.timer_outlined,
-                  labelOf: (v) => switch (v) {
-                    MediaSegmentCountdown.progressBar =>
-                      l10n.settingsProgressBar,
-                    MediaSegmentCountdown.timer => l10n.settingsTimer,
-                    MediaSegmentCountdown.both => l10n.settingsBoth,
-                    MediaSegmentCountdown.none => l10n.settingsNone,
-                  },
+                  labelOf: countdownLabel,
                 ),
               if (promptsForAnySegment)
                 EnumPreferenceTile<MediaSegmentAutoHide>(
@@ -168,10 +165,7 @@ class _AutomationQueueScreenState extends State<_AutomationQueueScreen> {
                   title: l10n.settingsSkipButtonAutoHide,
                   description: l10n.settingsSkipButtonAutoHideDescription,
                   icon: Icons.visibility_off_outlined,
-                  labelOf: (v) => switch (v) {
-                    MediaSegmentAutoHide.off => l10n.off,
-                    _ => l10n.secondsValue(v.seconds),
-                  },
+                  labelOf: autoHideLabel,
                 ),
             ],
           ),

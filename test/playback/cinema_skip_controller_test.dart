@@ -14,8 +14,7 @@ void main() {
     final second = Object();
     final trailer = {'RunTimeTicks': '900000000'};
 
-    void sync(Object item, int index, PlaybackBringupState source, Duration duration,
-        {bool initial = false}) {
+    void sync(Object item, int index, PlaybackBringupState source, Duration duration) {
       controller.synchronize(
         item: item,
         index: index,
@@ -24,7 +23,6 @@ void main() {
         source: source,
         duration: duration,
         playing: true,
-        initial: initial,
       );
     }
 
@@ -34,7 +32,7 @@ void main() {
       itemId: id,
     );
 
-    sync(first, 0, ready('trailer', 7), const Duration(seconds: 50), initial: true);
+    sync(first, 0, ready('trailer', 7), const Duration(seconds: 50));
     expect(controller.duration, const Duration(seconds: 50));
     expect(controller.generation, 1);
     sync(first, 0, ready('trailer', 7), const Duration(seconds: 50));

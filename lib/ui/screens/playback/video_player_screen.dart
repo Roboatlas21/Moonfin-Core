@@ -516,7 +516,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     autoHideSeconds: _prefs.get(UserPreferences.cinemaModeSkipAutoHide).seconds,
   );
 
-  void _syncCinemaSkip({bool initial = false}) {
+  void _syncCinemaSkip() {
     final item = _queue.currentItem;
     final data = _rawDataForQueueItem(item);
     _cinemaSkip.synchronize(
@@ -527,7 +527,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       source: _manager.bringupState,
       duration: _manager.backend?.duration ?? Duration.zero,
       playing: _state.isPlaying,
-      initial: initial,
     );
   }
 
@@ -723,7 +722,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     super.initState();
     _cinemaSkip = CinemaSkipController(onSkip: _manager.nextInQueue);
     _configureCinemaSkip();
-    _syncCinemaSkip(initial: true);
+    _syncCinemaSkip();
     _cinemaSkip.addListener(_onCinemaSkipChanged);
     _cinemaSkipDurationSub = _state.durationStream.listen(
       (_) => _syncCinemaSkip(),

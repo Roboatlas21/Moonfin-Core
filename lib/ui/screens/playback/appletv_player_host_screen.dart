@@ -92,7 +92,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     );
   }
 
-  void _syncCinemaSkip({bool initial = false}) {
+  void _syncCinemaSkip() {
     final manager = _manager;
     if (manager == null) return;
     final item = manager.queueService.currentItem;
@@ -105,7 +105,6 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       source: manager.bringupState,
       duration: manager.backend?.duration ?? Duration.zero,
       playing: manager.state.isPlaying,
-      initial: initial,
     );
   }
 
@@ -216,7 +215,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       prefs.addListener(_onPrefsChanged);
     } catch (_) {}
     _configureCinemaSkip();
-    _syncCinemaSkip(initial: true);
+    _syncCinemaSkip();
     _cinemaSkip.addListener(_syncCinemaSkipButton);
     _loadSegmentsForCurrentItem();
     if (GetIt.instance.isRegistered<SyncPlayManager>()) {

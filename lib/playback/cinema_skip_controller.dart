@@ -14,8 +14,7 @@ class CinemaSkipController extends ChangeNotifier {
   int _queueIndex = -1;
   int? _lastReadyToken;
   int? _previousReadyToken;
-  Duration? _metadataDuration;
-  Duration? _playerDuration;
+  Duration _duration = Duration.zero;
   int _generation = 0;
   int _minimumSeconds = 15;
   int _autoHideSeconds = 15;
@@ -27,8 +26,7 @@ class CinemaSkipController extends ChangeNotifier {
 
   int get generation => _generation;
   bool get enabled => _enabled;
-  Duration get duration =>
-      _playerDuration ?? _metadataDuration ?? Duration.zero;
+  Duration get duration => _duration;
   bool get eligible =>
       _active &&
       _enabled &&
@@ -64,10 +62,9 @@ class CinemaSkipController extends ChangeNotifier {
     required PlaybackBringupState source,
     required Duration duration,
     required bool playing,
-    bool initial = false,
   }) {
-    if (initial || !identical(item, _queueItem) || index != _queueIndex) {
-      _previousReadyToken = initial ? null : _lastReadyToken;
+    if (!identical(item, _queueItem) || index != _queueIndex) {
+      _previousReadyToken = _lastReadyToken;
       _queueItem = item;
       _queueIndex = index;
       enter(preroll);
@@ -92,12 +89,10 @@ class CinemaSkipController extends ChangeNotifier {
     _wanted = _active;
     _playing = false;
     _skipping = false;
-    _playerDuration = null;
-    _metadataDuration = null;
-    final ticks = int.tryParse(item?['RunTimeTicks']?.toString() ?? '');
-    if (ticks != null && ticks > 0) {
-      _metadataDuration = Duration(microseconds: ticks ~/ 10);
-    }
+    final ticks = int.tryParse(item?['RunTimeTicks']?.toString() ?? '') ?? 0;
+    _duration = ticks > 0
+        ? Duration(microseconds: ticks ~/ 10)
+        : Duration.zero;
     notifyListeners();
   }
 
@@ -109,8 +104,8 @@ class CinemaSkipController extends ChangeNotifier {
     if (!_active) return;
     final wasVisible = visible;
     final wasPlaying = _playing;
-    final oldDuration = this.duration;
-    if (duration > Duration.zero) _playerDuration = duration;
+    final oldDuration = _duration;
+    if (duration > Duration.zero) _duration = duration;
     _playing = playing;
     if (wasVisible != visible || wasPlaying != playing) _restartTimer();
     if (oldDuration != this.duration || wasVisible != visible) {
@@ -121,13 +116,10 @@ class CinemaSkipController extends ChangeNotifier {
   /// User interaction can reveal a control hidden by the timeout or Back.
   void reveal() {
     if (!eligible || _skipping) return;
-    if (visible) {
-      _restartTimer();
-      return;
-    }
+    final wasVisible = visible;
     _wanted = true;
     _restartTimer();
-    notifyListeners();
+    if (!wasVisible) notifyListeners();
   }
 
   void hide() {
@@ -140,10 +132,10 @@ class CinemaSkipController extends ChangeNotifier {
 
   void activate() {
     if (!eligible) return;
-    if (!visible) {
-      reveal();
-    } else {
+    if (visible) {
       skip();
+    } else {
+      reveal();
     }
   }
 
