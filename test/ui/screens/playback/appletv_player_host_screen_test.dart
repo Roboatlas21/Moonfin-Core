@@ -2,12 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
+import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:moonfin/l10n/app_localizations.dart';
+import 'package:moonfin/playback/appletv_backend.dart';
+import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/screens/playback/appletv_player_host_screen.dart';
 import 'package:moonfin/ui/widgets/playback/player_loading_overlay.dart';
 import 'package:playback_core/playback_core.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
 
@@ -48,6 +54,82 @@ void main() {
     await bringupController.close();
     queue.dispose();
     playerState.dispose();
+  });
+
+  testWidgets('native Select pauses short pre-rolls without skipping', (
+    tester,
+  ) async {
+    const control = MethodChannel('moonfin/appletv_video_control');
+    const events = MethodChannel('moonfin/appletv_video_events');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(control, (call) async {
+      calls.add(call);
+      return null;
+    });
+    messenger.setMockMethodCallHandler(events, (_) async => null);
+    SharedPreferences.setMockInitialValues({});
+    final store = PreferenceStore();
+    await store.init();
+    final prefs = UserPreferences(store);
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    final backend = AppleTvBackend(prefs);
+    addTearDown(backend.dispose);
+    GetIt.instance.registerSingleton<UserPreferences>(prefs);
+    GetIt.instance.registerSingleton<AppleTvBackend>(backend);
+    when(() => manager.isOfflinePlayback).thenReturn(false);
+    when(() => manager.playbackDeferredToExternalPlayer).thenReturn(false);
+    when(() => manager.pause()).thenAnswer(
+      (_) async => playerState.setPlaying(false),
+    );
+    when(() => manager.resume()).thenAnswer(
+      (_) async => playerState.setPlaying(true),
+    );
+    queue.setQueue([
+      {'Id': 'short-intro', '__moonfinIsPreroll': true, 'RunTimeTicks': 50000000},
+    ]);
+    playerState.setPlaying(true);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const AppleTvPlayerHostScreen(),
+      ),
+    );
+    await tester.pump();
+    final cinema = calls
+        .lastWhere((c) => c.method == 'setCinemaSkipState')
+        .arguments as Map;
+    expect(cinema['active'], isTrue);
+    expect(cinema['visible'], isFalse);
+    final generation = cinema['generation'] as int;
+
+    Future<void> select(int token) async {
+      await messenger.handlePlatformMessage(
+        events.name,
+        const StandardMethodCodec().encodeSuccessEnvelope({
+          'event': 'cinemaSkipAction',
+          'action': 'activate',
+          'generation': token,
+        }),
+        (_) {},
+      );
+      await tester.pump();
+    }
+
+    await select(generation - 1);
+    verifyNever(() => manager.pause());
+    await select(generation);
+    verify(() => manager.pause()).called(1);
+    await select(generation);
+    verify(() => manager.resume()).called(1);
+    verifyNever(() => manager.nextInQueue());
+
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, false);
+    await select(generation);
+    verifyNever(() => manager.pause());
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('uses a white native spinner throughout tvOS bring-up', (
