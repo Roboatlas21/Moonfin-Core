@@ -392,6 +392,7 @@ void main() {
     );
     manager.state.setPosition(const Duration(seconds: 6));
     await tester.pump();
+    await tester.pump();
     expect(ordinary, findsOneWidget);
     final stalePress = tester.widget<SkipSegmentOverlay>(ordinary).onSkip;
 
@@ -418,6 +419,7 @@ void main() {
     manager.state.setPosition(Duration.zero);
     await tester.pump();
     manager.state.setPosition(const Duration(seconds: 6));
+    await tester.pump();
     await tester.pump();
     expect(ordinary, findsOneWidget);
     tester.widget<SkipSegmentOverlay>(ordinary).onSkip();
