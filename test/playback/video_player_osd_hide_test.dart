@@ -20,6 +20,8 @@ import 'package:moonfin/playback/playback_lifecycle_handler.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/screens/playback/video_player_screen.dart';
 import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
+import 'package:moonfin/ui/widgets/playback/skip_segment_overlay.dart';
+import 'package:moonfin/util/platform_detection.dart';
 
 class _Client extends Fake implements MediaServerClient {
   @override
@@ -62,6 +64,7 @@ class _PlaybackManager extends PlaybackManager {
   @override
   Future<void> nextInQueue() async {
     nextInQueueCalls++;
+    queueService.next();
   }
 }
 
@@ -124,6 +127,69 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   }
+
+  testWidgets('Cinema Skip handles Back, Right, Select and the next clip', (
+    tester,
+  ) async {
+    PlatformDetection.setTvMode(true);
+    addTearDown(() => PlatformDetection.setTvMode(false));
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.cinemaModeSkipEnabled, true,
+    );
+    manager.queueService.setQueue([
+      {'Id': 'first-intro', '__moonfinIsPreroll': true, 'RunTimeTicks': 900000000},
+      {'Id': 'second-intro', '__moonfinIsPreroll': true, 'RunTimeTicks': 450000000},
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const VideoPlayerScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final skip = find.byType(SkipSegmentOverlay);
+    expect(skip, findsOneWidget);
+    final first = tester.widget<SkipSegmentOverlay>(skip);
+    expect(first.segment.itemId, 'first-intro');
+    expect(first.segment.end, const Duration(seconds: 90));
+    expect(first.focusNode!.hasPrimaryFocus, isTrue);
+    expect(find.byType(Slider), findsNothing);
+
+    // Use actual key events: dismissing the focused button must leave the
+    // player listening for the next remote press without popping the route.
+    await tester.sendKeyEvent(LogicalKeyboardKey.goBack);
+    await tester.pumpAndSettle();
+    expect(skip, findsNothing);
+    expect(find.byType(VideoPlayerScreen), findsOneWidget);
+    expect(manager.queueService.currentIndex, 0);
+    expect(manager.nextInQueueCalls, 0);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(skip, findsOneWidget);
+    expect(
+      tester.widget<SkipSegmentOverlay>(skip).focusNode!.hasPrimaryFocus,
+      isTrue,
+    );
+    expect(manager.nextInQueueCalls, 0);
+    expect(find.byType(Slider), findsNothing);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(manager.nextInQueueCalls, 1);
+    expect(manager.nextCalls, 0);
+    expect(manager.queueService.currentIndex, 1);
+    expect(skip, findsOneWidget);
+    final second = tester.widget<SkipSegmentOverlay>(skip);
+    expect(second.segment.itemId, 'second-intro');
+    expect(second.segment.end, const Duration(seconds: 45));
+    expect(second.focusNode!.hasPrimaryFocus, isTrue);
+    expect(find.byType(Slider), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+  });
 
   // Issue #1688: a resume that takes longer than the hide delay to start
   // playing left the controls up until a key was pressed.
