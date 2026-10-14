@@ -2825,7 +2825,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   /// runs it stays up on its own; afterwards it rides along with the OSD.
   /// With auto-hide off it stays up until the segment ends.
   bool get _isSkipSegmentButtonVisible =>
-      !_isCinemaSkipVisible &&
+      !(_isCurrentPreroll && _cinemaSkip.enabled) &&
       _skipSegment != null &&
       (!_skipSegmentAutoHideEnabled ||
           _skipSegmentAutoHidePending ||
@@ -3034,9 +3034,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   void _focusTvSkipSegment({int attempt = 0}) {
     if (!PlatformDetection.isTV ||
-        (_skipSegment == null && !_isCinemaSkipVisible)) return;
+        _routeCovered ||
+        (!_isSkipSegmentButtonVisible && !_isCinemaSkipVisible)) {
+      return;
+    }
+    final generation = _cinemaSkip.generation;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || (_skipSegment == null && !_isCinemaSkipVisible)) return;
+      if (!mounted ||
+          _routeCovered ||
+          generation != _cinemaSkip.generation ||
+          (!_isSkipSegmentButtonVisible && !_isCinemaSkipVisible)) {
+        return;
+      }
       _tvSkipSegmentFocus.requestFocus();
 
       if (!_tvSkipSegmentFocus.hasFocus && attempt < 8) {
@@ -3514,6 +3523,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (_routeCovered) return KeyEventResult.ignored;
     if (_isCurrentPreroll) {
       if (event is KeyUpEvent) {
         final isBackKey = event.logicalKey.isBackKey;
@@ -3565,7 +3575,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
             return KeyEventResult.handled;
 
           case LogicalKeyboardKey.mediaFastForward:
-            unawaited(_manager.next());
+            if (_cinemaSkip.enabled) {
+              _cinemaSkip.skip(requireVisible: false);
+            } else {
+              unawaited(_manager.next());
+            }
             return KeyEventResult.handled;
 
           case LogicalKeyboardKey.mediaRewind:

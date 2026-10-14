@@ -10,6 +10,7 @@ class CinemaSkipController extends ChangeNotifier {
 
   final Future<void> Function() _onSkip;
   Timer? _hideTimer;
+  Timer? _skipCooldown;
   Object? _queueItem;
   int _queueIndex = -1;
   int? _lastReadyToken;
@@ -139,8 +140,17 @@ class CinemaSkipController extends ChangeNotifier {
     }
   }
 
-  void skip() {
-    if (!visible || _skipping) return;
+  /// Fast Forward can skip short clips and clips whose button is hidden.
+  void skip({bool requireVisible = true}) {
+    if (!_active ||
+        !_enabled ||
+        _skipping ||
+        (requireVisible && !visible) ||
+        _skipCooldown?.isActive == true) {
+      return;
+    }
+    // Keep the debounce across queue changes, including very fast transitions.
+    _skipCooldown = Timer(const Duration(milliseconds: 400), () {});
     _skipping = true;
     _hideTimer?.cancel();
     _hideTimer = null;
@@ -168,6 +178,7 @@ class CinemaSkipController extends ChangeNotifier {
   void dispose() {
     ++_generation;
     _hideTimer?.cancel();
+    _skipCooldown?.cancel();
     super.dispose();
   }
 }

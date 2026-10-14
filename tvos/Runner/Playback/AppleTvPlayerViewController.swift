@@ -1453,6 +1453,10 @@ final class AppleTvPlayerViewController: UIViewController {
             if wasActive { hideSkipSegment() }
             return
         }
+        if !wasActive {
+            hideOsd()
+            updatePauseOverlay()
+        }
         if (args["visible"] as? Bool) == true {
             showSkipSegment(
                 label: (args["skipLabel"] as? String) ?? "Skip",
@@ -3123,7 +3127,7 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     private func updatePauseOverlay() {
-        let shouldShow = isPaused() && pauseMeta != nil
+        let shouldShow = !cinemaSkipActive && isPaused() && pauseMeta != nil
         let visible = pauseOverlay.alpha > 0.5
         if shouldShow && !visible, let meta = pauseMeta {
             pauseTitleLabel.text = hasLogo ? headerPrimary : (headerPrimary.isEmpty ? headerSecondary : headerPrimary)
@@ -3139,6 +3143,7 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     private func showOsd() {
+        guard !cinemaSkipActive else { return }
         lastShowAt = CACurrentMediaTime()
         osdDismissed = false
         setSubtitlesRaised(true)
@@ -3234,7 +3239,7 @@ final class AppleTvPlayerViewController: UIViewController {
         updateLoadingOverlay()
 
         let shouldShow =
-            !osdDismissed && !nextUpVisible
+            !cinemaSkipActive && !osdDismissed && !nextUpVisible
             && (isPaused() || scrubTargetMs != nil || scrubFrozenMs != nil
                 || (CACurrentMediaTime() - lastShowAt < 4.0))
         updateSubtitleLoadingPill(osdShown: shouldShow)

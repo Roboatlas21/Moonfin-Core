@@ -111,9 +111,9 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   void _syncCinemaSkipButton() {
     final backend = _backend;
     if (!mounted || backend == null) return;
-    // Keep eligibility even when auto-hide or Back hides the button so the
-    // Apple TV remote can reveal it without showing the regular player OSD.
-    final active = _isCinemaPreroll && _cinemaSkip.eligible;
+    // Keep Cinema controls active for the whole pre-roll when opted in,
+    // including short clips and when auto-hide or Back hides the Skip button.
+    final active = _isCinemaPreroll && _cinemaSkip.enabled;
     final visible = active && _cinemaSkip.visible;
     final prefs = _prefsListened;
     final countdown = prefs == null
