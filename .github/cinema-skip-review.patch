@@ -12,10 +12,10 @@ index c52952e..b46b477 100644
      final replaceSkipOutroWithNextUp = _prefs.get(
        UserPreferences.replaceSkipOutroWithNextUp,
 diff --git a/test/playback/video_player_osd_hide_test.dart b/test/playback/video_player_osd_hide_test.dart
-index d0d9629..04f5f3b 100644
+index d0d9629..a89bb20 100644
 --- a/test/playback/video_player_osd_hide_test.dart
 +++ b/test/playback/video_player_osd_hide_test.dart
-@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
+@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
  import 'package:flutter/services.dart';
  import 'package:flutter_test/flutter_test.dart';
  import 'package:get_it/get_it.dart';
@@ -25,11 +25,12 @@ index d0d9629..04f5f3b 100644
  import 'package:server_core/server_core.dart';
  import 'package:shared_preferences/shared_preferences.dart';
  
++import 'package:moonfin/auth/repositories/user_repository.dart';
 +import 'package:moonfin/data/models/aggregated_item.dart';
  import 'package:moonfin/data/services/cast/cast_service.dart';
  import 'package:moonfin/data/services/cast/cast_target.dart';
  import 'package:moonfin/data/services/cast/native_airplay_channel.dart';
-@@ -20,8 +22,20 @@ import 'package:moonfin/playback/playback_lifecycle_handler.dart';
+@@ -20,8 +23,20 @@ import 'package:moonfin/playback/playback_lifecycle_handler.dart';
  import 'package:moonfin/preference/user_preferences.dart';
  import 'package:moonfin/ui/screens/playback/video_player_screen.dart';
  import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
@@ -50,7 +51,7 @@ index d0d9629..04f5f3b 100644
    @override
    ServerType get serverType => ServerType.jellyfin;
  }
-@@ -53,6 +67,8 @@ class _Lifecycle extends Fake implements PlaybackLifecycleHandler {}
+@@ -53,6 +68,8 @@ class _Lifecycle extends Fake implements PlaybackLifecycleHandler {}
  class _PlaybackManager extends PlaybackManager {
    int nextCalls = 0;
    int nextInQueueCalls = 0;
@@ -59,7 +60,7 @@ index d0d9629..04f5f3b 100644
  
    @override
    Future<void> next() async {
-@@ -62,11 +78,24 @@ class _PlaybackManager extends PlaybackManager {
+@@ -62,11 +79,24 @@ class _PlaybackManager extends PlaybackManager {
    @override
    Future<void> nextInQueue() async {
      nextInQueueCalls++;
@@ -84,17 +85,21 @@ index d0d9629..04f5f3b 100644
    late PipService pip;
  
    setUp(() async {
-@@ -76,7 +105,8 @@ void main() {
+@@ -76,7 +106,12 @@ void main() {
      manager = _PlaybackManager();
      GetIt.instance.registerSingleton<PlaybackManager>(manager);
      GetIt.instance.registerSingleton<UserPreferences>(UserPreferences(store));
 -    GetIt.instance.registerSingleton<MediaServerClient>(_Client());
++    GetIt.instance.registerSingleton<UserRepository>(
++      UserRepository(),
++      dispose: (repository) => repository.dispose(),
++    );
 +    client = _Client();
 +    GetIt.instance.registerSingleton<MediaServerClient>(client);
      GetIt.instance.registerSingleton<MediaServerClientFactory>(_Factory());
      GetIt.instance.registerSingleton<CastService>(_Cast());
      GetIt.instance.registerSingleton<NativeCastChannel>(NativeCastChannel());
-@@ -92,6 +122,7 @@ void main() {
+@@ -92,6 +127,7 @@ void main() {
    });
  
    tearDown(() async {
@@ -102,11 +107,15 @@ index d0d9629..04f5f3b 100644
      manager.dispose();
      pip.dispose();
      await GetIt.instance.reset();
-@@ -125,6 +156,124 @@ void main() {
+@@ -125,6 +161,129 @@ void main() {
      });
    }
  
 +  Future<void> pumpPlayer(WidgetTester tester) async {
++    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
++      SystemChannels.platform,
++      (_) async => null,
++    );
 +    final router = GoRouter(
 +      initialLocation: '/player',
 +      routes: [
@@ -208,6 +217,7 @@ index d0d9629..04f5f3b 100644
 +        ]);
 +        await pumpPlayer(tester);
 +        manager.state.setPosition(const Duration(seconds: 2));
++        await tester.pump();
 +        await tester.pumpAndSettle();
 +
 +        final suppressed = preroll && enabled;

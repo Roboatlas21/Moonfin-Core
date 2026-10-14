@@ -13,7 +13,7 @@ jobs:
       - name: Apply focused patch to the expected feature head
         run: |
           cp .github/cinema-skip-review.patch "$RUNNER_TEMP/cinema-skip-review.patch"
-          git fetch origin feat/cinema-mode-skip-only
+          git fetch --depth=1 origin feat/cinema-mode-skip-only
           test "$(git rev-parse FETCH_HEAD)" = 61d01902d2f1478c9b4c1ba54a8a7d3e33e342fc
           git checkout --detach 61d01902d2f1478c9b4c1ba54a8a7d3e33e342fc
           git apply --check "$RUNNER_TEMP/cinema-skip-review.patch"
@@ -24,30 +24,53 @@ jobs:
           flutter-version: '3.47.2'
           cache: true
       - name: Resolve dependencies
-        run: flutter pub get
-      - name: Run focused regression tests
+        run: flutter pub get > "$RUNNER_TEMP/pub-get.log" 2>&1 || { tail -n 60 "$RUNNER_TEMP/pub-get.log"; exit 1; }
+      - name: Validate tests and baseline failure
         run: |
-          flutter test --no-pub --reporter expanded \
-            test/playback/video_player_osd_hide_test.dart \
-            test/playback/cinema_skip_controller_test.dart \
-            test/ui/screens/playback/appletv_player_host_screen_test.dart \
-            test/playback/skip_segment_dismiss_test.dart \
-            test/data/services/media_segment_service_test.dart
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          paths = ['lib/ui/screens/playback/video_player_screen.dart', 'test/playback/video_player_osd_hide_test.dart']
+          patched = {p: Path(p).read_bytes() for p in paths}
+          def run(label, args):
+              result = subprocess.run(['flutter','test','--no-pub','--machine',*args], capture_output=True,text=True)
+              names, failed, passed, messages = {}, [], [], []
+              for line in result.stdout.splitlines():
+                  try: event=json.loads(line)
+                  except json.JSONDecodeError: continue
+                  kind=event.get('type')
+                  if kind=='testStart': names[event['test']['id']]=event['test']['name']
+                  if kind=='testDone' and not event.get('hidden'):
+                      name=names.get(event['testID'],str(event['testID']))
+                      (passed if event['result']=='success' else failed).append(name)
+                  if kind=='error': messages.append(event.get('error',''))
+              print(f'{label}: exit={result.returncode}, passed={len(passed)}, failed={len(failed)}',flush=True)
+              for name in failed: print('FAILED:',name,flush=True)
+              for message in messages: print(message[:1800],flush=True)
+              if result.stderr: print(result.stderr[-2000:],flush=True)
+              return result, failed, passed
+          # Confirm the Apple TV initialization failure on the untouched feature head.
+          for p in paths: Path(p).write_bytes(subprocess.check_output(['git','show',f'HEAD:{p}']))
+          baseline, failures, passed = run('Unchanged Apple TV baseline', ['test/ui/screens/playback/appletv_player_host_screen_test.dart'])
+          assert baseline.returncode != 0 and failures == ['native Select pauses short pre-rolls without skipping'], failures
+          assert 'before _AppleTvPlayerHostScreenState.initState() completed' in baseline.stdout
+          for p, data in patched.items(): Path(p).write_bytes(data)
+          result, failures, passed = run('Focused regression suite', [
+              'test/playback/video_player_osd_hide_test.dart',
+              'test/playback/cinema_skip_controller_test.dart',
+              'test/playback/skip_segment_dismiss_test.dart',
+              'test/data/services/media_segment_service_test.dart'])
+          assert result.returncode == 0 and not failures, failures
+          Path(paths[0]).write_bytes(subprocess.check_output(['git','show',f'HEAD:{paths[0]}']))
+          result, failures, passed = run('Without guard (expected regression failures)', [paths[1], '--plain-name', 'auto-skip: preroll=true, Cinema Skip=true'])
+          Path(paths[0]).write_bytes(patched[paths[0]])
+          assert result.returncode != 0 and set(failures) == {'Intro auto-skip: preroll=true, Cinema Skip=true', 'Outro auto-skip: preroll=true, Cinema Skip=true'}, failures
+          PY
       - name: Analyze changed Dart files
         run: |
           flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings \
             lib/ui/screens/playback/video_player_screen.dart \
             test/playback/video_player_osd_hide_test.dart
-      - name: Prove segment regressions fail without the guard
-        run: |
-          cp lib/ui/screens/playback/video_player_screen.dart "$RUNNER_TEMP/video_player_screen.fixed.dart"
-          git checkout -- lib/ui/screens/playback/video_player_screen.dart
-          set +e
-          flutter test --no-pub --reporter expanded test/playback/video_player_osd_hide_test.dart --plain-name 'auto-skip: preroll=true, Cinema Skip=true'
-          result=$?
-          set -e
-          cp "$RUNNER_TEMP/video_player_screen.fixed.dart" lib/ui/screens/playback/video_player_screen.dart
-          test "$result" -ne 0
       - name: Publish validated additional commit to a temporary result branch
         run: |
           git diff --check
