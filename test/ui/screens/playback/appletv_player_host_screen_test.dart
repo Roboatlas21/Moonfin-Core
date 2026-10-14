@@ -17,6 +17,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
 
+const _control = MethodChannel('moonfin/appletv_video_control');
+const _events = MethodChannel('moonfin/appletv_video_events');
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() => registerFallbackValue(Duration.zero));
@@ -57,18 +60,22 @@ void main() {
     playerState.dispose();
   });
 
-  testWidgets('native Select pauses short pre-rolls without skipping', (
-    tester,
+
+  Future<({UserPreferences prefs, List<MethodCall> calls})> pumpCinemaHost(
+    WidgetTester tester,
   ) async {
-    const control = MethodChannel('moonfin/appletv_video_control');
-    const events = MethodChannel('moonfin/appletv_video_events');
     final messenger = tester.binding.defaultBinaryMessenger;
     final calls = <MethodCall>[];
-    messenger.setMockMethodCallHandler(control, (call) async {
+    messenger.setMockMethodCallHandler(_control, (call) async {
       calls.add(call);
       return null;
     });
-    messenger.setMockMethodCallHandler(events, (_) async => null);
+    messenger.setMockMethodCallHandler(_events, (_) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(_control, null);
+      messenger.setMockMethodCallHandler(_events, null);
+    });
+
     SharedPreferences.setMockInitialValues({});
     final store = PreferenceStore();
     await store.init();
@@ -80,6 +87,21 @@ void main() {
     GetIt.instance.registerSingleton<AppleTvBackend>(backend);
     when(() => manager.isOfflinePlayback).thenReturn(false);
     when(() => manager.playbackDeferredToExternalPlayer).thenReturn(false);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const AppleTvPlayerHostScreen(),
+      ),
+    );
+    await tester.pump();
+    return (prefs: prefs, calls: calls);
+  }
+
+  testWidgets('native Select pauses short pre-rolls without skipping', (
+    tester,
+  ) async {
     when(() => manager.pause()).thenAnswer(
       (_) async => playerState.setPlaying(false),
     );
@@ -91,14 +113,7 @@ void main() {
     ]);
     playerState.setPlaying(true);
 
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: const [Locale('en')],
-        home: const AppleTvPlayerHostScreen(),
-      ),
-    );
-    await tester.pump();
+    final (:prefs, :calls) = await pumpCinemaHost(tester);
     final cinema = calls
         .lastWhere((c) => c.method == 'setCinemaSkipState')
         .arguments as Map;
@@ -107,8 +122,8 @@ void main() {
     final generation = cinema['generation'] as int;
 
     Future<void> select(int token) async {
-      await messenger.handlePlatformMessage(
-        events.name,
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        _events.name,
         const StandardMethodCodec().encodeSuccessEnvelope({
           'event': 'cinemaSkipAction',
           'action': 'activate',
@@ -137,31 +152,6 @@ void main() {
   testWidgets('system Forward Skip is distinct from seeking on Apple TV', (
     tester,
   ) async {
-    const control = MethodChannel('moonfin/appletv_video_control');
-    const events = MethodChannel('moonfin/appletv_video_events');
-    final messenger = tester.binding.defaultBinaryMessenger;
-    final calls = <MethodCall>[];
-    messenger.setMockMethodCallHandler(control, (call) async {
-      calls.add(call);
-      return null;
-    });
-    messenger.setMockMethodCallHandler(events, (_) async => null);
-    addTearDown(() {
-      messenger.setMockMethodCallHandler(control, null);
-      messenger.setMockMethodCallHandler(events, null);
-    });
-
-    SharedPreferences.setMockInitialValues({});
-    final store = PreferenceStore();
-    await store.init();
-    final prefs = UserPreferences(store);
-    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
-    final backend = AppleTvBackend(prefs);
-    addTearDown(backend.dispose);
-    GetIt.instance.registerSingleton<UserPreferences>(prefs);
-    GetIt.instance.registerSingleton<AppleTvBackend>(backend);
-    when(() => manager.isOfflinePlayback).thenReturn(false);
-    when(() => manager.playbackDeferredToExternalPlayer).thenReturn(false);
     when(() => manager.seekTo(any())).thenAnswer((_) async {});
     when(() => manager.nextInQueue()).thenAnswer((_) async => queue.next());
     queue.setQueue([
@@ -169,18 +159,11 @@ void main() {
       {'Id': 'long', '__moonfinIsPreroll': true, 'RunTimeTicks': 900000000},
       {'Id': 'movie', 'RunTimeTicks': 900000000},
     ]);
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: const [Locale('en')],
-        home: const AppleTvPlayerHostScreen(),
-      ),
-    );
-    await tester.pump();
+    final (:prefs, :calls) = await pumpCinemaHost(tester);
 
     Future<void> send(Map<String, Object> action) async {
-      await messenger.handlePlatformMessage(
-        events.name,
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        _events.name,
         const StandardMethodCodec().encodeSuccessEnvelope(action),
         (_) {},
       );

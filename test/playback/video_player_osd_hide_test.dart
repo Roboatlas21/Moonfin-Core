@@ -1,13 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
+import 'package:go_router/go_router.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:moonfin/data/models/aggregated_item.dart';
+import 'package:moonfin/data/models/media_segment.dart';
 import 'package:moonfin/data/services/cast/cast_service.dart';
 import 'package:moonfin/data/services/cast/cast_target.dart';
 import 'package:moonfin/data/services/cast/native_airplay_channel.dart';
@@ -220,6 +224,15 @@ void main() {
   testWidgets('Cinema Skip suppresses segment seeks and exits when enabled', (
     tester,
   ) async {
+    // The platform responds to orientation restoration before playback stops.
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (_) async => null,
+    );
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(SystemChannels.platform, null),
+    );
     final prefs = GetIt.instance<UserPreferences>();
     await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
     await prefs.set(UserPreferences.mediaSegmentActions, 'intro:skip,outro:skip');
@@ -241,13 +254,24 @@ void main() {
         },
       ),
     ]);
+    final router = GoRouter(
+      routes: [
+        GoRoute(path: '/', builder: (_, __) => const SizedBox()),
+        GoRoute(
+          path: '/player',
+          builder: (_, __) => const VideoPlayerScreen(),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
     await tester.pumpWidget(
-      MaterialApp(
+      MaterialApp.router(
+        routerConfig: router,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: const [Locale('en')],
-        home: const VideoPlayerScreen(),
       ),
     );
+    router.push('/player');
     await tester.pumpAndSettle();
 
     manager.state.setPosition(const Duration(seconds: 6));
@@ -266,7 +290,103 @@ void main() {
     expect(manager.seeks, [const Duration(seconds: 10)]);
     expect(manager.stopCalls, 0);
 
+    // With the loaded markers confirmed active, the outro must still exit.
+    manager.state.setPosition(const Duration(seconds: 31));
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(manager.stopCalls, 1);
+
     await tester.pumpWidget(const SizedBox());
+  });
+
+
+  testWidgets('short Cinema pre-roll blocks automatic intro and outro actions', (
+    tester,
+  ) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    await prefs.set(UserPreferences.mediaSegmentActions, 'intro:skip,outro:skip');
+    final client = GetIt.instance<MediaServerClient>() as _Client;
+    client.items.segments = [
+      segmentJson(id: 'intro', type: 'Intro', startMs: 1000, endMs: 2000),
+      segmentJson(id: 'outro', type: 'Outro', startMs: 3000, endMs: 4000),
+    ];
+    manager.queueService.setQueue([
+      const AggregatedItem(
+        id: 'short',
+        serverId: 'server',
+        rawData: {
+          'Id': 'short',
+          '__moonfinIsPreroll': true,
+          'RunTimeTicks': 50000000,
+          'Chapters': [{'StartPositionTicks': 0}],
+        },
+      ),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const VideoPlayerScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(SkipSegmentOverlay), findsNothing);
+
+    manager.state.setPosition(const Duration(milliseconds: 1500));
+    await tester.pump();
+    manager.state.setPosition(const Duration(milliseconds: 3500));
+    await tester.pump();
+    expect(manager.seeks, isEmpty);
+    expect(manager.stopCalls, 0);
+    expect(find.byType(VideoPlayerScreen), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Skip overlay keeps stream subscription on segment changes', (
+    tester,
+  ) async {
+    var listens = 0;
+    var cancels = 0;
+    final positions = StreamController<Duration>.broadcast(
+      onListen: () => listens++,
+      onCancel: () => cancels++,
+    );
+    addTearDown(positions.close);
+
+    Future<void> show(String id) => tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: Scaffold(
+          body: Stack(
+            children: [
+              SkipSegmentOverlay(
+                segment: MediaSegment(
+                  id: id,
+                  itemId: 'movie',
+                  type: MediaSegmentType.preview,
+                  start: Duration.zero,
+                  end: const Duration(seconds: 90),
+                ),
+                onSkip: () {},
+                onDismiss: () {},
+                positionStream: positions.stream,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await show('first');
+    expect(listens, 1);
+    await show('second');
+    expect(listens, 1);
+    expect(cancels, 0);
+    await tester.pumpWidget(const SizedBox());
+    expect(cancels, 1);
   });
 
   // Issue #1688: a resume that takes longer than the hide delay to start

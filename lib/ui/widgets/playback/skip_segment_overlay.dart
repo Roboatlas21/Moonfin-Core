@@ -73,12 +73,11 @@ class _SkipSegmentOverlayState extends State<SkipSegmentOverlay> {
   @override
   void didUpdateWidget(SkipSegmentOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.positionStream != widget.positionStream ||
-        oldWidget.segment != widget.segment) {
+    if (oldWidget.segment != widget.segment) {
+      _currentPosition = widget.initialPosition ?? widget.segment.start;
+    }
+    if (oldWidget.positionStream != widget.positionStream) {
       _unsubscribe();
-      if (widget.segment != oldWidget.segment) {
-        _currentPosition = widget.initialPosition ?? widget.segment.start;
-      }
       _subscribe();
     }
     // Keep the countdown in sync when the parent rebuilds with a fresh

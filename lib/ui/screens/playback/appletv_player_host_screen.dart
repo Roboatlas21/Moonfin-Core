@@ -174,7 +174,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         if (state.phase == PlaybackBringupPhase.ready) {
           _pushSubtitleStyle(force: true);
         }
-        // The initState load can run before the queue item resolves, so retry
+        // The initial load may precede queue item resolution, so retry
         // here. The per-item guard makes repeat events a no-op.
         _loadSegmentsForCurrentItem();
       });
