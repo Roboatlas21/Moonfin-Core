@@ -7,6 +7,7 @@ import 'package:playback_core/playback_core.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/services/cast/cast_service.dart';
 import 'package:moonfin/data/services/cast/cast_target.dart';
 import 'package:moonfin/data/services/cast/native_airplay_channel.dart';
@@ -23,9 +24,19 @@ import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
 import 'package:moonfin/ui/widgets/playback/skip_segment_overlay.dart';
 import 'package:moonfin/util/platform_detection.dart';
 
+import '../util/media_segment_fakes.dart';
+
 class _Client extends Fake implements MediaServerClient {
+  final items = FakeItemsApi();
+
   @override
   ServerType get serverType => ServerType.jellyfin;
+
+  @override
+  ItemsApi get itemsApi => items;
+
+  @override
+  TrickplayApi? get trickplayApi => null;
 }
 
 class _Factory extends Fake implements MediaServerClientFactory {
@@ -55,6 +66,18 @@ class _Lifecycle extends Fake implements PlaybackLifecycleHandler {}
 class _PlaybackManager extends PlaybackManager {
   int nextCalls = 0;
   int nextInQueueCalls = 0;
+  final seeks = <Duration>[];
+  int stopCalls = 0;
+
+  @override
+  Future<void> seekTo(Duration position) async {
+    seeks.add(position);
+  }
+
+  @override
+  Future<void> stop({bool userInitiated = true}) async {
+    stopCalls++;
+  }
 
   @override
   Future<void> next() async {
@@ -187,6 +210,58 @@ void main() {
     expect(second.segment.end, const Duration(seconds: 45));
     expect(second.focusNode!.hasPrimaryFocus, isTrue);
     expect(find.byType(Slider), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Cinema Skip suppresses segment seeks and exits when enabled', (
+    tester,
+  ) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    await prefs.set(UserPreferences.mediaSegmentActions, 'intro:skip,outro:skip');
+    final client = GetIt.instance<MediaServerClient>() as _Client;
+    client.items.segments = [
+      segmentJson(id: 'intro', type: 'Intro', startMs: 5000, endMs: 10000),
+      segmentJson(id: 'outro', type: 'Outro', startMs: 30000, endMs: 40000),
+    ];
+    // A final queue item also exercises the automatic outro exit path.
+    manager.queueService.setQueue([
+      const AggregatedItem(
+        id: 'ep1',
+        serverId: 'server',
+        rawData: {
+          'Id': 'ep1',
+          '__moonfinIsPreroll': true,
+          'RunTimeTicks': 900000000,
+          'Chapters': [{'StartPositionTicks': 0}],
+        },
+      ),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const VideoPlayerScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    manager.state.setPosition(const Duration(seconds: 6));
+    await tester.pump();
+    manager.state.setPosition(const Duration(seconds: 31));
+    await tester.pump();
+    expect(manager.seeks, isEmpty);
+    expect(manager.stopCalls, 0);
+    expect(find.byType(VideoPlayerScreen), findsOneWidget);
+
+    // The same loaded markers still work after opting out of Cinema Skip.
+    // This also proves the assertions above were not passing on empty data.
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, false);
+    manager.state.setPosition(const Duration(seconds: 6));
+    await tester.pump();
+    expect(manager.seeks, [const Duration(seconds: 10)]);
+    expect(manager.stopCalls, 0);
 
     await tester.pumpWidget(const SizedBox());
   });
