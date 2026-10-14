@@ -1,0 +1,33 @@
+name: Cinema Skip Segment Guard
+on:
+  push:
+    branches: [review/cinema-skip-segment-guard-20261014]
+permissions:
+  contents: read
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+      - name: Install Flutter dependencies
+        run: flutter pub get > /tmp/pub-get.log 2>&1 || { tail -n 60 /tmp/pub-get.log; exit 1; }
+      - name: Run focused regression tests
+        run: |
+          flutter test --no-pub --reporter expanded \
+            test/playback/video_player_osd_hide_test.dart \
+            test/ui/screens/playback/appletv_player_host_screen_test.dart \
+            test/playback/cinema_skip_controller_test.dart
+      - name: Analyze changed Dart
+        run: |
+          flutter analyze --no-pub --no-fatal-infos --no-fatal-warnings \
+            lib/ui/screens/playback/video_player_screen.dart \
+            test/playback/video_player_osd_hide_test.dart \
+            test/ui/screens/playback/appletv_player_host_screen_test.dart
+      - name: Verify whitespace
+        run: git diff --check HEAD^ HEAD

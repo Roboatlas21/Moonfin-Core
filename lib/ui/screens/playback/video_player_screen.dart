@@ -2744,6 +2744,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _skipCurrentSegment() {
+    // A stale ordinary Skip Segment callback must not override Cinema Skip.
+    if (_isCurrentPreroll && _cinemaSkip.enabled) return;
     _noteViewerActivity();
     final replaceSkipOutroWithNextUp = _prefs.get(
       UserPreferences.replaceSkipOutroWithNextUp,

@@ -13,9 +13,30 @@ import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/screens/playback/appletv_player_host_screen.dart';
 import 'package:moonfin/ui/widgets/playback/player_loading_overlay.dart';
 import 'package:playback_core/playback_core.dart';
+import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../util/media_segment_fakes.dart';
+
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
+
+class _EmptyImageApi extends Fake implements ImageApi {}
+
+class _SegmentClient extends Fake implements MediaServerClient {
+  final items = FakeItemsApi();
+
+  @override
+  ServerType get serverType => ServerType.jellyfin;
+
+  @override
+  ItemsApi get itemsApi => items;
+
+  @override
+  ImageApi get imageApi => _EmptyImageApi();
+
+  @override
+  TrickplayApi? get trickplayApi => null;
+}
 
 const _control = MethodChannel('moonfin/appletv_video_control');
 const _events = MethodChannel('moonfin/appletv_video_events');
@@ -225,6 +246,63 @@ void main() {
     verify(() => manager.seekTo(const Duration(seconds: 14))).called(1);
     // The host schedules one metadata refresh 300 ms after normal seek events.
     await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+
+  testWidgets('tvOS ignores ordinary Skip Segment on Cinema pre-rolls only', (
+    tester,
+  ) async {
+    final client = _SegmentClient();
+    client.items.segments = [
+      segmentJson(id: 'intro', type: 'Intro', startMs: 5000, endMs: 10000),
+    ];
+    GetIt.instance.registerSingleton<MediaServerClient>(client);
+    when(() => manager.seekTo(any())).thenAnswer((_) async {});
+    queue.setQueue([
+      {'Id': 'intro', '__moonfinIsPreroll': true, 'RunTimeTicks': 900000000},
+      {'Id': 'main', 'RunTimeTicks': 900000000},
+    ]);
+    final (:prefs, :calls) = await pumpCinemaHost(tester);
+    await prefs.set(UserPreferences.mediaSegmentActions, 'intro:askToSkip');
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, false);
+    await tester.pump();
+
+    Future<void> pressOrdinarySkip() async {
+      await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+        _events.name,
+        const StandardMethodCodec().encodeSuccessEnvelope({
+          'event': 'skipSegment',
+        }),
+        (_) {},
+      );
+      await tester.pump();
+    }
+
+    // An actual loaded marker generates the ordinary native segment prompt.
+    playerState.setPosition(const Duration(seconds: 6));
+    await tester.pump();
+    expect(calls.where((call) => call.method == 'showSkipSegment').length, 1);
+
+    // Retaining the old prompt internally cannot let a native event seek.
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    await tester.pump();
+    await pressOrdinarySkip();
+    verifyNever(() => manager.seekTo(any()));
+    expect(queue.currentIndex, 0);
+
+    // On the main item regular segment controls work, even while Cinema is on.
+    queue.next();
+    await tester.pumpAndSettle();
+    playerState.setPosition(Duration.zero);
+    await tester.pump();
+    playerState.setPosition(const Duration(seconds: 6));
+    await tester.pump();
+    expect(calls.where((call) => call.method == 'showSkipSegment').length, 2);
+    await pressOrdinarySkip();
+    verify(() => manager.seekTo(const Duration(seconds: 10))).called(1);
+
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpWidget(const SizedBox());
   });
 

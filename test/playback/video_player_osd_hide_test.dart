@@ -256,10 +256,10 @@ void main() {
     ]);
     final router = GoRouter(
       routes: [
-        GoRoute(path: '/', builder: (_, __) => const SizedBox()),
+        GoRoute(path: '/', builder: (_, _) => const SizedBox()),
         GoRoute(
           path: '/player',
-          builder: (_, __) => const VideoPlayerScreen(),
+          builder: (_, _) => const VideoPlayerScreen(),
         ),
       ],
     );
@@ -340,6 +340,89 @@ void main() {
     expect(manager.seeks, isEmpty);
     expect(manager.stopCalls, 0);
     expect(find.byType(VideoPlayerScreen), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+
+  testWidgets('Cinema Skip blocks stale segment press and restores it for main feature', (
+    tester,
+  ) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, false);
+    await prefs.set(UserPreferences.mediaSegmentActions, 'intro:askToSkip');
+    final client = GetIt.instance<MediaServerClient>() as _Client;
+    client.items.segments = [
+      segmentJson(id: 'intro', type: 'Intro', startMs: 5000, endMs: 10000),
+    ];
+    manager.queueService.setQueue([
+      const AggregatedItem(
+        id: 'preroll',
+        serverId: 'server',
+        rawData: {
+          'Id': 'preroll',
+          '__moonfinIsPreroll': true,
+          'RunTimeTicks': 900000000,
+          'Chapters': [{'StartPositionTicks': 0}],
+        },
+      ),
+      const AggregatedItem(
+        id: 'main',
+        serverId: 'server',
+        rawData: {
+          'Id': 'main',
+          'RunTimeTicks': 900000000,
+          'Chapters': [{'StartPositionTicks': 0}],
+        },
+      ),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const VideoPlayerScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Start with an ordinary Ask-to-Skip prompt while Cinema Skip is off.
+    final ordinary = find.byWidgetPredicate(
+      (widget) => widget is SkipSegmentOverlay &&
+          widget.segment.type == MediaSegmentType.intro,
+    );
+    manager.state.setPosition(const Duration(seconds: 6));
+    await tester.pump();
+    expect(ordinary, findsOneWidget);
+    final stalePress = tester.widget<SkipSegmentOverlay>(ordinary).onSkip;
+
+    // Enabling Cinema removes the ordinary prompt. A late press must do nothing.
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    await tester.pump();
+    expect(ordinary, findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is SkipSegmentOverlay &&
+            widget.segment.id.startsWith('__cinema_preroll__'),
+      ),
+      findsOneWidget,
+    );
+    stalePress();
+    await tester.pump();
+    expect(manager.seeks, isEmpty);
+    expect(manager.stopCalls, 0);
+    expect(manager.queueService.currentIndex, 0);
+
+    // Cinema Skip remains enabled, but normal segment prompts work on main media.
+    manager.queueService.next();
+    await tester.pumpAndSettle();
+    manager.state.setPosition(Duration.zero);
+    await tester.pump();
+    manager.state.setPosition(const Duration(seconds: 6));
+    await tester.pump();
+    expect(ordinary, findsOneWidget);
+    tester.widget<SkipSegmentOverlay>(ordinary).onSkip();
+    await tester.pump();
+    expect(manager.seeks, [const Duration(seconds: 10)]);
 
     await tester.pumpWidget(const SizedBox());
   });
