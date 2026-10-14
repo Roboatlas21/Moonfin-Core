@@ -2504,6 +2504,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _checkSegments(Duration position) {
+    // Cinema Skip owns pre-roll controls, including automatic segment actions.
+    if (_isCurrentPreroll && _cinemaSkip.enabled) return;
     final result = _segmentService.checkPosition(position);
     final replaceSkipOutroWithNextUp = _prefs.get(
       UserPreferences.replaceSkipOutroWithNextUp,
