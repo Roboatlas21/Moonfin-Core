@@ -293,7 +293,9 @@ void main() {
 
     // On the main item regular segment controls work, even while Cinema is on.
     queue.next();
-    await tester.pumpAndSettle();
+    // The tvOS startup spinner is animated, so pump bounded frames.
+    await tester.pump();
+    await tester.pump();
     playerState.setPosition(Duration.zero);
     await tester.pump();
     playerState.setPosition(const Duration(seconds: 6));
