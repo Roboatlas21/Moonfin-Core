@@ -13098,6 +13098,13 @@
   "@navYou": {
     "description": "Bottom bar tab that opens the user's own menu with their profile, extra destinations and settings"
   },
+  "cinemaSkipPrerolls": "Show Skip button for Cinema Mode pre-rolls",
+  "cinemaSkipPrerollsDescription": "Show a Skip button during Cinema Mode pre-rolls. Off by default.",
+  "cinemaMinimumIntroLength": "Minimum clip length to show Skip",
+  "cinemaMinimumIntroLengthDescription": "Show Skip only for Cinema Mode pre-rolls at least this long.",
+  "cinemaSkipCountdown": "Cinema Skip countdown",
+  "cinemaAutoHideButtons": "Auto-hide Skip button",
+  "cinemaAutoHideButtonsDescription": "Hide Skip after this many seconds of playback. Off disables automatic hiding.",
   "detailsPage": "Details Page",
   "@detailsPage": {
     "description": "Settings entry and screen for options that shape the details page"
