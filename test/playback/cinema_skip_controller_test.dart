@@ -46,7 +46,9 @@ void main() {
     fakeAsync((time) {
       final skip = CinemaSkipController(onSkip: () async {});
       skip.enter({'Id': 'clip'});
-      skip.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
+      skip.configure(enabled: true, minimumSeconds: 30, autoHideSeconds: 10);
+      expect(skip.visible, isFalse);
+      skip.updatePlayback(duration: const Duration(seconds: 29), playing: true);
       expect(skip.visible, isFalse);
       skip.updatePlayback(duration: const Duration(seconds: 30), playing: true);
       expect(skip.visible, isTrue);

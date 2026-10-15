@@ -117,12 +117,11 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         case "hideNextUp":
             playerVC?.hideNextUpCard()
         case "setCinemaSkipState":
-            // Retain the latest authoritative state if the native player has
-            // not yet been presented. Each update replaces the previous one.
+            // Save the latest Cinema Skip state until the native player is ready.
             lastCinemaSkipState = args
             playerVC?.applyCinemaSkipState(args)
         case "showSkipSegment":
-            // Ordinary segment prompts must not cover a Cinema pre-roll.
+            // Don't show regular Skip Segment prompts during Cinema Mode trailers.
             if (lastCinemaSkipState?["active"] as? Bool) != true {
                 playerVC?.showSkipSegment(
                     label: (args["label"] as? String) ?? "Skip",

@@ -37,7 +37,7 @@ class SkipSegmentOverlay extends StatefulWidget {
   /// time row instead of landing on top of it.
   final double bottomInset;
 
-  /// Right edge offset, overridden by Cinema Mode for touch safe areas.
+  /// Distance from the right edge. Cinema Mode adjusts this for touch safe areas.
   final double rightInset;
 
   const SkipSegmentOverlay({

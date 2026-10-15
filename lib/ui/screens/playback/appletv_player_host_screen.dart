@@ -110,8 +110,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   void _syncCinemaSkipButton() {
     final backend = _backend;
     if (!mounted || backend == null) return;
-    // Keep Cinema controls active for the whole pre-roll when opted in,
-    // including short clips and when auto-hide or Back hides the Skip button.
+    // Once enabled, Cinema Skip stays active even when its button is hidden.
     final active = _isCinemaPreroll && _cinemaSkip.enabled;
     final prefs = _prefsListened;
     final countdown = prefs == null
@@ -174,8 +173,8 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         if (state.phase == PlaybackBringupPhase.ready) {
           _pushSubtitleStyle(force: true);
         }
-        // The initial load may precede queue item resolution, so retry
-        // here. The per-item guard makes repeat events a no-op.
+        // The queue might not be ready at startup. Try loading segments again;
+        // duplicate loads are ignored.
         _loadSegmentsForCurrentItem();
       });
       _screensaverPlayingSub = manager.state.playingStream.listen((playing) {
@@ -1683,8 +1682,8 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       case 'pause':
         unawaited(manager.pause());
       case 'seek':
-        // Only system Forward Skip advances a Cinema pre-roll. Explicit
-        // position seeks and backward skips retain their normal behavior.
+        // Treat system Forward Skip as Skip Trailer. Regular seeks and
+        // Backward Skip work as usual.
         if (action['isForwardSkip'] == true &&
             _isCinemaPreroll &&
             _cinemaSkip.enabled) {
@@ -1735,7 +1734,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         }
         return;
       case 'skipSegment':
-        // A regular segment event must not advance an active Cinema pre-roll.
+        // Ignore regular Skip Segment events during Cinema Mode trailers.
         if (!_isCinemaPreroll || !_cinemaSkip.enabled) {
           _prompts?.handleSkipSegment();
         }

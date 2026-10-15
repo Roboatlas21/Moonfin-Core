@@ -614,7 +614,6 @@ class AppleTvBackend implements PlayerBackend {
     return presented ?? false;
   }
 
-  /// Native tvOS owns presentation; retain the last state until it is ready.
   Future<void> setCinemaSkipState(Map<String, Object?> state) =>
       _invoke<void>('setCinemaSkipState', state);
 

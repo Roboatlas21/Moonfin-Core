@@ -1920,7 +1920,6 @@ class UserPreferences extends ChangeNotifier {
     defaultValue: false,
   );
 
-  /// Cinema pre-rolls play through unless the viewer explicitly opts in.
   static final cinemaModeSkipEnabled = Preference(
     key: 'pref_cinema_mode_skip_enabled',
     defaultValue: false,
@@ -1934,7 +1933,7 @@ class UserPreferences extends ChangeNotifier {
 
   static final cinemaModeSkipMinDurationSeconds = Preference(
     key: 'pref_cinema_mode_skip_min_duration_seconds',
-    defaultValue: 15,
+    defaultValue: 30,
   );
 
   static final cinemaModeSkipAutoHide = EnumPreference(

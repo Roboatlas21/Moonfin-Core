@@ -2504,7 +2504,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _checkSegments(Duration position) {
-    // Cinema Skip owns pre-roll controls, including automatic segment actions.
+    // Don't run automatic segment skips or outro actions during Cinema Mode trailers.
     if (_isCurrentPreroll && _cinemaSkip.enabled) return;
     final result = _segmentService.checkPosition(position);
     final replaceSkipOutroWithNextUp = _prefs.get(
@@ -2744,7 +2744,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _skipCurrentSegment() {
-    // A stale ordinary Skip Segment callback must not override Cinema Skip.
+    // Ignore a Skip Segment press if Cinema Skip has since taken over.
     if (_isCurrentPreroll && _cinemaSkip.enabled) return;
     _noteViewerActivity();
     final replaceSkipOutroWithNextUp = _prefs.get(

@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:playback_core/playback_core.dart';
 
-/// Optional Skip control for Cinema Mode pre-rolls; no trailer lookup or Seerr.
+/// Manages the Skip button for Cinema Mode trailers.
 class CinemaSkipController extends ChangeNotifier {
   CinemaSkipController({required Future<void> Function() onSkip})
       : _onSkip = onSkip;
@@ -17,7 +17,7 @@ class CinemaSkipController extends ChangeNotifier {
   int? _previousReadyToken;
   Duration _duration = Duration.zero;
   int _generation = 0;
-  int _minimumSeconds = 15;
+  int _minimumSeconds = 30;
   int _autoHideSeconds = 15;
   bool _active = false;
   bool _enabled = false;
@@ -53,8 +53,7 @@ class CinemaSkipController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Reconcile queue changes and playback readiness in one place, shared by
-  /// Flutter playback and the native Apple TV host.
+  /// Keeps the Skip button in sync with playback on Flutter and Apple TV.
   void synchronize({
     required Object? item,
     required int index,
@@ -64,7 +63,7 @@ class CinemaSkipController extends ChangeNotifier {
     required Duration duration,
     required bool playing,
   }) {
-    // Reordering the queue must not restart a still-playing trailer.
+    // Changing the queue order shouldn't reset the current trailer.
     final playbackChanged =
         index != _queueIndex &&
         source.sessionToken != null &&
@@ -76,8 +75,8 @@ class CinemaSkipController extends ChangeNotifier {
       enter(preroll);
     }
     _queueIndex = index;
-    // Ignore a ready event from the outgoing pre-roll, even if its item ID
-    // matches the next pre-roll. Only the new playback session can update it.
+    // Ignore late ready events from the previous trailer, even if both
+    // trailers have the same ID.
     if (preroll == null ||
         source.phase != PlaybackBringupPhase.ready ||
         source.itemId != itemId ||
@@ -103,7 +102,7 @@ class CinemaSkipController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Call only when playback's ready token belongs to the current queue item.
+  /// Only update playback when the ready event belongs to the current trailer.
   void updatePlayback({
     required Duration duration,
     required bool playing,
@@ -120,7 +119,6 @@ class CinemaSkipController extends ChangeNotifier {
     }
   }
 
-  /// User interaction can reveal a control hidden by the timeout or Back.
   void reveal() {
     if (!eligible || _skipping) return;
     final wasVisible = visible;
@@ -146,7 +144,8 @@ class CinemaSkipController extends ChangeNotifier {
     }
   }
 
-  /// Fast Forward can skip short clips and clips whose button is hidden.
+  /// Fast Forward still works when the trailer is too short for a Skip button
+  /// or the button is hidden.
   void skip({bool requireVisible = true}) {
     if (!_active ||
         !_enabled ||
@@ -155,7 +154,7 @@ class CinemaSkipController extends ChangeNotifier {
         _skipCooldown?.isActive == true) {
       return;
     }
-    // Keep the debounce across queue changes, including very fast transitions.
+    // Keep the cooldown between trailers so two quick presses don't skip both.
     _skipCooldown = Timer(const Duration(milliseconds: 400), () {});
     _skipping = true;
     _hideTimer?.cancel();
@@ -164,7 +163,7 @@ class CinemaSkipController extends ChangeNotifier {
     notifyListeners();
     unawaited(
       Future<void>.sync(_onSkip).catchError((Object _) {}).whenComplete(() {
-        // An old Skip completion must not change the next pre-roll.
+        // Don't let a late Skip result affect the next trailer.
         if (ticket != _generation) return;
         _skipping = false;
         _restartTimer();

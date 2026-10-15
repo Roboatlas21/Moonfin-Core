@@ -71,7 +71,7 @@ final class AppleTvPlayerViewController: UIViewController {
     var onNextUpCancel: (() -> Void)?
     var onNextUpDismiss: (() -> Void)?
     var onSkipSegmentSelect: (() -> Void)?
-    /// Native remote actions route to Dart's CinemaSkipController.
+    /// Sends remote Skip actions back to Dart.
     var onCinemaSkipAction: ((String, Int) -> Void)?
     /// Fires with the target after a scrub or a direct jump the user made.
     /// Carrying the position lets the host hand it to SyncPlay, which is the
@@ -1439,8 +1439,8 @@ final class AppleTvPlayerViewController: UIViewController {
         pauseMeta = (overview: overview, imageUrl: (dict["imageUrl"] as? String) ?? "")
     }
 
-    /// Apply an authoritative Cinema state even when its Skip control is hidden.
-    /// The view may not be presented yet when Dart sends the first state.
+    /// Apply the latest Cinema Skip state, even if the button is hidden or
+    /// the player view hasn't appeared yet.
     func applyCinemaSkipState(_ args: [String: Any]) {
         loadViewIfNeeded()
         let wasActive = cinemaSkipActive
@@ -1529,7 +1529,7 @@ final class AppleTvPlayerViewController: UIViewController {
         UIView.animate(withDuration: 0.15) {
             self.skipSegmentButton.alpha = 0
         } completion: { _ in
-            // A newer trailer may have re-shown the control during this fade.
+            // Don't let an old fade-out hide the next trailer's Skip button.
             self.skipSegmentButton.isHidden = !self.skipSegmentActive
         }
     }
