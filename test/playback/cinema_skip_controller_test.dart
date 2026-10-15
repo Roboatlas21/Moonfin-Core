@@ -45,6 +45,52 @@ void main() {
     expect(controller.duration, const Duration(seconds: 90));
     sync(second, 1, ready('trailer', 8), const Duration(seconds: 30));
     expect(controller.duration, const Duration(seconds: 30));
+
+    // Reusing an item in a new playback session still resets the controller.
+    sync(second, 2, ready('trailer', 9), const Duration(seconds: 22));
+    expect(controller.generation, 3);
+    expect(controller.duration, const Duration(seconds: 22));
+  });
+
+  test('reindex preserves trailer duration and auto-hide', () {
+    fakeAsync((clock) {
+      final controller = CinemaSkipController(onSkip: () async {});
+      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
+      final item = Object();
+      const ready = PlaybackBringupState(
+        phase: PlaybackBringupPhase.ready,
+        sessionToken: 7,
+        itemId: 'trailer',
+      );
+
+      void sync(int index) => controller.synchronize(
+        item: item,
+        index: index,
+        preroll: {'Id': 'trailer'},
+        itemId: 'trailer',
+        source: ready,
+        duration: const Duration(seconds: 30),
+        playing: true,
+      );
+
+      sync(1);
+      expect(controller.generation, 1);
+      expect(controller.duration, const Duration(seconds: 30));
+      clock.elapse(const Duration(seconds: 7));
+
+      // Removing an earlier item changes the index, not the playing session.
+      sync(0);
+      expect(controller.generation, 1);
+      expect(controller.duration, const Duration(seconds: 30));
+      expect(controller.visible, isTrue);
+      clock.elapse(const Duration(seconds: 3));
+      expect(controller.visible, isFalse);
+
+      // Reordering after auto-hide must not reveal the button again.
+      sync(2);
+      expect(controller.visible, isFalse);
+      controller.dispose();
+    });
   });
 
   test('skipping stays opt-in and respects minimum clip length', () {

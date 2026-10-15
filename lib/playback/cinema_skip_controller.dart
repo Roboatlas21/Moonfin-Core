@@ -64,12 +64,18 @@ class CinemaSkipController extends ChangeNotifier {
     required Duration duration,
     required bool playing,
   }) {
-    if (!identical(item, _queueItem) || index != _queueIndex) {
+    // Reordering the queue must not restart a still-playing trailer.
+    final playbackChanged =
+        index != _queueIndex &&
+        source.sessionToken != null &&
+        source.sessionToken != _lastReadyToken &&
+        source.itemId == itemId;
+    if (!identical(item, _queueItem) || playbackChanged) {
       _previousReadyToken = _lastReadyToken;
       _queueItem = item;
-      _queueIndex = index;
       enter(preroll);
     }
+    _queueIndex = index;
     // Ignore a ready event from the outgoing pre-roll, even if its item ID
     // matches the next pre-roll. Only the new playback session can update it.
     if (preroll == null ||
