@@ -174,6 +174,7 @@ class AppleTvBackend implements PlayerBackend {
       case 'nextUpCancel':
       case 'nextUpDismiss':
       case 'skipSegment':
+      case 'cinemaSkipAction':
       case 'userSeeked':
       case 'searchSubtitles':
       case 'downloadSubtitle':
@@ -617,6 +618,9 @@ class AppleTvBackend implements PlayerBackend {
     final presented = await _invoke<bool>('showStillWatching');
     return presented ?? false;
   }
+
+  Future<void> setCinemaSkipState(Map<String, Object?> state) =>
+      _invoke<void>('setCinemaSkipState', state);
 
   Future<void> showSkipSegment(
     String label, {
