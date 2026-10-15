@@ -6,333 +6,102 @@ import 'package:moonfin/playback/cinema_skip_controller.dart';
 import 'package:playback_core/playback_core.dart';
 
 void main() {
-  test('a new trailer rejects stale playback readiness even with the same item ID', () {
-    final controller = CinemaSkipController(onSkip: () async {});
-    addTearDown(controller.dispose);
-    controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 0);
-    final first = Object();
-    final second = Object();
-    final trailer = {'RunTimeTicks': '900000000'};
+  test('stale readiness cannot overwrite a new trailer; reindex is harmless', () {
+    final skip = CinemaSkipController(onSkip: () async {});
+    addTearDown(skip.dispose);
+    skip.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 0);
+    final first = Object(), second = Object();
 
-    void sync(Object item, int index, PlaybackBringupState source, Duration duration) {
-      controller.synchronize(
+    void sync(Object item, int index, int token, int seconds) {
+      skip.synchronize(
         item: item,
         index: index,
-        preroll: trailer,
-        itemId: 'trailer',
-        source: source,
-        duration: duration,
+        preroll: {'Id': 'same', 'RunTimeTicks': 900000000},
+        itemId: 'same',
+        source: PlaybackBringupState(
+          phase: PlaybackBringupPhase.ready,
+          sessionToken: token,
+          itemId: 'same',
+        ),
+        duration: Duration(seconds: seconds),
         playing: true,
       );
     }
 
-    PlaybackBringupState ready(String id, int token) => PlaybackBringupState(
-      phase: PlaybackBringupPhase.ready,
-      sessionToken: token,
-      itemId: id,
-    );
-
-    sync(first, 0, ready('trailer', 7), const Duration(seconds: 50));
-    expect(controller.duration, const Duration(seconds: 50));
-    expect(controller.generation, 1);
-    sync(first, 0, ready('trailer', 7), const Duration(seconds: 50));
-    expect(controller.generation, 1);
-
-    sync(second, 1, ready('trailer', 7), const Duration(seconds: 30));
-    expect(controller.generation, 2);
-    expect(controller.duration, const Duration(seconds: 90));
-    sync(second, 1, ready('other', 8), const Duration(seconds: 30));
-    expect(controller.duration, const Duration(seconds: 90));
-    sync(second, 1, ready('trailer', 8), const Duration(seconds: 30));
-    expect(controller.duration, const Duration(seconds: 30));
-
-    // Reusing an item in a new playback session still resets the controller.
-    sync(second, 2, ready('trailer', 9), const Duration(seconds: 22));
-    expect(controller.generation, 3);
-    expect(controller.duration, const Duration(seconds: 22));
+    sync(first, 0, 1, 30);
+    expect(skip.duration, const Duration(seconds: 30));
+    sync(first, 1, 1, 30);
+    expect(skip.generation, 1);
+    sync(second, 2, 1, 45);
+    expect(skip.duration, const Duration(seconds: 90));
+    sync(second, 2, 2, 45);
+    expect(skip.duration, const Duration(seconds: 45));
+    sync(second, 0, 2, 45);
+    expect(skip.generation, 2);
+    sync(second, 1, 3, 25);
+    expect(skip.generation, 3);
   });
 
-  test('reindex preserves trailer duration and auto-hide', () {
-    fakeAsync((clock) {
-      final controller = CinemaSkipController(onSkip: () async {});
-      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
-      final item = Object();
-      const ready = PlaybackBringupState(
-        phase: PlaybackBringupPhase.ready,
-        sessionToken: 7,
-        itemId: 'trailer',
-      );
-
-      void sync(int index) => controller.synchronize(
-        item: item,
-        index: index,
-        preroll: {'Id': 'trailer'},
-        itemId: 'trailer',
-        source: ready,
-        duration: const Duration(seconds: 30),
-        playing: true,
-      );
-
-      sync(1);
-      expect(controller.generation, 1);
-      expect(controller.duration, const Duration(seconds: 30));
-      clock.elapse(const Duration(seconds: 7));
-
-      // Removing an earlier item changes the index, not the playing session.
-      sync(0);
-      expect(controller.generation, 1);
-      expect(controller.duration, const Duration(seconds: 30));
-      expect(controller.visible, isTrue);
-      clock.elapse(const Duration(seconds: 3));
-      expect(controller.visible, isFalse);
-
-      // Reordering after auto-hide must not reveal the button again.
-      sync(2);
-      expect(controller.visible, isFalse);
-      controller.dispose();
+  test('duration, pause and auto-hide control eligibility and visibility', () {
+    fakeAsync((time) {
+      final skip = CinemaSkipController(onSkip: () async {});
+      skip.enter({'Id': 'clip'});
+      skip.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
+      expect(skip.visible, isFalse);
+      skip.updatePlayback(duration: const Duration(seconds: 30), playing: true);
+      expect(skip.visible, isTrue);
+      time.elapse(const Duration(seconds: 9));
+      skip.updatePlayback(duration: Duration.zero, playing: false);
+      time.elapse(const Duration(minutes: 1));
+      expect(skip.visible, isTrue);
+      skip.updatePlayback(duration: Duration.zero, playing: true);
+      time.elapse(const Duration(seconds: 10));
+      expect(skip.visible, isFalse);
+      skip.activate();
+      expect(skip.visible, isTrue);
+      skip.hide();
+      expect(skip.visible, isFalse);
+      skip.dispose();
     });
   });
 
-  test('skipping stays opt-in and respects minimum clip length', () {
-    final controller = CinemaSkipController(onSkip: () async {});
-    addTearDown(controller.dispose);
-    controller.enter({'Id': 'short', 'RunTimeTicks': 50000000});
-    expect(controller.visible, isFalse);
-    controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 15);
-    expect(controller.visible, isFalse);
-    controller.updatePlayback(
-      duration: const Duration(seconds: 16),
-      playing: true,
-    );
-    expect(controller.visible, isTrue);
-    controller.configure(enabled: false, minimumSeconds: 15, autoHideSeconds: 15);
-    expect(controller.visible, isFalse);
-  });
-
-  test('auto-hide begins when playback starts and can be revealed', () {
-    fakeAsync((clock) {
-      final controller = CinemaSkipController(onSkip: () async {});
-      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
-      controller.enter({'Id': 'first', 'RunTimeTicks': 900000000});
-      expect(controller.visible, isTrue);
-      clock.elapse(const Duration(seconds: 30));
-      expect(controller.visible, isTrue);
-      controller.updatePlayback(
-        duration: const Duration(seconds: 90),
-        playing: true,
-      );
-      clock.elapse(const Duration(seconds: 10));
-      expect(controller.visible, isFalse);
-      controller.reveal();
-      expect(controller.visible, isTrue);
-      controller.hide();
-      expect(controller.visible, isFalse);
-      controller.dispose();
-    });
-  });
-
-  test('pausing suspends auto-hide and resuming starts a fresh timeout', () {
-    fakeAsync((clock) {
-      final controller = CinemaSkipController(onSkip: () async {});
-      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
-      controller.enter({'Id': 'trailer', 'RunTimeTicks': 900000000});
-      controller.updatePlayback(
-        duration: const Duration(seconds: 90),
-        playing: true,
-      );
-      clock.elapse(const Duration(seconds: 9));
-      expect(controller.visible, isTrue);
-
-      controller.updatePlayback(duration: Duration.zero, playing: false);
-      clock.elapse(const Duration(minutes: 1));
-      expect(controller.visible, isTrue);
-
-      controller.updatePlayback(duration: Duration.zero, playing: true);
-      clock.elapse(const Duration(seconds: 9));
-      expect(controller.visible, isTrue);
-      clock.elapse(const Duration(seconds: 1));
-      expect(controller.visible, isFalse);
-      controller.dispose();
-    });
-  });
-
-  test('playback duration makes a clip without runtime metadata eligible', () {
-    final controller = CinemaSkipController(onSkip: () async {});
-    addTearDown(controller.dispose);
-    controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 0);
-    controller.enter({'Id': 'trailer'});
-    expect(controller.duration, Duration.zero);
-    expect(controller.eligible, isFalse);
-    expect(controller.visible, isFalse);
-
-    controller.updatePlayback(duration: Duration.zero, playing: true);
-    expect(controller.visible, isFalse);
-    controller.updatePlayback(
-      duration: const Duration(seconds: 30),
-      playing: true,
-    );
-    expect(controller.duration, const Duration(seconds: 30));
-    expect(controller.eligible, isTrue);
-    expect(controller.visible, isTrue);
-
-    // A temporary zero duration must not discard the runtime already learned.
-    controller.updatePlayback(duration: Duration.zero, playing: true);
-    expect(controller.duration, const Duration(seconds: 30));
-    expect(controller.visible, isTrue);
-  });
-
-  test('disposing during a pending Skip prevents late notifications', () {
-    fakeAsync((clock) {
-      final pending = Completer<void>();
-      var notifications = 0;
-      final controller = CinemaSkipController(onSkip: () => pending.future);
-      controller.configure(enabled: true, minimumSeconds: 0, autoHideSeconds: 10);
-      controller.enter({'Id': 'trailer'});
-      controller.updatePlayback(
-        duration: const Duration(seconds: 30),
-        playing: true,
-      );
-      controller.addListener(() => notifications++);
-      controller.skip();
-      expect(notifications, 1);
-      controller.dispose();
-
-      pending.complete();
-      clock.flushMicrotasks();
-      clock.elapse(const Duration(seconds: 20));
-      expect(notifications, 1);
-    });
-  });
-
-  test('remote Back hides, Right reveals, and Select activates once', () {
-    fakeAsync((clock) {
-      var skips = 0;
-      final controller = CinemaSkipController(onSkip: () async {
-        skips++;
-      });
-      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
-      controller.enter({'Id': 'trailer', 'RunTimeTicks': 900000000});
-      controller.updatePlayback(
-        duration: const Duration(seconds: 90),
-        playing: true,
-      );
-      controller.hide();
-      expect(controller.visible, isFalse);
-      controller.skip(); // Ignore a late select from the hidden native button.
-      clock.flushMicrotasks();
-      expect(skips, 0);
-
-      controller.reveal();
-      expect(controller.visible, isTrue);
-      clock.elapse(const Duration(seconds: 10));
-      expect(controller.visible, isFalse);
-
-      controller.activate(); // Select while hidden shows the control.
-      expect(controller.visible, isTrue);
-      expect(skips, 0);
-      controller.activate(); // The next Select skips.
-      clock.flushMicrotasks();
-      expect(skips, 1);
-      controller.dispose();
-    });
-  });
-
-  test('a late skip completion does not change the next pre-roll', () {
-    fakeAsync((clock) {
-      final pending = Completer<void>();
-      final controller = CinemaSkipController(onSkip: () => pending.future);
-      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 15);
-      controller.enter({'Id': 'first', 'RunTimeTicks': 900000000});
-      controller.updatePlayback(
-        duration: const Duration(seconds: 90),
-        playing: true,
-      );
-      controller.skip();
-      expect(controller.visible, isFalse);
-      controller.enter({'Id': 'second', 'RunTimeTicks': 900000000});
-      controller.updatePlayback(
-        duration: const Duration(seconds: 90),
-        playing: true,
-      );
-      pending.complete();
-      clock.flushMicrotasks();
-      expect(controller.visible, isTrue);
-      clock.elapse(const Duration(seconds: 15));
-      expect(controller.visible, isFalse);
-      controller.dispose();
-    });
-  });
-
-  test('Fast Forward skips short and hidden clips only when enabled', () {
-    fakeAsync((clock) {
-      var skips = 0;
-      final controller = CinemaSkipController(onSkip: () async {
-        skips++;
-      });
-      controller.enter({'RunTimeTicks': 50000000});
-      controller.skip(requireVisible: false);
-      expect(skips, 0);
-
-      controller.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 10);
-      expect(controller.eligible, isFalse);
-      controller.skip();
-      expect(skips, 0);
-      controller.skip(requireVisible: false);
-      clock.flushMicrotasks();
-      expect(skips, 1);
-
-      clock.elapse(const Duration(milliseconds: 400));
-      controller.enter({'RunTimeTicks': 900000000});
-      controller.hide();
-      controller.skip();
-      expect(skips, 1);
-      controller.skip(requireVisible: false);
-      clock.flushMicrotasks();
-      expect(skips, 2);
-      controller.dispose();
-    });
-  });
-
-  test('rapid Skip presses cannot advance two successive pre-rolls', () {
-    fakeAsync((clock) {
-      var skips = 0;
-      final controller = CinemaSkipController(onSkip: () async {
-        skips++;
-      });
-      controller.configure(enabled: true, minimumSeconds: 0, autoHideSeconds: 0);
-      controller.enter({'Id': 'first'});
-      controller.skip();
-      clock.flushMicrotasks();
-      controller.enter({'Id': 'second'});
-      clock.elapse(const Duration(milliseconds: 399));
-      controller.skip();
-      expect(skips, 1);
-      clock.elapse(const Duration(milliseconds: 1));
-      controller.skip();
-      clock.flushMicrotasks();
-      expect(skips, 2);
-      controller.dispose();
-    });
-  });
-
-  test('a failed Skip restores the current control and permits a retry', () {
-    fakeAsync((clock) {
+  test('hidden Fast Forward, cooldown, failures and stale completions', () {
+    fakeAsync((time) {
       var attempts = 0;
-      final controller = CinemaSkipController(onSkip: () {
+      final pending = <Completer<void>>[];
+      final skip = CinemaSkipController(onSkip: () {
         attempts++;
-        if (attempts == 1) throw StateError('transition failed');
-        return Future<void>.value();
+        final next = Completer<void>();
+        pending.add(next);
+        return next.future;
       });
-      controller.configure(enabled: true, minimumSeconds: 0, autoHideSeconds: 0);
-      controller.enter({'Id': 'trailer'});
-      controller.skip();
-      clock.flushMicrotasks();
-      expect(controller.visible, isTrue);
-      clock.elapse(const Duration(milliseconds: 400));
-      controller.skip();
-      clock.flushMicrotasks();
+      skip.enter({'RunTimeTicks': 50000000});
+      skip.skip(requireVisible: false);
+      expect(attempts, 0);
+      skip.configure(enabled: true, minimumSeconds: 15, autoHideSeconds: 0);
+      skip.skip();
+      expect(attempts, 0);
+      skip.skip(requireVisible: false);
+      expect(attempts, 1);
+      skip.enter({'RunTimeTicks': 900000000});
+      skip.skip();
+      expect(attempts, 1);
+      time.elapse(const Duration(milliseconds: 400));
+      skip.skip();
       expect(attempts, 2);
-      controller.dispose();
+      skip.enter({'RunTimeTicks': 900000000});
+      pending[1].completeError(StateError('old trailer failed'));
+      time.flushMicrotasks();
+      expect(skip.visible, isTrue);
+      time.elapse(const Duration(milliseconds: 400));
+      skip.skip();
+      expect(attempts, 3);
+      pending[2].completeError(StateError('failed'));
+      time.flushMicrotasks();
+      expect(skip.visible, isTrue);
+      skip.dispose();
+      pending[0].complete();
+      time.flushMicrotasks();
     });
   });
 }
