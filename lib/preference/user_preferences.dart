@@ -1938,7 +1938,7 @@ class UserPreferences extends ChangeNotifier {
 
   static final cinemaModeSkipAutoHide = EnumPreference(
     key: 'pref_cinema_mode_skip_auto_hide',
-    defaultValue: MediaSegmentAutoHide.s15,
+    defaultValue: MediaSegmentAutoHide.s10,
     values: MediaSegmentAutoHide.values,
   );
 

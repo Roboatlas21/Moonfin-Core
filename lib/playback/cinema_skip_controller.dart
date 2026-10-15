@@ -18,7 +18,7 @@ class CinemaSkipController extends ChangeNotifier {
   Duration _duration = Duration.zero;
   int _generation = 0;
   int _minimumSeconds = 30;
-  int _autoHideSeconds = 15;
+  int _autoHideSeconds = 10;
   bool _active = false;
   bool _enabled = false;
   bool _wanted = false;
