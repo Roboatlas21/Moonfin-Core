@@ -7,6 +7,7 @@ import 'package:playback_core/playback_core.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/services/cast/cast_service.dart';
 import 'package:moonfin/data/services/cast/cast_target.dart';
 import 'package:moonfin/data/services/cast/native_airplay_channel.dart';
@@ -20,10 +21,22 @@ import 'package:moonfin/playback/playback_lifecycle_handler.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/screens/playback/video_player_screen.dart';
 import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
+import 'package:moonfin/ui/widgets/playback/skip_segment_overlay.dart';
+import 'package:moonfin/util/platform_detection.dart';
+
+import '../util/media_segment_fakes.dart';
 
 class _Client extends Fake implements MediaServerClient {
+  final items = FakeItemsApi();
+
   @override
   ServerType get serverType => ServerType.jellyfin;
+
+  @override
+  ItemsApi get itemsApi => items;
+
+  @override
+  TrickplayApi? get trickplayApi => null;
 }
 
 class _Factory extends Fake implements MediaServerClientFactory {
@@ -50,15 +63,37 @@ class _Screensaver extends Fake implements ScreensaverController {
 
 class _Lifecycle extends Fake implements PlaybackLifecycleHandler {}
 
+class _PlaybackManager extends PlaybackManager {
+  final seeks = <Duration>[];
+  int stopCalls = 0;
+  int nextInQueueCalls = 0;
+
+  @override
+  Future<void> seekTo(Duration position) async {
+    seeks.add(position);
+  }
+
+  @override
+  Future<void> stop({bool userInitiated = true}) async {
+    stopCalls++;
+  }
+
+  @override
+  Future<void> nextInQueue() async {
+    nextInQueueCalls++;
+    queueService.next();
+  }
+}
+
 void main() {
-  late PlaybackManager manager;
+  late _PlaybackManager manager;
   late PipService pip;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     final store = PreferenceStore();
     await store.init();
-    manager = PlaybackManager();
+    manager = _PlaybackManager();
     GetIt.instance.registerSingleton<PlaybackManager>(manager);
     GetIt.instance.registerSingleton<UserPreferences>(UserPreferences(store));
     GetIt.instance.registerSingleton<MediaServerClient>(_Client());
@@ -80,6 +115,95 @@ void main() {
     manager.dispose();
     pip.dispose();
     await GetIt.instance.reset();
+  });
+
+  Future<void> mountPlayer(WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const VideoPlayerScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('Back hides, Right reveals, Select and Fast Forward advance', (
+    tester,
+  ) async {
+    PlatformDetection.setTvMode(true);
+    addTearDown(() => PlatformDetection.setTvMode(false));
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.cinemaModeSkipEnabled,
+      true,
+    );
+    manager.queueService.setQueue([
+      {'Id': 'first', '__moonfinIsPreroll': true, 'RunTimeTicks': 900000000},
+      {'Id': 'second', '__moonfinIsPreroll': true, 'RunTimeTicks': 450000000},
+      {'Id': 'short', '__moonfinIsPreroll': true, 'RunTimeTicks': 50000000},
+    ]);
+    await mountPlayer(tester);
+    final button = find.byType(SkipSegmentOverlay);
+    expect(
+      tester.widget<SkipSegmentOverlay>(button).focusNode!.hasPrimaryFocus,
+      isTrue,
+    );
+    await tester.sendKeyEvent(
+      LogicalKeyboardKey.goBack,
+      physicalKey: PhysicalKeyboardKey.escape,
+    );
+    await tester.pumpAndSettle();
+    expect(button, findsNothing);
+    expect(manager.queueService.currentIndex, 0);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(button, findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pumpAndSettle();
+    expect(manager.queueService.currentIndex, 1);
+    expect(tester.widget<SkipSegmentOverlay>(button).segment.itemId, 'second');
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
+    await tester.pump();
+    expect(manager.queueService.currentIndex, 2);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('short Cinema pre-roll blocks ordinary intro/outro actions', (
+    tester,
+  ) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    await prefs.set(UserPreferences.mediaSegmentActions, 'intro:skip,outro:skip');
+    (GetIt.instance<MediaServerClient>() as _Client).items.segments = [
+      segmentJson(id: 'intro', type: 'Intro', startMs: 1000, endMs: 2000),
+      segmentJson(id: 'outro', type: 'Outro', startMs: 3000, endMs: 4000),
+    ];
+    manager.queueService.setQueue([
+      const AggregatedItem(
+        id: 'short',
+        serverId: 'server',
+        rawData: {
+          'Id': 'short',
+          '__moonfinIsPreroll': true,
+          'RunTimeTicks': 50000000,
+          'Chapters': [{'StartPositionTicks': 0}],
+        },
+      ),
+    ]);
+    await mountPlayer(tester);
+    expect(find.byType(SkipSegmentOverlay), findsNothing);
+    manager.state.setPosition(const Duration(milliseconds: 1500));
+    await tester.pump();
+    manager.state.setPosition(const Duration(milliseconds: 3500));
+    await tester.pump();
+    expect(manager.seeks, isEmpty);
+    expect(manager.stopCalls, 0);
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, false);
+    manager.state.setPosition(const Duration(milliseconds: 1500));
+    await tester.pump();
+    expect(manager.seeks, [const Duration(seconds: 2)]);
+    await tester.pumpWidget(const SizedBox());
   });
 
   // Issue #1688: a resume that takes longer than the hide delay to start
