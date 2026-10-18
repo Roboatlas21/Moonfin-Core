@@ -28,6 +28,37 @@ void main() {
       expect(payload['passthroughCodecs'], isA<List<String>>());
     });
 
+    test('auto reports coarse TrueHD capabilities to the native player', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      PlatformDetection.setTvMode(true);
+      addTearDown(() {
+        debugDefaultTargetPlatformOverride = null;
+        PlatformDetection.setTvMode(false);
+        PlatformDetection.setAudioCapabilities(null);
+      });
+
+      final prefs = await _prefs();
+      PlatformDetection.setAudioCapabilities({
+        'activeRouteType': 'earc',
+        'canPassthroughAc3': true,
+        'canPassthroughTrueHd': false,
+      });
+      var codecs =
+          Media3PlayerBackend.audioDecoderPreferencesPayload(prefs)['passthroughCodecs']
+              as List<String>;
+      expect(codecs, contains('ac3'));
+      expect(codecs, isNot(contains('truehd')));
+
+      PlatformDetection.setAudioCapabilities({
+        'activeRouteType': 'earc',
+        'canPassthroughTrueHd': true,
+      });
+      codecs = Media3PlayerBackend.audioDecoderPreferencesPayload(
+        prefs,
+      )['passthroughCodecs'] as List<String>;
+      expect(codecs, contains('truehd'));
+    });
+
     test('disabled mode sends an empty codec list', () async {
       final prefs = await _prefs();
       await prefs.set(
@@ -79,6 +110,24 @@ void main() {
 
       expect(payload['passthroughCodecs'], isNot(contains('dtshd')));
       expect(payload['passthroughCodecs'], isNot(contains('dts')));
+    });
+
+    test('manual TrueHD off overrides detected bitstream capability', () async {
+      final prefs = await _prefs();
+      addTearDown(() => PlatformDetection.setAudioCapabilities(null));
+      PlatformDetection.setAudioCapabilities({
+        'activeRouteType': 'earc',
+        'canPassthroughTrueHd': true,
+      });
+      await prefs.set(
+        UserPreferences.audioPassthroughMode,
+        AudioPassthroughMode.manual,
+      );
+      await prefs.set(UserPreferences.trueHdPassthroughEnabled, false);
+
+      final payload = Media3PlayerBackend.audioDecoderPreferencesPayload(prefs);
+      expect(payload['passthroughMode'], 'manual');
+      expect(payload['passthroughCodecs'], isNot(contains('truehd')));
     });
 
     test('downmix preference is forwarded', () async {

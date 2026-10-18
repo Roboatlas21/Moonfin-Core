@@ -84,4 +84,53 @@ void main() {
       expect(unenumerated.isDowngradeFrom(hdmi), isTrue);
     });
   });
+
+  group('TrueHD 7.1 / 48 kHz settings indicator', () {
+    test('reference status is independent from Manual or Auto capability', () {
+      final p = AudioCapabilityProfile.fromMap({
+        'activeRouteType': 'earc',
+        'canPassthroughTrueHd': true,
+        'trueHd71BitstreamStatus': 'unsupported',
+      });
+
+      expect(p.canPassthroughTrueHd, isTrue);
+      expect(p.trueHd71BitstreamStatus, TrueHd71BitstreamStatus.unsupported);
+      expect(p.toMap()['trueHd71BitstreamStatus'], 'unsupported');
+      expect(
+        AudioCapabilityProfile.fromMap(p.toMap()).trueHd71BitstreamStatus,
+        TrueHd71BitstreamStatus.unsupported,
+      );
+    });
+
+    test('supported bitstream flag survives profile serialization', () {
+      final p = AudioCapabilityProfile.fromMap({
+        'activeRouteType': 'hdmi',
+        'canPassthroughTrueHd': false,
+        'trueHd71BitstreamStatus': 'supported',
+      });
+
+      expect(p.canPassthroughTrueHd, isFalse);
+      expect(p.trueHd71BitstreamStatus, TrueHd71BitstreamStatus.supported);
+      expect(
+        AudioCapabilityProfile.fromMap(p.toMap()).trueHd71BitstreamStatus,
+        TrueHd71BitstreamStatus.supported,
+      );
+    });
+
+    test('missing or invalid reference status stays unknown', () {
+      expect(
+        AudioCapabilityProfile.fromMap({
+          'activeRouteType': 'earc',
+          'canPassthroughTrueHd': true,
+        }).trueHd71BitstreamStatus,
+        TrueHd71BitstreamStatus.unknown,
+      );
+      expect(
+        AudioCapabilityProfile.fromMap({
+          'trueHd71BitstreamStatus': 'garbled',
+        }).trueHd71BitstreamStatus,
+        TrueHd71BitstreamStatus.unknown,
+      );
+    });
+  });
 }
