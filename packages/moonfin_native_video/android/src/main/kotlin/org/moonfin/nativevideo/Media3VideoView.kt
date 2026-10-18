@@ -123,6 +123,7 @@ private class MoonfinRenderersFactory(
     private val channelMixingProcessor: ChannelMixingAudioProcessor,
     private val preferSoftwareAv1Renderer: Boolean,
     private val passthroughPolicy: AudioPassthroughPolicy,
+    private val trueHdAutoProbe: TrueHdBitstreamProbe,
     private val stereoDownmixRequested: () -> Boolean,
     private val onPassthroughRecoveryNeeded: (String) -> Unit,
     private val iecOutputProvider: Iec61937AudioOutputProvider?,
@@ -260,13 +261,11 @@ private class MoonfinRenderersFactory(
             flap = RouteFlapHold(),
             onRecoveryNeeded = onPassthroughRecoveryNeeded,
         )
-        // Auto skips the policy veto so the platform's own format probe
-        // stays authoritative. The recovery wrapper forwards every probe
-        // call untouched, so it rides along in every mode.
-        if (passthroughPolicy.mode == PassthroughMode.AUTO) {
-            return recovering
-        }
-        return PassthroughPolicyAudioSink(recovering, passthroughPolicy)
+        // Only Auto-mode TrueHD uses the track-specific API 33+ probe.
+        // Unknown results, older Android, and other formats use Media3's sink.
+        return PassthroughPolicyAudioSink(
+            recovering, passthroughPolicy, trueHdAutoProbe::supportsBitstream,
+        )
     }
 
     private fun buildAv1ExtensionRenderer(
@@ -783,6 +782,9 @@ class Media3VideoView(
     private var passthroughMode = Media3Bridge.passthroughMode()
     private var passthroughCodecs = Media3Bridge.passthroughCodecs()
     private var passthroughOutput = Media3Bridge.passthroughOutput()
+    private val trueHdAutoProbe = TrueHdBitstreamProbe(context) { details ->
+        Media3Bridge.emitEvent(mapOf("event" to "trueHdAutoProbe", "details" to details))
+    }
     // Present only while the IEC output mode is active. The provider is
     // chosen at buildAudioSink time, so changes ride the rebuild-on-dirty
     // path like the other passthrough preferences.
@@ -1802,6 +1804,7 @@ class Media3VideoView(
             channelMixingProcessor = channelMixingProcessor,
             preferSoftwareAv1Renderer = !hasHardwareAv1Decoder,
             passthroughPolicy = passthroughPolicy,
+            trueHdAutoProbe = trueHdAutoProbe,
             stereoDownmixRequested = ::effectiveStereoDownmix,
             onPassthroughRecoveryNeeded = ::recoverPassthroughSilence,
             iecOutputProvider = iecOutputProvider,

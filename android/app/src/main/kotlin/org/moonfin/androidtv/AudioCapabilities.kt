@@ -90,6 +90,7 @@ object AudioCapabilities {
             if (activeDevices.isNotEmpty()) activeDevices else outputDevices
         val routeType = classifyRoute(routeDevices.map { it.type }.toSet())
         val routeSupportsHdAudio = routeType == ROUTE_EARC
+        val activeBitstreamRoute = routeDevices.any(::isBitstreamOutputDevice)
         val allowSpeakerDolbyFallback =
             routeType == ROUTE_SPEAKER || routeType == ROUTE_OTHER
 
@@ -112,6 +113,8 @@ object AudioCapabilities {
         var canPassthroughDts = encodings.contains(AudioFormat.ENCODING_DTS)
         var canPassthroughDtsHd = encodings.contains(AudioFormat.ENCODING_DTS_HD)
         var canPassthroughTrueHd = encodings.contains(AudioFormat.ENCODING_DOLBY_TRUEHD)
+        var trueHdDirectPlaybackFlags = -1
+        var trueHd71BitstreamStatus = "unknown"
 
         if (allowSpeakerDolbyFallback) {
             canPassthroughAc3 =
@@ -138,6 +141,22 @@ object AudioCapabilities {
                 canPassthroughDtsHd ||
                     directProfileEncodings.contains(AudioFormat.ENCODING_DTS_HD) ||
                     supportsDirectPlaybackApi33(audioManager, AudioFormat.ENCODING_DTS_HD)
+            // The settings indicator uses a single representative TrueHD
+            // format: 7.1 channels at 48 kHz. Unlike the broad capability
+            // below, only an explicit BITSTREAM flag counts as supported.
+            // Playback Auto still probes the exact selected track separately.
+            val referenceHdRoute =
+                activeDevices.any(::isBitstreamOutputDevice) &&
+                    (routeType == ROUTE_HDMI || routeType == ROUTE_EARC)
+            trueHdDirectPlaybackFlags =
+                if (referenceHdRoute) queryTrueHd71DirectPlaybackFlagsApi33() ?: -1
+                else -1
+            trueHd71BitstreamStatus = trueHd71ReferenceStatus(
+                routeKnown = activeDevices.isNotEmpty(),
+                onHdBitstreamRoute = referenceHdRoute,
+                directPlaybackFlags = trueHdDirectPlaybackFlags.takeIf { it >= 0 },
+                bitstreamFlag = AudioManager.DIRECT_PLAYBACK_BITSTREAM_SUPPORTED,
+            )
             canPassthroughTrueHd =
                 canPassthroughTrueHd ||
                     directProfileEncodings.contains(AudioFormat.ENCODING_DOLBY_TRUEHD) ||
@@ -189,6 +208,14 @@ object AudioCapabilities {
             "canPassthroughDts" to canPassthroughDts,
             "canPassthroughDtsHd" to canPassthroughDtsHd,
             "canPassthroughTrueHd" to canPassthroughTrueHd,
+            "trueHdDirectPlaybackFlags" to trueHdDirectPlaybackFlags,
+            "trueHdActiveBitstreamRoute" to activeBitstreamRoute,
+            "trueHdBitstreamFlagReported" to trueHdBitstreamSupported(
+                activeBitstreamRoute,
+                trueHdDirectPlaybackFlags,
+                AudioManager.DIRECT_PLAYBACK_BITSTREAM_SUPPORTED,
+            ),
+            "trueHd71BitstreamStatus" to trueHd71BitstreamStatus,
             "canIecLow" to canIecLow,
             "canIecMid" to canIecMid,
             "canIecHbr" to canIecHbr,
@@ -254,6 +281,16 @@ object AudioCapabilities {
             .map { profile -> profile.format }
             .toSet()
     }
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun queryTrueHd71DirectPlaybackFlagsApi33(): Int? = runCatching {
+        val format = AudioFormat.Builder()
+            .setEncoding(AudioFormat.ENCODING_DOLBY_TRUEHD)
+            .setChannelMask(AudioFormat.CHANNEL_OUT_7POINT1_SURROUND)
+            .setSampleRate(48_000)
+            .build()
+        AudioManager.getDirectPlaybackSupport(format, directAudioAttributes)
+    }.getOrNull()
 
     @RequiresApi(Build.VERSION_CODES.TIRAMISU)
     private fun supportsDirectPlaybackApi33(audioManager: AudioManager, encoding: Int): Boolean {
@@ -441,3 +478,28 @@ object AudioCapabilities {
         }
     }
 }
+
+/**
+ * The settings indicator checks TrueHD 7.1 / 48 kHz. Unknown does not
+ * imply unsupported (Android < 13, missing route, or failed probe).
+ * This status only describes Android's bitstream report, not playback quality.
+ */
+internal fun trueHd71ReferenceStatus(
+    routeKnown: Boolean,
+    onHdBitstreamRoute: Boolean,
+    directPlaybackFlags: Int?,
+    bitstreamFlag: Int,
+): String = when {
+    !routeKnown -> "unknown"
+    !onHdBitstreamRoute -> "unsupported"
+    directPlaybackFlags == null -> "unknown"
+    (directPlaybackFlags and bitstreamFlag) != 0 -> "supported"
+    else -> "unsupported"
+}
+
+/** TrueHD bitstream support in the coarse device profile, not a track veto. */
+internal fun trueHdBitstreamSupported(
+    hasActiveBitstreamRoute: Boolean,
+    directPlaybackFlags: Int,
+    bitstreamFlag: Int,
+): Boolean = hasActiveBitstreamRoute && (directPlaybackFlags and bitstreamFlag) != 0

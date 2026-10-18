@@ -403,6 +403,8 @@ class Media3PlayerBackend extends PlayerBackend {
           '${map['message'] ?? ''}',
           level: LogLevel.warning,
         );
+      case 'trueHdAutoProbe':
+        _diag('Media3: TrueHD Auto ${map['details'] ?? ''}');
       case 'audioSinkError':
         final deadObject = map['deadObject'] == true;
         _diag(

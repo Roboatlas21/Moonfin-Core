@@ -74,6 +74,15 @@ class AudioCapabilityProbe {
         'audioCapabilities',
       );
       if (raw == null) return null;
+      if (raw.containsKey('trueHdDirectPlaybackFlags')) {
+        _log(
+          'audio probe: TrueHD 7.1/48kHz directFlags=${raw['trueHdDirectPlaybackFlags']} '
+          'activeBitstreamRoute=${raw['trueHdActiveBitstreamRoute']} '
+          'status=${raw['trueHd71BitstreamStatus']} '
+          '(Media3 Auto probes the selected track separately)',
+          level: LogLevel.debug,
+        );
+      }
       return AudioCapabilityProfile.fromMap(
         raw.map((key, value) => MapEntry(key.toString(), value)),
       );

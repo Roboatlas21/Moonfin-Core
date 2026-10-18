@@ -2,6 +2,9 @@ import '../util/platform_detection.dart';
 
 enum AudioRouteType { hdmi, arc, earc, bluetooth, speaker, headphones, other }
 
+/// Android's bitstream report for the reference TrueHD 7.1 / 48 kHz format.
+enum TrueHd71BitstreamStatus { supported, unsupported, unknown }
+
 class AudioCapabilityProfile {
   const AudioCapabilityProfile({
     required this.canDecodeAc3,
@@ -15,6 +18,7 @@ class AudioCapabilityProfile {
     required this.canPassthroughDts,
     required this.canPassthroughDtsHd,
     required this.canPassthroughTrueHd,
+    this.trueHd71BitstreamStatus = TrueHd71BitstreamStatus.unknown,
     this.canIecLow = false,
     this.canIecMid = false,
     this.canIecHbr = false,
@@ -35,6 +39,7 @@ class AudioCapabilityProfile {
       canPassthroughDts = false,
       canPassthroughDtsHd = false,
       canPassthroughTrueHd = false,
+      trueHd71BitstreamStatus = TrueHd71BitstreamStatus.unknown,
       canIecLow = false,
       canIecMid = false,
       canIecHbr = false,
@@ -61,6 +66,8 @@ class AudioCapabilityProfile {
   final bool canPassthroughDts;
   final bool canPassthroughDtsHd;
   final bool canPassthroughTrueHd;
+  // Display-only status: does not alter Auto or Manual passthrough decisions.
+  final TrueHd71BitstreamStatus trueHd71BitstreamStatus;
 
   // IEC 61937 carrier support for the Media3 app-side packer ("AudioTrack
   // (IEC)"): stream-rate stereo, 192 kHz stereo, and 192 kHz 8-channel HBR.
@@ -178,6 +185,11 @@ class AudioCapabilityProfile {
       canPassthroughTrueHd:
           isHdRoute &&
           _readBool(values, 'canPassthroughTrueHd', defaultValue: legacyTrueHd),
+      trueHd71BitstreamStatus: switch (values['trueHd71BitstreamStatus']) {
+        'supported' => TrueHd71BitstreamStatus.supported,
+        'unsupported' => TrueHd71BitstreamStatus.unsupported,
+        _ => TrueHd71BitstreamStatus.unknown,
+      },
       // Absent keys stay false so a stale capability cache can never turn IEC
       // eligibility on by accident.
       canIecLow: _readBool(values, 'canIecLow', defaultValue: false),
@@ -209,6 +221,7 @@ class AudioCapabilityProfile {
       'canPassthroughDts': canPassthroughDts,
       'canPassthroughDtsHd': canPassthroughDtsHd,
       'canPassthroughTrueHd': canPassthroughTrueHd,
+      'trueHd71BitstreamStatus': trueHd71BitstreamStatus.name,
       'canIecLow': canIecLow,
       'canIecMid': canIecMid,
       'canIecHbr': canIecHbr,

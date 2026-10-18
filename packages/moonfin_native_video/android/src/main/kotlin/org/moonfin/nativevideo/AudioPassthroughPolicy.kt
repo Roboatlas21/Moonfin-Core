@@ -18,10 +18,12 @@ data class AudioPassthroughPolicy(
     val mode: PassthroughMode,
     val allowedCodecs: Set<String>,
 ) {
-    fun allowsBitstream(mimeType: String?): Boolean {
+    fun allowsBitstream(mimeType: String?, autoTrueHdSupported: Boolean? = null): Boolean {
         val codec = codecKeyForMime(mimeType) ?: return true
         return when (mode) {
-            PassthroughMode.AUTO -> true
+            // A definite format-specific failure vetoes TrueHD. Unknown and
+            // older Android retain Media3's existing sink decision.
+            PassthroughMode.AUTO -> codec != "truehd" || autoTrueHdSupported != false
             PassthroughMode.DISABLED -> false
             PassthroughMode.MANUAL -> codec in allowedCodecs
         }
@@ -72,23 +74,28 @@ data class AudioPassthroughPolicy(
 class PassthroughPolicyAudioSink(
     delegate: AudioSink,
     private val policy: AudioPassthroughPolicy,
+    private val autoTrueHdProbe: (Format) -> Boolean? = { null },
 ) : ForwardingAudioSink(delegate) {
+    private fun allowsFormat(format: Format): Boolean {
+        val supported = if (
+            policy.mode == PassthroughMode.AUTO &&
+            format.sampleMimeType == MimeTypes.AUDIO_TRUEHD
+        ) autoTrueHdProbe(format) else null
+        return policy.allowsBitstream(format.sampleMimeType, supported)
+    }
+
     override fun supportsFormat(format: Format): Boolean {
-        if (!policy.allowsBitstream(format.sampleMimeType)) return false
+        if (!allowsFormat(format)) return false
         return super.supportsFormat(format)
     }
 
     override fun getFormatSupport(format: Format): Int {
-        if (!policy.allowsBitstream(format.sampleMimeType)) {
-            return AudioSink.SINK_FORMAT_UNSUPPORTED
-        }
+        if (!allowsFormat(format)) return AudioSink.SINK_FORMAT_UNSUPPORTED
         return super.getFormatSupport(format)
     }
 
     override fun getFormatOffloadSupport(format: Format): AudioOffloadSupport {
-        if (!policy.allowsBitstream(format.sampleMimeType)) {
-            return AudioOffloadSupport.DEFAULT_UNSUPPORTED
-        }
+        if (!allowsFormat(format)) return AudioOffloadSupport.DEFAULT_UNSUPPORTED
         return super.getFormatOffloadSupport(format)
     }
 }

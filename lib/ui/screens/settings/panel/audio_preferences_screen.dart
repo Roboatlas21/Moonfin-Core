@@ -171,6 +171,20 @@ class _AudioPreferencesScreenState extends State<_AudioPreferencesScreen> {
     return '$baseSubtitle\n${l10n.status}: $status';
   }
 
+  String _trueHdCapabilitySubtitle(
+    AppLocalizations l10n,
+    TrueHd71BitstreamStatus support,
+  ) {
+    final base = l10n.settingsAudioTrueHdIncludesAtmos;
+    if (!(PlatformDetection.isAndroid && PlatformDetection.isTV)) return base;
+    final result = switch (support) {
+      TrueHd71BitstreamStatus.supported => l10n.supportedOnThisDevice,
+      TrueHd71BitstreamStatus.unsupported => l10n.notSupportedOnThisDevice,
+      TrueHd71BitstreamStatus.unknown => l10n.unknown,
+    };
+    return '$base\n${l10n.status} (Android TrueHD 7.1 / 48 kHz bitstream): $result';
+  }
+
   /// Manual mode only makes sense where the per-format toggles render.
   List<AudioPassthroughMode> get _availableModes => _showPassthroughToggles
       ? const [
@@ -385,10 +399,9 @@ class _AudioPreferencesScreenState extends State<_AudioPreferencesScreen> {
                   SwitchPreferenceTile(
                     preference: UserPreferences.trueHdPassthroughEnabled,
                     title: l10n.settingsAudioTrueHdPassthrough,
-                    subtitle: _capabilitySubtitle(
+                    subtitle: _trueHdCapabilitySubtitle(
                       l10n,
-                      baseSubtitle: l10n.settingsAudioTrueHdIncludesAtmos,
-                      isSupported: capabilities.canPassthroughTrueHd,
+                      capabilities.trueHd71BitstreamStatus,
                     ),
                     icon: Icons.graphic_eq,
                   ),
