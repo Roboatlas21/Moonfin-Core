@@ -47,6 +47,7 @@ internal class SecondarySubtitleOverlay(
     private var selectedUrl: String? = null
     private var selectedCodec: String? = null
     private var delayMs = 0L
+    private var embeddedCues: List<TimedTextCue>? = null
     private var lastRenderedText: String? = null
     private var baseTextColor = Color.WHITE
     private var baseBackgroundColor = Color.TRANSPARENT
@@ -78,7 +79,8 @@ internal class SecondarySubtitleOverlay(
     /** Selecting the track that's already loaded keeps its cues instead of fetching it again. */
     fun select(url: String?, codec: String?) {
         if (disposed) return
-        if (url == selectedUrl && codec == selectedCodec) return
+        if (embeddedCues == null && url == selectedUrl && codec == selectedCodec) return
+        embeddedCues = null
         generation++
         val requestGeneration = generation
         selectedUrl = url
@@ -124,6 +126,40 @@ internal class SecondarySubtitleOverlay(
         } catch (_: RejectedExecutionException) {
             // dispose() may race with a late source update from the platform view.
         }
+    }
+
+    /** Cues decoded by the second Media3 renderer need no download or parser. */
+    fun selectEmbedded() {
+        generation++ // Any old sidecar completion no longer owns the view.
+        selectedUrl = null
+        selectedCodec = null
+        timeline = null
+        embeddedCues = emptyList()
+        lastRenderedText = null
+        view.setCues(emptyList())
+        updatePrimaryOffset()
+    }
+
+    fun updateEmbeddedCues(cues: List<Cue>) {
+        if (embeddedCues == null || disposed) return
+        embeddedCues = cues.filter { it.text != null }.map { cue ->
+            TimedTextCue(
+                0, Long.MAX_VALUE, cue.text.toString(),
+                line = cue.line.takeUnless { it == Cue.DIMEN_UNSET },
+                lineType = cue.lineType,
+                lineAnchor = cue.lineAnchor.takeUnless { it == Cue.TYPE_UNSET },
+                position = cue.position.takeUnless { it == Cue.DIMEN_UNSET },
+                positionAnchor = cue.positionAnchor.takeUnless { it == Cue.TYPE_UNSET },
+                size = cue.size.takeUnless { it == Cue.DIMEN_UNSET },
+                alignment = when (cue.textAlignment) {
+                    Layout.Alignment.ALIGN_NORMAL -> "start"
+                    Layout.Alignment.ALIGN_OPPOSITE -> "end"
+                    else -> "center"
+                },
+            )
+        }
+        lastRenderedText = null
+        renderAt(positionMs())
     }
 
     /** Positive delay means show the subtitle later, matching the primary track. */
@@ -194,7 +230,8 @@ internal class SecondarySubtitleOverlay(
     }
 
     private fun render(playerPositionMs: Long) {
-        val active = timeline?.activeCuesAtPlayerPosition(playerPositionMs, delayMs).orEmpty()
+        val active = embeddedCues
+            ?: timeline?.activeCuesAtPlayerPosition(playerPositionMs, delayMs).orEmpty()
         val signature = active.joinToString("\u0000") {
             "${it.text}|${it.line}|${it.lineType}|${it.lineAnchor}|${it.position}|${it.positionAnchor}|${it.size}|${it.alignment}"
         }
@@ -416,7 +453,7 @@ internal class SecondarySubtitleOverlay(
 
     // Only while a secondary is loaded, and never past the bottom edge.
     private fun primaryOffsetPx(): Float {
-        if (!primaryCanShift || timeline == null) return 0f
+        if (!primaryCanShift || (timeline == null && embeddedCues == null)) return 0f
         return -offsetDelta.coerceAtLeast(-primaryBottomPaddingFraction) * view.height
     }
 
@@ -425,6 +462,7 @@ internal class SecondarySubtitleOverlay(
     }
 
     fun clear() {
+        embeddedCues = null
         mainHandler.removeCallbacks(changeRender)
         generation++
         selectedUrl = null

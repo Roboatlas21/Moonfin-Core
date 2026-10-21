@@ -1,0 +1,37 @@
+name: Embedded dual subtitle Android test
+
+on:
+  push:
+    branches: [fix/android-embedded-dual-subtitles]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          cache: true
+      - run: flutter pub get
+      - name: Check subtitle routing
+        run: flutter test test/playback/backend_payload_external_subtitles_test.dart test/playback/media3_declared_subtitles_test.dart
+      - name: Build phone APK
+        env:
+          MOONFIN_TEST_ID_SUFFIX: .dualsubtitletest
+        run: flutter build apk --release --flavor mobile --target-platform android-arm64 --dart-define=DISTRIBUTION_CHANNEL=apk
+      - name: Check native selection and timing
+        working-directory: android
+        run: ./gradlew :moonfin_native_video:testDebugUnitTest --tests '*DualSubtitleTrackSelectorTest' --tests '*TimeOffsetMediaPeriodTest' --tests '*SecondarySubtitleParserTest' --tests '*SubtitleLayoutPlannerTest'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Moonfin-Android-embedded-dual-subtitles
+          path: build/app/outputs/flutter-apk/app-mobile-release.apk

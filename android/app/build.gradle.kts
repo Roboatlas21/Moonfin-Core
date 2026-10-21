@@ -30,10 +30,9 @@ plugins {
     // START: FlutterFire Configuration
     // Applied only for a normal build. google-services.json lists clients for
     // the real application ids, so a test build under MOONFIN_TEST_ID_SUFFIX
-    // (see productFlavors) would fail with "No matching client found". Skipping
-    // it there is safe because push messaging bails immediately on TV anyway -
-    // push_messaging_service.dart:38 returns unless PlatformDetection.isMobile,
-    // and the initializeApp call is try/caught regardless.
+    // (see productFlavors) would fail with "No matching client found". Push
+    // initialization handles missing Firebase configuration on mobile and is
+    // disabled on TV, so test builds can safely skip this plugin.
     id("com.google.gms.google-services")
         .apply(System.getenv("MOONFIN_TEST_ID_SUFFIX").isNullOrEmpty())
     // END: FlutterFire Configuration
@@ -96,11 +95,12 @@ android {
         val tvAbis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         create("mobile") {
             dimension = "device"
-            applicationId = baseAppId
+            applicationId = baseAppId + testIdSuffix
             versionCode = flutter.versionCode
             versionName = flutter.versionName
             ndk { abiFilters += mobileAbis }
-            manifestPlaceholders["appName"] = baseAppName
+            manifestPlaceholders["appName"] =
+                if (testIdSuffix.isEmpty()) baseAppName else "$baseAppName Test"
         }
         create("mobile-beta") {
             dimension = "device"

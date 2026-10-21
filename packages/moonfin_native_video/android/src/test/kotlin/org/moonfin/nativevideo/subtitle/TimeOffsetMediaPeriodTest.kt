@@ -21,6 +21,8 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+@org.junit.runner.RunWith(org.robolectric.RobolectricTestRunner::class)
+@org.robolectric.annotation.Config(sdk = [28], manifest = org.robolectric.annotation.Config.NONE)
 class TimeOffsetMediaPeriodTest {
 
     private class FakeStream : SampleStream {
@@ -350,4 +352,29 @@ class TimeOffsetMediaPeriodTest {
         streams[1]!!.skipData(5_000_000L)
         assertEquals(5_250_000L, text.skippedToUs)
     }
+    @Test
+    fun `embedded primary and secondary delays are independent and video stays unchanged`() {
+        val video = FakeStream().apply { nextTimeUs = 10_000_000L }
+        val primary = FakeStream().apply { nextTimeUs = 10_000_000L }
+        val secondary = FakeStream().apply { nextTimeUs = 10_000_000L }
+        val child = FakePeriod(listOf(video, primary, secondary))
+        val period = TextStreamOffsetMediaPeriod(child, 2_000_000L, -500_000L)
+        val streams = select(
+            period,
+            selection("video/avc"),
+            selection("application/x-media3-cues", "application/x-subrip"),
+            selection("application/x-media3-cues", "application/x-subrip"),
+            positionUs = 5_000_000L,
+        )
+        assertEquals(5_000_000L, child.selectedAtUs)
+        assertEquals(10_000_000L, readOnce(streams[0]!!).timeUs)
+        assertEquals(12_000_000L, readOnce(streams[1]!!).timeUs)
+        assertEquals(9_500_000L, readOnce(streams[2]!!).timeUs)
+        period.updateTimeOffsetUs(-250_000L, 1_000_000L)
+        assertEquals(9_750_000L, readOnce(streams[1]!!).timeUs)
+        assertEquals(11_000_000L, readOnce(streams[2]!!).timeUs)
+        streams[2]!!.skipData(5_000_000L)
+        assertEquals(4_000_000L, secondary.skippedToUs)
+    }
+
 }

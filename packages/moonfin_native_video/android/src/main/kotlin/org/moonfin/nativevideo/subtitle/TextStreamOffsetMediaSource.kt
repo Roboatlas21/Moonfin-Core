@@ -28,17 +28,20 @@ import java.io.IOException
 internal class TextStreamOffsetMediaSource(
     child: MediaSource,
     initialOffsetUs: Long,
+    initialSecondaryOffsetUs: Long? = null,
 ) : WrappingMediaSource(child) {
 
     private val activePeriods = ArrayList<TextStreamOffsetMediaPeriod>()
 
     @Volatile
     private var timeOffsetUs: Long = initialOffsetUs
+    @Volatile private var secondaryOffsetUs: Long? = initialSecondaryOffsetUs
 
-    fun setTimeOffsetUs(offsetUs: Long) {
+    fun setTimeOffsetUs(offsetUs: Long, secondaryUs: Long? = secondaryOffsetUs) {
         timeOffsetUs = offsetUs
+        secondaryOffsetUs = secondaryUs
         for (period in activePeriods) {
-            period.updateTimeOffsetUs(offsetUs)
+            period.updateTimeOffsetUs(offsetUs, secondaryUs)
         }
     }
 
@@ -50,6 +53,7 @@ internal class TextStreamOffsetMediaSource(
         val period = TextStreamOffsetMediaPeriod(
             super.createPeriod(id, allocator, startPositionUs),
             timeOffsetUs,
+            secondaryOffsetUs,
         )
         activePeriods.add(period)
         return period
@@ -67,15 +71,18 @@ internal class TextStreamOffsetMediaSource(
 internal class TextStreamOffsetMediaPeriod(
     val wrappedMediaPeriod: MediaPeriod,
     initialOffsetUs: Long,
+    initialSecondaryOffsetUs: Long? = null,
 ) : MediaPeriod, MediaPeriod.Callback {
 
     @Volatile
     private var timeOffsetUs = initialOffsetUs
+    @Volatile private var secondaryOffsetUs: Long? = initialSecondaryOffsetUs
 
     private var callback: MediaPeriod.Callback? = null
 
-    fun updateTimeOffsetUs(offsetUs: Long) {
+    fun updateTimeOffsetUs(offsetUs: Long, secondaryUs: Long? = secondaryOffsetUs) {
         timeOffsetUs = offsetUs
+        secondaryOffsetUs = secondaryUs
     }
 
     override fun prepare(callback: MediaPeriod.Callback, positionUs: Long) {
@@ -118,7 +125,10 @@ internal class TextStreamOffsetMediaPeriod(
                 childStream == null -> null
                 format == null || !shiftsEmbeddedFormat(format.sampleMimeType, format.codecs) -> childStream
                 current != null && current.childStream === childStream -> current
-                else -> OffsetSampleStream(childStream) { timeOffsetUs }
+                else -> OffsetSampleStream(childStream) {
+                    // DualSubtitleTrackSelector reserves the final renderer slot.
+                    if (i == streams.lastIndex) secondaryOffsetUs ?: timeOffsetUs else timeOffsetUs
+                }
             }
         }
         return result

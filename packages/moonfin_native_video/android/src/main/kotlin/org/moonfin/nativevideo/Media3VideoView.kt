@@ -70,6 +70,7 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.RenderersFactory
 import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.mediacodec.ForwardingMediaCodecAdapter
 import androidx.media3.exoplayer.mediacodec.MediaCodecAdapter
@@ -78,7 +79,8 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
-import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
+import androidx.media3.exoplayer.text.TextOutput
+import androidx.media3.exoplayer.text.TextRenderer
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
 import androidx.media3.exoplayer.video.VideoRendererEventListener
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -104,6 +106,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 import org.moonfin.nativevideo.iec.Iec61937AudioOutputProvider
 import org.moonfin.nativevideo.subtitle.DeclaredSubtitle
+import org.moonfin.nativevideo.subtitle.DualSubtitleTrackSelector
 import org.moonfin.nativevideo.subtitle.SidecarSourceFactory
 import org.moonfin.nativevideo.subtitle.SecondarySubtitleOverlay
 import org.moonfin.nativevideo.subtitle.SourceTree
@@ -774,6 +777,10 @@ class Media3VideoView(
     private val subtitleView = SubtitleView(context)
     private val secondarySubtitleView = SubtitleView(context)
     private lateinit var secondarySubtitleOverlay: SecondarySubtitleOverlay
+    private var secondarySubtitleTrackId: Int? = null
+    private var secondarySubtitleUrl: String? = null
+    private var secondarySubtitleCodec: String? = null
+    private var secondarySubtitleDelayMs = 0L
     private val containerView: FrameLayout = object : FrameLayout(context) {
         override fun onVisibilityAggregated(isVisible: Boolean) {
             super.onVisibilityAggregated(isVisible)
@@ -848,7 +855,7 @@ class Media3VideoView(
     // and rebuilt throws "DefaultTrackSelector is accessed on the wrong thread"
     // on the new player's  playback thread, killing that thread and freezing
     // playback.
-    private lateinit var trackSelector: DefaultTrackSelector
+    private lateinit var trackSelector: DualSubtitleTrackSelector
     private val audioPipeline = ExoPlayerAudioPipeline()
     private val audioAttributeState = AudioAttributeState()
     private var preferFfmpegDecoder = Media3Bridge.preferFfmpegDecoderEnabled()
@@ -1281,6 +1288,7 @@ class Media3VideoView(
                     pendingAudioIndex = null
                 }
             }
+            applyEmbeddedSecondarySubtitle()
             emitTracksChanged()
             reportUnsupportedVideoIfNeeded()
             emitState()
@@ -1936,7 +1944,7 @@ class Media3VideoView(
         }
         emitFfmpegDecoderDiagnosticsOnce()
         // Fresh selector for every player; see the trackSelector field comment.
-        trackSelector = DefaultTrackSelector(context)
+        trackSelector = DualSubtitleTrackSelector(context)
         audioDelayProcessor.setDelayMs(audioDelayMs)
         val passthroughPolicy = AudioPassthroughPolicy.fromWire(
             passthroughMode,
@@ -2006,7 +2014,19 @@ class Media3VideoView(
             setSubtitleParserFactory(assParserFactory)
         }
 
-        return ExoPlayer.Builder(context, renderersFactory.withAssSupport(assHandler))
+        val primaryRenderers = renderersFactory.withAssSupport(assHandler)
+        val dualRenderers = RenderersFactory { handler, video, audio, text, metadata ->
+            val primary = primaryRenderers.createRenderers(handler, video, audio, text, metadata)
+            val secondary = TextRenderer(object : TextOutput {
+                override fun onCues(cueGroup: CueGroup) {
+                    if (::secondarySubtitleOverlay.isInitialized && secondarySubtitleTrackId != null) {
+                        secondarySubtitleOverlay.updateEmbeddedCues(cueGroup.cues)
+                    }
+                }
+            }, handler.looper)
+            primary + secondary
+        }
+        return ExoPlayer.Builder(context, dualRenderers)
             .setTrackSelector(trackSelector)
             .setLoadControl(buildLoadControl())
             .setMediaSourceFactory(bootMediaSourceFactory)
@@ -2574,6 +2594,9 @@ class Media3VideoView(
     private fun setSource(arguments: Any?) {
         val args = arguments as? Map<*, *> ?: return
         secondarySubtitleOverlay.clear()
+        secondarySubtitleTrackId = null
+        trackSelector.setSecondaryTrack(null)
+        secondarySubtitleDelayMs = (args["secondarySubtitleDelayMs"] as? Number)?.toLong() ?: 0L
         lastSourceArguments = args
         val url = args["url"]?.toString() ?: return
         val startPositionMs = (args["startPositionMs"] as? Number)?.toLong() ?: 0L
@@ -2729,10 +2752,11 @@ class Media3VideoView(
             (args["secondarySubtitleOffset"] as? Number)?.toFloat(),
             (args["secondarySubtitleTextColor"] as? Number)?.toInt(),
         )
-        secondarySubtitleOverlay.select(
-            args["secondarySubtitleUrl"]?.toString()?.takeIf { it.isNotBlank() },
-            args["secondarySubtitleCodec"]?.toString(),
-        )
+        selectSecondarySubtitle(mapOf(
+            "url" to args["secondarySubtitleUrl"],
+            "codec" to args["secondarySubtitleCodec"],
+            "embeddedTrackId" to args["secondarySubtitleTrackId"],
+        ))
     }
 
     private fun revealVideo() {
@@ -2901,6 +2925,8 @@ class Media3VideoView(
     }
 
     private fun stopPlaybackAndRestoreDisplayMode() {
+        secondarySubtitleTrackId = null
+        trackSelector.setSecondaryTrack(null)
         secondarySubtitleOverlay.clear()
         cancelPendingRetime()
         // A canonical stop ends ownership of this source. Clear it before
@@ -3131,6 +3157,7 @@ class Media3VideoView(
             .setTunnelingEnabled(shouldEnableTunneling)
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subtitleTrackEnabled || subtitleRetime?.disabling == true)
 
+        trackSelector.suspendSecondary(subtitleRetime?.disabling == true)
         trackSelector.setParameters(parametersBuilder)
     }
 
@@ -3358,16 +3385,59 @@ class Media3VideoView(
     private fun selectSecondarySubtitle(args: Map<*, *>?) {
         val url = args?.get("url")?.toString()?.takeIf { it.isNotBlank() }
         val codec = args?.get("codec")?.toString()
+        val id = (args?.get("embeddedTrackId") as? Number)?.toInt()?.takeIf { it > 0 }
+        // Reselecting a live track must keep its current cue: the renderer
+        // will not emit it again until the text changes.
+        if (id != null && id == secondarySubtitleTrackId &&
+            url == secondarySubtitleUrl && codec == secondarySubtitleCodec
+        ) return
+        secondarySubtitleUrl = url
+        secondarySubtitleCodec = codec
+        secondarySubtitleTrackId = id
         rememberSourceArguments(
-            "secondarySubtitleUrl" to url,
-            "secondarySubtitleCodec" to codec,
+            "secondarySubtitleUrl" to secondarySubtitleUrl,
+            "secondarySubtitleCodec" to secondarySubtitleCodec,
+            "secondarySubtitleTrackId" to secondarySubtitleTrackId,
         )
-        secondarySubtitleOverlay.select(url, codec)
+        if (secondarySubtitleTrackId != null) {
+            secondarySubtitleOverlay.selectEmbedded()
+            applyEmbeddedSecondarySubtitle()
+            if (secondarySubtitleDelayMs != 0L && embeddedOffsetSource == null) applySubtitleDelay()
+        } else {
+            trackSelector.setSecondaryTrack(null)
+            secondarySubtitleOverlay.select(secondarySubtitleUrl, secondarySubtitleCodec)
+        }
+    }
+
+    private fun applyEmbeddedSecondarySubtitle() {
+        val id = secondarySubtitleTrackId ?: return
+        if (subtitleRetime?.disabling == true) return
+        val entry = collectTracks(C.TRACK_TYPE_TEXT).getOrNull(id - 1) ?: return
+        val format = entry.group.getFormat(entry.trackIndex)
+        val mime = if (format.sampleMimeType == MimeTypes.APPLICATION_MEDIA3_CUES) {
+            format.codecs
+        } else format.sampleMimeType
+        if (!entry.supported || mime !in setOf(MimeTypes.APPLICATION_SUBRIP, MimeTypes.TEXT_VTT)) {
+            secondarySubtitleTrackId = null
+            trackSelector.setSecondaryTrack(null)
+            secondarySubtitleOverlay.select(secondarySubtitleUrl, secondarySubtitleCodec)
+            Media3Bridge.emitEvent(mapOf("event" to "secondarySubtitleSelection", "mode" to "file fallback"))
+            return
+        }
+        if (trackSelector.setSecondaryTrack(TrackSelectionOverride(entry.group, listOf(entry.trackIndex)))) {
+            Media3Bridge.emitEvent(mapOf(
+                "event" to "secondarySubtitleSelection", "mode" to "embedded", "trackId" to id,
+            ))
+        }
     }
 
     private fun setSecondarySubtitleDelay(delayMs: Long) {
-        rememberSourceArguments("secondarySubtitleDelayMs" to delayMs)
-        secondarySubtitleOverlay.setDelayMs(delayMs)
+        val next = clampManualDelayMs(delayMs)
+        val changed = secondarySubtitleDelayMs != next
+        secondarySubtitleDelayMs = next
+        rememberSourceArguments("secondarySubtitleDelayMs" to next)
+        secondarySubtitleOverlay.setDelayMs(next)
+        if (changed && secondarySubtitleTrackId != null) applySubtitleDelay()
     }
 
     private fun configureSecondarySubtitleStyle(args: Map<*, *>?) {
@@ -4077,7 +4147,7 @@ class Media3VideoView(
             isPreview = currentIsPreview,
             mediaType = currentMediaType,
             externalCount = externalSubtitleConfigurations.size,
-            manualDelayMs = manualSubtitleDelayMs,
+            manualDelayMs = if (manualSubtitleDelayMs != 0L) manualSubtitleDelayMs else secondarySubtitleDelayMs,
             hasEmbeddedWrapper = embeddedOffsetSource != null,
         )
         when (tree) {
@@ -4112,7 +4182,7 @@ class Media3VideoView(
             .build()
         val content = bootMediaSourceFactory.createMediaSource(contentItem)
         val offsetUs = subtitleOffsetUs()
-        val embedded = TextStreamOffsetMediaSource(content, offsetUs)
+        val embedded = TextStreamOffsetMediaSource(content, offsetUs, secondarySubtitleDelayMs * 1000L)
         val sidecars = externalSubtitleConfigurations.map { configuration ->
             TimeOffsetMediaSource(
                 SidecarSourceFactory.create(configuration, bootDataSourceFactory, assParserFactory),
@@ -4143,7 +4213,7 @@ class Media3VideoView(
                 isPreview = currentIsPreview,
                 mediaType = currentMediaType,
                 externalCount = externalSubtitleConfigurations.size,
-                manualDelayMs = manualSubtitleDelayMs,
+                manualDelayMs = if (manualSubtitleDelayMs != 0L) manualSubtitleDelayMs else secondarySubtitleDelayMs,
                 hasEmbeddedWrapper = false,
             )
             if (tree == SourceTree.CUSTOM_TREE && playerHasLoadedSource) {
@@ -4176,6 +4246,7 @@ class Media3VideoView(
         val request = subtitleRetime
         subtitleRetime = null
         if (request?.disabling == true && !isDisposed && !isPlayerReleased) {
+            trackSelector.suspendSecondary(false)
             trackSelector.parameters = trackSelector.parameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !subtitleTrackEnabled)
                 .build()
@@ -4189,6 +4260,7 @@ class Media3VideoView(
         if (isDisposed || isPlayerReleased || retimeRunnable != null || request.writing) return
         if (!request.disabling) {
             request.disabling = true
+            trackSelector.suspendSecondary(true)
             trackSelector.parameters = trackSelector.parameters.buildUpon()
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                 .build()
@@ -4199,23 +4271,25 @@ class Media3VideoView(
         val embedded = embeddedOffsetSource ?: return
         val sidecars = sidecarOffsetSources
         val offsetUs = subtitleOffsetUs()
+        val secondaryOffsetUs = secondarySubtitleDelayMs * 1000L
         request.writing = true
         // This also orders writes after queued selection invalidations when
         // text was already Off and no track-change callback will be delivered.
         val posted = Handler(owner.playbackLooper).post playback@{
             if (subtitleRetime !== request) return@playback
-            embedded.setTimeOffsetUs(offsetUs)
+            embedded.setTimeOffsetUs(offsetUs, secondaryOffsetUs)
             for (source in sidecars) source.setTimeOffsetUs(offsetUs)
             mainHandler.post completion@{
                 if (subtitleRetime !== request || player !== owner || isDisposed || isPlayerReleased) {
                     return@completion
                 }
                 request.writing = false
-                if (offsetUs != subtitleOffsetUs()) {
+                if (offsetUs != subtitleOffsetUs() || secondaryOffsetUs != secondarySubtitleDelayMs * 1000L) {
                     retimeTextTrack()
                     return@completion
                 }
                 subtitleRetime = null
+                trackSelector.suspendSecondary(false)
                 assOverlayView?.timeOffsetUs = offsetUs
                 // Keep accepted overrides rather than restoring a snapshot of
                 // possibly stale Tracks. New pending choices and Off take priority.
@@ -5169,7 +5243,9 @@ class Media3VideoView(
                     mapOf(
                         "index" to oneBasedIndex,
                         "label" to formatTrackLabel(format, trackType, oneBasedIndex),
-                        "selected" to group.isTrackSelected(trackIndex),
+                        "selected" to if (trackType == C.TRACK_TYPE_TEXT) {
+                            trackSelector.isPrimaryTrackSelected(group.mediaTrackGroup, trackIndex)
+                        } else group.isTrackSelected(trackIndex),
                         "language" to (format.language ?: ""),
                         "codec" to (format.codecs ?: format.sampleMimeType ?: ""),
                         "supported" to group.isTrackSupported(trackIndex),

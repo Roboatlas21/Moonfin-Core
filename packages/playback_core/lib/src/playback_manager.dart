@@ -624,7 +624,8 @@ class PlaybackManager implements AudioOwnable {
         codec != 'webvtt') {
       return false;
     }
-    return _secondarySubtitleUrlForStream(streamIndex)?.isNotEmpty ?? false;
+    return _secondaryEmbeddedTrackId(streamIndex) != null ||
+        (_secondarySubtitleUrlForStream(streamIndex)?.isNotEmpty ?? false);
   }
 
   int? get subtitleStreamIndex {
@@ -796,6 +797,7 @@ class PlaybackManager implements AudioOwnable {
     bool audioLike = false,
     String? secondarySubtitleUrl,
     String? secondarySubtitleCodec,
+    int? secondarySubtitleTrackId,
   }) {
     // Music and audiobooks are audio whatever their streams say. Media3 only
     // plays audio with no view when the payload says audio, so a stray video
@@ -925,6 +927,8 @@ class PlaybackManager implements AudioOwnable {
           normalizationGainDb ??
           MediaStreamResolver.extractNormalizationGainDb(mediaStreams),
       if (declaredSubtitles.isNotEmpty) 'externalSubtitles': declaredSubtitles,
+      if (secondarySubtitleTrackId != null)
+        'secondarySubtitleTrackId': secondarySubtitleTrackId,
       'secondarySubtitleDelayMs': (_secondarySubtitleDelaySeconds * 1000)
           .round(),
       'secondarySubtitleOffset': _secondarySubtitleOffset,
@@ -2795,6 +2799,9 @@ class PlaybackManager implements AudioOwnable {
                 canUseAsSecondarySubtitle(_secondarySubtitleStreamIndex!)
             ? _secondarySubtitleUrlForStream(_secondarySubtitleStreamIndex!)
             : null,
+        secondarySubtitleTrackId: _secondarySubtitleStreamIndex != null
+            ? _secondaryEmbeddedTrackId(_secondarySubtitleStreamIndex!)
+            : null,
         secondarySubtitleCodec: _secondarySubtitleStreamIndex != null
             ? _subtitleCodecForStream(_secondarySubtitleStreamIndex!)
             : null,
@@ -3591,6 +3598,15 @@ class PlaybackManager implements AudioOwnable {
     return null;
   }
 
+  /// Only direct play retains the original embedded subtitle tracks.
+  int? _secondaryEmbeddedTrackId(int streamIndex) {
+    if (_currentResolution?.playMethod != StreamPlayMethod.directPlay ||
+        _embeddedSubtitlesUnavailable || _isSubtitleExternal(streamIndex)) {
+      return null;
+    }
+    return _mpvTrackIdForStream(streamIndex, 'Subtitle');
+  }
+
   /// The sidecar the server offers for [streamIndex], or else the file it can
   /// serve from an embedded SRT or WebVTT track. Only the secondary overlay
   /// takes the second kind.
@@ -3743,6 +3759,7 @@ class PlaybackManager implements AudioOwnable {
     await _backend?.setSecondarySubtitle(
       url: _secondarySubtitleUrlForStream(index),
       codec: _subtitleCodecForStream(index),
+      embeddedTrackId: _secondaryEmbeddedTrackId(index),
     );
     await _backend?.setSecondarySubtitleDelay(_secondarySubtitleDelaySeconds);
     await _backend?.configureSecondarySubtitleStyle(

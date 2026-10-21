@@ -103,7 +103,13 @@ class _CapturingBackend extends Fake implements PlayerBackend {
 }
 
 class _StubResolver extends MediaStreamResolver {
-  _StubResolver({required this.mediaStreams, required this.externalSubtitles});
+  _StubResolver({
+    required this.mediaStreams,
+    required this.externalSubtitles,
+    this.playMethod = StreamPlayMethod.directPlay,
+  });
+
+  final StreamPlayMethod playMethod;
 
   final List<Map<String, dynamic>> mediaStreams;
   final List<ExternalSubtitle> externalSubtitles;
@@ -124,7 +130,7 @@ class _StubResolver extends MediaStreamResolver {
     streamUrl: '/downloads/movie.mp4',
     mediaSourceId: 'source-1',
     playSessionId: 'session-1',
-    playMethod: StreamPlayMethod.directPlay,
+    playMethod: playMethod,
     mediaStreams: mediaStreams,
     externalSubtitles: externalSubtitles,
     isLocalMedia: true,
@@ -135,19 +141,24 @@ Future<Map<String, dynamic>> _payloadFor({
   required List<Map<String, dynamic>> mediaStreams,
   required List<ExternalSubtitle> externalSubtitles,
   int? subtitleStreamIndex,
+  int? secondarySubtitleStreamIndex,
+  StreamPlayMethod playMethod = StreamPlayMethod.directPlay,
 }) async {
   final backend = _CapturingBackend();
   final manager = PlaybackManager()
+    ..secondarySubtitleTrackSelector = ((_, _) => secondarySubtitleStreamIndex)
     ..setBackend(backend)
     ..setResolver(
       _StubResolver(
         mediaStreams: mediaStreams,
         externalSubtitles: externalSubtitles,
+        playMethod: playMethod,
       ),
     );
   await manager.playItems(<dynamic>[
     <String, dynamic>{'Id': 'movie', 'Type': 'Movie'},
   ], subtitleStreamIndex: subtitleStreamIndex);
+  manager.dispose();
   return backend.payload!;
 }
 
@@ -156,6 +167,39 @@ List<Map<String, dynamic>> _declared(Map<String, dynamic> payload) =>
         .cast<Map<String, dynamic>>();
 
 void main() {
+  test('embedded secondary uses its native ordinal even without an extraction URL', () async {
+    final payload = await _payloadFor(
+      mediaStreams: const [
+        {'Type': 'Video', 'Index': 0},
+        {'Type': 'Subtitle', 'Index': 2, 'Codec': 'srt', 'IsExternal': true},
+        {'Type': 'Subtitle', 'Index': 4, 'Codec': 'subrip'},
+        {'Type': 'Subtitle', 'Index': 7, 'Codec': 'subrip'},
+      ],
+      externalSubtitles: const [],
+      subtitleStreamIndex: 4,
+      secondarySubtitleStreamIndex: 7,
+    );
+    expect(payload['secondarySubtitleTrackId'], 2);
+    expect(payload['secondarySubtitleUrl'], isNull);
+  });
+
+  test('remuxed secondary keeps file delivery because embedded tracks were stripped', () async {
+    final payload = await _payloadFor(
+      mediaStreams: const [
+        {'Type': 'Video', 'Index': 0},
+        {'Type': 'Subtitle', 'Index': 2, 'Codec': 'subrip'},
+      ],
+      externalSubtitles: const [
+        ExternalSubtitle(deliveryUrl: 'https://server/sub.srt', codec: 'subrip', streamIndex: 2),
+      ],
+      subtitleStreamIndex: -1,
+      secondarySubtitleStreamIndex: 2,
+      playMethod: StreamPlayMethod.directStream,
+    );
+    expect(payload['secondarySubtitleTrackId'], isNull);
+    expect(payload['secondarySubtitleUrl'], 'https://server/sub.srt');
+  });
+
   test('a transcoded download declares its sidecars with the source', () async {
     final payload = await _payloadFor(
       mediaStreams: _transcodedDownloadStreams,

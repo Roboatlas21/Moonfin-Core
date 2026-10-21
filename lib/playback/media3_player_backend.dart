@@ -440,6 +440,9 @@ class Media3PlayerBackend extends PlayerBackend
               ? LogLevel.warning
               : LogLevel.debug,
         );
+      case 'secondarySubtitleSelection':
+        _diag('Media3: secondary subtitle ${map['mode']} '
+            '(track=${map['trackId'] ?? 'none'})');
       case 'secondarySubtitleError':
         _diag(
           'Media3: secondary subtitle failed: ${map['message'] ?? 'unknown error'}',
@@ -1173,6 +1176,8 @@ class Media3PlayerBackend extends PlayerBackend
       'preferredAudioLanguage': preferredAudioLanguage,
       'preferredTextLanguage': preferredSubtitleLanguage,
       'externalSubtitles': payload['externalSubtitles'] ?? const [],
+      if (payload['secondarySubtitleTrackId'] is int)
+        'secondarySubtitleTrackId': payload['secondarySubtitleTrackId'],
       if (payload['secondarySubtitleUrl'] is String)
         'secondarySubtitleUrl': payload['secondarySubtitleUrl'],
       if (payload['secondarySubtitleCodec'] is String)
@@ -1486,8 +1491,14 @@ class Media3PlayerBackend extends PlayerBackend
   }
 
   @override
-  Future<void> setSecondarySubtitle({String? url, String? codec}) async {
-    await _invoke<void>('setSecondarySubtitle', {'url': url, 'codec': codec});
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    int? embeddedTrackId,
+  }) async {
+    await _invoke<void>('setSecondarySubtitle', {
+      'url': url, 'codec': codec, 'embeddedTrackId': embeddedTrackId,
+    });
   }
 
   @override
