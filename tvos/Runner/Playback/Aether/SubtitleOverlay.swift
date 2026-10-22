@@ -42,6 +42,14 @@ final class SubtitleOverlay: PlatformView {
     /// The second text block follows the actual frame of the primary block.
     weak var primaryForStacking: SubtitleOverlay?
     weak var secondaryForStacking: SubtitleOverlay?
+    var stackingEnabled = false {
+        didSet {
+            primaryForStacking?.requestLayout()
+            requestLayout()
+        }
+    }
+    private var lastPrimaryTextFrame: CGRect?
+    private var lastPrimaryAlignment = 2
     var secondaryVerticalAdjustment: Double = 0 {
         didSet {
             primaryForStacking?.requestLayout()
@@ -55,8 +63,11 @@ final class SubtitleOverlay: PlatformView {
 
     private var currentAlignment: Int {
         let authored = activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2
-        let requested = primaryForStacking?.activeTextEvents.isEmpty == false
-            ? (primaryForStacking?.currentAlignment ?? authored) : authored
+        let requested = primaryForStacking != nil && stackingEnabled
+            ? (primaryForStacking?.activeTextEvents.isEmpty == false
+                ? primaryForStacking?.currentAlignment
+                : primaryForStacking?.lastPrimaryAlignment) ?? authored
+            : authored
         return (1...9).contains(requested) ? requested : 2
     }
 
@@ -331,6 +342,8 @@ final class SubtitleOverlay: PlatformView {
     func clear() {
         eventQueue.removeAll()
         lastUpdateTime = 0
+        lastPrimaryTextFrame = nil
+        lastPrimaryAlignment = 2
         hideAll()
         assImageView.image = nil
         assImageView.isHidden = true
@@ -445,7 +458,10 @@ final class SubtitleOverlay: PlatformView {
         let maxWidth = bounds.width * 0.9
         let size = textLabel.sizeThatFits(CGSize(width: maxWidth, height: bounds.height * 0.4))
         let placement = activeTextEvents.first { $0.alignment != nil || $0.position != nil }
-        let alignment = (1...9).contains(placement?.alignment ?? 2) ? (placement?.alignment ?? 2) : 2
+        let authoredAlignment = (1...9).contains(placement?.alignment ?? 2)
+            ? (placement?.alignment ?? 2) : 2
+        let alignment = primaryForStacking != nil && stackingEnabled
+            ? currentAlignment : authoredAlignment
         let column = (alignment - 1) % 3
         let row = (alignment - 1) / 3
         let picture = videoBox
@@ -459,10 +475,13 @@ final class SubtitleOverlay: PlatformView {
         var x = xAnchor - size.width * CGFloat(column) / 2
         var y = yAnchor - size.height * CGFloat(2 - row) / 2
         let gap = 8 * canvasScale
-        if let primary = primaryForStacking, let parentFrame = primary.visibleTextFrame {
+        if let primary = primaryForStacking, stackingEnabled,
+           let parentFrame = primary.visibleTextFrame ?? primary.lastPrimaryTextFrame {
             // Follow the primary's vertical zone and horizontal anchor.
-            let parentColumn = (primary.currentAlignment - 1) % 3
-            let parentRow = (primary.currentAlignment - 1) / 3
+            let parentAlignment = primary.activeTextEvents.isEmpty
+                ? primary.lastPrimaryAlignment : primary.currentAlignment
+            let parentColumn = (parentAlignment - 1) % 3
+            let parentRow = (parentAlignment - 1) / 3
             x = parentColumn == 0 ? parentFrame.minX
                 : parentColumn == 2 ? parentFrame.maxX - size.width
                 : parentFrame.midX - size.width / 2
@@ -477,19 +496,22 @@ final class SubtitleOverlay: PlatformView {
                     CGFloat(secondaryVerticalAdjustment) * bounds.height
             }
         } else if row == 1, let secondary = secondaryForStacking,
-                  secondary.visibleTextFrame != nil {
+                  secondary.stackingEnabled {
+            // Opposing anchors keep both slots still while secondary cues
+            // appear, disappear, wrap or change their line count.
             let pairGap = max(2 * canvasScale, gap +
                 CGFloat(secondary.secondaryVerticalAdjustment) * bounds.height)
-            let secondaryHeight = secondary.textLabel.sizeThatFits(
-                CGSize(width: secondary.bounds.width * 0.9,
-                       height: secondary.bounds.height * 0.4)).height
-            y += (secondaryHeight + pairGap) / 2
+            y = yAnchor + pairGap / 2
         }
         x = min(max(x, 0), max(0, bounds.width - size.width))
         y = min(max(y, 0), max(0, bounds.height - size.height))
         let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
         textLabel.frame = frame
         outlineLabel.frame = frame
+        if secondaryForStacking != nil {
+            lastPrimaryTextFrame = frame
+            lastPrimaryAlignment = alignment
+        }
     }
 
     private func layoutBitmapView() {

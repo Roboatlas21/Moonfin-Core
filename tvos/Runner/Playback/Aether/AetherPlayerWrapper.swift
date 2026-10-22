@@ -841,6 +841,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         secondarySubtitlesReady = false
         let secondary = sourceConfiguration.secondarySubtitle
         pendingSecondarySubtitle = (secondary.embeddedTrackId, secondary.url)
+        secondarySubtitleOverlay.stackingEnabled =
+            secondary.embeddedTrackId != nil || secondary.url != nil
         setSecondarySubtitleDelay(secondary.delay)
         configureSecondarySubtitleStyle(
             fontSize: secondary.fontSize, verticalOffset: secondary.offset,
@@ -1291,6 +1293,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     func setSecondarySubtitle(embeddedTrackId: Int?, url: URL?) {
         Self.sharedEngine()?.clearSecondarySubtitle()
         secondarySubtitleOverlay.clear()
+        secondarySubtitleOverlay.stackingEnabled =
+            embeddedTrackId != nil || url != nil
         pendingSecondarySubtitle = (embeddedTrackId, url)
         applyPendingSecondarySubtitle()
     }
@@ -1322,6 +1326,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         secondarySubtitlesReady = false
         pendingSecondarySubtitle = nil
         secondarySubtitleOverlay.clear()
+        secondarySubtitleOverlay.stackingEnabled = false
         secondarySubtitleOverlay.keepsVideoComposited = false
     }
 
