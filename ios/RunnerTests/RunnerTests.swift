@@ -103,7 +103,7 @@ final class RunnerTests: XCTestCase {
         player.applySubtitleStyle(
             textColor: 0xFFFFFFFF, backgroundColor: nil, strokeColor: nil,
             fontSize: 24, fontWeight: nil, verticalOffset: nil)
-        player.configureSecondarySubtitleStyle(fontSize: 36, verticalOffset: 0.12, textColor: 0xFFFFFF00)
+        player.configureSecondarySubtitleStyle(fontSize: 36, verticalOffset: -0.04, textColor: 0xFFFFFF00)
         XCTAssertEqual(color(primaryLabel), .white)
         XCTAssertEqual(color(secondaryLabel), .yellow)
         XCTAssertGreaterThan(font(secondaryLabel)!.pointSize, font(primaryLabel)!.pointSize)
@@ -116,7 +116,7 @@ final class RunnerTests: XCTestCase {
         player.configureSecondarySubtitleStyle(fontSize: nil, verticalOffset: nil, textColor: nil)
         XCTAssertEqual(color(secondaryLabel), .green)
         XCTAssertEqual(font(secondaryLabel), font(primaryLabel))
-        XCTAssertEqual(secondary.topOffset, 0.12)
+        XCTAssertEqual(secondary.topOffset!, 0.12, accuracy: 0.0001)
 
         // Default remains inherited when the primary appearance changes again.
         player.applySubtitleStyle(
@@ -124,6 +124,23 @@ final class RunnerTests: XCTestCase {
             fontSize: 20, fontWeight: nil, verticalOffset: nil)
         XCTAssertEqual(color(secondaryLabel), .blue)
         XCTAssertEqual(font(secondaryLabel), font(primaryLabel))
+    }
+
+    @MainActor
+    func testSecondaryDelayAddsToPrimaryAndPositionDoesNotMovePrimary() {
+        let player = AetherPlayerWrapper()
+        defer { player.shutdown() }
+        player.setSubtitleDelay(0.5)
+        player.setSecondarySubtitleDelay(0.2)
+        XCTAssertEqual(player.secondarySubtitleOverlay.delaySeconds, 0.7, accuracy: 0.0001)
+        player.setSubtitleDelay(-0.1)
+        XCTAssertEqual(player.secondarySubtitleOverlay.delaySeconds, 0.1, accuracy: 0.0001)
+        player.setSecondarySubtitleDelay(0)
+        XCTAssertEqual(player.secondarySubtitleOverlay.delaySeconds, -0.1, accuracy: 0.0001)
+        let primaryPosition = player.baseSubtitlePos
+        player.configureSecondarySubtitleStyle(fontSize: nil, verticalOffset: 0.02, textColor: nil)
+        XCTAssertEqual(player.secondarySubtitleOverlay.topOffset!, 0.06, accuracy: 0.0001)
+        XCTAssertEqual(player.baseSubtitlePos, primaryPosition)
     }
 
 }

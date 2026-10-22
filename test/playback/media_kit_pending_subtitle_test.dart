@@ -250,7 +250,7 @@ void main() {
     },
   );
 
-  test('newer mpv changes only secondary delay and position', () async {
+  test('mpv adds secondary delay to the primary and positions independently', () async {
     final other = _Player();
     other.platform.properties.addAll({
       'secondary-sub-delay': '0',
@@ -262,15 +262,19 @@ void main() {
     try {
       await second.setSecondarySubtitleDelay(1.25);
       await second.configureSecondarySubtitleStyle(
-        verticalOffset: 0.2,
+        verticalOffset: -0.12,
         textColor: 0xFFFFFF00,
       );
       expect(second.supportsSecondarySubtitleDelay, isTrue);
       expect(second.supportsSecondarySubtitlePosition, isTrue);
-      expect(other.platform.properties['secondary-sub-delay'], '1.250');
+      expect(other.platform.properties['secondary-sub-delay'], '1.750');
       expect(other.platform.properties['secondary-sub-pos'], '20');
       expect(other.platform.properties['sub-delay'], '0.500');
       expect(other.platform.properties['sub-color'], '#ffffffff');
+      await second.setSubtitleDelay(-0.25);
+      expect(other.platform.properties['secondary-sub-delay'], '1.000');
+      await second.setSecondarySubtitleDelay(0);
+      expect(other.platform.properties['secondary-sub-delay'], '-0.250');
     } finally {
       second.dispose();
     }

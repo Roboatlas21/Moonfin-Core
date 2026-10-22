@@ -3573,6 +3573,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final next = (style, embeddedStyles, embeddedFontSizes);
     if (!force && next == _lastSubtitleStyle) return;
     _lastSubtitleStyle = next;
+    unawaited(syncSecondarySubtitleStyle(_manager, _prefs));
 
     // Embedded-style overrides are Media3-specific (Android only) and live on
     // the Media3PlayerBackend's wider signature, not the base PlayerBackend.
@@ -7395,84 +7396,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     );
   }
 
-  void _showSubtitleSlotSelector() {
-    final l10n = AppLocalizations.of(context);
-    final resolution = _manager.currentResolution;
-    final streams =
-        (resolution?.mediaStreams ??
-                (_manager.currentOfflineMetadata?['MediaStreams'] as List?)
-                    ?.cast<Map<String, dynamic>>() ??
-                const <Map<String, dynamic>>[])
-            .where((stream) => stream['Type'] == 'Subtitle')
-            .toList();
-
-    String trackLabel(int? index) {
-      if (index == null || index < 0) return l10n.off;
-      final stream = streams
-          .where((entry) => entry['Index'] == index)
-          .firstOrNull;
-      if (stream == null) return l10n.off;
-      final displayTitle = (stream['DisplayTitle'] as String?)?.trim();
-      if (displayTitle != null && displayTitle.isNotEmpty) return displayTitle;
-      final title = (stream['Title'] as String?)?.trim();
-      if (title != null && title.isNotEmpty) return title;
-      final language = (stream['Language'] as String?)?.trim();
-      if (language != null && language.isNotEmpty) return language;
-      return l10n.streamTypeFallback('Subtitle', streams.indexOf(stream) + 1);
-    }
-
-    unawaited(() async {
-      final result = await TrackSelectorDialog.show(
-        context,
-        title: l10n.subtitles,
-        options: [
-          TrackOption(
-            label: l10n.primarySubtitleSlot,
-            subtitle: trackLabel(_manager.subtitleStreamIndex),
-          ),
-          TrackOption(
-            label: l10n.secondarySubtitleSlot,
-            subtitle: trackLabel(_manager.secondarySubtitleStreamIndex),
-          ),
-        ],
-        useRootNavigator: false,
-      );
-      if (result == null || !mounted) return;
-      _showTrackSelector(
-        audio: false,
-        secondary: result == 1,
-        chooseSubtitleSlot: false,
-      );
-    }());
-    _showControls();
-  }
-
-  /// Skip the slot question when the engine or available tracks cannot fill it.
-  bool get _offersSecondarySubtitles {
-    if (_activeBackend is! SecondarySubtitleBackend) return false;
-    if (_manager.secondarySubtitleStreamIndex != null) return true;
-    final primary = _manager.subtitleStreamIndex;
-    final streams =
-        _manager.currentResolution?.mediaStreams ??
-        const <Map<String, dynamic>>[];
-    return streams.any((stream) {
-      final index = stream['Index'];
-      return stream['Type'] == 'Subtitle' &&
-          index is int &&
-          index != primary &&
-          _manager.canUseAsSecondarySubtitle(index);
-    });
-  }
-
   void _showTrackSelector({
     required bool audio,
     bool secondary = false,
-    bool chooseSubtitleSlot = true,
   }) {
-    if (!audio && chooseSubtitleSlot && _offersSecondarySubtitles) {
-      _showSubtitleSlotSelector();
-      return;
-    }
     unawaited(
       TrackPicker.show(
         context,

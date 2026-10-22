@@ -81,6 +81,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     let secondarySubtitleOverlay = SubtitleOverlay()
     private var pendingSecondarySubtitle: (embeddedTrackId: Int?, url: URL?)?
     private var secondarySubtitlesReady = false
+    private(set) var secondaryDelayAdjustment: Double = 0
     private var secondaryFontSize: Double?
     private var secondaryTextColor: Int?
     private var cancellables = Set<AnyCancellable>()
@@ -735,7 +736,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         var embeddedTrackId: Int?
         var url: URL?
         var delay: Double = 0
-        var offset: Double = 0.08
+        var offset: Double = 0
         var fontSize: Double?
         var textColor: Int?
     }
@@ -748,7 +749,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             embeddedTrackId: (args["secondarySubtitleTrackId"] as? NSNumber)?.intValue,
             url: url,
             delay: ((args["secondarySubtitleDelayMs"] as? NSNumber)?.doubleValue ?? 0) / 1000,
-            offset: (args["secondarySubtitleOffset"] as? NSNumber)?.doubleValue ?? 0.08,
+            offset: (args["secondarySubtitleOffset"] as? NSNumber)?.doubleValue ?? 0,
             fontSize: (args["secondarySubtitleFontSize"] as? NSNumber)?.doubleValue,
             textColor: (args["secondarySubtitleTextColor"] as? NSNumber)?.intValue)
     }
@@ -1324,7 +1325,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     }
 
     func setSecondarySubtitleDelay(_ seconds: Double) {
-        secondarySubtitleOverlay.delaySeconds = min(max(seconds, -5), 5)
+        secondaryDelayAdjustment = min(max(seconds, -5), 5)
+        secondarySubtitleOverlay.delaySeconds = subtitleOverlay.delaySeconds + secondaryDelayAdjustment
         secondarySubtitleOverlay.update(currentTime: Self._sharedEngine?.sourceTime ?? 0)
     }
 
@@ -1332,7 +1334,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         fontSize: Double?, verticalOffset: Double?, textColor: Int?
     ) {
         if let verticalOffset {
-            secondarySubtitleOverlay.topOffset = min(max(verticalOffset, 0), 0.4)
+            secondarySubtitleOverlay.topOffset = min(max(0.08 - verticalOffset, 0), 1)
         }
         secondaryFontSize = fontSize
         secondaryTextColor = textColor
@@ -1528,6 +1530,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     func setSubtitleDelay(_ interval: TimeInterval) {
         subtitleOverlay.delaySeconds = interval
+        setSecondarySubtitleDelay(secondaryDelayAdjustment)
     }
 
     /// No audio-delay control exists on the AVFoundation path.

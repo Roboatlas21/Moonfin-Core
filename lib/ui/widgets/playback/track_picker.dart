@@ -70,6 +70,7 @@ abstract final class TrackPicker {
     required bool audio,
     required MediaServerClient Function(AggregatedItem item) clientFor,
     bool secondary = false,
+    bool chooseSubtitleSlot = true,
     bool useRootNavigator = true,
     PlayerMutation? runMutation,
     VoidCallback? onSubtitlesChanged,
@@ -95,13 +96,47 @@ abstract final class TrackPicker {
           : '',
     );
     final streams = choices.streams;
+    final showSlots =
+        !audio &&
+        !secondary &&
+        chooseSubtitleSlot &&
+        manager.backend is SecondarySubtitleBackend &&
+        (manager.secondarySubtitleStreamIndex != null ||
+            streams.any((stream) {
+              final index = stream['Index'];
+              return index is int &&
+                  index != manager.subtitleStreamIndex &&
+                  manager.canUseAsSecondarySubtitle(index);
+            }));
+    final showControls = audio || secondary || chooseSubtitleSlot;
+    String trackLabel(int? index) {
+      final stream = streams
+          .where((entry) => entry['Index'] == index)
+          .firstOrNull;
+      return stream?['DisplayTitle'] as String? ??
+          stream?['Title'] as String? ??
+          stream?['Language'] as String? ??
+          l10n.off;
+    }
+
     final options = <TrackOption>[
-      ...choices.options,
-      if (canDownloadRemote)
+      if (showSlots) ...[
         TrackOption(
-          label: l10n.downloadSubtitlesLabel,
-          subtitle: l10n.searchOpenSubtitlesPlugin,
+          label: l10n.primarySubtitleSlot,
+          subtitle: trackLabel(manager.subtitleStreamIndex),
         ),
+        TrackOption(
+          label: l10n.secondarySubtitleSlot,
+          subtitle: trackLabel(manager.secondarySubtitleStreamIndex),
+        ),
+      ] else ...[
+        ...choices.options,
+        if (canDownloadRemote)
+          TrackOption(
+            label: l10n.downloadSubtitlesLabel,
+            subtitle: l10n.searchOpenSubtitlesPlugin,
+          ),
+      ],
     ];
     if (!context.mounted) return;
 
@@ -110,7 +145,9 @@ abstract final class TrackPicker {
         backend is SecondarySubtitleBackend
         ? backend as SecondarySubtitleBackend
         : null;
-    final delayLimits = secondary
+    final delayLimits = !showControls
+        ? null
+        : secondary
         ? secondaryControls?.supportsSecondarySubtitleDelay == true
               ? (
                   -PlaybackManager.secondarySubtitleMaxDelaySeconds,
@@ -140,6 +177,7 @@ abstract final class TrackPicker {
     }
     Widget? footer;
     if (!audio &&
+        showControls &&
         (!secondary ||
             secondaryControls?.supportsSecondarySubtitleStyle == true ||
             secondaryControls?.supportsSecondarySubtitlePosition == true)) {
@@ -150,59 +188,57 @@ abstract final class TrackPicker {
       footer = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Container(
-              height: 1,
-              color: Colors.white.withValues(alpha: 0.08),
+          if (delayLimits == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Container(
+                height: 1,
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
             ),
-          ),
           SubtitleAppearanceFooter(
             showStyle:
                 !secondary || secondaryControls!.supportsSecondarySubtitleStyle,
             showPosition:
-                secondary &&
+                !secondary ||
                 secondaryControls!.supportsSecondarySubtitlePosition,
             showColor: secondary,
-            minFontSize: secondary ? 8 : 12,
-            maxFontSize: secondary ? 72 : 48,
+            secondary: secondary,
             initialFontSize: secondary
-                ? manager.secondarySubtitleFontSize
+                ? prefs.get(UserPreferences.secondarySubtitleSizeAdjustment)
                 : style.fontSize,
-            defaultFontSize: secondary ? style.fontSize : null,
-            initialOffset: manager.secondarySubtitleOffset,
+            initialOffset: secondary
+                ? manager.secondarySubtitleOffset
+                : style.verticalOffset,
             initialTextColor: manager.secondarySubtitleTextColor,
             defaultTextColor: style.textColor,
             onChanged: (fontSize, offset, textColor) {
               if (!secondary) {
-                unawaited(setPrimarySubtitleSize(manager, prefs, fontSize!));
+                unawaited(
+                  setPrimarySubtitleAppearance(
+                    manager,
+                    prefs,
+                    fontSize: fontSize,
+                    verticalOffset: offset,
+                  ),
+                );
                 return;
               }
-              unawaited(
-                manager.configureSecondarySubtitleStyle(
-                  fontSize: fontSize,
-                  verticalOffset: offset,
-                  textColor: textColor,
-                ),
-              );
-              unawaited(
-                prefs.set(
-                  UserPreferences.secondarySubtitleTextSize,
-                  fontSize ?? 0.0,
-                ),
-              );
-              unawaited(
-                prefs.set(
+              unawaited(() async {
+                await prefs.set(
+                  UserPreferences.secondarySubtitleSizeAdjustment,
+                  fontSize,
+                );
+                await prefs.set(
                   UserPreferences.secondarySubtitleOffsetPosition,
                   offset,
-                ),
-              );
-              unawaited(
-                prefs.set(
+                );
+                await prefs.set(
                   UserPreferences.secondarySubtitleTextColor,
                   textColor ?? -1,
-                ),
-              );
+                );
+                await syncSecondarySubtitleStyle(manager, prefs);
+              }());
             },
           ),
         ],
@@ -212,13 +248,16 @@ abstract final class TrackPicker {
       onDialogOpenChanged,
       () => TrackSelectorDialog.show(
         context,
-        title: audio
+        title: showSlots
+            ? l10n.subtitles
+            : audio
             ? l10n.audioTrack
             : secondary
             ? l10n.secondarySubtitleTrack
             : l10n.subtitleTrack,
         options: options,
-        selectedIndex: choices.selectedIndex,
+        selectedIndex: showSlots ? null : choices.selectedIndex,
+        dividerBefore: delayLimits == null ? null : options.length - 1,
         useRootNavigator: useRootNavigator,
         footer: footer,
       ),
@@ -232,7 +271,7 @@ abstract final class TrackPicker {
           useRootNavigator: useRootNavigator,
           bar: DelayFooter(
             initialDelay: delay,
-            label: delayLabel,
+            label: secondary ? l10n.secondaryDelayAdjustment : delayLabel,
             minDelay: delayLimits.$1,
             maxDelay: delayLimits.$2,
             onDelayChanged: (d) => secondary
@@ -241,6 +280,21 @@ abstract final class TrackPicker {
             formatDelay: formatDelay,
           ),
         ),
+      );
+      return;
+    }
+    if (showSlots) {
+      await show(
+        context,
+        manager: manager,
+        audio: false,
+        secondary: result == 1,
+        chooseSubtitleSlot: false,
+        clientFor: clientFor,
+        useRootNavigator: useRootNavigator,
+        runMutation: runMutation,
+        onSubtitlesChanged: onSubtitlesChanged,
+        onDialogOpenChanged: onDialogOpenChanged,
       );
       return;
     }

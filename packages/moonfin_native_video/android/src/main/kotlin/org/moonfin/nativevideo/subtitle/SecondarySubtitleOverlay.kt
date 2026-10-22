@@ -12,10 +12,8 @@ import androidx.media3.ui.SubtitleView
 @androidx.media3.common.util.UnstableApi
 internal class SecondarySubtitleOverlay(
     private val view: SubtitleView,
-    private val onPrimaryVerticalOffset: (Float) -> Unit = {},
 ) {
     companion object {
-        private const val DEFAULT_OFFSET_DELTA = 0.08f
         private const val MIN_GAP_DP = 8f
     }
 
@@ -31,13 +29,11 @@ internal class SecondarySubtitleOverlay(
     private var offsetDelta = 0f
     private var primaryBottomPaddingFraction = 0.04f
     private var primaryCues: List<Cue> = emptyList()
-    private var primaryCanShift = false
 
     init {
         view.setApplyEmbeddedStyles(false)
         view.setApplyEmbeddedFontSizes(false)
         view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            updatePrimaryOffset()
             renderCues()
         }
         applyStyle()
@@ -47,7 +43,6 @@ internal class SecondarySubtitleOverlay(
     /** A track switch clears old cues; Media3 owns loading, timing and seeking. */
     fun select(enabled: Boolean) {
         secondaryCues = if (enabled) emptyList() else null
-        updatePrimaryOffset()
         renderCues()
     }
 
@@ -74,16 +69,11 @@ internal class SecondarySubtitleOverlay(
             primaryBottomPaddingFraction = verticalOffset.coerceIn(0f, 0.95f)
         }
         applyStyle()
-        updatePrimaryOffset()
         renderCues()
     }
 
-    fun updatePrimaryCues(cues: List<Cue>, allowAutomaticShift: Boolean = true) {
+    fun updatePrimaryCues(cues: List<Cue>) {
         primaryCues = cues
-        primaryCanShift = allowAutomaticShift && cues.isNotEmpty() && cues.all {
-            it.bitmap == null && it.line == Cue.DIMEN_UNSET && it.position == Cue.DIMEN_UNSET
-        }
-        updatePrimaryOffset()
         renderCues()
     }
 
@@ -93,12 +83,10 @@ internal class SecondarySubtitleOverlay(
         verticalOffset: Float?,
         textColor: Int? = null,
     ) {
-        fontSizeOverride = fontSize?.coerceIn(8f, 72f)
+        fontSizeOverride = fontSize?.coerceIn(6f, 72f)
         textColorOverride = textColor
-        offsetDelta = ((verticalOffset ?: DEFAULT_OFFSET_DELTA) - DEFAULT_OFFSET_DELTA)
-            .coerceIn(-0.08f, 0.32f)
+        offsetDelta = (verticalOffset ?: 0f).coerceIn(-0.4f, 0.4f)
         applyStyle()
-        updatePrimaryOffset()
         renderCues()
     }
 
@@ -127,12 +115,17 @@ internal class SecondarySubtitleOverlay(
         val topFallback = ArrayList<Pair<String, Cue>>()
         for (sourceCue in fixed) {
             var cue = buildCue(sourceCue)
-            val box = estimateSecondaryBox(
+            val originalBox = estimateSecondaryBox(
                 cue,
                 width,
                 height,
                 estimateTextHeight(sourceCue.text.toString(), width * (sourceCue.size.takeUnless { it == Cue.DIMEN_UNSET } ?: 0.9f), secondaryFontPx),
             )
+            val shift = (-offsetDelta * height)
+                .coerceAtLeast(-originalBox.top).coerceAtMost(height - originalBox.bottom)
+            val box = originalBox.copy(top = originalBox.top + shift, bottom = originalBox.bottom + shift)
+            cue = cue.buildUpon().setLine(box.bottom / height, Cue.LINE_TYPE_FRACTION)
+                .setLineAnchor(Cue.ANCHOR_TYPE_END).build()
             if (occupied.none { SubtitleLayoutPlanner.intersects(box, it, gapPx) }) {
                 rendered += cue
                 occupied += box
@@ -215,9 +208,8 @@ internal class SecondarySubtitleOverlay(
         val topOfLowestPrimary = occupied
             .filter { it.bottom > height / 2f }
             .minOfOrNull { it.top }
-        val primaryBottom = height * (1f - primaryBottomPaddingFraction) + primaryOffsetPx()
-        val secondaryOnlyOffset = if (primaryCanShift) 0f else offsetDelta * height
-        val desiredBottom = (topOfLowestPrimary ?: primaryBottom) - gapPx - secondaryOnlyOffset
+        val primaryBottom = height * (1f - primaryBottomPaddingFraction)
+        val desiredBottom = (topOfLowestPrimary ?: primaryBottom) - gapPx - offsetDelta * height
         val placement = SubtitleLayoutPlanner.placeSecondary(
             primary = occupied,
             viewportWidth = width,
@@ -259,7 +251,7 @@ internal class SecondarySubtitleOverlay(
             }
             cue.line < 0f -> height * (1f - primaryBottomPaddingFraction) + cue.line * fontPx - boxHeight
             else -> cue.line * fontPx
-        } + primaryOffsetPx()
+        }
         return SubtitleBox(left, top, left + cueWidth, top + boxHeight)
     }
 
@@ -302,19 +294,8 @@ internal class SecondarySubtitleOverlay(
         return lines * fontPx * 1.25f
     }
 
-    // Only while a secondary is loaded, and never past the bottom edge.
-    private fun primaryOffsetPx(): Float {
-        if (!primaryCanShift || secondaryCues == null) return 0f
-        return -offsetDelta.coerceAtLeast(-primaryBottomPaddingFraction) * view.height
-    }
-
-    private fun updatePrimaryOffset() {
-        onPrimaryVerticalOffset(primaryOffsetPx())
-    }
-
     fun clear() {
         primaryCues = emptyList()
-        primaryCanShift = false
         select(false)
     }
 

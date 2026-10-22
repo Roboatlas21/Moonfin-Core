@@ -166,6 +166,7 @@ class AppleTvBackend implements PlayerBackend, SecondarySubtitleBackend {
       case 'selectAudio':
       case 'selectSubtitle':
       case 'setSubtitleSize':
+      case 'setSubtitlePosition':
       case 'selectSecondarySubtitle':
       case 'setSecondarySubtitleDelay':
       case 'configureSecondarySubtitleStyle':
@@ -350,7 +351,7 @@ class AppleTvBackend implements PlayerBackend, SecondarySubtitleBackend {
       'secondarySubtitleUrl': payload['secondarySubtitleUrl'],
       'secondarySubtitleCodec': payload['secondarySubtitleCodec'],
       'secondarySubtitleDelayMs': payload['secondarySubtitleDelayMs'] ?? 0,
-      'secondarySubtitleOffset': payload['secondarySubtitleOffset'] ?? 0.08,
+      'secondarySubtitleOffset': payload['secondarySubtitleOffset'] ?? 0.0,
       'secondarySubtitleFontSize': payload['secondarySubtitleFontSize'],
       'secondarySubtitleTextColor': payload['secondarySubtitleTextColor'],
       'videoFrameRate': payload['videoFrameRate'],
@@ -812,9 +813,9 @@ class AppleTvBackend implements PlayerBackend, SecondarySubtitleBackend {
     int? textColor,
   }) async {
     await _invoke<void>('configureSecondarySubtitleStyle', {
-      if (fontSize != null) 'fontSize': fontSize.clamp(8.0, 72.0),
+      if (fontSize != null) 'fontSize': fontSize.clamp(6.0, 72.0),
       if (verticalOffset != null)
-        'verticalOffset': verticalOffset.clamp(0.0, 0.4),
+        'verticalOffset': verticalOffset.clamp(-0.4, 0.4),
       if (textColor != null) 'textColor': textColor,
     });
   }

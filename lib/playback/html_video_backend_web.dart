@@ -74,7 +74,7 @@ class HtmlVideoBackend extends PlayerBackend
   int _secondaryGeneration = 0;
   final _secondaryCues = <({web.VTTCue cue, double start, double end})>[];
   double _secondaryDelay = 0;
-  double _secondaryOffset = 0.08;
+  double _secondaryOffset = 0.0;
   double? _secondaryFontSize;
   int? _secondaryTextColor;
 
@@ -799,7 +799,7 @@ class HtmlVideoBackend extends PlayerBackend
     int? textColor,
   }) async {
     if (_disposed) return;
-    final size = fontSize?.clamp(8.0, 72.0);
+    final size = fontSize?.clamp(6.0, 72.0);
     if (_secondaryFontSize != size ||
         _secondaryTextColor != textColor ||
         _subtitleStyleElement == null) {
@@ -807,7 +807,7 @@ class HtmlVideoBackend extends PlayerBackend
       _secondaryTextColor = textColor;
       _applySubtitleAppearance();
     }
-    final offset = (verticalOffset ?? 0.08).clamp(0.0, 0.4);
+    final offset = (verticalOffset ?? 0.0).clamp(-0.4, 0.4);
     if (_secondaryOffset == offset) return;
     _secondaryOffset = offset;
     _positionSecondaryCues();
@@ -828,7 +828,7 @@ class HtmlVideoBackend extends PlayerBackend
         ..vertical = ''
         ..snapToLines = false
         ..lineAlign = 'start'
-        ..line = (_secondaryOffset * 100).toJS;
+        ..line = ((0.08 - _secondaryOffset) * 100).clamp(0.0, 100.0).toJS;
     }
   }
 

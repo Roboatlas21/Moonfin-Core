@@ -102,15 +102,22 @@ void main() {
       final manager = PlaybackManager();
       addTearDown(prefs.dispose);
       addTearDown(manager.dispose);
-      await prefs.set(UserPreferences.secondarySubtitleTextSize, 36.0);
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
       await prefs.set(UserPreferences.secondarySubtitleTextColor, 0xFFFFFF00);
       await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, 0.16);
       await syncSecondarySubtitleStyle(manager, prefs);
-      expect(manager.secondarySubtitleFontSize, 36.0);
+      expect(manager.secondarySubtitleFontSize, 30.0);
+      await prefs.set(UserPreferences.subtitlesTextSize, 40.0);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleFontSize, 60.0);
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, -50.0);
+      await prefs.set(UserPreferences.subtitlesTextSize, 12.0);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleFontSize, 6.0);
       expect(manager.secondarySubtitleTextColor, 0xFFFFFF00);
       expect(manager.secondarySubtitleOffset, 0.16);
 
-      await prefs.set(UserPreferences.secondarySubtitleTextSize, 0.0);
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 0.0);
       await prefs.set(UserPreferences.secondarySubtitleTextColor, -1);
       await syncSecondarySubtitleStyle(manager, prefs);
       expect(manager.secondarySubtitleFontSize, isNull);

@@ -19,6 +19,10 @@ Map<String, dynamic> appleTvSubtitleMetadata({
         manager.canUseAsSecondarySubtitle(index);
   }).toList(),
   'title': l10n.secondarySubtitleSlot,
+  'menuTitle': l10n.subtitles,
+  'primaryTitle': l10n.primarySubtitleSlot,
+  'secondaryTitle': l10n.secondarySubtitleTrack,
+  'secondaryDelayLabel': l10n.secondaryDelayAdjustment,
   'off': l10n.off,
   'cancel': l10n.cancel,
   'done': l10n.done,
@@ -27,23 +31,22 @@ Map<String, dynamic> appleTvSubtitleMetadata({
   'delayLabel': l10n.subtitleDelay,
   'sizeLabel': l10n.subtitleSize,
   'positionLabel': l10n.verticalOffset,
-  'colorLabel': l10n.textFillColor,
+  'colorLabel': l10n.subtitleColour,
   'primaryFontSize': SubtitleStyle.forResolution(
     prefs,
     manager.currentResolution,
   ).fontSize,
-  'fontSize': manager.secondarySubtitleFontSize ?? 0.0,
+  'sizeAdjustment': prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
+  'primaryVerticalOffset': SubtitleStyle.forResolution(
+    prefs,
+    manager.currentResolution,
+  ).verticalOffset,
   'verticalOffset': manager.secondarySubtitleOffset,
   'textColor': prefs.get(UserPreferences.secondarySubtitleTextColor),
   'colors': [
     {'label': l10n.defaultLabel, 'value': -1},
     {'label': l10n.white, 'value': 0xFFFFFFFF},
     {'label': l10n.yellow, 'value': 0xFFFFFF00},
-    {'label': l10n.green, 'value': 0xFF00FF00},
-    {'label': l10n.cyan, 'value': 0xFF00FFFF},
-    {'label': l10n.blue, 'value': 0xFF0000FF},
-    {'label': l10n.magenta, 'value': 0xFFFF00FF},
-    {'label': l10n.red, 'value': 0xFFFF0000},
   ],
 };
 
@@ -58,6 +61,14 @@ Future<void>? handleAppleTvSubtitleAction(
       final size = (action['fontSize'] as num?)?.toDouble();
       if (size == null) return Future<void>.value();
       return setPrimarySubtitleSize(manager, prefs, size);
+    case 'setSubtitlePosition':
+      final offset = (action['verticalOffset'] as num?)?.toDouble();
+      if (offset == null) return Future<void>.value();
+      return setPrimarySubtitleAppearance(
+        manager,
+        prefs,
+        verticalOffset: offset,
+      );
     case 'selectSecondarySubtitle':
       final index = (action['index'] as num?)?.toInt();
       if (index == null) return Future<void>.value();
@@ -78,19 +89,19 @@ Future<void> _saveAppearance(
   PlaybackManager manager,
   UserPreferences prefs,
 ) async {
-  final size = (action['fontSize'] as num?)?.toDouble();
+  final size = (action['sizeAdjustment'] as num?)?.toDouble();
   final offset = (action['verticalOffset'] as num?)?.toDouble();
   final color = (action['textColor'] as num?)?.toInt();
   if (size != null && size.isFinite) {
     await prefs.set(
-      UserPreferences.secondarySubtitleTextSize,
-      size <= 0 ? 0.0 : size.clamp(8, 72).toDouble(),
+      UserPreferences.secondarySubtitleSizeAdjustment,
+      size.clamp(-50, 50).toDouble(),
     );
   }
   if (offset != null && offset.isFinite) {
     await prefs.set(
       UserPreferences.secondarySubtitleOffsetPosition,
-      offset.clamp(0, 0.4).toDouble(),
+      offset.clamp(-0.4, 0.4).toDouble(),
     );
   }
   if (color != null) {

@@ -346,7 +346,7 @@ final class SubtitleOverlay: PlatformView {
     /// As on Media3, nil removes the secondary override and inherits the
     /// current primary appearance. Position and delay remain independent.
     func applySecondaryStyle(from primary: SubtitleOverlay, fontSize: Double?, textColor: Int?) {
-        subtitleUserFontSize = fontSize.map { CGFloat(min(max($0, 8), 72)) }
+        subtitleUserFontSize = fontSize.map { CGFloat(min(max($0, 6), 72)) }
             ?? primary.subtitleUserFontSize
         subtitleTextColor = textColor.map { Self.colorFromARGB($0) } ?? primary.subtitleTextColor
         subtitleFontWeight = primary.subtitleFontWeight
@@ -409,7 +409,7 @@ final class SubtitleOverlay: PlatformView {
         let size = textLabel.sizeThatFits(CGSize(width: maxWidth, height: bounds.height * 0.4))
         let frame = CGRect(
             x: (bounds.width - size.width) / 2,
-            y: topOffset.map { bounds.height * CGFloat(min(max($0, 0), 0.4)) }
+            y: topOffset.map { min(bounds.height * CGFloat(max($0, 0)), max(0, bounds.height - size.height)) }
                 ?? (bounds.height - size.height - textBottomOffset),
             width: size.width,
             height: size.height

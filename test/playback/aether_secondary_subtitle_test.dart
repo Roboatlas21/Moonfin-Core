@@ -85,7 +85,7 @@ void main() {
           expect(next.arguments['secondarySubtitleTrackId'], isNull);
           expect(next.arguments['secondarySubtitleUrl'], isNull);
           expect(next.arguments['secondarySubtitleDelayMs'], 0);
-          expect(next.arguments['secondarySubtitleOffset'], 0.08);
+          expect(next.arguments['secondarySubtitleOffset'], 0.0);
           expect(next.arguments['secondarySubtitleFontSize'], isNull);
           expect(next.arguments['secondarySubtitleTextColor'], isNull);
         },
@@ -130,7 +130,7 @@ void main() {
           expect(calls.last.method, 'configureSecondarySubtitleStyle');
           expect(calls.last.arguments, {
             'fontSize': 72.0,
-            'verticalOffset': 0.0,
+            'verticalOffset': -0.2,
             'textColor': 0xFF00FF00,
           });
           await backend.configureSecondarySubtitleStyle(verticalOffset: 0.2);

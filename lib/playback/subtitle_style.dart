@@ -3,13 +3,20 @@ import 'package:playback_core/playback_core.dart';
 
 import '../preference/user_preferences.dart';
 
-/// Updates the active SDR/HDR preference and applies it even in the mini player.
+/// Updates the active SDR/HDR appearance, including relative secondary size.
 Future<void> setPrimarySubtitleSize(
   PlaybackManager manager,
   UserPreferences prefs,
   double size,
-) async {
-  if (!size.isFinite) return;
+) => setPrimarySubtitleAppearance(manager, prefs, fontSize: size);
+
+Future<void> setPrimarySubtitleAppearance(
+  PlaybackManager manager,
+  UserPreferences prefs, {
+  double? fontSize,
+  double? verticalOffset,
+}) async {
+  if (fontSize?.isFinite == false || verticalOffset?.isFinite == false) return;
   final resolution = manager.currentResolution;
   final useHdr =
       prefs.get(UserPreferences.subtitlesHdrSeparate) &&
@@ -17,13 +24,22 @@ Future<void> setPrimarySubtitleSize(
         videoRangeType: resolution?.videoRangeType,
         isTranscoding: resolution?.playMethod == StreamPlayMethod.transcode,
       );
-  final fontSize = size.clamp(12.0, 48.0);
-  await prefs.set(
-    useHdr
-        ? UserPreferences.subtitlesHdrTextSize
-        : UserPreferences.subtitlesTextSize,
-    fontSize,
-  );
+  if (fontSize != null) {
+    await prefs.set(
+      useHdr
+          ? UserPreferences.subtitlesHdrTextSize
+          : UserPreferences.subtitlesTextSize,
+      fontSize.clamp(12.0, 48.0),
+    );
+  }
+  if (verticalOffset != null) {
+    await prefs.set(
+      useHdr
+          ? UserPreferences.subtitlesHdrOffsetPosition
+          : UserPreferences.subtitlesOffsetPosition,
+      verticalOffset.clamp(0.0, 0.4),
+    );
+  }
   // Some backends default omitted colours, so send the full saved appearance.
   final style = SubtitleStyle.forResolution(prefs, manager.currentResolution);
   await manager.backend?.configureSubtitleStyle(
@@ -34,6 +50,7 @@ Future<void> setPrimarySubtitleSize(
     fontWeight: style.fontWeight,
     verticalOffset: style.verticalOffset,
   );
+  await syncSecondarySubtitleStyle(manager, prefs);
 }
 
 /// Default keeps the override unset so the engine follows the primary style,
@@ -42,11 +59,15 @@ Future<void> syncSecondarySubtitleStyle(
   PlaybackManager manager,
   UserPreferences prefs,
 ) {
+  final adjustment = prefs
+      .get(UserPreferences.secondarySubtitleSizeAdjustment)
+      .clamp(-50.0, 50.0);
+  final primarySize = SubtitleStyle.forResolution(
+    prefs,
+    manager.currentResolution,
+  ).fontSize;
   return manager.configureSecondarySubtitleStyle(
-    fontSize: switch (prefs.get(UserPreferences.secondarySubtitleTextSize)) {
-      final size when size > 0 => size,
-      _ => null,
-    },
+    fontSize: adjustment == 0 ? null : primarySize * (1 + adjustment / 100),
     verticalOffset: prefs.get(UserPreferences.secondarySubtitleOffsetPosition),
     textColor: switch (prefs.get(UserPreferences.secondarySubtitleTextColor)) {
       -1 => null,

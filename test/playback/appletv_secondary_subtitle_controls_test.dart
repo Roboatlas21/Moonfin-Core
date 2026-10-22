@@ -54,8 +54,10 @@ void main() {
     expect(metadata['title'], l10n.secondarySubtitleSlot);
     expect(metadata['sizeLabel'], l10n.subtitleSize);
     expect(metadata['primaryFontSize'], 20.0);
-    expect(metadata['fontSize'], 0.0);
+    expect(metadata['sizeAdjustment'], 0.0);
     expect(metadata['defaultLabel'], l10n.defaultLabel);
+    expect(metadata['secondaryDelayLabel'], l10n.secondaryDelayAdjustment);
+    expect(metadata['primaryVerticalOffset'], 0.04);
     expect(
       metadata['colors'],
       contains(equals({'label': l10n.yellow, 'value': 0xFFFFFF00})),
@@ -93,7 +95,7 @@ void main() {
         );
         expect(prefs.get(UserPreferences.subtitlesTextSize), expected);
       }
-      expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 0.0);
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 0.0);
       expect(prefs.get(UserPreferences.subtitlesHdrTextSize), 20.0);
     },
   );
@@ -110,14 +112,14 @@ void main() {
       await handleAppleTvSubtitleAction(
         {
           'event': 'configureSecondarySubtitleStyle',
-          'fontSize': 30.0,
+          'sizeAdjustment': 50.0,
           'verticalOffset': 0.16,
           'textColor': 0xFFFFFF00,
         },
         manager,
         prefs,
       );
-      expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 30.0);
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
       expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.16);
       expect(prefs.get(UserPreferences.secondarySubtitleTextColor), 0xFFFFFF00);
       final next = PlaybackManager();
@@ -142,7 +144,7 @@ void main() {
     await handleAppleTvSubtitleAction(
       {
         'event': 'configureSecondarySubtitleStyle',
-        'fontSize': 34.0,
+        'sizeAdjustment': 40.0,
         'textColor': 0xFFFFFF00,
       },
       manager,
@@ -151,7 +153,7 @@ void main() {
     await handleAppleTvSubtitleAction(
       {
         'event': 'configureSecondarySubtitleStyle',
-        'fontSize': 0.0,
+        'sizeAdjustment': 0.0,
         'textColor': -1,
       },
       manager,
@@ -166,14 +168,14 @@ void main() {
       prefs,
     );
     await prefs.set(UserPreferences.subtitlesTextSize, 28.0);
-    expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 0.0);
+    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 0.0);
     final metadata = appleTvSubtitleMetadata(
       manager: manager,
       prefs: prefs,
       l10n: AppLocalizationsEn(),
       tracks: [],
     );
-    expect(metadata['fontSize'], 0.0);
+    expect(metadata['sizeAdjustment'], 0.0);
     expect(metadata['primaryFontSize'], 28.0);
   });
 }

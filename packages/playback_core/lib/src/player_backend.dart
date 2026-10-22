@@ -130,9 +130,11 @@ abstract class PlayerBackend {
     String? codec,
     int? embeddedTrackId,
   }) async {}
+  /// Additional delay, in seconds, on top of the primary subtitle delay.
   Future<void> setSecondarySubtitleDelay(double seconds) async {}
 
   /// Null size or colour clears the override and follows the primary style.
+  /// Positive offset raises only the secondary track by a fraction of player height.
   Future<void> configureSecondarySubtitleStyle({
     double? fontSize,
     double? verticalOffset,

@@ -275,6 +275,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   final _externalSubtitleLoads = <String, Future<void>>{};
   final _pendingSubtitleChoice = PendingSubtitleChoice();
   int _secondarySubtitleGeneration = 0;
+  double _secondarySubtitleDelay = 0;
   ({int? ordinal, String? url, int generation})? _pendingSecondarySubtitle;
   late final Future<void> _secondaryControlsReady;
   bool _secondaryDelaySupported = false;
@@ -305,6 +306,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     _pendingEmbeddedSubtitle = null;
     _secondarySubtitleGeneration++;
     _pendingSecondarySubtitle = null;
+    _secondarySubtitleDelay = 0;
     _externalSubtitleLoads.clear();
     _pendingSubtitleChoice.nextSource();
   }
@@ -2946,6 +2948,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   Future<void> setSubtitleDelay(double seconds) async {
     final native = _player.platform as NativePlayer;
     await _nativeSetProperty(native, 'sub-delay', seconds.toStringAsFixed(3));
+    await setSecondarySubtitleDelay(_secondarySubtitleDelay);
   }
 
   @override
@@ -3038,12 +3041,16 @@ class MediaKitPlayerBackend extends PlayerBackend
 
   @override
   Future<void> setSecondarySubtitleDelay(double seconds) async {
+    _secondarySubtitleDelay = seconds.clamp(-5.0, 5.0);
     await _secondaryControlsReady;
     if (_isDisposed || !supportsSecondarySubtitleDelay) return;
+    final native = _player.platform as NativePlayer;
+    final primary = double.tryParse(
+          await _tryNativeGetProperty(native, 'sub-delay') ?? '',
+        ) ?? 0;
     await _nativeSetProperty(
-      _player.platform as NativePlayer,
-      'secondary-sub-delay',
-      seconds.clamp(-5.0, 5.0).toStringAsFixed(3),
+      native, 'secondary-sub-delay',
+      (primary + _secondarySubtitleDelay).toStringAsFixed(3),
     );
   }
 
@@ -3055,9 +3062,9 @@ class MediaKitPlayerBackend extends PlayerBackend
   }) async {
     await _secondaryControlsReady;
     if (_isDisposed || !supportsSecondarySubtitlePosition) return;
-    // mpv draws the second track at the top; offset it down from that edge.
+    // mpv draws the second track at the top; positive adjustment moves it up.
     final offset = verticalOffset ?? PlaybackManager.defaultSecondarySubtitleOffset;
-    final position = (offset.clamp(0.0, 0.4) * 100).round();
+    final position = ((0.08 - offset) * 100).clamp(0.0, 100.0).round();
     await _nativeSetProperty(
       _player.platform as NativePlayer,
       'secondary-sub-pos',

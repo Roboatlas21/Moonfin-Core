@@ -604,7 +604,7 @@ class PlaybackManager implements AudioOwnable {
   static const secondarySubtitleMaxDelaySeconds = 5.0;
 
   /// Where the secondary track sits by default, as a fraction of the height.
-  static const defaultSecondarySubtitleOffset = 0.08;
+  static const defaultSecondarySubtitleOffset = 0.0;
 
   int? get secondarySubtitleStreamIndex => _secondarySubtitleStreamIndex;
   double get secondarySubtitleDelaySeconds => _secondarySubtitleDelaySeconds;
@@ -3737,10 +3737,10 @@ class PlaybackManager implements AudioOwnable {
     double? verticalOffset,
     int? textColor,
   }) async {
-    _secondarySubtitleFontSize = fontSize?.clamp(8.0, 72.0).toDouble();
+    _secondarySubtitleFontSize = fontSize?.clamp(6.0, 72.0).toDouble();
     _secondarySubtitleTextColor = textColor;
     final offset = verticalOffset ?? defaultSecondarySubtitleOffset;
-    _secondarySubtitleOffset = offset.clamp(0.0, 0.4).toDouble();
+    _secondarySubtitleOffset = offset.clamp(-0.4, 0.4).toDouble();
     await _backend?.configureSecondarySubtitleStyle(
       fontSize: _secondarySubtitleFontSize,
       verticalOffset: _secondarySubtitleOffset,

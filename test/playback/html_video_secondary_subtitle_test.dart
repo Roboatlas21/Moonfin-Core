@@ -210,7 +210,7 @@ void main() {
         'secondarySubtitleDelayMs': 500,
         'secondarySubtitleFontSize': 24,
         'secondarySubtitleTextColor': 0xFFFFFF00,
-        'secondarySubtitleOffset': 0.12,
+        'secondarySubtitleOffset': -0.04,
       });
       final second = await loadedSecondary();
       final cue = second.track.cues![0] as web.VTTCue;
@@ -266,7 +266,7 @@ void main() {
       await backend.configureSecondarySubtitleStyle(
         fontSize: 36,
         textColor: 0xFFFFFF00,
-        verticalOffset: 0.2,
+        verticalOffset: -0.12,
       );
       expect(writes, ['line', 'line']);
       expect((cues[0] as web.VTTCue).line.dartify(), 20);
@@ -282,7 +282,7 @@ void main() {
       await backend.configureSecondarySubtitleStyle(
         fontSize: 36,
         textColor: 0xFFFFFF00,
-        verticalOffset: 0.2,
+        verticalOffset: -0.12,
       );
       expect(writes, isEmpty);
     },

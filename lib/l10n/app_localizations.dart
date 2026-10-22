@@ -7456,6 +7456,12 @@ abstract class AppLocalizations {
   /// **'Secondary Subtitle Track'**
   String get secondarySubtitleTrack;
 
+  /// Title for the delay added to the main subtitle delay.
+  String get secondaryDelayAdjustment => 'Secondary Delay Adjustment';
+
+  /// Colour control for the secondary subtitle track.
+  String get subtitleColour => 'Subtitle Colour';
+
   /// Tooltip for the button that lowers a setting's value
   ///
   /// In en, this message translates to:

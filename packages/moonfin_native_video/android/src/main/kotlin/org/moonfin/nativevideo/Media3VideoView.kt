@@ -1126,7 +1126,6 @@ class Media3VideoView(
             if (::secondarySubtitleOverlay.isInitialized) {
                 secondarySubtitleOverlay.updatePrimaryCues(
                     stacked,
-                    allowAutomaticShift = !selectedSubtitleIsAss,
                 )
             }
         }
@@ -1137,7 +1136,6 @@ class Media3VideoView(
             if (::secondarySubtitleOverlay.isInitialized) {
                 secondarySubtitleOverlay.updatePrimaryCues(
                     stacked,
-                    allowAutomaticShift = !selectedSubtitleIsAss,
                 )
             }
         }
@@ -1534,9 +1532,6 @@ class Media3VideoView(
         player = createPlayer()
         secondarySubtitleOverlay = SecondarySubtitleOverlay(
             view = secondarySubtitleView,
-            onPrimaryVerticalOffset = { offsetPx ->
-                subtitleView.translationY = offsetPx
-            },
         )
 
         applyTrackSelectorForCurrentSource()
@@ -4199,12 +4194,12 @@ class Media3VideoView(
             .build()
         val content = bootMediaSourceFactory.createMediaSource(contentItem)
         val offsetUs = subtitleOffsetUs()
-        val embedded = TextStreamOffsetMediaSource(content, offsetUs, secondarySubtitleDelayMs * 1000L)
+        val embedded = TextStreamOffsetMediaSource(content, offsetUs, secondarySubtitleOffsetUs())
         val sidecars = externalSubtitleConfigurations.map { configuration ->
             TimeOffsetMediaSource(
                 SidecarSourceFactory.create(configuration, bootDataSourceFactory, assParserFactory),
                 offsetUs,
-                secondarySubtitleDelayMs * 1000L,
+                secondarySubtitleOffsetUs(),
                 onSecondaryError = { error ->
                     mainHandler.post {
                         Media3Bridge.emitEvent(mapOf(
@@ -4223,6 +4218,9 @@ class Media3VideoView(
     }
 
     private fun subtitleOffsetUs(): Long = manualSubtitleDelayMs * 1000L
+
+    private fun secondarySubtitleOffsetUs(): Long =
+        (manualSubtitleDelayMs + secondarySubtitleDelayMs) * 1000L
 
     /**
      * Pushes the current offsets into the source tree. The first non zero
@@ -4298,7 +4296,7 @@ class Media3VideoView(
         val embedded = embeddedOffsetSource ?: return
         val sidecars = sidecarOffsetSources
         val offsetUs = subtitleOffsetUs()
-        val secondaryOffsetUs = secondarySubtitleDelayMs * 1000L
+        val secondaryOffsetUs = secondarySubtitleOffsetUs()
         request.writing = true
         // This also orders writes after queued selection invalidations when
         // text was already Off and no track-change callback will be delivered.
@@ -4311,7 +4309,7 @@ class Media3VideoView(
                     return@completion
                 }
                 request.writing = false
-                if (offsetUs != subtitleOffsetUs() || secondaryOffsetUs != secondarySubtitleDelayMs * 1000L) {
+                if (offsetUs != subtitleOffsetUs() || secondaryOffsetUs != secondarySubtitleOffsetUs()) {
                     retimeTextTrack()
                     return@completion
                 }
