@@ -466,6 +466,29 @@ void main() {
     expect((secondaryCue.line.dartify() as num), lessThan(95));
   });
 
+
+  test('WebVTT automatic horizontal positioning follows the primary', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:08.000 line:90% align:start\nPrimary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n'),
+      codec: 'vtt',
+    );
+    final secondaryCue =
+        (await loadedSecondary()).track.cues![0] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => primary.track.activeCues?.length == 1);
+    final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(secondaryCue.position.dartify(), primaryCue.position.dartify());
+    expect(secondaryCue.align, primaryCue.align);
+  });
+
   test('SRT and primary VTT remain independently selectable', () async {
     await backend.setSubtitleTrack(
       1,

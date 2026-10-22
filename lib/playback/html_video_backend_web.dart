@@ -88,7 +88,7 @@ class HtmlVideoBackend extends PlayerBackend
     double centre,
     double top,
     double bottom,
-    double position,
+    JSAny position,
     String align,
     String positionAlign,
     double size,
@@ -974,10 +974,7 @@ class HtmlVideoBackend extends PlayerBackend
         centre: bounds.centre,
         top: bounds.top,
         bottom: bounds.bottom,
-        position: switch (primary.position.dartify()) {
-          num value => value.toDouble(),
-          _ => 50.0,
-        },
+        position: primary.position,
         align: primary.align,
         positionAlign: _cueAlignment(primary, 'positionAlign', 'auto'),
         size: primary.size,
@@ -1029,7 +1026,7 @@ class HtmlVideoBackend extends PlayerBackend
         ..line = (secondaryLine * 100).clamp(0.0, 100.0).toDouble().toJS
         ..align = placement?.align ?? 'center'
         ..positionAlign = placement?.positionAlign ?? 'center'
-        ..position = (placement?.position ?? 50.0).toJS
+        ..position = placement?.position ?? 50.0.toJS
         ..size = placement?.size ?? 90;
     }
   }
