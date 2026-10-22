@@ -258,7 +258,7 @@ internal class SecondarySubtitleOverlay(
     ): Cue? {
         val cueWidth = if (cue.size == Cue.DIMEN_UNSET) width * 0.9f else cue.size * width
         val textHeight = estimateTextHeight(text, cueWidth, fontPx.coerceAtLeast(1f))
-        val reference = primaryCues.firstOrNull { it.text != null }
+        val reference = primaryCues.firstOrNull { it.text != null } ?: lastPrimaryForStacking
         val refBox = reference?.let {
             estimatePrimaryBox(it, width, height, (baseFontSize / 24f) * 0.06f * height)
         }
