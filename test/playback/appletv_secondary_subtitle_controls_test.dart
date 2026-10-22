@@ -169,13 +169,13 @@ void main() {
         prefs,
       );
       expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
-      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.16);
+      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.06);
       expect(prefs.get(UserPreferences.secondarySubtitleTextColor), 0xFFFFFF00);
       final next = PlaybackManager();
       addTearDown(next.dispose);
       await syncSecondarySubtitleStyle(next, prefs);
       expect(next.secondarySubtitleFontSize, 30.0);
-      expect(next.secondarySubtitleOffset, 0.16);
+      expect(next.secondarySubtitleOffset, 0.06);
       expect(next.secondarySubtitleTextColor, 0xFFFFFF00);
       // Changing only position must keep the chosen font and colour.
       await handleAppleTvSubtitleAction(
@@ -185,6 +185,14 @@ void main() {
       );
       expect(manager.secondarySubtitleFontSize, 30.0);
       expect(manager.secondarySubtitleTextColor, 0xFFFFFF00);
+      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.06);
+      await handleAppleTvSubtitleAction(
+        {'event': 'configureSecondarySubtitleStyle', 'verticalOffset': -0.3},
+        manager,
+        prefs,
+      );
+      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), -0.06);
+      expect(manager.secondarySubtitleOffset, -0.06);
     },
   );
 

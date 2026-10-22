@@ -98,7 +98,9 @@ Future<void> _saveAppearance(
   if (offset != null && offset.isFinite) {
     await prefs.set(
       UserPreferences.secondarySubtitleOffsetPosition,
-      offset.clamp(-0.4, 0.4).toDouble(),
+      offset
+          .clamp(-secondarySubtitleMaxOffset, secondarySubtitleMaxOffset)
+          .toDouble(),
     );
   }
   if (color != null) {

@@ -373,7 +373,7 @@ void main() {
     final manager = _Manager(_AndroidBackend());
     addTearDown(manager.dispose);
     await openPicker(tester, manager, secondary: true);
-    expect(find.text('+20%'), findsOneWidget);
+    expect(find.text('+6%'), findsOneWidget);
 
     await tester.tap(find.byTooltip(l10n.playerTooltipPrevious));
     await tester.pumpAndSettle();
@@ -382,11 +382,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 10.0);
     expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.4);
-    expect(manager.secondarySubtitleOffset, 0.2);
+    expect(manager.secondarySubtitleOffset, 0.06);
   });
 
   testWidgets(
-    'Media3 offset shows the effective legacy limit and reverses by 2%',
+    'Media3 offset shows the new legacy limit and reverses by 2%',
     (tester) async {
       final prefs = GetIt.instance<UserPreferences>();
       await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, 0.4);
@@ -394,18 +394,71 @@ void main() {
       addTearDown(manager.dispose);
       await syncSecondarySubtitleStyle(manager, prefs);
       await openPicker(tester, manager, secondary: true);
-      expect(find.text('+20%'), findsOneWidget);
-      expect(manager.secondarySubtitleOffset, 0.2);
+      expect(find.text('+6%'), findsOneWidget);
+      expect(manager.secondarySubtitleOffset, 0.06);
       await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
       await tester.pumpAndSettle();
-      expect(find.text('+20%'), findsOneWidget);
+      expect(find.text('+6%'), findsOneWidget);
       await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
       await tester.pumpAndSettle();
-      expect(find.text('+18%'), findsOneWidget);
-      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.18);
-      expect(manager.secondarySubtitleOffset, 0.18);
+      expect(find.text('+4%'), findsOneWidget);
+      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.04);
+      expect(manager.secondarySubtitleOffset, 0.04);
     },
   );
+
+  testWidgets('primary offset has seven 2% steps from 0% to 12%', (tester) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    final manager = _Manager(_Backend());
+    addTearDown(manager.dispose);
+    await openPicker(tester, manager, audio: false);
+    expect(find.text('4%'), findsOneWidget);
+    for (final expected in ['6%', '8%', '10%', '12%']) {
+      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
+      await tester.pumpAndSettle();
+      expect(find.text(expected), findsOneWidget);
+    }
+    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
+    await tester.pumpAndSettle();
+    expect(find.text('12%'), findsOneWidget);
+    expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.12);
+
+    for (var i = 0; i < 6; i++) {
+      await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('0%'), findsOneWidget);
+    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
+    await tester.pumpAndSettle();
+    expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.0);
+  });
+
+  testWidgets('secondary offset has seven steps from −6% to +6%', (
+    tester,
+  ) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    final manager = _Manager(_AndroidBackend());
+    addTearDown(manager.dispose);
+    await openPicker(tester, manager, secondary: true);
+    for (final expected in ['-2%', '-4%', '-6%']) {
+      await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
+      await tester.pumpAndSettle();
+      expect(find.text(expected), findsOneWidget);
+    }
+    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
+    await tester.pumpAndSettle();
+    expect(find.text('-6%'), findsOneWidget);
+    expect(manager.secondarySubtitleOffset, -0.06);
+    for (var i = 0; i < 6; i++) {
+      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('+6%'), findsOneWidget);
+    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
+    await tester.pumpAndSettle();
+    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.06);
+    expect(manager.secondarySubtitleOffset, 0.06);
+  });
 
   for (final (name, method, separate, hdr) in [
     ('shared size for HDR', StreamPlayMethod.directPlay, false, false),

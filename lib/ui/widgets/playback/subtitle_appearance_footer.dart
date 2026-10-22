@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../l10n/app_localizations.dart';
+import '../../../playback/subtitle_style.dart';
 
 class SubtitleAppearanceFooter extends StatefulWidget {
   const SubtitleAppearanceFooter({
@@ -16,7 +17,7 @@ class SubtitleAppearanceFooter extends StatefulWidget {
     this.showStyle = true,
     this.showPosition = true,
     this.showColor = true,
-    this.maxOffset = 0.4,
+    this.maxOffset = primarySubtitleMaxOffset,
   });
 
   final double initialFontSize;
@@ -46,8 +47,12 @@ class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
       .clamp(widget.secondary ? -50.0 : 12.0, widget.secondary ? 50.0 : 48.0)
       .toDouble();
 
-  double _clampOffset(double value) =>
-      value.clamp(widget.secondary ? -0.4 : 0.0, widget.maxOffset).toDouble();
+  double _clampOffset(double value) => value
+      .clamp(
+        widget.secondary ? -secondarySubtitleMaxOffset : 0.0,
+        widget.maxOffset,
+      )
+      .toDouble();
 
   String _relativeLabel(double value) => value == 0
       ? AppLocalizations.of(context).defaultLabel

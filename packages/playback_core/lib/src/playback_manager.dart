@@ -3740,7 +3740,7 @@ class PlaybackManager implements AudioOwnable {
     _secondarySubtitleFontSize = fontSize?.clamp(6.0, 72.0).toDouble();
     _secondarySubtitleTextColor = textColor;
     final offset = verticalOffset ?? defaultSecondarySubtitleOffset;
-    _secondarySubtitleOffset = offset.clamp(-0.4, 0.4).toDouble();
+    _secondarySubtitleOffset = offset.clamp(-0.06, 0.06).toDouble();
     await _backend?.configureSecondarySubtitleStyle(
       fontSize: _secondarySubtitleFontSize,
       verticalOffset: _secondarySubtitleOffset,

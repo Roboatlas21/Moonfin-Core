@@ -210,7 +210,9 @@ abstract final class TrackPicker {
                 secondaryControls!.supportsSecondarySubtitlePosition,
             showColor: secondary,
             secondary: secondary,
-            maxOffset: secondary ? secondarySubtitleMaxOffset(backend) : 0.4,
+            maxOffset: secondary
+                ? secondarySubtitleMaxOffset
+                : primarySubtitleMaxOffset,
             initialFontSize: secondary
                 ? prefs.get(UserPreferences.secondarySubtitleSizeAdjustment)
                 : style.fontSize,

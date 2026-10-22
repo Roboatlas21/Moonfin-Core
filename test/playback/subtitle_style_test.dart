@@ -111,7 +111,8 @@ void main() {
     expect(style.strokeColor, 0xFF333333);
     expect(style.fontSize, 30.0);
     expect(style.fontWeight, 700);
-    expect(style.verticalOffset, 0.2);
+    expect(style.verticalOffset, 0.12);
+    expect(prefs.get(UserPreferences.subtitlesHdrOffsetPosition), 0.2);
   });
 
   test(
@@ -134,14 +135,14 @@ void main() {
       await syncSecondarySubtitleStyle(manager, prefs);
       expect(manager.secondarySubtitleFontSize, 6.0);
       expect(manager.secondarySubtitleTextColor, 0xFFFFFF00);
-      expect(manager.secondarySubtitleOffset, 0.16);
+      expect(manager.secondarySubtitleOffset, 0.06);
 
       await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 0.0);
       await prefs.set(UserPreferences.secondarySubtitleTextColor, -1);
       await syncSecondarySubtitleStyle(manager, prefs);
       expect(manager.secondarySubtitleFontSize, isNull);
       expect(manager.secondarySubtitleTextColor, isNull);
-      expect(manager.secondarySubtitleOffset, 0.16);
+      expect(manager.secondarySubtitleOffset, 0.06);
       expect(prefs.get(UserPreferences.secondarySubtitleTextColor), -1);
     },
   );
@@ -205,8 +206,25 @@ void main() {
     expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
   });
 
+  test('primary default is 4%; legacy settings apply within 0–12%', () async {
+    final prefs = await _prefs();
+    final manager = PlaybackManager();
+    addTearDown(prefs.dispose);
+    addTearDown(manager.dispose);
+    expect(SubtitleStyle.resolve(prefs, isHdr: false).verticalOffset, 0.04);
+
+    await prefs.set(UserPreferences.subtitlesOffsetPosition, 0.4);
+    expect(SubtitleStyle.resolve(prefs, isHdr: false).verticalOffset, 0.12);
+    expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.4);
+
+    await setPrimarySubtitleAppearance(manager, prefs, verticalOffset: 0.2);
+    expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.12);
+    await setPrimarySubtitleAppearance(manager, prefs, verticalOffset: -0.2);
+    expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.0);
+  });
+
   test(
-    'Media3 bounds legacy positive offsets and retains negative travel',
+    'all backends bound legacy offsets without rewriting stored preferences',
     () async {
       final prefs = await _prefs();
       final manager = _Manager(_AndroidBackend());
@@ -214,12 +232,13 @@ void main() {
       addTearDown(manager.dispose);
       await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, 0.4);
       await syncSecondarySubtitleStyle(manager, prefs);
-      expect(manager.secondarySubtitleOffset, 0.2);
+      expect(manager.secondarySubtitleOffset, 0.06);
       expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.4);
 
       await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, -0.4);
       await syncSecondarySubtitleStyle(manager, prefs);
-      expect(manager.secondarySubtitleOffset, -0.4);
+      expect(manager.secondarySubtitleOffset, -0.06);
+      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), -0.4);
     },
   );
 }

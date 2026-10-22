@@ -4,10 +4,9 @@ import 'package:playback_core/playback_core.dart';
 import '../preference/user_preferences.dart';
 import 'aether_backend.dart';
 import 'appletv_backend.dart';
-import 'media3_player_backend.dart';
 
-double secondarySubtitleMaxOffset(PlayerBackend? backend) =>
-    backend is Media3PlayerBackend ? 0.2 : 0.4;
+const double primarySubtitleMaxOffset = 0.12;
+const double secondarySubtitleMaxOffset = 0.06;
 
 /// Updates the active SDR/HDR appearance, including relative secondary size.
 Future<void> setPrimarySubtitleSize(
@@ -43,7 +42,7 @@ Future<void> setPrimarySubtitleAppearance(
       useHdr
           ? UserPreferences.subtitlesHdrOffsetPosition
           : UserPreferences.subtitlesOffsetPosition,
-      verticalOffset.clamp(0.0, 0.4),
+      verticalOffset.clamp(0.0, primarySubtitleMaxOffset),
     );
   }
   // Some backends default omitted colours, so send the full saved appearance.
@@ -81,7 +80,7 @@ Future<void> syncSecondarySubtitleStyle(
         : (isApple ? adjustedSize.clamp(12.0, 48.0).toDouble() : adjustedSize),
     verticalOffset: prefs
         .get(UserPreferences.secondarySubtitleOffsetPosition)
-        .clamp(-0.4, secondarySubtitleMaxOffset(manager.backend)),
+        .clamp(-secondarySubtitleMaxOffset, secondarySubtitleMaxOffset),
     textColor: switch (prefs.get(UserPreferences.secondarySubtitleTextColor)) {
       -1 => null,
       final color => color,
@@ -162,7 +161,7 @@ class SubtitleStyle {
       verticalOffset: pick(
         UserPreferences.subtitlesOffsetPosition,
         UserPreferences.subtitlesHdrOffsetPosition,
-      ),
+      ).clamp(0.0, primarySubtitleMaxOffset).toDouble(),
     );
   }
 
