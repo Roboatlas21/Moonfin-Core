@@ -284,8 +284,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   bool _secondarySubtitleRequested = false;
   double _secondaryVerticalOffset = 0;
   int? _lastSecondaryStackPosition;
-  String? _unstackedPrimarySubPos;
-  int? _lastStackedPrimarySubPos;
+  ({int alignment, double height})? _lastPrimaryStack;
   DateTime? _lastSecondaryPositionCheck;
   bool _checkingSecondaryPosition = false;
   StreamSubscription<Duration>? _secondaryPositionSub;
@@ -319,6 +318,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     _secondarySubtitleDelay = 0;
     _secondarySubtitleRequested = false;
     _lastSecondaryStackPosition = null;
+    _lastPrimaryStack = null;
     _lastSecondaryPositionCheck = null;
     _externalSubtitleLoads.clear();
     _pendingSubtitleChoice.nextSource();
@@ -826,7 +826,6 @@ class MediaKitPlayerBackend extends PlayerBackend
     _liveStartupGate = null;
 
     _resetSubtitleState();
-    await _restoreStackedPrimaryPosition();
     if (!_ownsPlayback(generation)) return;
     _setSelectedExternalSubtitle(
       payload['selectedExternalSubtitleUrl'] as String?,
@@ -2359,7 +2358,6 @@ class MediaKitPlayerBackend extends PlayerBackend
   Future<void> stop() async {
     ++_playbackGeneration;
     _resetSubtitleState();
-    await _restoreStackedPrimaryPosition();
     _setSelectedExternalSubtitle(null);
     _isStale = true;
     // An earlier open() may still emit playing=true before stop() finishes.
@@ -2996,10 +2994,7 @@ class MediaKitPlayerBackend extends PlayerBackend
         : (ordinal: ordinal, url: externalUrl, generation: generation);
     final native = _player.platform;
     if (native is! NativePlayer) return;
-    if (!_secondarySubtitleRequested) {
-      await _restoreStackedPrimaryPosition();
-      if (!_isCurrentSecondarySubtitle(generation)) return;
-    }
+    if (!_secondarySubtitleRequested) _lastPrimaryStack = null;
     await _nativeSetProperty(native, 'secondary-sid', 'no');
     if (!_isCurrentSecondarySubtitle(generation)) return;
     await _applyPendingSecondarySubtitle();
@@ -3112,8 +3107,21 @@ class MediaKitPlayerBackend extends PlayerBackend
     await _refreshStackedSecondaryPosition(force: true);
   }
 
-  /// mpv exposes primary text in ASS form, including SRT \an alignment tags.
-  /// Its secondary renderer has independent vertical but not horizontal control.
+  /// mpv does not expose rendered cue bounds. Estimate the height from the
+  /// current primary text and keep that placement through dialogue gaps.
+  /// Secondary text only affects its own height when a top anchor needs it.
+  static int _subtitleLineCount(String text, double fontSize) {
+    if (text.isEmpty) return 0;
+    final plain = text
+        .replaceAll(RegExp(r'\{[^}]*\}'), '')
+        .replaceAll(r'\N', '\n');
+    final maxChars = (64 * 24 / fontSize).round().clamp(1, 10000);
+    return plain.split('\n').fold<int>(
+      0,
+      (count, line) => count + (line.runes.length / maxChars).ceil().clamp(1, 10000),
+    );
+  }
+
   Future<void> _refreshStackedSecondaryPosition({bool force = false}) async {
     if (_isDisposed || !_secondarySubtitleRequested || !_secondaryPositionSupported ||
         _checkingSecondaryPosition) return;
@@ -3131,33 +3139,35 @@ class MediaKitPlayerBackend extends PlayerBackend
       final primaryAss = await _tryNativeGetProperty(native, 'sub-text/ass') ?? '';
       final secondaryText = await _tryNativeGetProperty(native, 'secondary-sub-text') ?? '';
       if (!_isCurrentSecondarySubtitle(generation) || !_secondarySubtitleRequested) return;
-      final alignment = int.tryParse(_mpvSrtAlignment.firstMatch(primaryAss)?[1] ?? '') ?? 2;
-      final rows = primaryAss.isEmpty ? 1
-          : primaryAss.split(RegExp(r'\\N|\n')).length;
-      final secondaryRows = secondaryText.isEmpty ? 1
-          : secondaryText.split('\n').length;
-      final primaryHeight = rows * ((_lastFontSize ?? 24) / 24 * 0.055);
-      final secondaryHeight = secondaryRows * ((_lastFontSize ?? 24) / 24 * 0.055);
+      final fontSize = _lastFontSize ?? 24;
+      final lineHeight = fontSize / 24 * 0.055;
+      if (primaryAss.isNotEmpty) {
+        _lastPrimaryStack = (
+          alignment: int.tryParse(_mpvSrtAlignment.firstMatch(primaryAss)?[1] ?? '') ?? 2,
+          height: _subtitleLineCount(primaryAss, fontSize) * lineHeight,
+        );
+      }
+      final alignment = _lastPrimaryStack?.alignment ?? 2;
+      final primaryHeight = _lastPrimaryStack?.height ?? 0.0;
+      final secondaryHeight = _subtitleLineCount(secondaryText, fontSize) * lineHeight;
       final zone = (alignment - 1) ~/ 3;
       final primaryAnchor = zone == 2 ? 0.05
           : zone == 1 ? 0.5
           : 1 - (_lastVerticalOffset ?? 0.04);
-      // mpv exposes a separate primary subtitle position. Move it down by
-      // half the combined separation while the secondary moves up by half.
-      final primaryShift = zone == 1 &&
-              primaryAss.isNotEmpty && secondaryText.isNotEmpty
-          ? (secondaryHeight +
-                  middleSubtitleGap(0.015, _secondaryVerticalOffset)) / 2
-          : null;
-      await _updateStackedPrimaryPosition(native, primaryShift, generation);
-      if (!_isCurrentSecondarySubtitle(generation)) return;
-      final position = (stackedSecondaryTop(
+
+      // secondary-sub-pos controls the text's bottom position. For top
+      // captions its value must include the current secondary height so that
+      // the visually fixed top anchor can expand downward. For middle/bottom
+      // the bottom edge stays fixed regardless of secondary line count.
+      final secondaryTop = stackedSecondaryTop(
         alignment: alignment,
         primaryAnchor: primaryAnchor,
         primaryHeight: primaryHeight,
         secondaryHeight: secondaryHeight,
         offset: _secondaryVerticalOffset,
-      ) * 100).round();
+      );
+      final position = ((secondaryTop + secondaryHeight) * 100)
+          .round().clamp(0, 150);
       if (force || position != _lastSecondaryStackPosition) {
         await _nativeSetProperty(native, 'secondary-sub-pos', '$position');
         if (_isCurrentSecondarySubtitle(generation)) {
@@ -3168,42 +3178,6 @@ class MediaKitPlayerBackend extends PlayerBackend
       // Unavailable properties leave the previously selected subtitle intact.
     } finally {
       _checkingSecondaryPosition = false;
-    }
-  }
-
-  /// Save mpv's original position so disabling the second language or
-  /// returning to top/bottom cues never leaves the primary displaced.
-  Future<void> _updateStackedPrimaryPosition(
-    NativePlayer native, double? shift, int generation,
-  ) async {
-    if (shift == null) {
-      await _restoreStackedPrimaryPosition();
-      return;
-    }
-    final original = _unstackedPrimarySubPos ??
-        await _tryNativeGetProperty(native, 'sub-pos');
-    if (!_isCurrentSecondarySubtitle(generation)) return;
-    final basePosition = double.tryParse(original ?? '');
-    if (basePosition == null) return;
-    _unstackedPrimarySubPos ??= original;
-    final position = (basePosition + shift * 100).round().clamp(0, 150);
-    if (position == _lastStackedPrimarySubPos) return;
-    await _nativeSetProperty(native, 'sub-pos', '$position');
-    if (_isCurrentSecondarySubtitle(generation)) {
-      _lastStackedPrimarySubPos = position;
-    }
-  }
-
-  Future<void> _restoreStackedPrimaryPosition() async {
-    final original = _unstackedPrimarySubPos;
-    if (original == null) return;
-    _unstackedPrimarySubPos = null;
-    _lastStackedPrimarySubPos = null;
-    final native = _player.platform;
-    if (native is NativePlayer) {
-      try {
-        await _nativeSetProperty(native, 'sub-pos', original);
-      } catch (_) {}
     }
   }
 

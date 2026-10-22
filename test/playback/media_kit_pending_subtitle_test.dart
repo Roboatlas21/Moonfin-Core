@@ -305,7 +305,7 @@ void main() {
     },
   );
 
-  test('mpv centres a middle pair and restores the original primary position', () async {
+  test('mpv follows primary placement without moving the primary with secondary cues', () async {
     final other = _Player();
     other.platform.properties.addAll({
       'secondary-sub-delay': '0',
@@ -319,26 +319,28 @@ void main() {
       other.discover();
       await second.setSecondarySubtitle(embeddedTrackId: 1);
       await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '44');
-      expect(other.platform.properties['sub-pos'], '104');
+      expect(other.platform.properties['secondary-sub-pos'], '46');
+      expect(other.platform.properties['sub-pos'], '100');
 
       await second.configureSecondarySubtitleStyle(verticalOffset: 0.02);
-      expect(other.platform.properties['secondary-sub-pos'], '43');
-      expect(other.platform.properties['sub-pos'], '105');
+      expect(other.platform.properties['secondary-sub-pos'], '44');
+      expect(other.platform.properties['sub-pos'], '100');
+
+      // Neither a secondary cue gap nor additional lines can move the primary.
+      other.platform.properties['secondary-sub-text'] = '';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(other.platform.properties['secondary-sub-pos'], '46');
+      other.platform.properties['secondary-sub-text'] = 'Line one\\NLine two';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(other.platform.properties['secondary-sub-pos'], '46');
+      expect(other.platform.properties['sub-pos'], '100');
 
       other.platform.properties['sub-text/ass'] = r'{\an2}Bottom';
       await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['sub-pos'], '100');
-
-      other.platform.properties['sub-text/ass'] = r'{\an5}Middle';
+      expect(other.platform.properties['secondary-sub-pos'], '89');
+      other.platform.properties['sub-text/ass'] = '';
       await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['sub-pos'], '104');
-      other.platform.properties['secondary-sub-text'] = '';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['sub-pos'], '100');
-      other.platform.properties['secondary-sub-text'] = 'Other language';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['sub-pos'], '104');
+      expect(other.platform.properties['secondary-sub-pos'], '89');
       await second.setSecondarySubtitle();
       expect(other.platform.properties['sub-pos'], '100');
     } finally {
@@ -357,7 +359,7 @@ void main() {
       other.discover();
       await second.setSecondarySubtitle(embeddedTrackId: 1);
       await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '12');
+      expect(other.platform.properties['secondary-sub-pos'], '18');
     } finally {
       second.dispose();
     }

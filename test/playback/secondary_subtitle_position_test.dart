@@ -31,22 +31,19 @@ void main() {
     ), closeTo(top - 0.02, 0.0001));
   });
 
-  test('middle pair keeps its combined bounds centred at every offset', () {
+  test('middle secondary bottom stays anchored when its own height changes', () {
     const anchor = 0.5;
     const primaryHeight = 0.08;
-    const secondaryHeight = 0.12;
-    for (final offset in [-0.06, -0.02, 0.0, 0.02, 0.06]) {
+    for (final offset in [0.0, 0.02, 0.06]) {
       final separation = middleSubtitleGap(0.015, offset);
-      final secondaryTop = stackedSecondaryTop(
-        alignment: 5, primaryAnchor: anchor, primaryHeight: primaryHeight,
-        secondaryHeight: secondaryHeight, offset: offset,
-      );
-      final primaryCentre = anchor + (secondaryHeight + separation) / 2;
-      final primaryBottom = primaryCentre + primaryHeight / 2;
-      expect((secondaryTop + primaryBottom) / 2, closeTo(anchor, 0.0001));
-      expect(primaryCentre - primaryHeight / 2 -
-          (secondaryTop + secondaryHeight), closeTo(separation, 0.0001));
-      expect(separation, greaterThan(0));
+      for (final secondaryHeight in [0.0, 0.06, 0.14]) {
+        final secondaryTop = stackedSecondaryTop(
+          alignment: 5, primaryAnchor: anchor, primaryHeight: primaryHeight,
+          secondaryHeight: secondaryHeight, offset: offset,
+        );
+        expect(secondaryTop + secondaryHeight,
+            closeTo(anchor - primaryHeight / 2 - separation, 0.0001));
+      }
     }
   });
 
@@ -58,12 +55,12 @@ void main() {
       alignment: 5, primaryAnchor: anchor, primaryHeight: primaryHeight,
       secondaryHeight: secondaryHeight, offset: 0,
     );
-    expect(initial, closeTo(0.4325, 0.0001));
+    expect(initial, closeTo(0.395, 0.0001));
     final adjusted = stackedSecondaryTop(
       alignment: 5, primaryAnchor: anchor, primaryHeight: primaryHeight,
       secondaryHeight: secondaryHeight, offset: 0.02,
     );
-    expect(adjusted, closeTo(initial - 0.01, 0.0001));
+    expect(adjusted, closeTo(initial - 0.02, 0.0001));
     expect(middleSubtitleGap(0.015, -0.06), 0.002);
   });
 
