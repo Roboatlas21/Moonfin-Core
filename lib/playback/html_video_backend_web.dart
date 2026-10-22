@@ -56,6 +56,9 @@ class HtmlVideoBackend extends PlayerBackend
   static const _cueHookProperty = 'moonfinCuePlacement';
   static const _authoredSrtAlignment = 'moonfinAuthoredSrtAlignment';
   static const _autoPositionedCue = 'moonfinAutoPositionedCue';
+  static const _authoredLine = 'moonfinAuthoredLine';
+  static const _authoredSnapToLines = 'moonfinAuthoredSnapToLines';
+  static const _authoredLineAlign = 'moonfinAuthoredLineAlign';
   static const _stackedMiddleLine = 'moonfinStackedMiddleLine';
   static const _stackedMiddleLineAlign = 'moonfinStackedMiddleLineAlign';
   static const _stackedMiddleSnapToLines = 'moonfinStackedMiddleSnapToLines';
@@ -1196,17 +1199,55 @@ class HtmlVideoBackend extends PlayerBackend
           ..size = 90;
         continue;
       }
-      // A cue with explicit WebVTT line settings already has an authored
-      // position. Only apply the user's bottom offset to automatic cues.
-      if (!vtt.has(_autoPositionedCue) &&
-          vtt.line.dartify() != 'auto') {
+      // Read the original position, never a value shifted by a previous
+      // slider change or cuechange event.
+      if (vtt.has(_autoPositionedCue) || vtt.line.dartify() == 'auto') {
+        vtt.setProperty(_autoPositionedCue.toJS, true.toJS);
+        vtt.lineAlign = 'end';
+        if (vtt.lineAlign != 'end') continue;
+        vtt.snapToLines = false;
+        vtt.line = line.toJS;
         continue;
       }
-      vtt.setProperty(_autoPositionedCue.toJS, true.toJS);
-      vtt.lineAlign = 'end';
-      if (vtt.lineAlign != 'end') continue;
-      vtt.snapToLines = false;
-      vtt.line = line.toJS;
+      final saved = vtt.getProperty<JSNumber?>(_authoredLine.toJS);
+      final authored = saved?.toDartDouble ??
+          vtt.getProperty<JSNumber?>(_stackedMiddleLine.toJS)?.toDartDouble ??
+          (vtt.line.dartify() as num).toDouble();
+      if (saved == null) {
+        vtt
+          ..setProperty(_authoredLine.toJS, authored.toJS)
+          ..setProperty(_authoredSnapToLines.toJS, vtt.snapToLines.toJS)
+          ..setProperty(_authoredLineAlign.toJS,
+              _cueAlignment(vtt, 'lineAlign', 'start').toJS);
+      }
+      final snap = vtt.getProperty<JSBoolean?>(
+        _authoredSnapToLines.toJS,
+      )?.toDart ?? false;
+      final originalAlign = _cueAlignment(
+        vtt, _authoredLineAlign, 'start',
+      );
+      final lineHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) *
+          0.055 * 1.15;
+      final authoredFraction = snap
+          ? (authored < 0
+              ? 1 + (authored + 1) * lineHeight
+              : authored * lineHeight)
+          : authored / 100;
+      final direction = authoredFraction < 1 / 3
+          ? 1
+          : authoredFraction > 2 / 3 ? -1 : 0;
+      if (_subtitleVerticalOffset == 0 || direction == 0) {
+        vtt
+          ..line = authored.toJS
+          ..snapToLines = snap
+          ..lineAlign = originalAlign;
+      } else {
+        vtt
+          ..snapToLines = false
+          ..lineAlign = snap ? (authored < 0 ? 'end' : 'start') : originalAlign
+          ..line = ((authoredFraction + direction * _subtitleVerticalOffset)
+                  .clamp(0.0, 1.0) * 100).toDouble().toJS;
+      }
     }
     _positionSecondaryCues();
   }

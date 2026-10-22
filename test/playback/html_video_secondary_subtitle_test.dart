@@ -176,6 +176,10 @@ void main() {
     final authored = primary.track.cues![2] as web.VTTCue;
     expect(authored.line.dartify(), 20);
     await backend.configureSubtitleStyle(verticalOffset: 0.04);
+    expect(authored.line.dartify(), 24);
+    await backend.configureSubtitleStyle(verticalOffset: 0.02);
+    expect(authored.line.dartify(), 22);
+    await backend.configureSubtitleStyle(verticalOffset: 0);
     expect(authored.line.dartify(), 20);
   });
 
@@ -487,6 +491,81 @@ void main() {
     final primaryCue = primary.track.cues![0] as web.VTTCue;
     expect(secondaryCue.position.dartify(), primaryCue.position.dartify());
     expect(secondaryCue.align, primaryCue.align);
+  });
+
+
+  test('authored WebVTT positions shift inward without accumulating offsets', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:03.000 line:8%,start '
+        'position:30% align:start\nTop\n'
+        '\n00:04.000 --> 00:06.000 line:92%,end '
+        'position:70% align:end\nBottom\n'
+        '\n00:07.000 --> 00:09.000 line:50%,center\nMiddle\n',
+      ),
+    );
+    final track = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => track.track.cues?.length == 3);
+    final cues = track.track.cues!;
+    final top = cues[0] as web.VTTCue;
+    final bottom = cues[1] as web.VTTCue;
+    final middle = cues[2] as web.VTTCue;
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => track.track.activeCues?.length == 1);
+    await backend.configureSubtitleStyle(verticalOffset: 0.04);
+    expect(top.line.dartify(), closeTo(12, 0.01));
+    expect(top.position.dartify(), 30);
+
+    await backend.seekTo(const Duration(seconds: 5));
+    await _until(() => track.track.activeCues?.length == 1);
+    expect(bottom.line.dartify(), closeTo(88, 0.01));
+    expect(bottom.position.dartify(), 70);
+    await backend.configureSubtitleStyle(verticalOffset: 0.02);
+    expect(bottom.line.dartify(), closeTo(90, 0.01));
+    await backend.configureSubtitleStyle(verticalOffset: 0.04);
+    expect(bottom.line.dartify(), closeTo(88, 0.01));
+
+    await backend.seekTo(const Duration(seconds: 8));
+    await _until(() => track.track.activeCues?.length == 1);
+    expect(middle.line.dartify(), 50);
+    await backend.configureSubtitleStyle(verticalOffset: 0);
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => track.track.activeCues?.length == 1);
+    expect(top.line.dartify(), 8);
+    await backend.seekTo(const Duration(seconds: 5));
+    await _until(() => track.track.activeCues?.length == 1);
+    expect(bottom.line.dartify(), 92);
+  });
+
+  test('WebVTT snap-to-lines top and bottom offsets restore original line numbers', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:03.000 line:0\nTop\n'
+        '\n00:04.000 --> 00:06.000 line:-1\nBottom\n',
+      ),
+    );
+    final track = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => track.track.cues?.length == 2);
+    final top = track.track.cues![0] as web.VTTCue;
+    final bottom = track.track.cues![1] as web.VTTCue;
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => track.track.activeCues?.length == 1);
+    await backend.configureSubtitleStyle(verticalOffset: 0.04);
+    expect(top.snapToLines, isFalse);
+    expect(top.line.dartify(), closeTo(4, 0.01));
+    await backend.seekTo(const Duration(seconds: 5));
+    await _until(() => track.track.activeCues?.length == 1);
+    expect(bottom.snapToLines, isFalse);
+    expect(bottom.line.dartify(), closeTo(96, 0.01));
+    await backend.configureSubtitleStyle(verticalOffset: 0);
+    expect(bottom.snapToLines, isTrue);
+    expect(bottom.line.dartify(), -1);
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => track.track.activeCues?.length == 1);
+    expect(top.snapToLines, isTrue);
+    expect(top.line.dartify(), 0);
   });
 
   test('SRT and primary VTT remain independently selectable', () async {

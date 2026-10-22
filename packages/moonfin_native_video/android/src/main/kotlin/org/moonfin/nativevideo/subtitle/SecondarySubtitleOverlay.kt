@@ -5,28 +5,42 @@ import android.graphics.Typeface
 import android.text.Layout
 import android.view.View
 import androidx.media3.common.text.Cue
-import androidx.media3.common.MimeTypes
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 
-// Pre-parsed text tracks identify their original subtitle format in codecs.
-internal fun isSubripPrimaryFormat(sampleMimeType: String?, codecs: String?): Boolean =
-    sampleMimeType == MimeTypes.APPLICATION_SUBRIP ||
-        (sampleMimeType == MimeTypes.APPLICATION_MEDIA3_CUES && codecs == MimeTypes.APPLICATION_SUBRIP)
-
-// Media3's SRT alignment tags use standard 8%/92% edge anchors. Move those
-// anchors inward by the user offset, but never infer SRT from a WebVTT coordinate.
-internal fun offsetSubripAlignmentCue(cue: Cue, verticalOffset: Float, isSubrip: Boolean): Cue {
-    if (!isSubrip || verticalOffset == 0f || cue.bitmap != null ||
-        cue.lineType != Cue.LINE_TYPE_FRACTION) return cue
-    val line = when {
-        cue.lineAnchor == Cue.ANCHOR_TYPE_START && cue.line in 0.079f..0.081f ->
-            cue.line + verticalOffset
-        cue.lineAnchor == Cue.ANCHOR_TYPE_END && cue.line in 0.919f..0.921f ->
-            cue.line - verticalOffset
+/**
+ * Move positioned primary cues inward from their authored top/bottom positions.
+ * Automatic cues keep Media3's normal bottom-padding behavior, while middle
+ * cues keep their authored centre (and the existing dual-subtitle pairing).
+ * A numbered WebVTT line is converted only for non-zero adjustments; at zero
+ * the renderer retains the exact authored line-number semantics.
+ */
+internal fun offsetPrimaryCue(
+    cue: Cue,
+    verticalOffset: Float,
+    lineHeightFraction: Float,
+): Cue {
+    if (verticalOffset <= 0f || cue.bitmap != null || cue.line == Cue.DIMEN_UNSET) return cue
+    val line = when (cue.lineType) {
+        Cue.LINE_TYPE_FRACTION -> cue.line
+        Cue.LINE_TYPE_NUMBER -> if (cue.line < 0f)
+            1f + (cue.line + 1f) * lineHeightFraction
+        else cue.line * lineHeightFraction
         else -> return cue
     }
-    return cue.buildUpon().setLine(line.coerceIn(0f, 1f), Cue.LINE_TYPE_FRACTION).build()
+    val direction = when {
+        line < 1f / 3f -> 1f
+        line > 2f / 3f -> -1f
+        else -> return cue
+    }
+    val builder = cue.buildUpon().setLine(
+        (line + direction * verticalOffset).coerceIn(0f, 1f),
+        Cue.LINE_TYPE_FRACTION,
+    )
+    if (cue.lineType == Cue.LINE_TYPE_NUMBER) {
+        builder.setLineAnchor(if (cue.line < 0f) Cue.ANCHOR_TYPE_END else Cue.ANCHOR_TYPE_START)
+    }
+    return builder.build()
 }
 
 /** Places and styles cues decoded by the second Media3 text renderer. */
@@ -52,7 +66,6 @@ internal class SecondarySubtitleOverlay(
     private var primaryBottomPaddingFraction = 0.04f
     private var primaryCues: List<Cue> = emptyList()
     private var unmodifiedPrimaryCues: List<Cue> = emptyList()
-    private var primaryIsSubrip = false
     private var lastPrimaryForStacking: Cue? = null
     private var lastPrimaryWasCentred = false
 
@@ -105,9 +118,8 @@ internal class SecondarySubtitleOverlay(
         renderCues()
     }
 
-    fun updatePrimaryCues(cues: List<Cue>, isSubrip: Boolean) {
+    fun updatePrimaryCues(cues: List<Cue>) {
         unmodifiedPrimaryCues = cues
-        primaryIsSubrip = isSubrip
         renderCues()
     }
 
@@ -136,8 +148,9 @@ internal class SecondarySubtitleOverlay(
         val middleGapPx = SubtitleLayoutPlanner.middleGap(
             gapPx, offsetDelta, height, minimumGapPx)
         primaryCues = unmodifiedPrimaryCues.map { cue ->
-            val positioned = offsetSubripAlignmentCue(
-                cue, primaryBottomPaddingFraction, primaryIsSubrip,
+            val positioned = offsetPrimaryCue(
+                cue, primaryBottomPaddingFraction,
+                (baseFontSize / 24f) * 0.06f * 1.25f,
             )
             if (secondaryCues != null && height > 0 &&
                 positioned.lineType == Cue.LINE_TYPE_FRACTION &&
