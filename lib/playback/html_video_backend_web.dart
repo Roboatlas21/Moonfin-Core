@@ -28,7 +28,8 @@ extension type _MoonfinHlsBridge._(JSObject _) implements JSObject {
   external void destroy(JSAny? controller);
 }
 
-class HtmlVideoBackend extends PlayerBackend {
+class HtmlVideoBackend extends PlayerBackend
+    implements SecondarySubtitleBackend {
   HtmlVideoBackend(this._prefs)
     : _viewType = 'moonfin-html-video-${_nextViewId++}' {
     _videoElement = _createVideoElement();
@@ -65,6 +66,24 @@ class HtmlVideoBackend extends PlayerBackend {
   double? _subtitleFontSize;
   int? _subtitleFontWeight;
   double _subtitleVerticalOffset = 0;
+
+  web.HTMLTrackElement? _secondaryTrack;
+  web.AbortController? _secondaryRequest;
+  String? _secondaryUrl;
+  String? _secondaryObjectUrl;
+  int _secondaryGeneration = 0;
+  final _secondaryCues = <({web.VTTCue cue, double start, double end})>[];
+  double _secondaryDelay = 0;
+  double _secondaryOffset = 0.08;
+  double? _secondaryFontSize;
+  int? _secondaryTextColor;
+
+  @override
+  bool get supportsSecondarySubtitleDelay => true;
+  @override
+  bool get supportsSecondarySubtitlePosition => true;
+  @override
+  bool get supportsSecondarySubtitleStyle => true;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -354,6 +373,7 @@ class HtmlVideoBackend extends PlayerBackend {
   }
 
   void _clearExternalTracks() {
+    _clearSecondarySubtitle();
     for (final track in _externalTracks) {
       track.element.remove();
     }
@@ -383,6 +403,18 @@ class HtmlVideoBackend extends PlayerBackend {
     _completedStream.add(false);
 
     await _applySource(url, container: container, startPosition: startPosition);
+    await setSecondarySubtitleDelay(
+      ((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000,
+    );
+    await configureSecondarySubtitleStyle(
+      fontSize: (payload['secondarySubtitleFontSize'] as num?)?.toDouble(),
+      verticalOffset: (payload['secondarySubtitleOffset'] as num?)?.toDouble(),
+      textColor: (payload['secondarySubtitleTextColor'] as num?)?.toInt(),
+    );
+    await setSecondarySubtitle(
+      url: payload['secondarySubtitleUrl'] as String?,
+      codec: payload['secondarySubtitleCodec'] as String?,
+    );
 
     if (autoPlay) {
       _setBuffering(true);
@@ -553,6 +585,7 @@ class HtmlVideoBackend extends PlayerBackend {
     try {
       final tracks = _videoElement.textTracks;
       for (var i = 0; i < tracks.length; i++) {
+        if (tracks[i] == _secondaryTrack?.track) continue;
         tracks[i].mode = 'disabled';
       }
 
@@ -640,6 +673,148 @@ class HtmlVideoBackend extends PlayerBackend {
 
   @override
   Future<void> setSubtitleDelay(double seconds) async {}
+
+  @override
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    int? embeddedTrackId,
+  }) async {
+    if (_disposed || (url != null && url == _secondaryUrl)) return;
+    _clearSecondarySubtitle();
+    if (url == null || url.isEmpty) return;
+    _secondaryUrl = url;
+    // This backend does not demux embedded tracks. The manager supplies the
+    // server's text delivery URL, including for subtitles inside an MKV.
+    unawaited(_loadSecondarySubtitle(url, _secondaryGeneration));
+  }
+
+  Future<void> _loadSecondarySubtitle(String url, int generation) async {
+    final abort = _secondaryRequest = web.AbortController();
+    try {
+      final response = await web.window
+          .fetch(url.toJS, web.RequestInit(signal: abort.signal))
+          .toDart;
+      if (!response.ok) throw StateError('HTTP ${response.status}');
+      final content = (await response.text().toDart).toDart;
+      if (_disposed || generation != _secondaryGeneration) return;
+      // Browsers parse WebVTT only. Jellyfin usually converts SRT itself, but
+      // fallback extraction URLs and external sidecars can still deliver SRT.
+      final vtt = _asWebVtt(content);
+      final objectUrl = _secondaryObjectUrl = web.URL.createObjectURL(
+        web.Blob([vtt.toJS].toJS, web.BlobPropertyBag(type: 'text/vtt')),
+      );
+      final element = _secondaryTrack = web.HTMLTrackElement()
+        ..kind = 'subtitles'
+        ..label = 'Secondary'
+        ..src = objectUrl;
+      element.addEventListener(
+        'load',
+        ((web.Event _) {
+          if (_disposed || generation != _secondaryGeneration) return;
+          final cues = element.track.cues;
+          _secondaryCues.clear();
+          if (cues != null) {
+            for (var i = 0; i < cues.length; i++) {
+              final cue = cues[i] as web.VTTCue;
+              _secondaryCues.add((
+                cue: cue,
+                start: cue.startTime,
+                end: cue.endTime,
+              ));
+              cue.text = '<c.moonfin-secondary>${cue.text}</c>';
+            }
+          }
+          _applySecondaryCues();
+          element.setAttribute('default', '');
+          element.track.mode = 'showing';
+        }).toJS,
+      );
+      element.addEventListener(
+        'error',
+        ((web.Event _) {
+          _secondaryLoadFailed(generation);
+        }).toJS,
+      );
+      _videoElement.appendChild(element);
+      // Load without briefly rendering at the primary track's position.
+      element.track.mode = 'hidden';
+    } catch (_) {
+      _secondaryLoadFailed(generation);
+    }
+  }
+
+  static String _asWebVtt(String content) {
+    final text = content
+        .replaceFirst(RegExp(r'^\uFEFF'), '')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .trim();
+    if (text.startsWith('WEBVTT')) return '$text\n\n';
+    // Only replace decimal commas on timing lines, leaving dialogue intact.
+    final timing = RegExp(
+      r'^(\d{2,}:\d{2}:\d{2}),(\d{3})(\s+-->\s+\d{2,}:\d{2}:\d{2}),(\d{3})',
+      multiLine: true,
+    );
+    return 'WEBVTT\n\n${text.replaceAllMapped(timing, (m) => '${m[1]}.${m[2]}${m[3]}.${m[4]}')}\n\n';
+  }
+
+  void _secondaryLoadFailed(int generation) {
+    if (_disposed || generation != _secondaryGeneration) return;
+    _clearSecondarySubtitle();
+    _errorStream.add({
+      'event': 'subtitleError',
+      'message': 'Could not load secondary subtitle file',
+    });
+  }
+
+  void _clearSecondarySubtitle() {
+    _secondaryGeneration++;
+    _secondaryRequest?.abort();
+    _secondaryRequest = null;
+    _secondaryTrack?.track.mode = 'disabled';
+    _secondaryTrack?.remove();
+    _secondaryTrack = null;
+    _secondaryCues.clear();
+    _secondaryUrl = null;
+    final objectUrl = _secondaryObjectUrl;
+    _secondaryObjectUrl = null;
+    if (objectUrl != null) web.URL.revokeObjectURL(objectUrl);
+  }
+
+  @override
+  Future<void> setSecondarySubtitleDelay(double seconds) async {
+    if (_disposed) return;
+    _secondaryDelay = seconds.clamp(-5.0, 5.0);
+    _applySecondaryCues();
+  }
+
+  @override
+  Future<void> configureSecondarySubtitleStyle({
+    double? fontSize,
+    double? verticalOffset,
+    int? textColor,
+  }) async {
+    if (_disposed) return;
+    _secondaryFontSize = fontSize?.clamp(8.0, 72.0);
+    _secondaryTextColor = textColor;
+    _secondaryOffset = (verticalOffset ?? 0.08).clamp(0.0, 0.4);
+    _applySubtitleAppearance();
+    _applySecondaryCues();
+  }
+
+  void _applySecondaryCues() {
+    for (final original in _secondaryCues) {
+      original.cue
+        ..startTime = original.start + _secondaryDelay
+        ..endTime = original.end + _secondaryDelay
+        ..region = null
+        ..vertical = ''
+        ..snapToLines = false
+        ..lineAlign = 'start'
+        ..line = (_secondaryOffset * 100).toJS;
+    }
+  }
 
   /// Adds the subtitle without showing it, so tracks loaded at startup stay
   /// off until one is picked.
@@ -741,7 +916,15 @@ class HtmlVideoBackend extends PlayerBackend {
     );
 
     final style = _subtitleStyleElement ??= _createSubtitleStyleElement();
-    style.textContent = '#$_viewType::cue { ${rules.join('; ')} }';
+    final secondaryColor = _cssColor(_secondaryTextColor);
+    final primarySize = _subtitleFontSize ?? _referenceTextSize;
+    final secondaryPercent =
+        (_secondaryFontSize ?? primarySize) / primarySize * 100;
+    style.textContent =
+        '#$_viewType::cue { ${rules.join('; ')} }\n'
+        '#$_viewType::cue(.moonfin-secondary) { '
+        'font-size: $secondaryPercent%; '
+        '${secondaryColor == null ? '' : 'color: $secondaryColor;'} }';
   }
 
   web.HTMLStyleElement _createSubtitleStyleElement() {
@@ -754,6 +937,7 @@ class HtmlVideoBackend extends PlayerBackend {
     try {
       final tracks = _videoElement.textTracks;
       for (var i = 0; i < tracks.length; i++) {
+        if (tracks[i] == _secondaryTrack?.track) continue;
         action(tracks[i]);
       }
     } catch (_) {}

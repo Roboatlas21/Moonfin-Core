@@ -20,6 +20,8 @@ const _transcodedDownloadStreams = <Map<String, dynamic>>[
 
 class _CapturingBackend extends Fake
     implements PlayerBackend, SecondarySubtitleBackend {
+  _CapturingBackend({this.demuxesEmbeddedSubtitles = true});
+
   Map<String, dynamic>? payload;
 
   @override
@@ -57,7 +59,7 @@ class _CapturingBackend extends Fake
   @override
   bool get nativelyHandlesStartPosition => true;
   @override
-  bool get demuxesEmbeddedSubtitles => true;
+  final bool demuxesEmbeddedSubtitles;
 
   @override
   Map<String, dynamic> getDeviceProfile({
@@ -144,8 +146,11 @@ Future<Map<String, dynamic>> _payloadFor({
   int? subtitleStreamIndex,
   int? secondarySubtitleStreamIndex,
   StreamPlayMethod playMethod = StreamPlayMethod.directPlay,
+  bool demuxesEmbeddedSubtitles = true,
 }) async {
-  final backend = _CapturingBackend();
+  final backend = _CapturingBackend(
+    demuxesEmbeddedSubtitles: demuxesEmbeddedSubtitles,
+  );
   final manager = PlaybackManager()
     ..secondarySubtitleTrackSelector = ((_, _) => secondarySubtitleStreamIndex)
     ..setBackend(backend)
@@ -168,6 +173,34 @@ List<Map<String, dynamic>> _declared(Map<String, dynamic> payload) =>
         .cast<Map<String, dynamic>>();
 
 void main() {
+  test('browser secondary requires file delivery even during direct play', () async {
+    const streams = [
+      {'Type': 'Video', 'Index': 0},
+      {'Type': 'Subtitle', 'Index': 2, 'Codec': 'subrip'},
+    ];
+    final delivered = await _payloadFor(
+      mediaStreams: streams,
+      externalSubtitles: const [
+        ExternalSubtitle(deliveryUrl: 'https://server/sub.vtt', codec: 'subrip', streamIndex: 2),
+      ],
+      subtitleStreamIndex: -1,
+      secondarySubtitleStreamIndex: 2,
+      demuxesEmbeddedSubtitles: false,
+    );
+    expect(delivered['secondarySubtitleTrackId'], isNull);
+    expect(delivered['secondarySubtitleUrl'], 'https://server/sub.vtt');
+
+    final unavailable = await _payloadFor(
+      mediaStreams: streams,
+      externalSubtitles: const [],
+      subtitleStreamIndex: -1,
+      secondarySubtitleStreamIndex: 2,
+      demuxesEmbeddedSubtitles: false,
+    );
+    expect(unavailable['secondarySubtitleTrackId'], isNull);
+    expect(unavailable['secondarySubtitleUrl'], isNull);
+  });
+
   test('embedded secondary uses its native ordinal even without an extraction URL', () async {
     final payload = await _payloadFor(
       mediaStreams: const [
