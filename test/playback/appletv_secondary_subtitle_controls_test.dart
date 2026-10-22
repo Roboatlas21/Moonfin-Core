@@ -54,7 +54,7 @@ void main() {
     expect(metadata['sizeLabel'], l10n.subtitleSize);
     expect(
       metadata['colors'],
-      contains({'label': l10n.yellow, 'value': 0xFFFFFF00}),
+      contains(equals({'label': l10n.yellow, 'value': 0xFFFFFF00})),
     );
   });
 
