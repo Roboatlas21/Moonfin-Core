@@ -43,6 +43,11 @@ Map<String, dynamic> appleTvSubtitleMetadata({
       {'label': l10n.defaultLabel, 'value': -1},
       {'label': l10n.white, 'value': 0xFFFFFFFF},
       {'label': l10n.yellow, 'value': 0xFFFFFF00},
+      {'label': l10n.green, 'value': 0xFF00FF00},
+      {'label': l10n.cyan, 'value': 0xFF00FFFF},
+      {'label': l10n.blue, 'value': 0xFF0000FF},
+      {'label': l10n.magenta, 'value': 0xFFFF00FF},
+      {'label': l10n.red, 'value': 0xFFFF0000},
     ],
   };
 }

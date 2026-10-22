@@ -282,6 +282,35 @@ void main() {
     },
   );
 
+  testWidgets('saved secondary colours show their name and cycle through the full palette', (
+    tester,
+  ) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.secondarySubtitleTextColor, 0xFF00FF00);
+    final manager = _Manager(_AndroidBackend());
+    addTearDown(manager.dispose);
+    await openPicker(tester, manager, secondary: true);
+
+    // An existing Green preference must not appear as Default.
+    expect(find.text(l10n.green), findsOneWidget);
+    for (final (label, color) in [
+      (l10n.cyan, 0xFF00FFFF),
+      (l10n.blue, 0xFF0000FF),
+      (l10n.magenta, 0xFFFF00FF),
+      (l10n.red, 0xFFFF0000),
+    ]) {
+      await tester.tap(find.byTooltip(l10n.next));
+      await tester.pumpAndSettle();
+      expect(find.text(label), findsOneWidget);
+      expect(prefs.get(UserPreferences.secondarySubtitleTextColor), color);
+      expect(manager.secondarySubtitleTextColor, color);
+    }
+    await tester.tap(find.byTooltip(l10n.next));
+    await tester.pumpAndSettle();
+    expect(prefs.get(UserPreferences.secondarySubtitleTextColor), -1);
+    expect(manager.secondarySubtitleTextColor, isNull);
+  });
+
   testWidgets('Apple keeps the chosen size percentage when the cap is reached', (
     tester,
   ) async {

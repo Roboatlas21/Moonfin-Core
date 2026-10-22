@@ -80,6 +80,47 @@ void main() {
     );
   });
 
+  test('tvOS offers the original eight colours and restores the saved choice', () async {
+    const palette = [
+      (-1, 'Default'),
+      (0xFFFFFFFF, 'White'),
+      (0xFFFFFF00, 'Yellow'),
+      (0xFF00FF00, 'Green'),
+      (0xFF00FFFF, 'Cyan'),
+      (0xFF0000FF, 'Blue'),
+      (0xFFFF00FF, 'Magenta'),
+      (0xFFFF0000, 'Red'),
+    ];
+    final l10n = AppLocalizationsEn();
+    final expectedLabels = [
+      l10n.defaultLabel, l10n.white, l10n.yellow, l10n.green,
+      l10n.cyan, l10n.blue, l10n.magenta, l10n.red,
+    ];
+    await prefs.set(UserPreferences.secondarySubtitleTextColor, 0xFF0000FF);
+    Map<String, dynamic> metadata() => appleTvSubtitleMetadata(
+      manager: manager,
+      prefs: prefs,
+      l10n: l10n,
+      tracks: [],
+    );
+    expect(metadata()['textColor'], 0xFF0000FF);
+    expect(
+      metadata()['colors'],
+      [
+        for (var i = 0; i < palette.length; i++)
+          {'label': expectedLabels[i], 'value': palette[i].$1},
+      ],
+    );
+
+    await handleAppleTvSubtitleAction(
+      {'event': 'configureSecondarySubtitleStyle', 'textColor': 0xFFFF00FF},
+      manager,
+      prefs,
+    );
+    expect(prefs.get(UserPreferences.secondarySubtitleTextColor), 0xFFFF00FF);
+    expect(metadata()['textColor'], 0xFFFF00FF);
+  });
+
   test('native selection and off go through the shared manager', () async {
     for (final index in [3, -1]) {
       await handleAppleTvSubtitleAction(
