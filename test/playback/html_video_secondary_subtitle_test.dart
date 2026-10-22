@@ -172,7 +172,8 @@ void main() {
     expect(middle.line.dartify(), 50);
 
     await backend.seekTo(const Duration(seconds: 8));
-    await _until(() => primary.track.activeCues?.length == 1);
+    await _until(() => primary.track.activeCues?.length == 1 &&
+        (primary.track.activeCues![0] as web.VTTCue).text.contains('Authored VTT'));
     final authored = primary.track.cues![2] as web.VTTCue;
     expect(authored.line.dartify(), 20);
     await backend.configureSubtitleStyle(verticalOffset: 0.04);
@@ -375,6 +376,12 @@ void main() {
     expect(secondaryCue.position.dartify(), 30);
     expect(secondaryCue.lineAlign, 'end');
     expect(secondaryCue.line.dartify(), closeTo(88.5, 0.1));
+    await backend.configureSubtitleStyle(verticalOffset: 0.04);
+    expect(primaryCue.line.dartify(), closeTo(86, 0.01));
+    expect(secondaryCue.line.dartify(), closeTo(84.5, 0.1));
+    await backend.configureSubtitleStyle(verticalOffset: 0);
+    expect(primaryCue.line.dartify(), 90);
+    expect(secondaryCue.line.dartify(), closeTo(88.5, 0.1));
     expect(secondaryCue.align, primaryCue.align);
     expect(secondaryCue.size, primaryCue.size);
     await backend.seekTo(const Duration(seconds: 9));
@@ -404,7 +411,13 @@ void main() {
     expect(primaryCue.position.dartify(), 72);
     expect(secondaryCue.position.dartify(), 72);
     expect(secondaryCue.lineAlign, 'start');
-    expect((secondaryCue.line.dartify() as num), greaterThan(10));
+    final originalSecondaryLine = (secondaryCue.line.dartify() as num).toDouble();
+    expect(originalSecondaryLine, greaterThan(10));
+    await backend.configureSubtitleStyle(verticalOffset: 0.04);
+    expect(primaryCue.line.dartify(), closeTo(14, 0.01));
+    expect(secondaryCue.line.dartify(), closeTo(originalSecondaryLine + 4, 0.1));
+    await backend.configureSubtitleStyle(verticalOffset: 0);
+    expect(primaryCue.line.dartify(), 10);
     expect(secondaryCue.align, primaryCue.align);
     expect(secondaryCue.size, primaryCue.size);
   });
