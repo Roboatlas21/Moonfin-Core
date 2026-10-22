@@ -305,7 +305,7 @@ void main() {
     ('top', 7, 'start', 'left'),
     ('bottom', 2, 'end', 'center'),
   ]) {
-    test('$name primary keeps a stable three-line reserve', () async {
+    test('$name primary height adjusts secondary without a three-line reserve', () async {
       await backend.setSubtitleTrack(
         1, isExternalSubtitle: true,
         externalSubtitleUrl: subtitle(
@@ -314,30 +314,35 @@ void main() {
         ),
       );
       await backend.setSecondarySubtitle(
-        url: subtitle(
-          'WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n',
-        ),
+        url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n'),
         codec: 'vtt',
       );
       final second = await loadedSecondary();
       final cue = second.track.cues![0] as web.VTTCue;
       final primary = video.querySelector('track')! as web.HTMLTrackElement;
       await backend.seekTo(const Duration(seconds: 2));
-      // Wait until the first authored primary cue has actually determined
-      // the pair's position; the bottom-only fallback uses the same alignment.
       await _until(() =>
           primary.track.activeCues?.length == 1 &&
           (primary.track.activeCues![0] as web.VTTCue).text.contains('One') &&
-          cue.align == horizontalAlign &&
-          cue.lineAlign == lineAlign &&
-          (tag != 2 || (cue.line.dartify() as num) < 90));
-      final anchor = cue.line.dartify();
+          cue.align == horizontalAlign && cue.lineAlign == lineAlign &&
+          (tag != 2 || (cue.line.dartify() as num) < 95));
+      final oneLine = (cue.line.dartify() as num).toDouble();
       await backend.seekTo(const Duration(seconds: 5));
       await _until(() =>
           primary.track.activeCues?.length == 1 &&
-          (primary.track.activeCues![0] as web.VTTCue).text.contains('Three'));
-      expect(cue.line.dartify(), anchor);
+          (primary.track.activeCues![0] as web.VTTCue).text.contains('Three') &&
+          (cue.line.dartify() as num).toDouble() != oneLine);
+      final threeLines = (cue.line.dartify() as num).toDouble();
+      if (tag == 7) {
+        expect(threeLines, greaterThan(oneLine + 8));
+      } else {
+        expect(threeLines, lessThan(oneLine - 8));
+      }
       expect(cue.lineAlign, lineAlign);
+      // Primary gaps do not restore a large reserved height or move the slot.
+      await backend.seekTo(const Duration(seconds: 8));
+      await _until(() => primary.track.activeCues?.length == 0);
+      expect(cue.line.dartify(), closeTo(threeLines, 0.01));
     });
   }
 

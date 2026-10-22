@@ -81,7 +81,7 @@ class HtmlVideoBackend extends PlayerBackend
   double _secondaryDelay = 0;
   double _secondaryOffset = 0.0;
   // Preserve the primary's authored placement through gaps in dialogue.
-  ({int alignment, double anchor})? _primaryPlacement;
+  ({int alignment, double anchor, double height})? _primaryPlacement;
   double? _secondaryFontSize;
   int? _secondaryTextColor;
 
@@ -887,6 +887,27 @@ class HtmlVideoBackend extends PlayerBackend
     return row * 3 + column + 1;
   }
 
+  // Estimate each visible primary block, including explicit lines and text
+  // that wraps at the browser's cue width. Only primary changes can move
+  // secondary placement; the secondary's own line count cannot.
+  double _primaryCueHeight(web.VTTCue cue) {
+    final fontHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) * 0.055;
+    final width = _videoElement.clientWidth;
+    final height = _videoElement.clientHeight;
+    final aspect = width > 0 && height > 0 ? width / height : 16 / 9;
+    final cueWidth = cue.size.isFinite
+        ? (cue.size / 100).clamp(0.1, 1.0)
+        : 0.9;
+    final charsPerLine = (aspect * cueWidth / (fontHeight * 0.52))
+        .floor().clamp(1, 10000);
+    final text = cue.text.replaceAll(RegExp(r'<[^>]*>'), '');
+    final rows = text.split('\n').fold<int>(
+      0,
+      (sum, line) => sum + (line.runes.length / charsPerLine).ceil().clamp(1, 10000),
+    );
+    return rows * fontHeight * 1.15;
+  }
+
   void _positionSecondaryCues() {
     if (_secondaryCues.isEmpty) return;
     final primary = _activePrimaryCue();
@@ -899,6 +920,7 @@ class HtmlVideoBackend extends PlayerBackend
       _primaryPlacement = (
         alignment: _primaryAlignment(primary),
         anchor: (originalLine / 100).clamp(0.0, 1.0).toDouble(),
+        height: _primaryCueHeight(primary),
       );
     }
     final placement = _primaryPlacement;
@@ -907,10 +929,9 @@ class HtmlVideoBackend extends PlayerBackend
     final row = (alignment - 1) ~/ 3;
     final gap = middleSubtitleGap(0.015, _secondaryOffset);
 
-    // Reserve room for three primary lines at top/bottom without remeasuring
-    // each cue. Middle pairs grow away from two anchors around the centre.
-    final primaryHeight =
-        3 * ((_subtitleFontSize ?? _referenceTextSize) / 24 * 0.055);
+    // Use the current primary's size, not a permanent three-line reserve.
+    // Through a dialogue gap the last primary height remains in place.
+    final primaryHeight = placement?.height ?? 0.0;
     if (primary != null && row == 1) {
       if (primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS) == null) {
         primary.setProperty(_stackedMiddleLine.toJS, (anchor * 100).toJS);
