@@ -962,7 +962,7 @@ class HtmlVideoBackend extends PlayerBackend
         centre: bounds.centre,
         top: bounds.top,
         bottom: bounds.bottom,
-        position: primary.position,
+        position: (primary.position.dartify() as num).toDouble(),
         align: primary.align,
         positionAlign: primary.positionAlign,
         size: primary.size,
@@ -1013,7 +1013,7 @@ class HtmlVideoBackend extends PlayerBackend
         ..line = (secondaryLine * 100).clamp(0.0, 100.0).toDouble().toJS
         ..align = placement?.align ?? 'center'
         ..positionAlign = placement?.positionAlign ?? 'center'
-        ..position = placement?.position ?? 50
+        ..position = (placement?.position ?? 50.0).toJS
         ..size = placement?.size ?? 90;
     }
   }
