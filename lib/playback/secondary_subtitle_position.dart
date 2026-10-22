@@ -2,6 +2,14 @@
 double middleSubtitleGap(double gap, double offset) =>
     (gap + offset).clamp(0.002, 1.0).toDouble();
 
+/// mpv applies the shared sub-margin-y before positioning either subtitle.
+/// These anchors are therefore relative to that margin, not absolute screen Y.
+double mpvPrimaryStackingAnchor(int alignment) => switch ((alignment - 1) ~/ 3) {
+  2 => 0.05,
+  1 => 0.5,
+  _ => 1.0,
+};
+
 /// Pure placement for mpv's secondary subtitle top edge. Its bottom edge is
 /// the controlled position; top-anchored text needs its own height added back.
 /// The primary's authored alignment dictates the pair's vertical zone.

@@ -2,6 +2,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/playback/secondary_subtitle_position.dart';
 
 void main() {
+  test('mpv bottom position does not apply primary margin twice', () {
+    expect(mpvPrimaryStackingAnchor(7), 0.05);
+    expect(mpvPrimaryStackingAnchor(5), 0.5);
+    expect(mpvPrimaryStackingAnchor(2), 1.0);
+
+    // mpv applies sub-margin-y to both tracks, including at primary offsets
+    // of 0%, 4% and 8%. The bottom secondary-sub-pos value must stay the
+    // same for a given spacing, rather than subtracting that margin again.
+    for (final spacing in [0.0, 0.02, 0.04]) {
+      final top = stackedSecondaryTop(
+        alignment: 2, primaryAnchor: mpvPrimaryStackingAnchor(2),
+        primaryHeight: 0.055, secondaryHeight: 0.055, offset: spacing,
+      );
+      final subPos = ((top + 0.055) * 100).round();
+      expect(subPos, 93 - (spacing * 100).round());
+    }
+  });
+
   test('bottom stacks above and positive offsets move secondary upward', () {
     final top = stackedSecondaryTop(
       alignment: 2, primaryAnchor: 0.96, primaryHeight: 0.1,

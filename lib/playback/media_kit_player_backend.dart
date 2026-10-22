@@ -3157,10 +3157,9 @@ class MediaKitPlayerBackend extends PlayerBackend
       final alignment = _lastPrimaryStack?.alignment ?? 2;
       final primaryHeight = _lastPrimaryStack?.height ?? 0.0;
       final secondaryHeight = _subtitleLineCount(secondaryText, fontSize) * lineHeight;
-      final zone = (alignment - 1) ~/ 3;
-      final primaryAnchor = zone == 2 ? 0.05
-          : zone == 1 ? 0.5
-          : 1 - (_lastVerticalOffset ?? 0.04);
+      // mpv's sub-margin-y already moves both tracks, so don't apply the
+      // primary offset again to secondary-sub-pos.
+      final primaryAnchor = mpvPrimaryStackingAnchor(alignment);
 
       // secondary-sub-pos controls the text's bottom position. For top
       // captions its value must include the current secondary height so that
