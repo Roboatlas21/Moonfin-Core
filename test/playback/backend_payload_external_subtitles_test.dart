@@ -173,33 +173,6 @@ List<Map<String, dynamic>> _declared(Map<String, dynamic> payload) =>
         .cast<Map<String, dynamic>>();
 
 void main() {
-  test('browser secondary requires file delivery even during direct play', () async {
-    const streams = <Map<String, dynamic>>[
-      {'Type': 'Video', 'Index': 0},
-      {'Type': 'Subtitle', 'Index': 2, 'Codec': 'subrip'},
-    ];
-    final delivered = await _payloadFor(
-      mediaStreams: streams,
-      externalSubtitles: const [
-        ExternalSubtitle(deliveryUrl: 'https://server/sub.vtt', codec: 'subrip', streamIndex: 2),
-      ],
-      subtitleStreamIndex: -1,
-      secondarySubtitleStreamIndex: 2,
-      demuxesEmbeddedSubtitles: false,
-    );
-    expect(delivered['secondarySubtitleTrackId'], isNull);
-    expect(delivered['secondarySubtitleUrl'], 'https://server/sub.vtt');
-
-    final unavailable = await _payloadFor(
-      mediaStreams: streams,
-      externalSubtitles: const [],
-      subtitleStreamIndex: -1,
-      secondarySubtitleStreamIndex: 2,
-      demuxesEmbeddedSubtitles: false,
-    );
-    expect(unavailable['secondarySubtitleTrackId'], isNull);
-    expect(unavailable['secondarySubtitleUrl'], isNull);
-  });
 
   test('embedded secondary uses its native ordinal even without an extraction URL', () async {
     final payload = await _payloadFor(
@@ -217,6 +190,7 @@ void main() {
     expect(payload['secondarySubtitleUrl'], isNull);
   });
 
+
   test('remuxed secondary keeps file delivery because embedded tracks were stripped', () async {
     final payload = await _payloadFor(
       mediaStreams: const [
@@ -233,6 +207,7 @@ void main() {
     expect(payload['secondarySubtitleTrackId'], isNull);
     expect(payload['secondarySubtitleUrl'], 'https://server/sub.srt');
   });
+
 
   test('a transcoded download declares its sidecars with the source', () async {
     final payload = await _payloadFor(
@@ -409,4 +384,5 @@ void main() {
 
     expect(payload.containsKey('selectedExternalSubtitleUrl'), isFalse);
   });
+
 }

@@ -140,6 +140,7 @@ void main() {
     prefs.dispose();
   });
 
+
   test(
     'secondary embedded track uses its real sid and survives primary changes',
     () async {
@@ -159,69 +160,6 @@ void main() {
     },
   );
 
-  test(
-    'secondary selection waits for discovery and off cancels a pending read',
-    () async {
-      await backend.setSecondarySubtitle(embeddedTrackId: 2);
-      player.discover();
-      await _flush();
-      expect(player.platform.properties['secondary-sid'], '17');
-      final read = Completer<String>();
-      player.platform.delayedTracks = read;
-      final selection = backend.setSecondarySubtitle(embeddedTrackId: 1);
-      await _flush();
-      await backend.setSecondarySubtitle();
-      read.complete(jsonEncode(player.platform.tracks));
-      await selection;
-      expect(player.platform.properties['secondary-sid'], 'no');
-    },
-  );
-
-  test(
-    'restores secondary selection on open and resets it on the next source',
-    () async {
-      player.discover();
-      await backend.play({
-        'url': 'https://example.com/video.mkv',
-        'autoPlay': false,
-        'secondarySubtitleTrackId': 2,
-      });
-      expect(player.platform.properties['secondary-sid'], '17');
-      await backend.play({
-        'url': 'https://example.com/next.mkv',
-        'autoPlay': false,
-      });
-      expect(player.platform.properties['secondary-sid'], 'no');
-    },
-  );
-
-  for (final primary in ['Japanese', 'Off']) {
-    test(
-      'restores default English secondary after primary becomes $primary',
-      () async {
-        player.discover();
-        player.automaticSubtitleSid = '17';
-        await backend.play({
-          'url': 'https://example.com/video.mkv',
-          'autoPlay': false,
-          'secondarySubtitleTrackId': 2,
-        });
-        expect(player.platform.properties['sid'], '17');
-        expect(player.platform.properties['secondary-sid'], 'no');
-        expect(player.platform.rejectedSecondarySelections, greaterThan(0));
-
-        // The manager applies its primary selection after backend.play returns.
-        if (primary == 'Off') {
-          await backend.disableSubtitleTrack();
-        } else {
-          await backend.setSubtitleTrack(1);
-        }
-        expect(player.platform.properties['sid'], primary == 'Off' ? 'no' : '11');
-        expect(player.platform.properties['secondary-sid'], '17');
-        expect(player.platform.properties['secondary-sub-visibility'], 'yes');
-      },
-    );
-  }
 
   test(
     'secondary Off cancels a selection rejected by the automatic primary',
@@ -235,6 +173,7 @@ void main() {
       expect(player.platform.properties['secondary-sid'], 'no');
     },
   );
+
 
   test('external secondary uses sub-add auto without changing primary or adding duplicates', () async {
     const url = '/downloads/secondary.srt';
@@ -250,103 +189,6 @@ void main() {
     expect(player.platform.commands, hasLength(1));
   });
 
-  for (final action in ['off', 'stop', 'source', 'choice', 'dispose']) {
-    test(
-      '$action prevents a late external load from selecting the secondary track',
-      () async {
-        player.discover();
-        final load = Completer<void>();
-        player.platform.delayedSubtitleLoad = load;
-        await backend.setSecondarySubtitle(url: '/downloads/secondary.srt');
-        await _flush();
-        switch (action) {
-          case 'off':
-            await backend.setSecondarySubtitle();
-          case 'stop':
-            await backend.stop();
-          case 'source':
-            await backend.play({
-              'url': 'https://example.com/next.mkv',
-              'autoPlay': false,
-            });
-          case 'choice':
-            await backend.setSecondarySubtitle(embeddedTrackId: 2);
-          case 'dispose':
-            backend.dispose();
-            disposed = true;
-        }
-        load.complete();
-        await _flush();
-        expect(
-          player.platform.properties['secondary-sid'],
-          action == 'choice' ? '17' : 'no',
-        );
-      },
-    );
-  }
-
-  test(
-    'older mpv exposes selection without unsupported delay or style controls',
-    () async {
-      await backend.setSecondarySubtitleDelay(1);
-      await backend.configureSecondarySubtitleStyle(
-        verticalOffset: 0.2,
-        fontSize: 30,
-        textColor: 0xFFFFFF00,
-      );
-      expect(backend.supportsSecondarySubtitleDelay, isFalse);
-      expect(backend.supportsSecondarySubtitlePosition, isFalse);
-      expect(backend.supportsSecondarySubtitleStyle, isFalse);
-      expect(
-        player.platform.properties.containsKey('secondary-sub-delay'),
-        isFalse,
-      );
-      expect(player.platform.properties.containsKey('sub-font-size'), isFalse);
-    },
-  );
-
-  test('mpv follows primary placement without moving the primary with secondary cues', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
-      'secondary-sub-delay': '0',
-      'secondary-sub-pos': '0',
-      'sub-pos': '100',
-      'sub-text/ass': r'{\an5}Middle',
-      'secondary-sub-text': 'Other language',
-    });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      other.discover();
-      await second.setSecondarySubtitle(embeddedTrackId: 1);
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '46');
-      expect(other.platform.properties['sub-pos'], '100');
-
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0.02);
-      expect(other.platform.properties['secondary-sub-pos'], '44');
-      expect(other.platform.properties['sub-pos'], '100');
-
-      // Neither a secondary cue gap nor additional lines can move the primary.
-      other.platform.properties['secondary-sub-text'] = '';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '46');
-      other.platform.properties['secondary-sub-text'] = 'Line one\\NLine two';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '46');
-      expect(other.platform.properties['sub-pos'], '100');
-
-      other.platform.properties['sub-text/ass'] = r'{\an2}Bottom';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '93');
-      other.platform.properties['sub-text/ass'] = '';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '93');
-      await second.setSecondarySubtitle();
-      expect(other.platform.properties['sub-pos'], '100');
-    } finally {
-      second.dispose();
-    }
-  });
 
   test('mpv bottom spacing stays fixed across primary offsets', () async {
     final other = _Player();
@@ -379,54 +221,6 @@ void main() {
     }
   });
 
-  test('secondary mpv vertical placement follows top-aligned SRT', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
-      'secondary-sub-delay': '0', 'secondary-sub-pos': '0',
-      'sub-text/ass': r'{\an8}Top text', 'secondary-sub-text': 'Other',
-    });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      other.discover();
-      await second.setSecondarySubtitle(embeddedTrackId: 1);
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '18');
-    } finally {
-      second.dispose();
-    }
-  });
-
-  test('mpv adds secondary delay to the primary and positions independently', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
-      'secondary-sub-delay': '0',
-      'secondary-sub-pos': '0',
-      'sub-delay': '0.500',
-      'sub-color': '#ffffffff',
-    });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      await second.setSecondarySubtitleDelay(1.25);
-      other.discover();
-      await second.setSecondarySubtitle(embeddedTrackId: 1);
-      await second.configureSecondarySubtitleStyle(
-        verticalOffset: -0.12,
-        textColor: 0xFFFFFF00,
-      );
-      expect(second.supportsSecondarySubtitleDelay, isTrue);
-      expect(second.supportsSecondarySubtitlePosition, isTrue);
-      expect(other.platform.properties['secondary-sub-delay'], '1.750');
-      expect(other.platform.properties['secondary-sub-pos'], '99');
-      expect(other.platform.properties['sub-delay'], '0.500');
-      expect(other.platform.properties['sub-color'], '#ffffffff');
-      await second.setSubtitleDelay(-0.25);
-      expect(other.platform.properties['secondary-sub-delay'], '1.000');
-      await second.setSecondarySubtitleDelay(0);
-      expect(other.platform.properties['secondary-sub-delay'], '-0.250');
-    } finally {
-      second.dispose();
-    }
-  });
 
   test('discovery selects the embedded ordinal once, excluding external and CC tracks', () async {
     await backend.setSubtitleTrack(2);

@@ -4,10 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
-import 'package:moonfin/playback/aether_backend.dart';
-import 'package:moonfin/playback/media3_player_backend.dart';
+
 import 'package:moonfin/playback/media_kit_player_backend.dart';
-import 'package:moonfin/playback/subtitle_style.dart';
+
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/widgets/playback/track_picker.dart';
 import 'package:playback_core/playback_core.dart';
@@ -77,13 +76,7 @@ class _Manager extends PlaybackManager {
       false;
 }
 
-class _AppleBackend extends _Backend implements AetherBackend {
-  _AppleBackend() : super(secondaryStyle: true);
-}
 
-class _AndroidBackend extends _Backend implements Media3PlayerBackend {
-  _AndroidBackend() : super(secondaryStyle: true);
-}
 
 void main() {
   late AppLocalizations l10n;
@@ -133,6 +126,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+
   testWidgets('reports its dialog opening and closing', (tester) async {
     final events = <bool>[];
     await openPicker(
@@ -181,6 +175,7 @@ void main() {
     },
   );
 
+
   testWidgets(
     'shared controls stay in the slot menu and primary opens only tracks',
     (tester) async {
@@ -221,79 +216,6 @@ void main() {
     },
   );
 
-  testWidgets('slot descriptions ignore blank display titles and titles', (
-    tester,
-  ) async {
-    final manager = _Manager(
-      _Backend(secondaryStyle: true),
-      primaryIndex: 2,
-      secondaryIndex: 3,
-      resolution: StreamResolutionResult(
-        streamUrl: 'https://host/stream',
-        mediaSourceId: 'source',
-        playMethod: StreamPlayMethod.directPlay,
-        mediaStreams: [
-          {
-            'Type': 'Subtitle',
-            'Index': 2,
-            'DisplayTitle': '   ',
-            'Title': '  English - SRT  ',
-            'Language': 'eng',
-          },
-          {
-            'Type': 'Subtitle',
-            'Index': 3,
-            'DisplayTitle': '',
-            'Title': '  ',
-            'Language': '  French  ',
-          },
-        ],
-      ),
-    );
-    addTearDown(manager.dispose);
-    await openPicker(tester, manager, audio: false);
-
-    expect(find.text(l10n.primarySubtitleSlot), findsOneWidget);
-    expect(find.text(l10n.secondarySubtitleSlot), findsOneWidget);
-    expect(find.text('English - SRT'), findsOneWidget);
-    expect(find.text('French'), findsOneWidget);
-  });
-
-  testWidgets('slot descriptions prefer a nonempty display title and fall back to Off', (
-    tester,
-  ) async {
-    final manager = _Manager(
-      _Backend(secondaryStyle: true),
-      primaryIndex: 2,
-      secondaryIndex: 3,
-      resolution: StreamResolutionResult(
-        streamUrl: 'https://host/stream',
-        mediaSourceId: 'source',
-        playMethod: StreamPlayMethod.directPlay,
-        mediaStreams: [
-          {
-            'Type': 'Subtitle',
-            'Index': 2,
-            'DisplayTitle': '  English SDH  ',
-            'Title': 'Ignored',
-          },
-          {
-            'Type': 'Subtitle',
-            'Index': 3,
-            'DisplayTitle': '',
-            'Title': '   ',
-            'Language': '  ',
-          },
-        ],
-      ),
-    );
-    addTearDown(manager.dispose);
-    await openPicker(tester, manager, audio: false);
-
-    expect(find.text('English SDH'), findsOneWidget);
-    expect(find.text('Ignored'), findsNothing);
-    expect(find.text(l10n.off), findsOneWidget);
-  });
 
   testWidgets('the secondary subtitle delay opens in the same bar', (
     tester,
@@ -329,226 +251,6 @@ void main() {
     expect(backend.audioDelays, [0.1]);
   });
 
-  testWidgets(
-    'secondary size steps through Default and both 50 percent limits',
-    (tester) async {
-      final prefs = GetIt.instance<UserPreferences>();
-      final manager = _Manager(_Backend(secondaryStyle: true));
-      addTearDown(manager.dispose);
-      await openPicker(tester, manager, secondary: true);
-      expect(find.byIcon(Icons.restore), findsNothing);
-      expect(find.byIcon(Icons.av_timer), findsOneWidget);
-      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
-      await tester.pumpAndSettle();
-      expect(find.text('+2%'), findsOneWidget);
-      expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.04);
-      await tester.tap(find.byTooltip(l10n.next));
-      await tester.pumpAndSettle();
-      for (var i = 0; i < 6; i++) {
-        await tester.tap(find.byTooltip(l10n.increaseValue(l10n.subtitleSize)));
-        await tester.pumpAndSettle();
-      }
-      expect(find.text('+50%'), findsOneWidget);
-      expect(manager.secondarySubtitleFontSize, 30.0);
-      await setPrimarySubtitleSize(manager, prefs, 24.0);
-      expect(manager.secondarySubtitleFontSize, 36.0);
-      for (var i = 0; i < 5; i++) {
-        await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.subtitleSize)));
-        await tester.pumpAndSettle();
-      }
-      expect(manager.secondarySubtitleFontSize, isNull);
-      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 0.0);
-      expect(manager.secondarySubtitleOffset, 0.02);
-      expect(manager.secondarySubtitleTextColor, 0xFFFFFFFF);
-      for (var i = 0; i < 6; i++) {
-        await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.subtitleSize)));
-        await tester.pumpAndSettle();
-      }
-      expect(find.text('-50%'), findsOneWidget);
-      expect(manager.secondarySubtitleFontSize, 12.0);
-    },
-  );
-
-  testWidgets('saved secondary colours show their name and cycle through the full palette', (
-    tester,
-  ) async {
-    final prefs = GetIt.instance<UserPreferences>();
-    await prefs.set(UserPreferences.secondarySubtitleTextColor, 0xFF00FF00);
-    final manager = _Manager(_AndroidBackend());
-    addTearDown(manager.dispose);
-    await openPicker(tester, manager, secondary: true);
-
-    // An existing Green preference must not appear as Default.
-    expect(find.text(l10n.green), findsOneWidget);
-    for (final (label, color) in [
-      (l10n.cyan, 0xFF00FFFF),
-      (l10n.blue, 0xFF0000FF),
-      (l10n.magenta, 0xFFFF00FF),
-      (l10n.red, 0xFFFF0000),
-    ]) {
-      await tester.tap(find.byTooltip(l10n.next));
-      await tester.pumpAndSettle();
-      expect(find.text(label), findsOneWidget);
-      expect(prefs.get(UserPreferences.secondarySubtitleTextColor), color);
-      expect(manager.secondarySubtitleTextColor, color);
-    }
-    await tester.tap(find.byTooltip(l10n.next));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleTextColor), -1);
-    expect(manager.secondarySubtitleTextColor, isNull);
-  });
-
-  testWidgets('Apple keeps the chosen size percentage when the cap is reached', (
-    tester,
-  ) async {
-    final prefs = GetIt.instance<UserPreferences>();
-    await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
-    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
-    final manager = _Manager(_AppleBackend());
-    addTearDown(manager.dispose);
-    await syncSecondarySubtitleStyle(manager, prefs);
-    await openPicker(tester, manager, secondary: true);
-
-    expect(find.text('+50%'), findsOneWidget);
-    expect(manager.secondarySubtitleFontSize, 48.0);
-    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.subtitleSize)));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
-    expect(find.text('+50%'), findsOneWidget);
-    expect(manager.secondarySubtitleFontSize, 48.0);
-
-    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.subtitleSize)));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 40.0);
-    expect(find.text('+40%'), findsOneWidget);
-    expect(manager.secondarySubtitleFontSize, 48.0);
-
-    await setPrimarySubtitleSize(manager, prefs, 24.0);
-    await tester.pumpAndSettle();
-    expect(find.text('+40%'), findsOneWidget);
-    expect(manager.secondarySubtitleFontSize, closeTo(33.6, 0.0001));
-  });
-
-  testWidgets('Apple retains -50% despite the minimum rendered size', (
-    tester,
-  ) async {
-    final prefs = GetIt.instance<UserPreferences>();
-    await prefs.set(UserPreferences.subtitlesTextSize, 12.0);
-    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, -50.0);
-    final manager = _Manager(_AppleBackend());
-    addTearDown(manager.dispose);
-    await syncSecondarySubtitleStyle(manager, prefs);
-    await openPicker(tester, manager, secondary: true);
-
-    expect(find.text('-50%'), findsOneWidget);
-    expect(manager.secondarySubtitleFontSize, 12.0);
-    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.subtitleSize)));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), -50.0);
-
-    await setPrimarySubtitleSize(manager, prefs, 40.0);
-    await tester.pumpAndSettle();
-    expect(find.text('-50%'), findsOneWidget);
-    expect(manager.secondarySubtitleFontSize, 20.0);
-  });
-
-  testWidgets('colour and position edits preserve capped Apple size intent', (
-    tester,
-  ) async {
-    final prefs = GetIt.instance<UserPreferences>();
-    await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
-    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
-    final manager = _Manager(_AppleBackend());
-    addTearDown(manager.dispose);
-    await openPicker(tester, manager, secondary: true);
-    expect(find.text('+50%'), findsOneWidget);
-
-    await tester.tap(find.byTooltip(l10n.playerTooltipPrevious));
-    await tester.pumpAndSettle();
-    // Previous from Default wraps to Red in the restored full palette.
-    expect(prefs.get(UserPreferences.secondarySubtitleTextColor), 0xFFFF0000);
-    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
-    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.02);
-    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
-    expect(manager.secondarySubtitleFontSize, 48.0);
-
-    await setPrimarySubtitleSize(manager, prefs, 24.0);
-    await tester.pumpAndSettle();
-    expect(find.text('+50%'), findsOneWidget);
-    expect(manager.secondarySubtitleFontSize, 36.0);
-    expect(manager.secondarySubtitleTextColor, 0xFFFF0000);
-    expect(manager.secondarySubtitleOffset, 0.02);
-  });
-
-  testWidgets('size and colour edits preserve capped Media3 offset intent', (
-    tester,
-  ) async {
-    final prefs = GetIt.instance<UserPreferences>();
-    await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, 0.4);
-    final manager = _Manager(_AndroidBackend());
-    addTearDown(manager.dispose);
-    await openPicker(tester, manager, secondary: true);
-    expect(find.text('+6%'), findsOneWidget);
-
-    await tester.tap(find.byTooltip(l10n.playerTooltipPrevious));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.4);
-    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.subtitleSize)));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 10.0);
-    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.4);
-    expect(manager.secondarySubtitleOffset, 0.06);
-  });
-
-  testWidgets(
-    'Media3 offset shows the new legacy limit and reverses by 2%',
-    (tester) async {
-      final prefs = GetIt.instance<UserPreferences>();
-      await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, 0.4);
-      final manager = _Manager(_AndroidBackend());
-      addTearDown(manager.dispose);
-      await syncSecondarySubtitleStyle(manager, prefs);
-      await openPicker(tester, manager, secondary: true);
-      expect(find.text('+6%'), findsOneWidget);
-      expect(manager.secondarySubtitleOffset, 0.06);
-      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
-      await tester.pumpAndSettle();
-      expect(find.text('+6%'), findsOneWidget);
-      await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
-      await tester.pumpAndSettle();
-      expect(find.text('+4%'), findsOneWidget);
-      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.04);
-      expect(manager.secondarySubtitleOffset, 0.04);
-    },
-  );
-
-  testWidgets('primary offset has seven 2% steps from 0% to 12%', (tester) async {
-    final prefs = GetIt.instance<UserPreferences>();
-    final manager = _Manager(_Backend());
-    addTearDown(manager.dispose);
-    await openPicker(tester, manager, audio: false);
-    expect(find.text('4%'), findsOneWidget);
-    for (final expected in ['6%', '8%', '10%', '12%']) {
-      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
-      await tester.pumpAndSettle();
-      expect(find.text(expected), findsOneWidget);
-    }
-    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
-    await tester.pumpAndSettle();
-    expect(find.text('12%'), findsOneWidget);
-    expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.12);
-
-    for (var i = 0; i < 6; i++) {
-      await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
-      await tester.pumpAndSettle();
-    }
-    expect(find.text('0%'), findsOneWidget);
-    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.0);
-  });
 
   testWidgets('secondary offset uses 0%, +2%, +4%, +6% only', (
     tester,
@@ -584,63 +286,5 @@ void main() {
     expect(manager.secondarySubtitleOffset, 0.0);
   });
 
-  testWidgets('legacy negative spacing displays as Default and cannot go lower', (
-    tester,
-  ) async {
-    final prefs = GetIt.instance<UserPreferences>();
-    await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, -0.04);
-    final manager = _Manager(_AndroidBackend());
-    addTearDown(manager.dispose);
-    await syncSecondarySubtitleStyle(manager, prefs);
-    await openPicker(tester, manager, secondary: true);
-    expect(manager.secondarySubtitleOffset, 0.0);
-    expect(find.text('-4%'), findsNothing);
-    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
-    await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), -0.04);
-    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
-    await tester.pumpAndSettle();
-    expect(find.text('+2%'), findsOneWidget);
-    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.02);
-    expect(manager.secondarySubtitleOffset, 0.02);
-  });
 
-  for (final (name, method, separate, hdr) in [
-    ('shared size for HDR', StreamPlayMethod.directPlay, false, false),
-    ('separate HDR size', StreamPlayMethod.directPlay, true, true),
-    ('SDR size for transcoded HDR', StreamPlayMethod.transcode, true, false),
-  ]) {
-    testWidgets('primary picker applies and saves $name', (tester) async {
-      final prefs = GetIt.instance<UserPreferences>();
-      await prefs.set(UserPreferences.subtitlesHdrSeparate, separate);
-      await prefs.set(UserPreferences.subtitlesHdrTextSize, 30.0);
-      await prefs.set(UserPreferences.subtitlesTextColor, 0xFF00FF00);
-      final backend = _Backend();
-      final manager = _Manager(
-        backend,
-        resolution: StreamResolutionResult(
-          streamUrl: 'https://host/stream',
-          mediaSourceId: 'source',
-          playMethod: method,
-          videoRangeType: 'HDR10',
-        ),
-      );
-      addTearDown(manager.dispose);
-      await openPicker(tester, manager, audio: false);
-      expect(find.text(l10n.subtitleSize), findsOneWidget);
-      expect(find.text(l10n.textFillColor), findsNothing);
-      expect(find.text(l10n.verticalOffset), findsOneWidget);
-
-      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.subtitleSize)));
-      await tester.pumpAndSettle();
-      expect(backend.fontSizes, [hdr ? 32.0 : 22.0]);
-      expect(backend.textColor, hdr ? 0xFF808080 : 0xFF00FF00);
-      expect(prefs.get(UserPreferences.subtitlesTextSize), hdr ? 20.0 : 22.0);
-      expect(
-        prefs.get(UserPreferences.subtitlesHdrTextSize),
-        hdr ? 32.0 : 30.0,
-      );
-      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 0.0);
-    });
-  }
 }

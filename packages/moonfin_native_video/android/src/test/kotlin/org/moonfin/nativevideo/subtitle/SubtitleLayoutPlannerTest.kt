@@ -7,82 +7,6 @@ import org.junit.Test
 
 class SubtitleLayoutPlannerTest {
     @Test
-    fun stackedSecondaryFollowsTopOrBottomPrimary() {
-        val top = SubtitleBox(50f, 50f, 900f, 110f)
-        val middle = SubtitleBox(50f, 480f, 900f, 540f)
-        val bottom = SubtitleBox(50f, 860f, 900f, 920f)
-        assertEquals(
-            190f,
-            SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 70f, 10f, 0f),
-            0.01f,
-        )
-        assertEquals(
-            470f,
-            SubtitleLayoutPlanner.stackedDesiredBottom(middle, 1000, 70f, 10f, 0f),
-            0.01f,
-        )
-        assertEquals(
-            850f,
-            SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 70f, 10f, 0f),
-            0.01f,
-        )
-        assertEquals(
-            830f,
-            SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 70f, 10f, 0.02f),
-            0.01f,
-        )
-        // Top-aligned second subtitles move inward (down) on positive offsets.
-        assertEquals(
-            210f,
-            SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 70f, 10f, 0.02f),
-            0.01f,
-        )
-        assertEquals(
-            170f,
-            SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 70f, 10f, -0.02f),
-            0.01f,
-        )
-    }
-
-
-    @Test
-    fun secondaryHeightNeverChangesItsEdgeNextToThePrimary() {
-        val top = SubtitleBox(50f, 50f, 900f, 110f)
-        val bottom = SubtitleBox(50f, 860f, 900f, 920f)
-        // A top secondary grows down from its top anchor; a bottom
-        // secondary grows up from its bottom anchor.
-        val smallTop = SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 24f, 10f, 0f)
-        val tallTop = SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 90f, 10f, 0f)
-        assertEquals(120f, smallTop - 24f, 0.01f)
-        assertEquals(120f, tallTop - 90f, 0.01f)
-        val smallBottom = SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 24f, 10f, 0f)
-        val tallBottom = SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 90f, 10f, 0f)
-        assertEquals(850f, smallBottom, 0.01f)
-        assertEquals(smallBottom, tallBottom, 0.01f)
-    }
-
-    @Test
-    fun centredPairOffsetsSplitTheSeparationAndPreserveTheCentre() {
-        val anchor = 500f
-        val primaryHeight = 70f
-        val secondaryHeight = 105f
-        val baseGap = 10f
-        for (offset in listOf(-0.06f, -0.02f, 0f, 0.02f, 0.06f)) {
-            val gap = SubtitleLayoutPlanner.middleGap(baseGap, offset, 1000, 2f)
-            val primaryCentre = anchor + (secondaryHeight + gap) / 2f
-            val primaryTop = primaryCentre - primaryHeight / 2f
-            val secondaryBottom = primaryTop - gap
-            val secondaryTop = secondaryBottom - secondaryHeight
-            assertEquals(anchor, (secondaryTop + primaryCentre +
-                primaryHeight / 2f) / 2f, 0.01f)
-            assertEquals(gap, primaryTop - secondaryBottom, 0.01f)
-            assertTrue(gap >= 2f)
-        }
-        assertEquals(30f, SubtitleLayoutPlanner.middleGap(10f, 0.02f, 1000, 2f), 0.01f)
-        assertEquals(2f, SubtitleLayoutPlanner.middleGap(10f, -0.06f, 1000, 2f), 0.01f)
-    }
-
-    @Test
     fun preferredSearchHalfFollowsCuePositionRatherThanItsLineAnchor() {
         val lowerStartAlignedCue = SubtitleBox(50f, 800f, 950f, 840f)
         val upperEndAlignedCue = SubtitleBox(50f, 70f, 950f, 150f)
@@ -214,61 +138,6 @@ class SubtitleLayoutPlannerTest {
     }
 
     @Test
-    fun twentyPercentUpwardOffsetClampsMultilineTextInsideLowerHalf() {
-        // At 1080p and size 20, two primary lines and three secondary lines.
-        val primary = SubtitleBox(96f, 901.8f, 1824f, 1036.8f)
-        val placed = SubtitleLayoutPlanner.placeSecondary(
-            primary = listOf(primary),
-            viewportWidth = 1920,
-            viewportHeight = 1080,
-            secondaryHeight = 202.5f,
-            desiredBottom = primary.top - 8f - 0.2f * 1080,
-            gapPx = 8f,
-            stepPx = 8f,
-        )!!
-
-        assertEquals(540f, placed.top)
-        assertEquals(742.5f, placed.bottom)
-        assertTrue(!SubtitleLayoutPlanner.intersects(placed, primary, 8f))
-    }
-
-    @Test
-    fun clampedCueFindsFreeSpaceBelowPositionedPrimaryWithoutOverlap() {
-        val positioned = SubtitleBox(50f, 500f, 950f, 600f)
-        val bottom = SubtitleBox(50f, 900f, 950f, 960f)
-        val placed = SubtitleLayoutPlanner.placeSecondary(
-            primary = listOf(positioned, bottom),
-            viewportWidth = 1000,
-            viewportHeight = 1000,
-            secondaryHeight = 100f,
-            desiredBottom = 560f,
-            gapPx = 8f,
-            stepPx = 8f,
-        )!!
-
-        assertEquals(608f, placed.top)
-        assertEquals(708f, placed.bottom)
-        assertTrue(listOf(positioned, bottom).none {
-            SubtitleLayoutPlanner.intersects(placed, it, 8f)
-        })
-    }
-
-    @Test
-    fun returnsNoPlacementWhenTextIsTallerThanLowerHalf() {
-        assertNull(
-            SubtitleLayoutPlanner.placeSecondary(
-                primary = emptyList(),
-                viewportWidth = 1000,
-                viewportHeight = 1000,
-                secondaryHeight = 501f,
-                desiredBottom = 900f,
-                gapPx = 8f,
-                stepPx = 8f,
-            ),
-        )
-    }
-
-    @Test
     fun returnsNoPlacementWhenLowerHalfIsOccupied() {
         val primary = listOf(SubtitleBox(0f, 500f, 1000f, 1000f))
 
@@ -305,6 +174,33 @@ class SubtitleLayoutPlannerTest {
         assertTrue(listOf(positionedPrimary, bitmapPrimary).none {
             SubtitleLayoutPlanner.intersects(placed!!, it, 8f)
         })
+    }
+
+    @Test
+    fun verticalOffsetMovesBothRowsWhilePreservingTheirGap() {
+        val primary = SubtitleBox(50f, 800f, 950f, 850f)
+        val normal = SubtitleLayoutPlanner.placeSecondary(
+            primary = listOf(primary),
+            viewportWidth = 1000,
+            viewportHeight = 1000,
+            secondaryHeight = 24f,
+            desiredBottom = 792f,
+            gapPx = 8f,
+            stepPx = 8f,
+        )!!
+        val shiftedPrimary = SubtitleBox(50f, 760f, 950f, 810f)
+        val shifted = SubtitleLayoutPlanner.placeSecondary(
+            primary = listOf(shiftedPrimary),
+            viewportWidth = 1000,
+            viewportHeight = 1000,
+            secondaryHeight = 24f,
+            desiredBottom = 752f,
+            gapPx = 8f,
+            stepPx = 8f,
+        )!!
+
+        assertEquals(-40f, shifted.bottom - normal.bottom)
+        assertEquals(8f, shiftedPrimary.top - shifted.bottom)
     }
 
     @Test

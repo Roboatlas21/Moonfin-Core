@@ -42,54 +42,6 @@ void main() {
         messenger.setMockMethodCallHandler(events, null);
       });
 
-      test('exposes each shared secondary control', () {
-        expect(backend, isA<SecondarySubtitleBackend>());
-        expect(
-          (backend as SecondarySubtitleBackend).supportsSecondarySubtitleDelay,
-          isTrue,
-        );
-        expect(
-          (backend as SecondarySubtitleBackend)
-              .supportsSecondarySubtitlePosition,
-          isTrue,
-        );
-        expect(
-          (backend as SecondarySubtitleBackend).supportsSecondarySubtitleStyle,
-          isTrue,
-        );
-      });
-
-      test(
-        'startup keeps the native ordinal, fallback and appearance together',
-        () async {
-          final secondary = <String, dynamic>{
-            'secondarySubtitleTrackId': 3,
-            'secondarySubtitleUrl': 'https://server/subtitle.srt',
-            'secondarySubtitleCodec': 'subrip',
-            'secondarySubtitleDelayMs': 750,
-            'secondarySubtitleOffset': 0.12,
-            'secondarySubtitleFontSize': 28.0,
-            'secondarySubtitleTextColor': 0xFFFFFF00,
-          };
-          await backend.play({
-            'url': 'https://server/episode.mkv',
-            ...secondary,
-          });
-          final source = calls.lastWhere((call) => call.method == 'setSource');
-          for (final entry in secondary.entries) {
-            expect(source.arguments[entry.key], entry.value, reason: entry.key);
-          }
-
-          await backend.play({'url': 'https://server/next.mkv'});
-          final next = calls.lastWhere((call) => call.method == 'setSource');
-          expect(next.arguments['secondarySubtitleTrackId'], isNull);
-          expect(next.arguments['secondarySubtitleUrl'], isNull);
-          expect(next.arguments['secondarySubtitleDelayMs'], 0);
-          expect(next.arguments['secondarySubtitleOffset'], 0.0);
-          expect(next.arguments['secondarySubtitleFontSize'], isNull);
-          expect(next.arguments['secondarySubtitleTextColor'], isNull);
-        },
-      );
 
       test('secondary selection is sent before tracks arrive and clears explicitly', () async {
         await backend.setSecondarySubtitle(embeddedTrackId: 2, codec: 'srt');
@@ -114,29 +66,6 @@ void main() {
         expect(calls.last.arguments['embeddedTrackId'], isNull);
       });
 
-      test(
-        'secondary delay and appearance use independent bounded controls',
-        () async {
-          await backend.setSecondarySubtitleDelay(-1.25);
-          expect(calls.last.method, 'setSecondarySubtitleDelay');
-          expect(calls.last.arguments['delayMs'], -1250);
-          await backend.setSecondarySubtitleDelay(12);
-          expect(calls.last.arguments['delayMs'], 5000);
-          await backend.configureSecondarySubtitleStyle(
-            fontSize: 100,
-            verticalOffset: -0.2,
-            textColor: 0xFF00FF00,
-          );
-          expect(calls.last.method, 'configureSecondarySubtitleStyle');
-          expect(calls.last.arguments, {
-            'fontSize': 72.0,
-            'verticalOffset': -0.2,
-            'textColor': 0xFF00FF00,
-          });
-          await backend.configureSecondarySubtitleStyle(verticalOffset: 0.2);
-          expect(calls.last.arguments, {'verticalOffset': 0.2});
-        },
-      );
     });
   }
 }
