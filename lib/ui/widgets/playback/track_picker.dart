@@ -108,8 +108,8 @@ abstract final class TrackPicker {
     final backend = manager.backend;
     final SecondarySubtitleBackend? secondaryControls =
         backend is SecondarySubtitleBackend
-            ? backend as SecondarySubtitleBackend
-            : null;
+        ? backend as SecondarySubtitleBackend
+        : null;
     final delayLimits = secondary
         ? secondaryControls?.supportsSecondarySubtitleDelay == true
               ? (
@@ -167,14 +167,15 @@ abstract final class TrackPicker {
             minFontSize: secondary ? 8 : 12,
             maxFontSize: secondary ? 72 : 48,
             initialFontSize: secondary
-                ? manager.secondarySubtitleFontSize ?? style.fontSize
+                ? manager.secondarySubtitleFontSize
                 : style.fontSize,
+            defaultFontSize: secondary ? style.fontSize : null,
             initialOffset: manager.secondarySubtitleOffset,
             initialTextColor: manager.secondarySubtitleTextColor,
             defaultTextColor: style.textColor,
             onChanged: (fontSize, offset, textColor) {
               if (!secondary) {
-                unawaited(setPrimarySubtitleSize(manager, prefs, fontSize));
+                unawaited(setPrimarySubtitleSize(manager, prefs, fontSize!));
                 return;
               }
               unawaited(
@@ -185,7 +186,10 @@ abstract final class TrackPicker {
                 ),
               );
               unawaited(
-                prefs.set(UserPreferences.secondarySubtitleTextSize, fontSize),
+                prefs.set(
+                  UserPreferences.secondarySubtitleTextSize,
+                  fontSize ?? 0.0,
+                ),
               );
               unawaited(
                 prefs.set(

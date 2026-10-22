@@ -54,6 +54,8 @@ void main() {
     expect(metadata['title'], l10n.secondarySubtitleSlot);
     expect(metadata['sizeLabel'], l10n.subtitleSize);
     expect(metadata['primaryFontSize'], 20.0);
+    expect(metadata['fontSize'], 0.0);
+    expect(metadata['defaultLabel'], l10n.defaultLabel);
     expect(
       metadata['colors'],
       contains(equals({'label': l10n.yellow, 'value': 0xFFFFFF00})),
@@ -138,12 +140,40 @@ void main() {
   test('native Default clears overrides instead of copying the primary preferences', () async {
     await prefs.set(UserPreferences.subtitlesTextColor, 0xFF00FF00);
     await handleAppleTvSubtitleAction(
-      {'event': 'configureSecondarySubtitleStyle', 'textColor': -1},
+      {
+        'event': 'configureSecondarySubtitleStyle',
+        'fontSize': 34.0,
+        'textColor': 0xFFFFFF00,
+      },
+      manager,
+      prefs,
+    );
+    await handleAppleTvSubtitleAction(
+      {
+        'event': 'configureSecondarySubtitleStyle',
+        'fontSize': 0.0,
+        'textColor': -1,
+      },
       manager,
       prefs,
     );
     expect(prefs.get(UserPreferences.secondarySubtitleTextColor), -1);
     expect(manager.secondarySubtitleTextColor, isNull);
     expect(manager.secondarySubtitleFontSize, isNull);
+    await handleAppleTvSubtitleAction(
+      {'event': 'configureSecondarySubtitleStyle', 'verticalOffset': 0.2},
+      manager,
+      prefs,
+    );
+    await prefs.set(UserPreferences.subtitlesTextSize, 28.0);
+    expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 0.0);
+    final metadata = appleTvSubtitleMetadata(
+      manager: manager,
+      prefs: prefs,
+      l10n: AppLocalizationsEn(),
+      tracks: [],
+    );
+    expect(metadata['fontSize'], 0.0);
+    expect(metadata['primaryFontSize'], 28.0);
   });
 }

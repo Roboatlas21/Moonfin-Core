@@ -2833,11 +2833,16 @@ final class AppleTvPlayerViewController: UIViewController {
         let color = field == "textColor"
         let primary = field == "primaryFontSize"
         let size = field == "fontSize" || primary
-        let current = (subtitleControls[field] as? NSNumber)?.doubleValue ?? (size ? 24 : color ? -1 : 0.08)
+        let stored = (subtitleControls[field] as? NSNumber)?.doubleValue ?? (size ? 0 : color ? -1 : 0.08)
+        let inheritedSize = size && !primary && stored <= 0
+        let defaultSize = (subtitleControls["primaryFontSize"] as? NSNumber)?.doubleValue ?? 20
+        let current = inheritedSize ? defaultSize : stored
+        let sizeLabel = (inheritedSize ? subtitleText("defaultLabel") + " (" : "")
+            + String(format: "%.0f", current) + (inheritedSize ? ")" : "")
         let label = subtitleText(size ? "sizeLabel" : color ? "colorLabel" : "positionLabel")
         let sheet = makePlayerMenu(
             title: label,
-            message: color ? nil : size ? String(format: "%.0f", current) : String(format: "%.0f%%", current * 100),
+            message: color ? nil : size ? sizeLabel : String(format: "%.0f%%", current * 100),
             preferredStyle: .actionSheet)
         if color {
             for entry in (subtitleControls["colors"] as? [[String: Any]]) ?? [] {
@@ -2857,6 +2862,11 @@ final class AppleTvPlayerViewController: UIViewController {
                     self?.applySubtitleAppearance(field: field, value: min(max(current + step, minimum), maximum))
                 })
             }
+        }
+        if size && !primary {
+            sheet.addAction(makePlayerAction(
+                title: subtitleText("defaultLabel") + String(format: " (%.0f)", defaultSize), style: .default
+            ) { [weak self] _ in self?.applySubtitleAppearance(field: field, value: 0) })
         }
         sheet.addAction(makePlayerAction(title: subtitleText("done"), style: .cancel))
         present(sheet, animated: true)

@@ -23,6 +23,7 @@ Map<String, dynamic> appleTvSubtitleMetadata({
   'cancel': l10n.cancel,
   'done': l10n.done,
   'reset': l10n.reset,
+  'defaultLabel': l10n.defaultLabel,
   'delayLabel': l10n.subtitleDelay,
   'sizeLabel': l10n.subtitleSize,
   'positionLabel': l10n.verticalOffset,
@@ -31,9 +32,7 @@ Map<String, dynamic> appleTvSubtitleMetadata({
     prefs,
     manager.currentResolution,
   ).fontSize,
-  'fontSize':
-      manager.secondarySubtitleFontSize ??
-      SubtitleStyle.forResolution(prefs, manager.currentResolution).fontSize,
+  'fontSize': manager.secondarySubtitleFontSize ?? 0.0,
   'verticalOffset': manager.secondarySubtitleOffset,
   'textColor': prefs.get(UserPreferences.secondarySubtitleTextColor),
   'colors': [
@@ -85,7 +84,7 @@ Future<void> _saveAppearance(
   if (size != null && size.isFinite) {
     await prefs.set(
       UserPreferences.secondarySubtitleTextSize,
-      size.clamp(8, 72).toDouble(),
+      size <= 0 ? 0.0 : size.clamp(8, 72).toDouble(),
     );
   }
   if (offset != null && offset.isFinite) {

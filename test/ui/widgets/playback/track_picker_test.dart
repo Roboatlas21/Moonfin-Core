@@ -5,12 +5,15 @@ import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/playback/media_kit_player_backend.dart';
+import 'package:moonfin/playback/subtitle_style.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/widgets/playback/track_picker.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _Backend extends Fake implements MediaKitPlayerBackend {
+  _Backend({this.secondaryStyle = false});
+  final bool secondaryStyle;
   final audioDelays = <double>[];
   final fontSizes = <double?>[];
   int? textColor;
@@ -18,7 +21,7 @@ class _Backend extends Fake implements MediaKitPlayerBackend {
   @override
   bool get supportsSecondarySubtitleDelay => true;
   @override
-  bool get supportsSecondarySubtitleStyle => false;
+  bool get supportsSecondarySubtitleStyle => secondaryStyle;
   @override
   bool get supportsSecondarySubtitlePosition => true;
 
@@ -131,16 +134,16 @@ void main() {
       expect(find.text(l10n.none), findsOneWidget);
       expect(find.byType(AnimatedModalBarrier), findsOneWidget);
 
-    await tester.tap(find.text(l10n.audioDelay));
-    await tester.pumpAndSettle();
-    expect(find.text(l10n.audioTrack), findsNothing);
-    expect(find.byType(AnimatedModalBarrier), findsNothing);
+      await tester.tap(find.text(l10n.audioDelay));
+      await tester.pumpAndSettle();
+      expect(find.text(l10n.audioTrack), findsNothing);
+      expect(find.byType(AnimatedModalBarrier), findsNothing);
 
-    await tester.tap(find.byTooltip(l10n.delayPlusMs(100)));
-    await tester.pump();
-    expect(find.text('+100 ms'), findsOneWidget);
-    expect(backend.audioDelays, [0.1]);
-    expect(TrackPicker.audioDelay, 0.1);
+      await tester.tap(find.byTooltip(l10n.delayPlusMs(100)));
+      await tester.pump();
+      expect(find.text('+100 ms'), findsOneWidget);
+      expect(backend.audioDelays, [0.1]);
+      expect(TrackPicker.audioDelay, 0.1);
 
       Navigator.of(tester.element(find.byType(Dialog))).pop();
       await tester.pumpAndSettle();
@@ -180,6 +183,50 @@ void main() {
     await tester.pump();
     expect(backend.audioDelays, [0.1]);
   });
+
+  testWidgets(
+    'secondary size keeps inheritance until adjusted and can restore it',
+    (tester) async {
+      final prefs = GetIt.instance<UserPreferences>();
+      final manager = _Manager(_Backend(secondaryStyle: true));
+      addTearDown(manager.dispose);
+      await openPicker(tester, manager, secondary: true);
+      expect(find.text('${l10n.defaultLabel} (20)'), findsOneWidget);
+
+      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip(l10n.next));
+      await tester.pumpAndSettle();
+      expect(manager.secondarySubtitleFontSize, isNull);
+      expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 0.0);
+
+      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.subtitleSize)));
+      await tester.pumpAndSettle();
+      expect(manager.secondarySubtitleFontSize, 22.0);
+      await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.subtitleSize)));
+      await tester.pumpAndSettle();
+      expect(find.text('${l10n.defaultLabel} (20)'), findsNothing);
+      expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 20.0);
+
+      Focus.of(tester.element(find.byIcon(Icons.restore))).requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(find.text('${l10n.defaultLabel} (20)'), findsOneWidget);
+      expect(manager.secondarySubtitleFontSize, isNull);
+      expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 0.0);
+      expect(manager.secondarySubtitleOffset, closeTo(0.1, 0.001));
+      expect(manager.secondarySubtitleTextColor, 0xFFFFFFFF);
+
+      Navigator.of(tester.element(find.byType(Dialog))).pop();
+      await tester.pumpAndSettle();
+      await setPrimarySubtitleSize(manager, prefs, 26.0);
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+      expect(find.text('${l10n.defaultLabel} (26)'), findsOneWidget);
+      expect(manager.secondarySubtitleFontSize, isNull);
+    },
+  );
 
   for (final (name, method, separate, hdr) in [
     ('shared size for HDR', StreamPlayMethod.directPlay, false, false),

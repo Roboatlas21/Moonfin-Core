@@ -10,14 +10,16 @@ class SubtitleAppearanceFooter extends StatefulWidget {
     required this.initialTextColor,
     required this.defaultTextColor,
     required this.onChanged,
+    this.defaultFontSize,
     this.showStyle = true,
     this.showPosition = true,
     this.showColor = true,
     this.minFontSize = 8,
     this.maxFontSize = 72,
-  });
+  }) : assert(initialFontSize != null || defaultFontSize != null);
 
-  final double initialFontSize;
+  final double? initialFontSize;
+  final double? defaultFontSize;
   final double initialOffset;
   final int? initialTextColor;
   final int defaultTextColor;
@@ -26,7 +28,8 @@ class SubtitleAppearanceFooter extends StatefulWidget {
   final bool showColor;
   final double minFontSize;
   final double maxFontSize;
-  final void Function(double fontSize, double offset, int? textColor) onChanged;
+  final void Function(double? fontSize, double offset, int? textColor)
+  onChanged;
 
   @override
   State<SubtitleAppearanceFooter> createState() =>
@@ -34,18 +37,27 @@ class SubtitleAppearanceFooter extends StatefulWidget {
 }
 
 class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
-  late double _fontSize = widget.initialFontSize;
+  late double? _fontSize = widget.initialFontSize;
   late double _offset = widget.initialOffset;
   late int? _textColor = widget.initialTextColor;
 
+  double get _effectiveFontSize => _fontSize ?? widget.defaultFontSize!;
+
   void _update({double? fontSize, double? offset}) {
     setState(() {
-      _fontSize = (fontSize ?? _fontSize)
-          .clamp(widget.minFontSize, widget.maxFontSize)
-          .toDouble();
+      if (fontSize != null) {
+        _fontSize = fontSize
+            .clamp(widget.minFontSize, widget.maxFontSize)
+            .toDouble();
+      }
       _offset = (offset ?? _offset).clamp(0.0, 0.4).toDouble();
     });
     widget.onChanged(_fontSize, _offset, _textColor);
+  }
+
+  void _resetFontSize() {
+    setState(() => _fontSize = null);
+    widget.onChanged(null, _offset, _textColor);
   }
 
   void _updateTextColor(int? textColor) {
@@ -63,9 +75,15 @@ class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
         if (widget.showStyle)
           _AppearanceControlRow(
             label: AppLocalizations.of(context).subtitleSize,
-            value: _fontSize.toStringAsFixed(0),
-            onDecrease: () => _update(fontSize: _fontSize - 2),
-            onIncrease: () => _update(fontSize: _fontSize + 2),
+            value: _fontSize == null
+                ? '${AppLocalizations.of(context).defaultLabel} (${_effectiveFontSize.toStringAsFixed(0)})'
+                : _fontSize!.toStringAsFixed(0),
+            onDecrease: () => _update(fontSize: _effectiveFontSize - 2),
+            onIncrease: () => _update(fontSize: _effectiveFontSize + 2),
+            valueWidth: widget.defaultFontSize == null ? 48 : 112,
+            onReset: widget.defaultFontSize != null && _fontSize != null
+                ? _resetFontSize
+                : null,
           ),
         if (widget.showPosition)
           _AppearanceControlRow(
@@ -153,12 +171,16 @@ class _AppearanceControlRow extends StatelessWidget {
     required this.value,
     required this.onDecrease,
     required this.onIncrease,
+    this.onReset,
+    this.valueWidth = 48,
   });
 
   final String label;
   final String value;
   final VoidCallback onDecrease;
   final VoidCallback onIncrease;
+  final VoidCallback? onReset;
+  final double valueWidth;
 
   @override
   Widget build(BuildContext context) => Row(
@@ -171,7 +193,19 @@ class _AppearanceControlRow extends StatelessWidget {
         onPressed: onDecrease,
         icon: const Icon(Icons.remove_circle_outline),
       ),
-      SizedBox(width: 48, child: Text(value, textAlign: TextAlign.center)),
+      SizedBox(
+        width: valueWidth,
+        child: onReset == null
+            ? Text(value, textAlign: TextAlign.center)
+            : Tooltip(
+                message: AppLocalizations.of(context).resetToDefaults,
+                child: TextButton.icon(
+                  onPressed: onReset,
+                  icon: const Icon(Icons.restore, size: 18),
+                  label: Text(value),
+                ),
+              ),
+      ),
       IconButton(
         tooltip: AppLocalizations.of(context).increaseValue(label),
         onPressed: onIncrease,
