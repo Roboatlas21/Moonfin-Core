@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations_en.dart';
@@ -45,6 +47,10 @@ void main() {
     await store.init();
     prefs = UserPreferences(store);
     manager = _TrackManager();
+    // The native playback host applies changes through this listener.
+    prefs.addListener(
+      () => unawaited(syncSecondarySubtitleStyle(manager, prefs)),
+    );
   });
   tearDown(() {
     manager.dispose();
@@ -119,6 +125,25 @@ void main() {
     );
     expect(prefs.get(UserPreferences.secondarySubtitleTextColor), 0xFFFF00FF);
     expect(metadata()['textColor'], 0xFFFF00FF);
+  });
+
+  test('native appearance changes notify the playback host once', () async {
+    var notifications = 0;
+    prefs.addListener(() => notifications++);
+    await handleAppleTvSubtitleAction(
+      {
+        'event': 'configureSecondarySubtitleStyle',
+        'sizeAdjustment': 10.0,
+        'verticalOffset': 0.02,
+        'textColor': 0xFFFFFF00,
+      },
+      manager,
+      prefs,
+    );
+    expect(notifications, 1);
+    expect(manager.secondarySubtitleFontSize, 22.0);
+    expect(manager.secondarySubtitleOffset, 0.02);
+    expect(manager.secondarySubtitleTextColor, 0xFFFFFF00);
   });
 
   test('native selection and off go through the shared manager', () async {
