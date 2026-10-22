@@ -77,6 +77,8 @@ final class RunnerTests: XCTestCase {
                     alignment: alignment, position: position)
             ])
             overlay.update(currentTime: 2)
+            // setSubtitlePosition schedules layout without replacing the cues.
+            overlay.layoutIfNeeded()
             return label.frame
         }
 
