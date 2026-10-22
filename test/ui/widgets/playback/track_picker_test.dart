@@ -378,7 +378,8 @@ void main() {
 
     await tester.tap(find.byTooltip(l10n.playerTooltipPrevious));
     await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleTextColor), 0xFFFFFF00);
+    // Previous from Default wraps to Red in the restored full palette.
+    expect(prefs.get(UserPreferences.secondarySubtitleTextColor), 0xFFFF0000);
     expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
     await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
     await tester.pumpAndSettle();
@@ -390,7 +391,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('+50%'), findsOneWidget);
     expect(manager.secondarySubtitleFontSize, 36.0);
-    expect(manager.secondarySubtitleTextColor, 0xFFFFFF00);
+    expect(manager.secondarySubtitleTextColor, 0xFFFF0000);
     expect(manager.secondarySubtitleOffset, 0.02);
   });
 
