@@ -14,13 +14,9 @@ internal object SubtitleLayoutPlanner {
     const val ALIGN_MIDDLE = 1
     const val ALIGN_BOTTOM = 2
 
-    /** Share changes to the middle pair's spacing equally between both lines. */
-    fun middlePrimaryShift(
-        secondaryHeight: Float,
-        gapPx: Float,
-        adjustment: Float,
-        viewportHeight: Int,
-    ): Float = (secondaryHeight + gapPx + adjustment * viewportHeight) / (2 * viewportHeight)
+    /** Respect a small gap when a negative middle adjustment pulls captions together. */
+    fun middleGap(gapPx: Float, adjustment: Float, viewportHeight: Int, minimumGapPx: Float): Float =
+        (gapPx + adjustment * viewportHeight).coerceAtLeast(minimumGapPx)
 
     /** Top dialogue gets the second language below; other dialogue gets it above. */
     fun stackedDesiredBottom(

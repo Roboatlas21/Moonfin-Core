@@ -230,11 +230,37 @@ void main() {
     expect(centre.line.dartify(), greaterThan(50));
     expect(cue.line.dartify(), lessThan(50));
     final middlePosition = (cue.line.dartify() as num).toDouble();
-    final primaryMiddlePosition = (centre.line.dartify() as num).toDouble();
+    final primaryPosition = (centre.line.dartify() as num).toDouble();
+    // A positive 2% gap adjustment moves each side by exactly 1%.
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0.02);
-    // Half the adjustment goes into each line, keeping their group centred.
     expect(cue.line.dartify(), closeTo(middlePosition - 1, 0.01));
-    expect(centre.line.dartify(), closeTo(primaryMiddlePosition + 1, 0.01));
+    expect(centre.line.dartify(), closeTo(primaryPosition + 1, 0.01));
+    const lineHeightPercent = 20 / 24 * 0.055 * 100;
+    final primaryBottom = (centre.line.dartify() as num).toDouble() +
+        lineHeightPercent / 2;
+    final secondaryTop = (cue.line.dartify() as num).toDouble();
+    expect((secondaryTop + primaryBottom) / 2, closeTo(50, 0.01));
+    await backend.configureSecondarySubtitleStyle(verticalOffset: -0.02);
+    final closePrimaryBottom = (centre.line.dartify() as num).toDouble() +
+        lineHeightPercent / 2;
+    expect(
+      ((cue.line.dartify() as num).toDouble() + closePrimaryBottom) / 2,
+      closeTo(50, 0.01),
+    );
+    expect(closePrimaryBottom - (cue.line.dartify() as num).toDouble() -
+        2 * lineHeightPercent, greaterThan(0));
+
+    // A font-size change must re-centre both labels even when offset is unchanged.
+    await backend.configureSecondarySubtitleStyle(
+      fontSize: 40, verticalOffset: 0,
+    );
+    const primaryHeightPercent = 20 / 24 * 0.055 * 100;
+    final largerPrimaryBottom = (centre.line.dartify() as num).toDouble() +
+        primaryHeightPercent / 2;
+    expect(
+      ((cue.line.dartify() as num).toDouble() + largerPrimaryBottom) / 2,
+      closeTo(50, 0.01),
+    );
     await backend.setSecondarySubtitle();
     expect(centre.line.dartify(), 50);
   });

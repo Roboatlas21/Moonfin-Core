@@ -118,18 +118,31 @@ final class RunnerTests: XCTestCase {
         XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
         XCTAssertGreaterThan(primaryLabel.frame.midY, 200)
         XCTAssertLessThan(secondaryLabel.frame.midY, 200)
-
-        let middlePrimary = primaryLabel.frame.midY
-        let middleSecondary = secondaryLabel.frame.midY
-        let groupMidY = (secondaryLabel.frame.minY + primaryLabel.frame.maxY) / 2
-
+        func pairCentre() -> CGFloat {
+            (secondaryLabel.frame.minY + primaryLabel.frame.maxY) / 2
+        }
+        XCTAssertEqual(pairCentre(), 200, accuracy: 0.1)
+        let initialPrimary = primaryLabel.frame.midY
+        let initialSecondary = secondaryLabel.frame.midY
         secondary.secondaryVerticalAdjustment = 0.02
         secondary.layoutIfNeeded()
-        XCTAssertEqual(primaryLabel.frame.midY, middlePrimary + 4, accuracy: 0.1)
-        XCTAssertEqual(secondaryLabel.frame.midY, middleSecondary - 4, accuracy: 0.1)
-        XCTAssertEqual((secondaryLabel.frame.minY + primaryLabel.frame.maxY) / 2,
-                       groupMidY, accuracy: 0.1)
-        XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
+        XCTAssertEqual(primaryLabel.frame.midY, initialPrimary + 4, accuracy: 0.1)
+        XCTAssertEqual(secondaryLabel.frame.midY, initialSecondary - 4, accuracy: 0.1)
+        XCTAssertEqual(pairCentre(), 200, accuracy: 0.1)
+
+        // Negative adjustments cannot create overlap or shift the pair.
+        secondary.secondaryVerticalAdjustment = -0.06
+        secondary.layoutIfNeeded()
+        XCTAssertGreaterThan(primaryLabel.frame.minY, secondaryLabel.frame.maxY)
+        XCTAssertEqual(pairCentre(), 200, accuracy: 0.1)
+
+        // Multi-line text with a different size still shares the same centre.
+        secondary.applySecondaryStyle(from: primary, fontSize: 36, textColor: nil)
+        secondary.layoutIfNeeded()
+        XCTAssertEqual(pairCentre(), 200, accuracy: 0.1)
+        secondary.clear()
+        primary.layoutIfNeeded()
+        XCTAssertEqual(primaryLabel.frame.midY, 200, accuracy: 0.1)
     }
 
     @MainActor

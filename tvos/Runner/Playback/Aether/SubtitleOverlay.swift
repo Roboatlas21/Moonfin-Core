@@ -44,7 +44,7 @@ final class SubtitleOverlay: PlatformView {
     weak var secondaryForStacking: SubtitleOverlay?
     var secondaryVerticalAdjustment: Double = 0 {
         didSet {
-            primaryForStacking?.layoutTextLabel()
+            primaryForStacking?.requestLayout()
             requestLayout()
         }
     }
@@ -217,6 +217,8 @@ final class SubtitleOverlay: PlatformView {
         if subtitleFontSize != appliedFontSize, !activeTextEvents.isEmpty {
             setLabelText(activeText)
         }
+        // Secondary adjustments also move the primary when cues are centred.
+        primaryForStacking?.layoutTextLabel()
         layoutTextLabel()
         secondaryForStacking?.layoutTextLabel()
         layoutBitmapView()
@@ -397,6 +399,8 @@ final class SubtitleOverlay: PlatformView {
         guard !events.isEmpty else {
             setTextHidden(true)
             setLabelText(nil)
+            primaryForStacking?.layoutTextLabel()
+            secondaryForStacking?.layoutTextLabel()
             return
         }
         setLabelText(activeText)
@@ -462,16 +466,24 @@ final class SubtitleOverlay: PlatformView {
             x = parentColumn == 0 ? parentFrame.minX
                 : parentColumn == 2 ? parentFrame.maxX - size.width
                 : parentFrame.midX - size.width / 2
-            y = parentRow == 2 ? parentFrame.maxY + gap
-                : parentFrame.minY - size.height - gap
-            // Top-positioned subtitles move downward; bottom and centre move upward.
-            let direction: CGFloat = parentRow == 2 ? 1 : -1
-            y += direction * CGFloat(secondaryVerticalAdjustment) * bounds.height
+            if parentRow == 1 {
+                let pairGap = max(2 * canvasScale, gap +
+                    CGFloat(secondaryVerticalAdjustment) * bounds.height)
+                y = parentFrame.minY - size.height - pairGap
+            } else {
+                y = parentRow == 2 ? parentFrame.maxY + gap
+                    : parentFrame.minY - size.height - gap
+                y += (parentRow == 2 ? 1 : -1) *
+                    CGFloat(secondaryVerticalAdjustment) * bounds.height
+            }
         } else if row == 1, let secondary = secondaryForStacking,
-                  let secondaryFrame = secondary.visibleTextFrame {
-            // Keep a centre-aligned pair centred around the authored anchor.
-            y += (secondaryFrame.height + gap +
-                  CGFloat(secondary.secondaryVerticalAdjustment) * bounds.height) / 2
+                  secondary.visibleTextFrame != nil {
+            let pairGap = max(2 * canvasScale, gap +
+                CGFloat(secondary.secondaryVerticalAdjustment) * bounds.height)
+            let secondaryHeight = secondary.textLabel.sizeThatFits(
+                CGSize(width: secondary.bounds.width * 0.9,
+                       height: secondary.bounds.height * 0.4)).height
+            y += (secondaryHeight + pairGap) / 2
         }
         x = min(max(x, 0), max(0, bounds.width - size.width))
         y = min(max(y, 0), max(0, bounds.height - size.height))

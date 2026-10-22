@@ -806,15 +806,16 @@ class HtmlVideoBackend extends PlayerBackend
   }) async {
     if (_disposed) return;
     final size = fontSize?.clamp(6.0, 72.0);
-    if (_secondaryFontSize != size ||
+    final styleChanged = _secondaryFontSize != size ||
         _secondaryTextColor != textColor ||
-        _subtitleStyleElement == null) {
+        _subtitleStyleElement == null;
+    if (styleChanged) {
       _secondaryFontSize = size;
       _secondaryTextColor = textColor;
       _applySubtitleAppearance();
     }
     final offset = (verticalOffset ?? 0.0).clamp(-0.4, 0.4);
-    if (_secondaryOffset == offset) return;
+    if (_secondaryOffset == offset && !styleChanged) return;
     _secondaryOffset = offset;
     _positionSecondaryCues();
   }
@@ -891,14 +892,13 @@ class HtmlVideoBackend extends PlayerBackend
         ((primary?.line.dartify() as num?)?.toDouble() ??
             ((1 - _subtitleVerticalOffset) * 100));
     final position = (primaryLine / 100).clamp(0.0, 1.0).toDouble();
-    final centred = primary != null && (alignment - 1) ~/ 3 == 1;
-    if (primary != null && centred) {
+    if (primary != null && (alignment - 1) ~/ 3 == 1) {
       if (originalCentre == null) {
         primary.setProperty(_stackedMiddleLine.toJS, primaryLine.toJS);
       }
-      primary.line =
-          ((position + (secondaryHeight + gap + _secondaryOffset) / 2) * 100)
-              .clamp(0.0, 100.0).toDouble().toJS;
+      primary.line = ((position + (secondaryHeight +
+                      middleSubtitleGap(gap, _secondaryOffset)) / 2) * 100)
+          .clamp(0.0, 100.0).toDouble().toJS;
     }
     final top = primary == null
         ? (0.96 - secondaryHeight - _secondaryOffset)
@@ -908,7 +908,7 @@ class HtmlVideoBackend extends PlayerBackend
             primaryAnchor: position,
             primaryHeight: primaryHeight,
             secondaryHeight: secondaryHeight,
-            offset: centred ? _secondaryOffset / 2 : _secondaryOffset,
+            offset: _secondaryOffset,
           );
     final column = (alignment - 1) % 3;
     for (final original in _secondaryCues) {

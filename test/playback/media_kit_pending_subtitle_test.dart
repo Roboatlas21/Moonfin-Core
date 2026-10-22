@@ -305,6 +305,47 @@ void main() {
     },
   );
 
+  test('mpv centres a middle pair and restores the original primary position', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-delay': '0',
+      'secondary-sub-pos': '0',
+      'sub-pos': '100',
+      'sub-text/ass': r'{\an5}Middle',
+      'secondary-sub-text': 'Other language',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(other.platform.properties['secondary-sub-pos'], '44');
+      expect(other.platform.properties['sub-pos'], '104');
+
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0.02);
+      expect(other.platform.properties['secondary-sub-pos'], '43');
+      expect(other.platform.properties['sub-pos'], '105');
+
+      other.platform.properties['sub-text/ass'] = r'{\an2}Bottom';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(other.platform.properties['sub-pos'], '100');
+
+      other.platform.properties['sub-text/ass'] = r'{\an5}Middle';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(other.platform.properties['sub-pos'], '104');
+      other.platform.properties['secondary-sub-text'] = '';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(other.platform.properties['sub-pos'], '100');
+      other.platform.properties['secondary-sub-text'] = 'Other language';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(other.platform.properties['sub-pos'], '104');
+      await second.setSecondarySubtitle();
+      expect(other.platform.properties['sub-pos'], '100');
+    } finally {
+      second.dispose();
+    }
+  });
+
   test('secondary mpv vertical placement follows top-aligned SRT', () async {
     final other = _Player();
     other.platform.properties.addAll({

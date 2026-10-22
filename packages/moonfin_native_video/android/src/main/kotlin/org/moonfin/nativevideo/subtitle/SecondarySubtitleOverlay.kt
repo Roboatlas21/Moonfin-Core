@@ -96,22 +96,23 @@ internal class SecondarySubtitleOverlay(
         val active = secondaryCues.orEmpty()
         val width = view.width
         val height = view.height
-        // Only a centred primary cue moves, and only while a secondary cue
-        // is showing. Restore the untouched source cue when it disappears.
-        val shift = if (active.isNotEmpty() && height > 0) {
+        // Split the middle pair around the authored anchor. The primary
+        // moves down by half of any gap adjustment; the secondary moves up.
+        val gapPx = MIN_GAP_DP * view.resources.displayMetrics.density
+        val minimumGapPx = 2f * view.resources.displayMetrics.density
+        val middleGapPx = SubtitleLayoutPlanner.middleGap(
+            gapPx, offsetDelta, height, minimumGapPx)
+        val shift = if (active.isNotEmpty() && width > 0 && height > 0) {
             val fontPx = ((fontSizeOverride ?: baseFontSize) / 24f) * 0.06f * height
-            SubtitleLayoutPlanner.middlePrimaryShift(
-                estimateTextHeight(active.first().text.toString(), width * 0.9f, fontPx),
-                MIN_GAP_DP * view.resources.displayMetrics.density,
-                offsetDelta,
-                height,
-            )
+            val secondaryText = active.joinToString("\n") { it.text.toString() }
+            (estimateTextHeight(secondaryText, width * 0.9f, fontPx) +
+                middleGapPx) / (2 * height)
         } else 0f
         primaryCues = unmodifiedPrimaryCues.map { cue ->
             val positioned = withPrimaryEdgeOffset(cue)
-            if (active.isNotEmpty() && positioned.lineType == Cue.LINE_TYPE_FRACTION &&
+            if (shift > 0f && positioned.lineType == Cue.LINE_TYPE_FRACTION &&
                 positioned.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE && positioned.line in 0.35f..0.65f
-            ) positioned.buildUpon().setLine((positioned.line + shift).coerceIn(0f, 1f), Cue.LINE_TYPE_FRACTION).build()
+            ) positioned.buildUpon().setLine((positioned.line + shift).coerceAtMost(1f), Cue.LINE_TYPE_FRACTION).build()
             else positioned
         }
         primaryView.setCues(primaryCues)
@@ -128,7 +129,6 @@ internal class SecondarySubtitleOverlay(
         val primaryFontPx = (baseFontSize / 24f) * 0.06f * height
         val secondaryFontPx = ((fontSizeOverride ?: baseFontSize) / 24f) * 0.06f * height
         val primaryBoxes = primaryCues.map { estimatePrimaryBox(it, width, height, primaryFontPx) }
-        val gapPx = MIN_GAP_DP * view.resources.displayMetrics.density
         val reference = primaryCues.firstOrNull { it.text != null }
         // The primary's authored anchor determines the secondary's placement.
         val fixed = if (reference == null) active.filter { it.line != Cue.DIMEN_UNSET } else emptyList()
@@ -245,11 +245,17 @@ internal class SecondarySubtitleOverlay(
             estimatePrimaryBox(it, width, height, (baseFontSize / 24f) * 0.06f * height)
         }
         val primaryBottom = height * (1f - primaryBottomPaddingFraction)
-        val desiredBottom = if (refBox != null)
-            SubtitleLayoutPlanner.stackedDesiredBottom(
-                refBox, height, textHeight, gapPx, offsetDelta,
-            )
-        else primaryBottom - gapPx - offsetDelta * height
+        val centred = reference != null &&
+            reference.lineType == Cue.LINE_TYPE_FRACTION &&
+            reference.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE
+        val minimumGapPx = 2f * view.resources.displayMetrics.density
+        val desiredBottom = when {
+            refBox == null -> primaryBottom - gapPx - offsetDelta * height
+            centred -> refBox.top - SubtitleLayoutPlanner.middleGap(
+                gapPx, offsetDelta, height, minimumGapPx)
+            else -> SubtitleLayoutPlanner.stackedDesiredBottom(
+                refBox, height, textHeight, gapPx, offsetDelta)
+        }
         val placement = if (refBox != null && reference != null) {
             val left = if (reference.position != Cue.DIMEN_UNSET)
                 (reference.position * width - when (reference.positionAnchor) {
@@ -259,12 +265,11 @@ internal class SecondarySubtitleOverlay(
                 }).coerceIn(0f, (width - cueWidth).coerceAtLeast(0f))
                 else (width - cueWidth) / 2f
             val desired = SubtitleBox(left, desiredBottom - textHeight, left + cueWidth, desiredBottom)
-            val alignment = if (reference.lineType == Cue.LINE_TYPE_FRACTION &&
-                reference.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE)
-                SubtitleLayoutPlanner.ALIGN_MIDDLE
+            val alignment = if (centred) SubtitleLayoutPlanner.ALIGN_MIDDLE
                 else SubtitleLayoutPlanner.verticalAlignmentFor(refBox, height)
             SubtitleLayoutPlanner.placePositionedSecondary(
-                occupied, width, height, desired, alignment, gapPx, gapPx,
+                occupied, width, height, desired, alignment,
+                if (centred) minimumGapPx / 2f else gapPx, gapPx,
             )
         } else SubtitleLayoutPlanner.placeSecondary(
             primary = occupied,

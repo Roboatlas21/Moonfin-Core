@@ -1,3 +1,8 @@
+/// Preserve a visible gap when negative adjustment draws a centred pair closer.
+/// Positive adjustment adds space, half above and half below the centre.
+double middleSubtitleGap(double gap, double offset) =>
+    (gap + offset).clamp(0.002, 1.0).toDouble();
+
 /// Pure relative stacking calculation for browser and mpv subtitle renderers.
 /// ASS/SRT numpad alignment: bottom 1-3, centre 4-6, top 7-9.
 double stackedSecondaryTop({
@@ -10,12 +15,11 @@ double stackedSecondaryTop({
 }) {
   final row = (alignment - 1) ~/ 3;
   final top = switch (row) {
-    2 => primaryAnchor + primaryHeight + gap,
-    1 => primaryAnchor - primaryHeight / 2 - (secondaryHeight + gap) / 2,
-    _ => primaryAnchor - primaryHeight - secondaryHeight - gap,
+    2 => primaryAnchor + primaryHeight + gap + offset,
+    1 => primaryAnchor -
+        (primaryHeight + secondaryHeight + middleSubtitleGap(gap, offset)) / 2,
+    _ => primaryAnchor - primaryHeight - secondaryHeight - gap - offset,
   };
-  // A positive adjustment moves inward: down from the top, up elsewhere.
-  final adjustedTop = row == 2 ? top + offset : top - offset;
-  return adjustedTop.clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0))
+  return top.clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0))
       .toDouble();
 }

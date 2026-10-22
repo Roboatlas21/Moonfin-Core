@@ -44,26 +44,26 @@ class SubtitleLayoutPlannerTest {
         )
     }
 
+
     @Test
-    fun middleOffsetMovesBothLinesHalfTheRequestedAmount() {
-        fun pair(offset: Float): Pair<Float, Float> {
-            val shift = SubtitleLayoutPlanner.middlePrimaryShift(
-                secondaryHeight = 70f, gapPx = 10f, adjustment = offset,
-                viewportHeight = 1000,
-            )
-            val primaryTop = 500f - 30f + shift * 1000f
-            val primaryBottom = primaryTop + 60f
-            val secondaryBottom = SubtitleLayoutPlanner.stackedDesiredBottom(
-                SubtitleBox(50f, primaryTop, 950f, primaryBottom),
-                1000, 70f, 10f, offset,
-            )
-            return Pair(primaryTop, secondaryBottom - 70f)
+    fun centredPairOffsetsSplitTheSeparationAndPreserveTheCentre() {
+        val anchor = 500f
+        val primaryHeight = 70f
+        val secondaryHeight = 105f
+        val baseGap = 10f
+        for (offset in listOf(-0.06f, -0.02f, 0f, 0.02f, 0.06f)) {
+            val gap = SubtitleLayoutPlanner.middleGap(baseGap, offset, 1000, 2f)
+            val primaryCentre = anchor + (secondaryHeight + gap) / 2f
+            val primaryTop = primaryCentre - primaryHeight / 2f
+            val secondaryBottom = primaryTop - gap
+            val secondaryTop = secondaryBottom - secondaryHeight
+            assertEquals(anchor, (secondaryTop + primaryCentre +
+                primaryHeight / 2f) / 2f, 0.01f)
+            assertEquals(gap, primaryTop - secondaryBottom, 0.01f)
+            assertTrue(gap >= 2f)
         }
-        val (primaryAtZero, secondaryAtZero) = pair(0f)
-        val (primaryAtPlusTwo, secondaryAtPlusTwo) = pair(0.02f)
-        assertEquals(10f, primaryAtPlusTwo - primaryAtZero, 0.01f)
-        assertEquals(-10f, secondaryAtPlusTwo - secondaryAtZero, 0.01f)
-        assertEquals(500f, (primaryAtPlusTwo + 60f + secondaryAtPlusTwo) / 2f, 0.01f)
+        assertEquals(30f, SubtitleLayoutPlanner.middleGap(10f, 0.02f, 1000, 2f), 0.01f)
+        assertEquals(2f, SubtitleLayoutPlanner.middleGap(10f, -0.06f, 1000, 2f), 0.01f)
     }
 
     @Test
