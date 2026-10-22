@@ -53,6 +53,9 @@ class HtmlVideoBackend extends PlayerBackend
   /// Marks a track whose cues are already being placed, so a track seen twice
   /// does not collect a second listener.
   static const _cueHookProperty = 'moonfinCuePlacement';
+  static const _authoredSrtAlignment = 'moonfinAuthoredSrtAlignment';
+  static const _autoPositionedCue = 'moonfinAutoPositionedCue';
+  static final _srtAlignmentTag = RegExp(r'^\s*\{\\an([1-9])\}');
 
   /// The size the cue percentage is measured against, so the setting at its
   /// default leaves the browser drawing cues at its own size.
@@ -970,10 +973,35 @@ class HtmlVideoBackend extends PlayerBackend
       final cue = cues[i];
       if (!cue.isA<web.VTTCue>()) continue;
       final vtt = cue as web.VTTCue;
-      // The alignment is what makes the line measure the cue's bottom edge.
-      // An engine that drops it would measure the top instead and push the
-      // lowest positions off the picture, so a cue that will not take it stays
-      // where the browser put it.
+      final tag = _srtAlignmentTag.firstMatch(vtt.text);
+      if (tag != null) {
+        vtt.text = vtt.text.replaceFirst(_srtAlignmentTag, '');
+        vtt.setProperty(_authoredSrtAlignment.toJS, tag[1]!.toJS);
+      }
+      final alignment = int.tryParse(
+        vtt.getProperty<JSString?>(_authoredSrtAlignment.toJS)?.toDart ?? '',
+      );
+      if (alignment != null) {
+        final column = (alignment - 1) % 3;
+        final row = (alignment - 1) ~/ 3;
+        vtt
+          ..snapToLines = false
+          ..lineAlign = row == 0 ? 'end' : row == 1 ? 'center' : 'start'
+          ..line = (row == 0 ? line : row == 1 ? 50 : 5).toJS
+          ..align = column == 0 ? 'left' : column == 2 ? 'right' : 'center'
+          ..positionAlign =
+              column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center'
+          ..position = (column == 0 ? 5 : column == 2 ? 95 : 50).toJS
+          ..size = 90;
+        continue;
+      }
+      // A cue with explicit WebVTT line settings already has an authored
+      // position. Only apply the user's bottom offset to automatic cues.
+      if (!vtt.has(_autoPositionedCue.toJS) &&
+          vtt.line.dartify() != 'auto') {
+        continue;
+      }
+      vtt.setProperty(_autoPositionedCue.toJS, true.toJS);
       vtt.lineAlign = 'end';
       if (vtt.lineAlign != 'end') continue;
       vtt.snapToLines = false;

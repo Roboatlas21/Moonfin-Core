@@ -10,6 +10,34 @@ final class RunnerTests: XCTestCase {
     }
 
     @MainActor
+    func testAuthoredSrtAlignmentAndNormalizedPosition() {
+        let overlay = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        func placed(_ alignment: Int, position: CGPoint? = nil) -> CGRect {
+            overlay.setEvents([
+                SubtitleEvent(
+                    startTime: 1, endTime: 3, text: "Caption",
+                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                    alignment: alignment, position: position)
+            ])
+            overlay.update(currentTime: 2)
+            return overlay.subviews.compactMap { $0 as? UILabel }.last!.frame
+        }
+        let topLeft = placed(7)
+        XCTAssertEqual(topLeft.minY, 20, accuracy: 0.1)
+        XCTAssertEqual(topLeft.minX, 40, accuracy: 0.1)
+        let topRight = placed(9)
+        XCTAssertEqual(topRight.minY, 20, accuracy: 0.1)
+        XCTAssertEqual(topRight.maxX, 760, accuracy: 0.1)
+        let middle = placed(5)
+        XCTAssertEqual(middle.midY, 200, accuracy: 0.1)
+        let bottom = placed(2)
+        XCTAssertEqual(bottom.maxY, 400, accuracy: 0.1)
+        let anchored = placed(5, position: CGPoint(x: 0.3, y: 0.4))
+        XCTAssertEqual(anchored.midX, 240, accuracy: 0.1)
+        XCTAssertEqual(anchored.midY, 160, accuracy: 0.1)
+    }
+
+    @MainActor
     func testSecondaryDelayAndClearLeavePrimaryUntouched() {
         let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
         let secondary = SubtitleOverlay(frame: primary.bounds)

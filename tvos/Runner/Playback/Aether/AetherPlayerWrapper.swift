@@ -1379,12 +1379,16 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 return SubtitleEvent(
                     startTime: cue.startTime, endTime: cue.endTime,
                     text: plainTextFromAssMarkup(text),
-                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0)
+                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                    alignment: cue.placement?.alignment,
+                    position: cue.placement?.position)
             case .richText(let runs):
                 return SubtitleEvent(
                     startTime: cue.startTime, endTime: cue.endTime,
                     text: plainTextFromAssMarkup(runs.map(\.text).joined()),
-                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0)
+                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                    alignment: cue.placement?.alignment,
+                    position: cue.placement?.position)
             case .image(let image):
                 return SubtitleEvent(
                     startTime: cue.startTime, endTime: cue.endTime, text: nil,

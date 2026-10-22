@@ -158,4 +158,7 @@ struct SubtitleEvent {
     let bitmapHeight: Int
     var normalizedRect: CGRect? = nil
     var canvasSize: CGSize? = nil
+    /// The cue's authored SRT/WebVTT alignment; nil keeps the user-set bottom position.
+    var alignment: Int? = nil
+    var position: CGPoint? = nil
 }

@@ -145,6 +145,40 @@ void main() {
     urls.clear();
   });
 
+  test('primary SRT alignment and explicit WebVTT settings survive styling', () async {
+    await backend.setSubtitleTrack(
+      1,
+      isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:03.000\n{\\an7}Top left\n'
+        '\n00:04.000 --> 00:06.000\n{\\an5}Middle\n'
+        '\n00:07.000 --> 00:09.000 line:20% position:80% align:end\nAuthored VTT\n',
+      ),
+    );
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 3);
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => primary.track.activeCues?.length == 1);
+    final top = primary.track.cues![0] as web.VTTCue;
+    expect(top.line.dartify(), 5);
+    expect(top.position, 5);
+    expect(top.text, 'Top left');
+
+    await backend.configureSubtitleStyle(verticalOffset: 0.2);
+    expect(top.line.dartify(), 5);
+    await backend.seekTo(const Duration(seconds: 5));
+    await _until(() => primary.track.activeCues?.length == 1);
+    final middle = primary.track.cues![1] as web.VTTCue;
+    expect(middle.line.dartify(), 50);
+
+    await backend.seekTo(const Duration(seconds: 8));
+    await _until(() => primary.track.activeCues?.length == 1);
+    final authored = primary.track.cues![2] as web.VTTCue;
+    expect(authored.line.dartify(), 20);
+    await backend.configureSubtitleStyle(verticalOffset: 0.3);
+    expect(authored.line.dartify(), 20);
+  });
+
   test('SRT and primary VTT remain independently selectable', () async {
     await backend.setSubtitleTrack(
       1,

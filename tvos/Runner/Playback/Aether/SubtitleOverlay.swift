@@ -283,7 +283,9 @@ final class SubtitleOverlay: PlatformView {
     private static func drawsTheSame(_ lhs: [SubtitleEvent], _ rhs: [SubtitleEvent]) -> Bool {
         lhs.count == rhs.count
             && zip(lhs, rhs).allSatisfy {
-                $0.startTime == $1.startTime && $0.endTime == $1.endTime && $0.text == $1.text
+                $0.startTime == $1.startTime && $0.endTime == $1.endTime
+                    && $0.text == $1.text && $0.alignment == $1.alignment
+                    && $0.position == $1.position
             }
     }
 
@@ -407,13 +409,22 @@ final class SubtitleOverlay: PlatformView {
         guard !textLabel.isHidden else { return }
         let maxWidth = bounds.width * 0.9
         let size = textLabel.sizeThatFits(CGSize(width: maxWidth, height: bounds.height * 0.4))
-        let frame = CGRect(
-            x: (bounds.width - size.width) / 2,
-            y: topOffset.map { min(bounds.height * CGFloat(max($0, 0)), max(0, bounds.height - size.height)) }
-                ?? (bounds.height - size.height - textBottomOffset),
-            width: size.width,
-            height: size.height
-        )
+        let placement = activeTextEvents.first { $0.alignment != nil || $0.position != nil }
+        let alignment = (1...9).contains(placement?.alignment ?? 2) ? (placement?.alignment ?? 2) : 2
+        let column = (alignment - 1) % 3
+        let row = (alignment - 1) / 3
+        let picture = videoBox
+        let xAnchor = placement?.position.map { picture.minX + $0.x * picture.width }
+            ?? bounds.width * ([0.05, 0.5, 0.95][column])
+        let yAnchor = placement?.position.map { picture.minY + $0.y * picture.height }
+            ?? (topOffset.map { bounds.height * CGFloat(max($0, 0)) }
+                ?? (row == 0 ? bounds.height - textBottomOffset
+                    : row == 1 ? bounds.height / 2 : bounds.height * 0.05))
+        let x = min(max(xAnchor - size.width * CGFloat(column) / 2, 0),
+                    max(0, bounds.width - size.width))
+        let y = min(max(yAnchor - size.height * CGFloat(2 - row) / 2, 0),
+                    max(0, bounds.height - size.height))
+        let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
         textLabel.frame = frame
         outlineLabel.frame = frame
     }
@@ -461,7 +472,8 @@ final class SubtitleOverlay: PlatformView {
     /// font's leading as a gap between stacked lines.
     private func paragraphStyle(for font: PlatformFont) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        style.alignment = .center
+        let column = ((activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2) - 1) % 3
+        style.alignment = column == 0 ? .left : (column == 2 ? .right : .center)
         let glyphBox = font.ascender - font.descender
         style.minimumLineHeight = glyphBox
         style.maximumLineHeight = glyphBox
