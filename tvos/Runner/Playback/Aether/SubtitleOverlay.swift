@@ -345,6 +345,13 @@ final class SubtitleOverlay: PlatformView {
         lastPrimaryTextFrame = nil
         lastPrimaryAlignment = 2
         hideAll()
+        // An explicit primary-track clear resets the inherited paragraph
+        // alignment. Ordinary gaps use showText([]) and keep the last one.
+        if let secondary = secondaryForStacking,
+           secondary.stackingEnabled, !secondary.activeTextEvents.isEmpty {
+            secondary.setLabelText(secondary.activeText)
+            secondary.layoutTextLabel()
+        }
         assImageView.image = nil
         assImageView.isHidden = true
     }

@@ -215,6 +215,51 @@ final class RunnerTests: XCTestCase {
     }
 
     @MainActor
+    func testPrimaryTrackClearResetsSecondaryAlignmentButDialogueGapDoesNot() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+
+        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        func textAlignment() -> NSTextAlignment? {
+            guard let style = label.attributedText?.attribute(
+                .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+            else { return nil }
+            return style.alignment
+        }
+
+        primary.setEvents([
+            SubtitleEvent(startTime: 1, endTime: 3, text: "Top left",
+                bitmap: nil, bitmapWidth: 0, bitmapHeight: 0, alignment: 7)
+        ])
+        secondary.setEvents([cue("Secondary", start: 1, end: 8)])
+        primary.update(currentTime: 2)
+        secondary.update(currentTime: 2)
+        XCTAssertEqual(textAlignment(), .left)
+
+        // A normal gap keeps the last primary alignment and its placement.
+        primary.update(currentTime: 4)
+        secondary.update(currentTime: 4)
+        XCTAssertEqual(primary.activeText, "")
+        XCTAssertEqual(secondary.activeText, "Secondary")
+        XCTAssertEqual(textAlignment(), .left)
+
+        // Turning the primary track Off resets the secondary paragraph style.
+        primary.clear()
+        XCTAssertEqual(textAlignment(), .center)
+
+        // A newly selected primary track can establish a different alignment.
+        primary.setEvents([
+            SubtitleEvent(startTime: 1, endTime: 8, text: "Top right",
+                bitmap: nil, bitmapWidth: 0, bitmapHeight: 0, alignment: 9)
+        ])
+        primary.update(currentTime: 4)
+        XCTAssertEqual(textAlignment(), .right)
+    }
+
+    @MainActor
     func testSecondaryStyleDoesNotChangePrimary() {
         let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
         let secondary = SubtitleOverlay(frame: primary.bounds)
