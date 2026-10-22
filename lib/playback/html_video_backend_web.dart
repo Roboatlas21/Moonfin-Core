@@ -938,9 +938,9 @@ class HtmlVideoBackend extends PlayerBackend
         ..snapToLines = false
         ..lineAlign = row == 2 ? 'start' : 'end'
         ..line = (secondaryLine * 100).clamp(0.0, 100.0).toDouble().toJS
-        ..align = column == 0 ? 'left' : column == 2 ? 'line-right' : 'center'
+        ..align = column == 0 ? 'left' : column == 2 ? 'right' : 'center'
         ..positionAlign =
-            column == 0 ? 'line-left' : column == 2 ? 'right' : 'center'
+            column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center'
         ..position = (column == 0 ? 5 : column == 2 ? 95 : 50).toJS
         ..size = 90;
     }
