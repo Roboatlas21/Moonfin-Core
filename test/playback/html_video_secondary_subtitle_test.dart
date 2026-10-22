@@ -199,7 +199,7 @@ void main() {
     expect(cue.line.dartify(), 100);
   });
 
-  test('secondary follows top-left and centred primary alignment', () async {
+  test('secondary follows authored top and fixed middle anchors', () async {
     await backend.setSubtitleTrack(
       1, isExternalSubtitle: true,
       externalSubtitleUrl: subtitle(
@@ -215,7 +215,7 @@ void main() {
     final cue = second.track.cues![0] as web.VTTCue;
     await backend.seekTo(const Duration(seconds: 2));
     await _until(() => cue.align == 'left');
-    expect(cue.line.dartify(), greaterThan(5));
+    expect(cue.lineAlign, 'start');
     final topPosition = (cue.line.dartify() as num).toDouble();
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0.02);
     expect(cue.line.dartify(), closeTo(topPosition + 2, 0.01));
@@ -227,43 +227,109 @@ void main() {
     await _until(() => cue.align == 'center');
     final primary = video.querySelector('track')! as web.HTMLTrackElement;
     final centre = primary.track.cues![1] as web.VTTCue;
-    expect(centre.line.dartify(), greaterThan(50));
-    expect(cue.line.dartify(), lessThan(50));
-    final middlePosition = (cue.line.dartify() as num).toDouble();
-    final primaryPosition = (centre.line.dartify() as num).toDouble();
-    // A positive 2% gap adjustment moves each side by exactly 1%.
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.02);
-    expect(cue.line.dartify(), closeTo(middlePosition - 1, 0.01));
-    expect(centre.line.dartify(), closeTo(primaryPosition + 1, 0.01));
-    const lineHeightPercent = 20 / 24 * 0.055 * 100;
-    final primaryBottom = (centre.line.dartify() as num).toDouble() +
-        lineHeightPercent / 2;
-    final secondaryTop = (cue.line.dartify() as num).toDouble();
-    expect((secondaryTop + primaryBottom) / 2, closeTo(50, 0.01));
-    await backend.configureSecondarySubtitleStyle(verticalOffset: -0.02);
-    final closePrimaryBottom = (centre.line.dartify() as num).toDouble() +
-        lineHeightPercent / 2;
-    expect(
-      ((cue.line.dartify() as num).toDouble() + closePrimaryBottom) / 2,
-      closeTo(50, 0.01),
-    );
-    expect(closePrimaryBottom - (cue.line.dartify() as num).toDouble() -
-        2 * lineHeightPercent, greaterThan(0));
+    expect(centre.lineAlign, 'start');
+    expect(cue.lineAlign, 'end');
+    final originalPrimary = (centre.line.dartify() as num).toDouble();
+    final originalSecondary = (cue.line.dartify() as num).toDouble();
+    expect((originalPrimary + originalSecondary) / 2, closeTo(50, 0.01));
+    expect(originalPrimary - originalSecondary, closeTo(1.5, 0.01));
 
-    // A font-size change must re-centre both labels even when offset is unchanged.
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.02);
+    expect(centre.line.dartify(), closeTo(originalPrimary + 1, 0.01));
+    expect(cue.line.dartify(), closeTo(originalSecondary - 1, 0.01));
+    await backend.configureSecondarySubtitleStyle(verticalOffset: -0.02);
+    expect(
+      (centre.line.dartify() as num) -
+          (cue.line.dartify() as num),
+      closeTo(0.2, 0.01),
+    );
+
+    // Changing font size must not change anchors when spacing is unchanged.
     await backend.configureSecondarySubtitleStyle(
       fontSize: 40, verticalOffset: 0,
     );
-    const primaryHeightPercent = 20 / 24 * 0.055 * 100;
-    final largerPrimaryBottom = (centre.line.dartify() as num).toDouble() +
-        primaryHeightPercent / 2;
-    expect(
-      ((cue.line.dartify() as num).toDouble() + largerPrimaryBottom) / 2,
-      closeTo(50, 0.01),
-    );
+    expect(centre.line.dartify(), closeTo(originalPrimary, 0.01));
+    expect(cue.line.dartify(), closeTo(originalSecondary, 0.01));
     await backend.setSecondarySubtitle();
     expect(centre.line.dartify(), 50);
+    expect(centre.lineAlign, 'center');
   });
+
+  test('middle slots stay put through secondary gaps and multiline cues', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:09.000\n{\\an5}Primary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:02.000 line:90% position:95% align:end\n'
+        'One line\n\n'
+        '00:04.000 --> 00:06.000 line:10% position:5% align:start\n'
+        'Three lines\nwith a second\nand a third\n',
+      ),
+      codec: 'vtt',
+    );
+    final second = await loadedSecondary();
+    final cues = second.track.cues!;
+    final first = cues[0] as web.VTTCue;
+    final multiline = cues[1] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    final centred = primary.track.cues![0] as web.VTTCue;
+    await backend.seekTo(const Duration(milliseconds: 1500));
+    await _until(() => first.align == 'center' && centred.lineAlign == 'start');
+    final secondaryAnchor = first.line.dartify();
+    final primaryAnchor = centred.line.dartify();
+    expect(first.lineAlign, 'end');
+    expect(multiline.lineAlign, 'end');
+    expect(multiline.line.dartify(), secondaryAnchor);
+    expect(multiline.position, 50);
+    expect(first.position, 50);
+
+    for (final seconds in [3, 5, 8]) {
+      await backend.seekTo(Duration(seconds: seconds));
+      await _until(() =>
+          second.track.activeCues?.length == (seconds == 5 ? 1 : 0));
+      expect(first.line.dartify(), secondaryAnchor);
+      expect(multiline.line.dartify(), secondaryAnchor);
+      expect(centred.line.dartify(), primaryAnchor);
+      expect(centred.lineAlign, 'start');
+    }
+  });
+
+  for (final (name, tag, lineAlign) in [
+    ('top', 7, 'start'),
+    ('bottom', 2, 'end'),
+  ]) {
+    test('$name primary keeps a stable three-line reserve', () async {
+      await backend.setSubtitleTrack(
+        1, isExternalSubtitle: true,
+        externalSubtitleUrl: subtitle(
+          'WEBVTT\n\n00:01.000 --> 00:03.000\n{\\an$tag}One\n'
+          '\n00:04.000 --> 00:07.000\n{\\an$tag}Three\nprimary\nlines\n',
+        ),
+      );
+      await backend.setSecondarySubtitle(
+        url: subtitle(
+          'WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n',
+        ),
+        codec: 'vtt',
+      );
+      final second = await loadedSecondary();
+      final cue = second.track.cues![0] as web.VTTCue;
+      await backend.seekTo(const Duration(seconds: 2));
+      await _until(() => cue.align == 'left' && cue.lineAlign == lineAlign);
+      final anchor = cue.line.dartify();
+      await backend.seekTo(const Duration(seconds: 5));
+      final primary = video.querySelector('track')! as web.HTMLTrackElement;
+      await _until(() =>
+          primary.track.activeCues?.length == 1 &&
+          (primary.track.activeCues![0] as web.VTTCue).text.contains('Three'));
+      expect(cue.line.dartify(), anchor);
+      expect(cue.lineAlign, lineAlign);
+    });
+  }
 
   test('SRT and primary VTT remain independently selectable', () async {
     await backend.setSubtitleTrack(
@@ -335,14 +401,15 @@ void main() {
       final second = await loadedSecondary();
       final cue = second.track.cues![0] as web.VTTCue;
       expect(cue.startTime, 1.5);
-      expect(cue.line.dartify(), closeTo(94.5, 0.2));
+      expect(cue.lineAlign, 'end');
+      expect(cue.line.dartify(), closeTo(100, 0.2));
       await backend.configureSubtitleStyle(fontSize: 48, verticalOffset: 0.2);
-      expect(cue.line.dartify(), closeTo(94.5, 0.2));
+      expect(cue.line.dartify(), closeTo(100, 0.2));
       final styles = web.document.head!.textContent!;
       expect(styles, matches(RegExp(r'font-size: 50(?:\.0+)?%')));
       expect(styles, contains('color: rgb(255, 255, 0)'));
       await backend.configureSecondarySubtitleStyle();
-      expect(cue.line.dartify(), closeTo(85, 0.2));
+      expect(cue.line.dartify(), closeTo(96, 0.2));
       expect(
         web.document.head!.textContent,
         matches(RegExp(r'font-size: 100(?:\.0+)?%')),
@@ -398,7 +465,7 @@ void main() {
         verticalOffset: -0.12,
       );
       expect(writes, ['line', 'line']);
-      expect((cues[0] as web.VTTCue).line.dartify(), closeTo(91.75, 0.2));
+      expect((cues[0] as web.VTTCue).line.dartify(), closeTo(100, 0.2));
       writes.clear();
       await backend.setSecondarySubtitleDelay(1.25);
       expect(writes, ['startTime', 'endTime', 'startTime', 'endTime']);

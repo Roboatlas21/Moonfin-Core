@@ -80,6 +80,8 @@ class HtmlVideoBackend extends PlayerBackend
   final _secondaryCues = <({web.VTTCue cue, double start, double end})>[];
   double _secondaryDelay = 0;
   double _secondaryOffset = 0.0;
+  // Preserve the primary's authored placement through gaps in dialogue.
+  ({int alignment, double anchor})? _primaryPlacement;
   double? _secondaryFontSize;
   int? _secondaryTextColor;
 
@@ -379,6 +381,7 @@ class HtmlVideoBackend extends PlayerBackend
 
   void _clearExternalTracks() {
     _clearSecondarySubtitle();
+    _primaryPlacement = null;
     for (final track in _externalTracks) {
       track.element.remove();
     }
@@ -586,6 +589,8 @@ class HtmlVideoBackend extends PlayerBackend
   /// position outside the list just clears the screen.
   void _showTrackAt(int position) {
     _subtitleOverlay?.clear();
+    _restorePrimaryMiddlePosition();
+    _primaryPlacement = null;
 
     try {
       final tracks = _videoElement.textTracks;
@@ -615,6 +620,7 @@ class HtmlVideoBackend extends PlayerBackend
         }
       }
     } catch (_) {}
+    _positionSecondaryCues();
   }
 
   @override
@@ -837,7 +843,11 @@ class HtmlVideoBackend extends PlayerBackend
         if (!cues[i].isA<web.VTTCue>()) continue;
         final cue = cues[i] as web.VTTCue;
         final original = cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
-        if (original != null) cue.line = original;
+        if (original != null) {
+          cue
+            ..line = original
+            ..lineAlign = 'center';
+        }
       }
     });
   }
@@ -862,11 +872,13 @@ class HtmlVideoBackend extends PlayerBackend
       cue.getProperty<JSString?>(_authoredSrtAlignment.toJS)?.toDart ?? '',
     );
     if (authored != null) return authored;
-    final row = switch (cue.lineAlign) {
-      'start' => 2,
-      'center' => 1,
-      _ => 0,
-    };
+    final row = cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS) != null
+        ? 1
+        : switch (cue.lineAlign) {
+            'start' => 2,
+            'center' => 1,
+            _ => 0,
+          };
     final column = switch (cue.align) {
       'left' || 'start' => 0,
       'right' || 'end' => 2,
@@ -878,50 +890,57 @@ class HtmlVideoBackend extends PlayerBackend
   void _positionSecondaryCues() {
     if (_secondaryCues.isEmpty) return;
     final primary = _activePrimaryCue();
-    final alignment = _primaryAlignment(primary);
-    final primaryRows = primary?.text.split('\n').length ?? 1;
-    final primaryHeight = primaryRows *
-        ((_subtitleFontSize ?? _referenceTextSize) / 24 * 0.055);
-    final secondaryRows = _secondaryCues.first.cue.text.split('\n').length;
-    final secondaryHeight = secondaryRows *
-        ((_secondaryFontSize ?? _subtitleFontSize ?? _referenceTextSize) /
-            24 * 0.055);
-    const gap = 0.015;
-    final originalCentre =
-        primary?.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
-    final primaryLine = originalCentre?.toDartDouble ??
-        ((primary?.line.dartify() as num?)?.toDouble() ??
-            ((1 - _subtitleVerticalOffset) * 100));
-    final position = (primaryLine / 100).clamp(0.0, 1.0).toDouble();
-    if (primary != null && (alignment - 1) ~/ 3 == 1) {
-      if (originalCentre == null) {
-        primary.setProperty(_stackedMiddleLine.toJS, primaryLine.toJS);
-      }
-      primary.line = ((position + (secondaryHeight +
-                      middleSubtitleGap(gap, _secondaryOffset)) / 2) * 100)
-          .clamp(0.0, 100.0).toDouble().toJS;
+    if (primary != null) {
+      final originalCentre =
+          primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
+      final originalLine = originalCentre?.toDartDouble ??
+          ((primary.line.dartify() as num?)?.toDouble() ??
+              ((1 - _subtitleVerticalOffset) * 100));
+      _primaryPlacement = (
+        alignment: _primaryAlignment(primary),
+        anchor: (originalLine / 100).clamp(0.0, 1.0).toDouble(),
+      );
     }
-    final top = primary == null
-        ? (0.96 - secondaryHeight - _secondaryOffset)
-            .clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0)).toDouble()
-        : stackedSecondaryTop(
-            alignment: alignment,
-            primaryAnchor: position,
-            primaryHeight: primaryHeight,
-            secondaryHeight: secondaryHeight,
-            offset: _secondaryOffset,
-          );
+    final placement = _primaryPlacement;
+    final alignment = placement?.alignment ?? 2;
+    final anchor = placement?.anchor ?? 0.96;
+    final row = (alignment - 1) ~/ 3;
+    final gap = middleSubtitleGap(0.015, _secondaryOffset);
+
+    // Reserve room for three primary lines at top/bottom without remeasuring
+    // each cue. Middle pairs grow away from two anchors around the centre.
+    final primaryHeight =
+        3 * ((_subtitleFontSize ?? _referenceTextSize) / 24 * 0.055);
+    if (primary != null && row == 1) {
+      if (primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS) == null) {
+        primary.setProperty(_stackedMiddleLine.toJS, (anchor * 100).toJS);
+      }
+      primary
+        ..lineAlign = 'start'
+        ..line = ((anchor + gap / 2) * 100).clamp(0.0, 100.0).toDouble().toJS;
+    }
+
+    // The secondary's own authored position never overrides the primary.
+    // Fixed opposing anchors let multiline dialogue expand without moving
+    // either slot when a cue starts, ends or changes its number of lines.
+    final secondaryLine = placement == null
+        ? anchor - _secondaryOffset
+        : switch (row) {
+            2 => anchor + primaryHeight + gap,
+            1 => anchor - gap / 2,
+            _ => anchor - primaryHeight - gap,
+          };
     final column = (alignment - 1) % 3;
     for (final original in _secondaryCues) {
       original.cue
         ..region = null
         ..vertical = ''
         ..snapToLines = false
-        ..lineAlign = 'start'
-        ..line = (top * 100).toJS
-        ..align = column == 0 ? 'left' : column == 2 ? 'right' : 'center'
+        ..lineAlign = row == 2 ? 'start' : 'end'
+        ..line = (secondaryLine * 100).clamp(0.0, 100.0).toDouble().toJS
+        ..align = column == 0 ? 'left' : column == 2 ? 'line-right' : 'center'
         ..positionAlign =
-            column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center'
+            column == 0 ? 'line-left' : column == 2 ? 'right' : 'center'
         ..position = (column == 0 ? 5 : column == 2 ? 95 : 50).toJS
         ..size = 90;
     }
