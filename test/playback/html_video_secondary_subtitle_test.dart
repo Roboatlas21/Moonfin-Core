@@ -362,11 +362,12 @@ void main() {
     final secondaryCue =
         (await loadedSecondary()).track.cues![0] as web.VTTCue;
     final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
     await backend.seekTo(const Duration(seconds: 2));
-    await _until(() =>
-        primary.track.activeCues?.length == 1 &&
-        secondaryCue.position == 30 && secondaryCue.lineAlign == 'end');
+    await _until(() => primary.track.activeCues?.length == 1);
     final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(secondaryCue.position.dartify(), 30);
+    expect(secondaryCue.lineAlign, 'end');
     expect(primaryCue.line.dartify(), 90);
     expect(primaryCue.lineAlign, 'start');
     expect(primaryCue.position, 30);
@@ -393,11 +394,12 @@ void main() {
     final secondaryCue =
         (await loadedSecondary()).track.cues![0] as web.VTTCue;
     final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
     await backend.seekTo(const Duration(seconds: 2));
-    await _until(() =>
-        primary.track.activeCues?.length == 1 &&
-        secondaryCue.position == 72 && secondaryCue.lineAlign == 'start');
+    await _until(() => primary.track.activeCues?.length == 1);
     final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(secondaryCue.position.dartify(), 72);
+    expect(secondaryCue.lineAlign, 'start');
     expect(primaryCue.line.dartify(), 10);
     expect(primaryCue.lineAlign, 'end');
     expect(primaryCue.positionAlign, 'line-right');
@@ -422,12 +424,13 @@ void main() {
     final secondaryCue =
         (await loadedSecondary()).track.cues![0] as web.VTTCue;
     final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
     final primaryCue = primary.track.cues![0] as web.VTTCue;
     await backend.seekTo(const Duration(seconds: 2));
-    await _until(() =>
-        primary.track.activeCues?.length == 1 &&
-        primaryCue.lineAlign == 'start' &&
-        secondaryCue.lineAlign == 'end' && secondaryCue.position == 35);
+    await _until(() => primary.track.activeCues?.length == 1);
+    expect(primaryCue.lineAlign, 'start');
+    expect(secondaryCue.lineAlign, 'end');
+    expect(secondaryCue.position.dartify(), 35);
     expect(primaryCue.line.dartify(), closeTo(45.75, 0.1));
     expect(secondaryCue.line.dartify(), closeTo(44.25, 0.1));
     expect(secondaryCue.positionAlign, primaryCue.positionAlign);
@@ -453,11 +456,12 @@ void main() {
     final secondaryCue =
         (await loadedSecondary()).track.cues![0] as web.VTTCue;
     final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
     await backend.seekTo(const Duration(seconds: 2));
-    await _until(() =>
-        primary.track.activeCues?.length == 1 &&
-        secondaryCue.position == 30 && secondaryCue.lineAlign == 'end');
+    await _until(() => primary.track.activeCues?.length == 1);
     final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(secondaryCue.position.dartify(), 30);
+    expect(secondaryCue.lineAlign, 'end');
     expect(primaryCue.line.dartify(), -1);
     expect(primaryCue.snapToLines, isTrue);
     expect((secondaryCue.line.dartify() as num), lessThan(95));
