@@ -46,6 +46,22 @@ class SubtitleLayoutPlannerTest {
 
 
     @Test
+    fun secondaryHeightNeverChangesItsEdgeNextToThePrimary() {
+        val top = SubtitleBox(50f, 50f, 900f, 110f)
+        val bottom = SubtitleBox(50f, 860f, 900f, 920f)
+        // A top secondary grows down from its top anchor; a bottom
+        // secondary grows up from its bottom anchor.
+        val smallTop = SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 24f, 10f, 0f)
+        val tallTop = SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 90f, 10f, 0f)
+        assertEquals(120f, smallTop - 24f, 0.01f)
+        assertEquals(120f, tallTop - 90f, 0.01f)
+        val smallBottom = SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 24f, 10f, 0f)
+        val tallBottom = SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 90f, 10f, 0f)
+        assertEquals(850f, smallBottom, 0.01f)
+        assertEquals(smallBottom, tallBottom, 0.01f)
+    }
+
+    @Test
     fun centredPairOffsetsSplitTheSeparationAndPreserveTheCentre() {
         val anchor = 500f
         val primaryHeight = 70f
