@@ -401,8 +401,12 @@ final class SubtitleOverlay: PlatformView {
         if let primary = primaryForStacking {
             primary.layoutTextLabel()
             layoutTextLabel()
-        } else {
-            secondaryForStacking?.layoutTextLabel()
+        } else if let secondary = secondaryForStacking {
+            // A new primary alignment also changes secondary paragraph alignment.
+            if !secondary.activeTextEvents.isEmpty {
+                secondary.setLabelText(secondary.activeText)
+            }
+            secondary.layoutTextLabel()
         }
     }
 
