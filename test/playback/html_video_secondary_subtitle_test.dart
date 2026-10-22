@@ -220,7 +220,8 @@ void main() {
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0.02);
     expect(cue.line.dartify(), closeTo(topPosition + 2, 0.01));
     await backend.configureSecondarySubtitleStyle(verticalOffset: -0.02);
-    expect(cue.line.dartify(), closeTo(topPosition - 2, 0.01));
+    // Legacy negative values never collapse the pair past its minimum gap.
+    expect(cue.line.dartify(), closeTo(topPosition - 1.3, 0.01));
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
 
     await backend.seekTo(const Duration(seconds: 5));
