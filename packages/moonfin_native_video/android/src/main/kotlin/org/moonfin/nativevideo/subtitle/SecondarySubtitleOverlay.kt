@@ -113,7 +113,7 @@ internal class SecondarySubtitleOverlay(
         val middleGapPx = SubtitleLayoutPlanner.middleGap(
             gapPx, offsetDelta, height, minimumGapPx)
         primaryCues = unmodifiedPrimaryCues.map { cue ->
-            val positioned = withPrimaryEdgeOffset(cue)
+            val positioned = cue
             if (secondaryCues != null && height > 0 &&
                 positioned.lineType == Cue.LINE_TYPE_FRACTION &&
                 positioned.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE &&
@@ -215,23 +215,6 @@ internal class SecondarySubtitleOverlay(
 
         view.visibility = if (rendered.isEmpty()) View.INVISIBLE else View.VISIBLE
         view.setCues(rendered)
-    }
-
-    /** Media3's SubRip alignment tags use 8%/92% edge anchors.
-     * Offset those captions inward while leaving other authored cue lines intact.
-     */
-    private fun withPrimaryEdgeOffset(cue: Cue): Cue {
-        if (cue.bitmap != null || cue.lineType != Cue.LINE_TYPE_FRACTION) return cue
-        val line = when {
-            cue.lineAnchor == Cue.ANCHOR_TYPE_START && cue.line in 0.079f..0.081f ->
-                cue.line + primaryBottomPaddingFraction
-            cue.lineAnchor == Cue.ANCHOR_TYPE_END && cue.line in 0.919f..0.921f ->
-                cue.line - primaryBottomPaddingFraction
-            else -> return cue
-        }
-        return cue.buildUpon()
-            .setLine(line.coerceIn(0f, 1f), Cue.LINE_TYPE_FRACTION)
-            .build()
     }
 
     private fun buildCue(cue: Cue): Cue = cue.buildUpon().apply {

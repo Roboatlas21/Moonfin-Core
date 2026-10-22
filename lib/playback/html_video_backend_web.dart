@@ -57,6 +57,8 @@ class HtmlVideoBackend extends PlayerBackend
   static const _authoredSrtAlignment = 'moonfinAuthoredSrtAlignment';
   static const _autoPositionedCue = 'moonfinAutoPositionedCue';
   static const _stackedMiddleLine = 'moonfinStackedMiddleLine';
+  static const _stackedMiddleLineAlign = 'moonfinStackedMiddleLineAlign';
+  static const _stackedMiddleSnapToLines = 'moonfinStackedMiddleSnapToLines';
   static final _srtAlignmentTag = RegExp(r'^\s*\{\\an([1-9])\}');
 
   /// The size the cue percentage is measured against, so the setting at its
@@ -81,7 +83,16 @@ class HtmlVideoBackend extends PlayerBackend
   double _secondaryDelay = 0;
   double _secondaryOffset = 0.0;
   // Preserve the primary's authored placement through gaps in dialogue.
-  ({int alignment, double anchor, double height})? _primaryPlacement;
+  ({
+    int alignment,
+    double centre,
+    double top,
+    double bottom,
+    double position,
+    String align,
+    String positionAlign,
+    double size,
+  })? _primaryPlacement;
   double? _secondaryFontSize;
   int? _secondaryTextColor;
 
@@ -846,7 +857,12 @@ class HtmlVideoBackend extends PlayerBackend
         if (original != null) {
           cue
             ..line = original
-            ..lineAlign = 'center';
+            ..lineAlign = cue.getProperty<JSString?>(
+              _stackedMiddleLineAlign.toJS,
+            )?.toDart ?? 'center'
+            ..snapToLines = cue.getProperty<JSBoolean?>(
+              _stackedMiddleSnapToLines.toJS,
+            )?.toDart ?? false;
         }
       }
     });
@@ -866,19 +882,16 @@ class HtmlVideoBackend extends PlayerBackend
     return null;
   }
 
-  int _primaryAlignment(web.VTTCue? cue) {
-    if (cue == null) return 2;
+  int _primaryAlignment(web.VTTCue cue, double centre) {
     final authored = int.tryParse(
       cue.getProperty<JSString?>(_authoredSrtAlignment.toJS)?.toDart ?? '',
     );
     if (authored != null) return authored;
+    // lineAlign describes which edge of the cue the coordinate measures,
+    // not whether the caption is actually at the top or bottom of the video.
     final row = cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS) != null
         ? 1
-        : switch (cue.lineAlign) {
-            'start' => 2,
-            'center' => 1,
-            _ => 0,
-          };
+        : centre < 1 / 3 ? 2 : centre > 2 / 3 ? 0 : 1;
     final column = switch (cue.align) {
       'left' || 'start' => 0,
       'right' || 'end' => 2,
@@ -908,50 +921,89 @@ class HtmlVideoBackend extends PlayerBackend
     return rows * fontHeight * 1.15;
   }
 
+  ({double top, double bottom, double centre}) _primaryCueBounds(
+    web.VTTCue cue,
+  ) {
+    final height = _primaryCueHeight(cue);
+    final originalLine =
+        cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
+    final rawLine = originalLine?.toDartDouble ?? cue.line.dartify();
+    final line = rawLine is num
+        ? rawLine.toDouble()
+        : (1 - _subtitleVerticalOffset) * 100;
+    final snapped = cue.getProperty<JSBoolean?>(
+      _stackedMiddleSnapToLines.toJS,
+    )?.toDart ?? cue.snapToLines;
+    final lineHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) *
+        0.055 * 1.15;
+    final top = snapped
+        ? (line < 0 ? 1 + line * lineHeight : line * lineHeight)
+        : switch (cue.getProperty<JSString?>(
+              _stackedMiddleLineAlign.toJS,
+            )?.toDart ?? cue.lineAlign) {
+            'start' => line / 100,
+            'center' => line / 100 - height / 2,
+            _ => line / 100 - height,
+          };
+    return (
+      top: top.clamp(0.0, 1.0).toDouble(),
+      bottom: (top + height).clamp(0.0, 1.0).toDouble(),
+      centre: (top + height / 2).clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
   void _positionSecondaryCues() {
     if (_secondaryCues.isEmpty) return;
     final primary = _activePrimaryCue();
     if (primary != null) {
-      final originalCentre =
-          primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
-      final originalLine = originalCentre?.toDartDouble ??
-          ((primary.line.dartify() as num?)?.toDouble() ??
-              ((1 - _subtitleVerticalOffset) * 100));
+      final bounds = _primaryCueBounds(primary);
       _primaryPlacement = (
-        alignment: _primaryAlignment(primary),
-        anchor: (originalLine / 100).clamp(0.0, 1.0).toDouble(),
-        height: _primaryCueHeight(primary),
+        alignment: _primaryAlignment(primary, bounds.centre),
+        centre: bounds.centre,
+        top: bounds.top,
+        bottom: bounds.bottom,
+        position: primary.position,
+        align: primary.align,
+        positionAlign: primary.positionAlign,
+        size: primary.size,
       );
     }
     final placement = _primaryPlacement;
-    final alignment = placement?.alignment ?? 2;
-    final anchor = placement?.anchor ?? 0.96;
-    final row = (alignment - 1) ~/ 3;
+    final row = ((placement?.alignment ?? 2) - 1) ~/ 3;
     final gap = middleSubtitleGap(0.015, _secondaryOffset);
 
-    // Use the current primary's size, not a permanent three-line reserve.
-    // Through a dialogue gap the last primary height remains in place.
-    final primaryHeight = placement?.height ?? 0.0;
+    // The primary stays at its authored position for top/bottom captions.
+    // Middle pairs use the authored centre as the anchor between both cues.
     if (primary != null && row == 1) {
       if (primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS) == null) {
-        primary.setProperty(_stackedMiddleLine.toJS, (anchor * 100).toJS);
+        final originalLine = primary.line.dartify();
+        if (originalLine is num) {
+          primary
+            ..setProperty(_stackedMiddleLine.toJS, originalLine.toJS)
+            ..setProperty(
+              _stackedMiddleLineAlign.toJS, primary.lineAlign.toJS,
+            )
+            ..setProperty(
+              _stackedMiddleSnapToLines.toJS, primary.snapToLines.toJS,
+            );
+        }
       }
       primary
+        ..snapToLines = false
         ..lineAlign = 'start'
-        ..line = ((anchor + gap / 2) * 100).clamp(0.0, 100.0).toDouble().toJS;
+        ..line = (((placement?.centre ?? 0.5) + gap / 2) * 100)
+            .clamp(0.0, 100.0).toDouble().toJS;
     }
 
-    // The secondary's own authored position never overrides the primary.
-    // Fixed opposing anchors let multiline dialogue expand without moving
-    // either slot when a cue starts, ends or changes its number of lines.
     final secondaryLine = placement == null
-        ? anchor - _secondaryOffset
+        ? 0.96 - _secondaryOffset
         : switch (row) {
-            2 => anchor + primaryHeight + gap,
-            1 => anchor - gap / 2,
-            _ => anchor - primaryHeight - gap,
+            2 => placement.bottom + gap,
+            1 => placement.centre - gap / 2,
+            _ => placement.top - gap,
           };
-    final column = (alignment - 1) % 3;
+    // Follow the primary's *actual* horizontal position and cue anchor;
+    // custom VTT coordinates must not snap to 5%, 50%, or 95%.
     for (final original in _secondaryCues) {
       original.cue
         ..region = null
@@ -959,11 +1011,10 @@ class HtmlVideoBackend extends PlayerBackend
         ..snapToLines = false
         ..lineAlign = row == 2 ? 'start' : 'end'
         ..line = (secondaryLine * 100).clamp(0.0, 100.0).toDouble().toJS
-        ..align = column == 0 ? 'left' : column == 2 ? 'right' : 'center'
-        ..positionAlign =
-            column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center'
-        ..position = (column == 0 ? 5 : column == 2 ? 95 : 50).toJS
-        ..size = 90;
+        ..align = placement?.align ?? 'center'
+        ..positionAlign = placement?.positionAlign ?? 'center'
+        ..position = placement?.position ?? 50
+        ..size = placement?.size ?? 90;
     }
   }
 

@@ -346,6 +346,123 @@ void main() {
     });
   }
 
+
+  test('WebVTT bottom placement follows real position, not a start anchor', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:08.000 line:90%,start '
+        'position:30%,line-left size:40% align:start\nPrimary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n'),
+      codec: 'vtt',
+    );
+    final secondaryCue =
+        (await loadedSecondary()).track.cues![0] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() =>
+        primary.track.activeCues?.length == 1 &&
+        secondaryCue.position == 30 && secondaryCue.lineAlign == 'end');
+    final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(primaryCue.line.dartify(), 90);
+    expect(primaryCue.lineAlign, 'start');
+    expect(primaryCue.position, 30);
+    expect(secondaryCue.line.dartify(), closeTo(88.5, 0.1));
+    expect(secondaryCue.align, primaryCue.align);
+    expect(secondaryCue.positionAlign, primaryCue.positionAlign);
+    expect(secondaryCue.size, primaryCue.size);
+    await backend.seekTo(const Duration(seconds: 9));
+    expect(primaryCue.line.dartify(), 90);
+  });
+
+  test('WebVTT top placement follows real position, not an end anchor', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:08.000 line:10%,end '
+        'position:72%,line-right size:25% align:end\nPrimary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n'),
+      codec: 'vtt',
+    );
+    final secondaryCue =
+        (await loadedSecondary()).track.cues![0] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() =>
+        primary.track.activeCues?.length == 1 &&
+        secondaryCue.position == 72 && secondaryCue.lineAlign == 'start');
+    final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(primaryCue.line.dartify(), 10);
+    expect(primaryCue.lineAlign, 'end');
+    expect(primaryCue.positionAlign, 'line-right');
+    expect(secondaryCue.line.dartify(), closeTo(11.5, 0.1));
+    expect(secondaryCue.align, primaryCue.align);
+    expect(secondaryCue.positionAlign, primaryCue.positionAlign);
+    expect(secondaryCue.size, primaryCue.size);
+  });
+
+  test('WebVTT custom middle alignment is centred and restored on Off', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:08.000 line:45%,center '
+        'position:35%,line-left size:40% align:start\nPrimary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n'),
+      codec: 'vtt',
+    );
+    final secondaryCue =
+        (await loadedSecondary()).track.cues![0] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    final primaryCue = primary.track.cues![0] as web.VTTCue;
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() =>
+        primary.track.activeCues?.length == 1 &&
+        primaryCue.lineAlign == 'start' &&
+        secondaryCue.lineAlign == 'end' && secondaryCue.position == 35);
+    expect(primaryCue.line.dartify(), closeTo(45.75, 0.1));
+    expect(secondaryCue.line.dartify(), closeTo(44.25, 0.1));
+    expect(secondaryCue.positionAlign, primaryCue.positionAlign);
+    await backend.setSecondarySubtitle();
+    expect(primaryCue.line.dartify(), 45);
+    expect(primaryCue.lineAlign, 'center');
+    expect(primaryCue.position, 35);
+    expect(primaryCue.snapToLines, isFalse);
+  });
+
+  test('WebVTT negative line numbers refer to the bottom, not the top', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:08.000 line:-1 '
+        'position:30%,line-left size:40% align:start\nPrimary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n'),
+      codec: 'vtt',
+    );
+    final secondaryCue =
+        (await loadedSecondary()).track.cues![0] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() =>
+        primary.track.activeCues?.length == 1 &&
+        secondaryCue.position == 30 && secondaryCue.lineAlign == 'end');
+    final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(primaryCue.line.dartify(), -1);
+    expect(primaryCue.snapToLines, isTrue);
+    expect((secondaryCue.line.dartify() as num), lessThan(95));
+  });
+
   test('SRT and primary VTT remain independently selectable', () async {
     await backend.setSubtitleTrack(
       1,
