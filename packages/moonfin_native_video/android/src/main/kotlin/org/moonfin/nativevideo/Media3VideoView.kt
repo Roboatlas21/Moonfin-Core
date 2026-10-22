@@ -118,6 +118,7 @@ import org.moonfin.nativevideo.subtitle.declaredSubtitleFrom
 import org.moonfin.nativevideo.subtitle.declaredSubtitlesFrom
 import org.moonfin.nativevideo.subtitle.externalFormatIdMatches
 import org.moonfin.nativevideo.subtitle.joinStackedCues
+import org.moonfin.nativevideo.subtitle.isSubripPrimaryFormat
 import org.moonfin.nativevideo.subtitle.sourceTreeFor
 import org.moonfin.nativevideo.subtitle.syncDelaysPayload
 import org.moonfin.nativevideo.ts.withHdmvTsSupport
@@ -1123,7 +1124,7 @@ class Media3VideoView(
         override fun onCues(cues: List<Cue>) {
             val stacked = joinStackedCues(cues)
             if (::secondarySubtitleOverlay.isInitialized) {
-                secondarySubtitleOverlay.updatePrimaryCues(stacked)
+                secondarySubtitleOverlay.updatePrimaryCues(stacked, primarySubtitleIsSubrip())
             } else {
                 subtitleView.setCues(stacked)
             }
@@ -1132,7 +1133,7 @@ class Media3VideoView(
         override fun onCues(cueGroup: CueGroup) {
             val stacked = joinStackedCues(cueGroup.cues)
             if (::secondarySubtitleOverlay.isInitialized) {
-                secondarySubtitleOverlay.updatePrimaryCues(stacked)
+                secondarySubtitleOverlay.updatePrimaryCues(stacked, primarySubtitleIsSubrip())
             } else {
                 subtitleView.setCues(stacked)
             }
@@ -3691,6 +3692,23 @@ class Media3VideoView(
     // Media3 picks the track on its own for a preferred text language or a
     // closed caption, so the selected track's mime type is the reliable test
     // and the codec hint is only a fallback for a track not selected yet.
+    // The selected track's format, not its screen coordinates, tells us
+    // whether Media3 produced SubRip's built-in 8%/92% alignment anchors.
+    // Read the primary selector because Tracks also includes secondary tracks.
+    private fun primarySubtitleIsSubrip(): Boolean {
+        for (group in player.currentTracks.groups) {
+            if (group.type != C.TRACK_TYPE_TEXT) continue
+            for (index in 0 until group.length) {
+                if (!trackSelector.isPrimaryTrackSelected(group.mediaTrackGroup, index)) continue
+                val format = group.getTrackFormat(index)
+                return isSubripPrimaryFormat(format.sampleMimeType, format.codecs)
+            }
+        }
+        // During initial selection the track list may not yet be published.
+        return subtitleTrackEnabled &&
+            codecToMimeType(selectedSubtitleCodec) == MimeTypes.APPLICATION_SUBRIP
+    }
+
     private val selectedSubtitleIsAss: Boolean
         get() = codecToMimeType(selectedSubtitleCodec) == MimeTypes.TEXT_SSA ||
             selectedTextTrackIsAss()

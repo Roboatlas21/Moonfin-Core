@@ -5,8 +5,29 @@ import android.graphics.Typeface
 import android.text.Layout
 import android.view.View
 import androidx.media3.common.text.Cue
+import androidx.media3.common.MimeTypes
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
+
+// Pre-parsed text tracks identify their original subtitle format in codecs.
+internal fun isSubripPrimaryFormat(sampleMimeType: String?, codecs: String?): Boolean =
+    sampleMimeType == MimeTypes.APPLICATION_SUBRIP ||
+        (sampleMimeType == MimeTypes.APPLICATION_MEDIA3_CUES && codecs == MimeTypes.APPLICATION_SUBRIP)
+
+// Media3's SRT alignment tags use standard 8%/92% edge anchors. Move those
+// anchors inward by the user offset, but never infer SRT from a WebVTT coordinate.
+internal fun offsetSubripAlignmentCue(cue: Cue, verticalOffset: Float, isSubrip: Boolean): Cue {
+    if (!isSubrip || verticalOffset == 0f || cue.bitmap != null ||
+        cue.lineType != Cue.LINE_TYPE_FRACTION) return cue
+    val line = when {
+        cue.lineAnchor == Cue.ANCHOR_TYPE_START && cue.line in 0.079f..0.081f ->
+            cue.line + verticalOffset
+        cue.lineAnchor == Cue.ANCHOR_TYPE_END && cue.line in 0.919f..0.921f ->
+            cue.line - verticalOffset
+        else -> return cue
+    }
+    return cue.buildUpon().setLine(line.coerceIn(0f, 1f), Cue.LINE_TYPE_FRACTION).build()
+}
 
 /** Places and styles cues decoded by the second Media3 text renderer. */
 @androidx.media3.common.util.UnstableApi
@@ -31,6 +52,7 @@ internal class SecondarySubtitleOverlay(
     private var primaryBottomPaddingFraction = 0.04f
     private var primaryCues: List<Cue> = emptyList()
     private var unmodifiedPrimaryCues: List<Cue> = emptyList()
+    private var primaryIsSubrip = false
     private var lastPrimaryForStacking: Cue? = null
     private var lastPrimaryWasCentred = false
 
@@ -83,8 +105,9 @@ internal class SecondarySubtitleOverlay(
         renderCues()
     }
 
-    fun updatePrimaryCues(cues: List<Cue>) {
+    fun updatePrimaryCues(cues: List<Cue>, isSubrip: Boolean) {
         unmodifiedPrimaryCues = cues
+        primaryIsSubrip = isSubrip
         renderCues()
     }
 
@@ -113,7 +136,9 @@ internal class SecondarySubtitleOverlay(
         val middleGapPx = SubtitleLayoutPlanner.middleGap(
             gapPx, offsetDelta, height, minimumGapPx)
         primaryCues = unmodifiedPrimaryCues.map { cue ->
-            val positioned = cue
+            val positioned = offsetSubripAlignmentCue(
+                cue, primaryBottomPaddingFraction, primaryIsSubrip,
+            )
             if (secondaryCues != null && height > 0 &&
                 positioned.lineType == Cue.LINE_TYPE_FRACTION &&
                 positioned.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE &&

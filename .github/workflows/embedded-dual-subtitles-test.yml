@@ -49,7 +49,7 @@ jobs:
         run: flutter build apk --release --flavor mobile --target-platform android-arm64 --dart-define=DISTRIBUTION_CHANNEL=apk
       - name: Check native selection and timing
         working-directory: android
-        run: ./gradlew :moonfin_native_video:testDebugUnitTest --tests '*DualSubtitleTrackSelectorTest' --tests '*TimeOffsetMediaPeriodTest' --tests '*SidecarSecondarySubtitleTest' --tests '*SubtitleOffsetPolicyTest' --tests '*SubtitleLayoutPlannerTest'
+        run: ./gradlew :moonfin_native_video:testDebugUnitTest --tests '*DualSubtitleTrackSelectorTest' --tests '*TimeOffsetMediaPeriodTest' --tests '*SidecarSecondarySubtitleTest' --tests '*SubtitleOffsetPolicyTest' --tests '*SubtitleLayoutPlannerTest' --tests '*SubripPrimaryPositionTest'
       - uses: actions/upload-artifact@v4
         with:
           name: Moonfin-Android-embedded-dual-subtitles
