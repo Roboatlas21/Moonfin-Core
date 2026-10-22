@@ -176,13 +176,13 @@ void main() {
         (primary.track.activeCues![0] as web.VTTCue).text.contains('Authored VTT'));
     final authored = primary.track.cues![2] as web.VTTCue;
     // The 2% adjustment remains active when this new cue is selected.
-    expect(authored.line.dartify(), 22);
+    expect(authored.line.dartify(), closeTo(22, 0.0001));
     await backend.configureSubtitleStyle(verticalOffset: 0.04);
-    expect(authored.line.dartify(), 24);
+    expect(authored.line.dartify(), closeTo(24, 0.0001));
     await backend.configureSubtitleStyle(verticalOffset: 0.02);
-    expect(authored.line.dartify(), 22);
+    expect(authored.line.dartify(), closeTo(22, 0.0001));
     await backend.configureSubtitleStyle(verticalOffset: 0);
-    expect(authored.line.dartify(), 20);
+    expect(authored.line.dartify(), closeTo(20, 0.0001));
   });
 
   test('bottom-aligned primary SRT moves upward from the bottom edge', () async {
