@@ -279,7 +279,9 @@ void main() {
     final primary = video.querySelector('track')! as web.HTMLTrackElement;
     final centred = primary.track.cues![0] as web.VTTCue;
     await backend.seekTo(const Duration(milliseconds: 1500));
-    await _until(() => first.align == 'center' && centred.lineAlign == 'start');
+    await _until(() =>
+        first.align == 'center' &&
+        centred.getProperty<JSString?>('lineAlign'.toJS)?.toDart == 'start');
     final secondaryAnchor = first.line.dartify();
     final primaryAnchor = centred.line.dartify();
     expect(first.lineAlign, 'end');
@@ -299,9 +301,9 @@ void main() {
     }
   });
 
-  for (final (name, tag, lineAlign) in [
-    ('top', 7, 'start'),
-    ('bottom', 2, 'end'),
+  for (final (name, tag, lineAlign, horizontalAlign) in [
+    ('top', 7, 'start', 'left'),
+    ('bottom', 2, 'end', 'center'),
   ]) {
     test('$name primary keeps a stable three-line reserve', () async {
       await backend.setSubtitleTrack(
@@ -320,7 +322,8 @@ void main() {
       final second = await loadedSecondary();
       final cue = second.track.cues![0] as web.VTTCue;
       await backend.seekTo(const Duration(seconds: 2));
-      await _until(() => cue.align == 'left' && cue.lineAlign == lineAlign);
+      await _until(() =>
+          cue.align == horizontalAlign && cue.lineAlign == lineAlign);
       final anchor = cue.line.dartify();
       await backend.seekTo(const Duration(seconds: 5));
       final primary = video.querySelector('track')! as web.HTMLTrackElement;
