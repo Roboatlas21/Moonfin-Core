@@ -44,8 +44,8 @@ final class RunnerTests: XCTestCase {
         overlay.applyStyle(
             textColor: nil, backgroundColor: nil, strokeColor: nil,
             fontSize: nil, fontWeight: nil, verticalOffset: 0.02)
-        XCTAssertGreaterThan(placed(7).minY, topLeft.minY)
-        XCTAssertLessThan(placed(2).maxY, bottom.maxY)
+        XCTAssertEqual(placed(7).minY, topLeft.minY + 8, accuracy: 0.1)
+        XCTAssertEqual(placed(2).maxY, bottom.maxY - 8, accuracy: 0.1)
         XCTAssertEqual(placed(7, position: CGPoint(x: 0.3, y: 0.08)).minY,
                        40, accuracy: 0.1)
         XCTAssertEqual(placed(2, position: CGPoint(x: 0.3, y: 0.92)).maxY,
@@ -62,6 +62,46 @@ final class RunnerTests: XCTestCase {
                        368, accuracy: 0.1)
     }
 
+
+    @MainActor
+    func testAppleOffsetUsesPictureHeightAndPreservesControlsLift() {
+        let overlay = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        // Video letterboxing must not make normal and authored offsets diverge.
+        overlay.videoRectProvider = { CGRect(x: 0, y: 50, width: 800, height: 300) }
+        let label = overlay.subviews.compactMap { $0 as? UILabel }.last!
+
+        func placed(_ alignment: Int, position: CGPoint? = nil) -> CGRect {
+            overlay.setEvents([
+                SubtitleEvent(startTime: 1, endTime: 3, text: "Caption",
+                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                    alignment: alignment, position: position)
+            ])
+            overlay.update(currentTime: 2)
+            return label.frame
+        }
+
+        let top = placed(7).minY
+        let bottom = placed(2).maxY
+        let authoredTop = placed(7, position: CGPoint(x: 0.5, y: 0.08)).minY
+        let authoredBottom = placed(2, position: CGPoint(x: 0.5, y: 0.92)).maxY
+        overlay.applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
+                           fontSize: nil, fontWeight: nil, verticalOffset: 0.04)
+        // Four percent of the 300pt picture is 12pt for both placement paths.
+        XCTAssertEqual(placed(7).minY, top + 12, accuracy: 0.1)
+        XCTAssertEqual(placed(2).maxY, bottom - 12, accuracy: 0.1)
+        XCTAssertEqual(placed(7, position: CGPoint(x: 0.5, y: 0.08)).minY,
+                       authoredTop + 12, accuracy: 0.1)
+        XCTAssertEqual(placed(2, position: CGPoint(x: 0.5, y: 0.92)).maxY,
+                       authoredBottom - 12, accuracy: 0.1)
+        XCTAssertEqual(placed(5).midY, 200, accuracy: 0.1)
+
+        // The transport OSD still raises a normal bottom cue by 25% of the
+        // 400pt surface, using the original 40...100 position scale.
+        overlay.setSubtitlePosition(basePosition: 70)
+        XCTAssertEqual(placed(2).maxY, bottom - 100, accuracy: 0.1)
+        overlay.setSubtitlePosition(basePosition: 98)
+        XCTAssertEqual(placed(2).maxY, bottom - 12, accuracy: 0.1)
+    }
 
     @MainActor
     func testAuthoredTopBottomOffsetsMoveSecondaryWithPrimary() {

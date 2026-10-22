@@ -147,11 +147,17 @@ final class SubtitleOverlay: PlatformView {
         subtitleStrokeEnabled ? max(2 * canvasScale, 1) : 0
     }
 
-    /// The lowest position puts the text on the bottom edge itself, which is
-    /// what the setting reads as zero and what a wide film needs to keep its
-    /// lines inside the black bar under the picture.
-    private var textBottomOffset: CGFloat {
+    /// Keep the native position scale for the temporary OSD lift and bitmap
+    /// fallback. The user's text offset is a percentage of the picture.
+    private var positionScaleBottomOffset: CGFloat {
         canvasHeight * 0.5 * CGFloat(100 - subtitlePositionBase) / 60.0
+    }
+
+    private var textBottomOffset: CGFloat {
+        let normalPosition = 100 - Int((Double(authoredVerticalOffset) * 60).rounded())
+        return subtitlePositionBase < normalPosition
+            ? positionScaleBottomOffset
+            : videoBox.height * authoredVerticalOffset
     }
 
     /// A bitmap cue that arrives without a canvas rect has nothing tying it to
@@ -159,7 +165,7 @@ final class SubtitleOverlay: PlatformView {
     /// The margin stays absolute rather than scaling with height, since those
     /// cues already sit correctly on a phone.
     private var bitmapBottomOffset: CGFloat {
-        40 + textBottomOffset
+        40 + positionScaleBottomOffset
     }
 
     override init(frame: CGRect) {
