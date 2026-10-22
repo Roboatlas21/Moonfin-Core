@@ -50,6 +50,7 @@ class SubtitleOffsetPolicyTest {
         externalCount: Int = 0,
         manualDelayMs: Long = 0L,
         hasEmbeddedWrapper: Boolean = false,
+        hasSecondarySidecar: Boolean = false,
     ) = sourceTreeFor(
         isLive = isLive,
         isPreview = isPreview,
@@ -57,6 +58,7 @@ class SubtitleOffsetPolicyTest {
         externalCount = externalCount,
         manualDelayMs = manualDelayMs,
         hasEmbeddedWrapper = hasEmbeddedWrapper,
+        hasSecondarySidecar = hasSecondarySidecar,
     )
 
     @Test
@@ -65,10 +67,17 @@ class SubtitleOffsetPolicyTest {
     }
 
     @Test
-    fun `live preview and audio never get the tree`() {
+    fun `live preview and audio without secondary sidecars keep the player item path`() {
         assertEquals(SourceTree.PLAYER_ITEM, tree(isLive = true, externalCount = 2, manualDelayMs = 500L))
         assertEquals(SourceTree.PLAYER_ITEM, tree(isPreview = true, externalCount = 1))
         assertEquals(SourceTree.PLAYER_ITEM, tree(mediaType = "audio", manualDelayMs = 500L))
+    }
+
+    @Test
+    fun `secondary sidecars always get independent timing including live sources`() {
+        assertEquals(SourceTree.CUSTOM_TREE, tree(isLive = true, externalCount = 1, hasSecondarySidecar = true))
+        assertEquals(SourceTree.CUSTOM_TREE, tree(isPreview = true, externalCount = 1, hasSecondarySidecar = true))
+        assertEquals(SourceTree.CUSTOM_TREE, tree(mediaType = "audio", externalCount = 1, hasSecondarySidecar = true))
     }
 
     @Test

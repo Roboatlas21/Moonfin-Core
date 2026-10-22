@@ -2,170 +2,59 @@ package org.moonfin.nativevideo.subtitle
 
 import android.graphics.Color
 import android.graphics.Typeface
-import android.net.Uri
-import android.os.Handler
 import android.text.Layout
-import android.util.Log
 import android.view.View
-import androidx.media3.common.C
 import androidx.media3.common.text.Cue
-import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DataSpec
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.RejectedExecutionException
 
-/** A sidecar text overlay synchronized to the owning ExoPlayer's clock. */
+/** Places and styles cues decoded by the second Media3 text renderer. */
 @androidx.media3.common.util.UnstableApi
 internal class SecondarySubtitleOverlay(
     private val view: SubtitleView,
-    private val dataSourceFactory: () -> DataSource.Factory,
-    private val mainHandler: Handler,
-    private val positionMs: () -> Long,
-    private val onFailure: (String) -> Unit,
     private val onPrimaryVerticalOffset: (Float) -> Unit = {},
 ) {
     companion object {
-        private const val TAG = "MoonfinSecondarySubtitle"
-        private const val MAX_SUBTITLE_BYTES = 4 * 1024 * 1024
         private const val DEFAULT_OFFSET_DELTA = 0.08f
         private const val MIN_GAP_DP = 8f
-        private const val TICK_MS = 250L
     }
 
-    private val executor: ExecutorService = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "moonfin-secondary-subtitle").apply { isDaemon = true }
-    }
-    private val activeDataSourceLock = Any()
-    @Volatile private var activeDataSource: DataSource? = null
-    @Volatile private var disposed = false
-    private var generation = 0
-    private var selectedUrl: String? = null
-    private var selectedCodec: String? = null
-    private var delayMs = 0L
-    private var embeddedCues: List<TimedTextCue>? = null
-    private var lastRenderedText: String? = null
+    private var disposed = false
+    private var secondaryCues: List<Cue>? = null
     private var baseTextColor = Color.WHITE
     private var baseBackgroundColor = Color.TRANSPARENT
     private var baseStrokeColor = Color.TRANSPARENT
     private var baseFontSize = 20f
     private var baseFontWeight = 400
-    private var baseVerticalOffset = 0.04f
     private var fontSizeOverride: Float? = null
     private var textColorOverride: Int? = null
     private var offsetDelta = 0f
     private var primaryBottomPaddingFraction = 0.04f
     private var primaryCues: List<Cue> = emptyList()
     private var primaryCanShift = false
-    @Volatile private var timeline: SecondarySubtitleTimeline? = null
-    private val changeRender = Runnable { render(positionMs()) }
 
     init {
         view.setApplyEmbeddedStyles(false)
         view.setApplyEmbeddedFontSizes(false)
         view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             updatePrimaryOffset()
-            lastRenderedText = null
-            renderAt(positionMs())
+            renderCues()
         }
         applyStyle()
         view.setCues(emptyList())
     }
 
-    /** Selecting the track that's already loaded keeps its cues instead of fetching it again. */
-    fun select(url: String?, codec: String?) {
-        if (disposed) return
-        if (embeddedCues == null && url == selectedUrl && codec == selectedCodec) return
-        embeddedCues = null
-        generation++
-        val requestGeneration = generation
-        selectedUrl = url
-        selectedCodec = codec
-        timeline = null
-        lastRenderedText = null
+    /** A track switch clears old cues; Media3 owns loading, timing and seeking. */
+    fun select(enabled: Boolean) {
+        secondaryCues = if (enabled) emptyList() else null
         updatePrimaryOffset()
-        view.visibility = View.VISIBLE
-        view.setCues(emptyList())
-        if (url.isNullOrBlank()) return
-
-        try {
-            executor.execute {
-                try {
-                    val content = readSubtitle(url)
-                    val cues = SecondarySubtitleParser.parse(content, codec)
-                    require(cues.isNotEmpty()) { "Secondary subtitle has no cues" }
-                    val parsed = SecondarySubtitleTimeline(cues)
-                    mainHandler.post {
-                        if (requestGeneration != generation || selectedUrl != url) return@post
-                        timeline = parsed
-                        updatePrimaryOffset()
-                        lastRenderedText = null
-                        renderAt(positionMs())
-                    }
-                } catch (error: Throwable) {
-                    val message = error.message ?: error.javaClass.simpleName
-                    // Log the whole throwable, since in release builds the message alone
-                    // is often just an obfuscated class name.
-                    Log.w(TAG, "Could not load secondary subtitle ($codec): $error", error)
-                    mainHandler.post {
-                        if (requestGeneration != generation || selectedUrl != url) return@post
-                        selectedUrl = null
-                        selectedCodec = null
-                        timeline = null
-                        lastRenderedText = null
-                        updatePrimaryOffset()
-                        view.setCues(emptyList())
-                        onFailure(message)
-                    }
-                }
-            }
-        } catch (_: RejectedExecutionException) {
-            // dispose() may race with a late source update from the platform view.
-        }
+        renderCues()
     }
 
-    /** Cues decoded by the second Media3 renderer need no download or parser. */
-    fun selectEmbedded() {
-        generation++ // Any old sidecar completion no longer owns the view.
-        selectedUrl = null
-        selectedCodec = null
-        timeline = null
-        embeddedCues = emptyList()
-        lastRenderedText = null
-        view.setCues(emptyList())
-        updatePrimaryOffset()
-    }
-
-    fun updateEmbeddedCues(cues: List<Cue>) {
-        if (embeddedCues == null || disposed) return
-        embeddedCues = cues.filter { it.text != null }.map { cue ->
-            TimedTextCue(
-                0, Long.MAX_VALUE, cue.text.toString(),
-                line = cue.line.takeUnless { it == Cue.DIMEN_UNSET },
-                lineType = cue.lineType,
-                lineAnchor = cue.lineAnchor.takeUnless { it == Cue.TYPE_UNSET },
-                position = cue.position.takeUnless { it == Cue.DIMEN_UNSET },
-                positionAnchor = cue.positionAnchor.takeUnless { it == Cue.TYPE_UNSET },
-                size = cue.size.takeUnless { it == Cue.DIMEN_UNSET },
-                alignment = when (cue.textAlignment) {
-                    Layout.Alignment.ALIGN_NORMAL -> "start"
-                    Layout.Alignment.ALIGN_OPPOSITE -> "end"
-                    else -> "center"
-                },
-            )
-        }
-        lastRenderedText = null
-        renderAt(positionMs())
-    }
-
-    /** Positive delay means show the subtitle later, matching the primary track. */
-    fun setDelayMs(value: Long) {
-        delayMs = value.coerceIn(-5000L, 5000L)
-        renderAt(positionMs())
+    fun updateCues(cues: List<Cue>) {
+        if (secondaryCues == null || disposed) return
+        secondaryCues = cues.filter { it.text != null }
+        renderCues()
     }
 
     fun configureBaseStyle(
@@ -182,13 +71,11 @@ internal class SecondarySubtitleOverlay(
         if (fontSize != null) baseFontSize = fontSize
         baseFontWeight = fontWeight
         if (verticalOffset != null) {
-            baseVerticalOffset = verticalOffset
             primaryBottomPaddingFraction = verticalOffset.coerceIn(0f, 0.95f)
         }
         applyStyle()
         updatePrimaryOffset()
-        lastRenderedText = null
-        renderAt(positionMs())
+        renderCues()
     }
 
     fun updatePrimaryCues(cues: List<Cue>, allowAutomaticShift: Boolean = true) {
@@ -197,8 +84,7 @@ internal class SecondarySubtitleOverlay(
             it.bitmap == null && it.line == Cue.DIMEN_UNSET && it.position == Cue.DIMEN_UNSET
         }
         updatePrimaryOffset()
-        lastRenderedText = null
-        renderAt(positionMs())
+        renderCues()
     }
 
     /** Font size and vertical offset use the same units as the primary subtitle style. */
@@ -213,34 +99,11 @@ internal class SecondarySubtitleOverlay(
             .coerceIn(-0.08f, 0.32f)
         applyStyle()
         updatePrimaryOffset()
-        lastRenderedText = null
-        renderAt(positionMs())
+        renderCues()
     }
 
-    /**
-     * Called from the 250 ms player ticker and right after seeks. A cue that
-     * starts or ends before the next tick gets its own render at that moment.
-     */
-    fun renderAt(playerPositionMs: Long) {
-        mainHandler.removeCallbacks(changeRender)
-        val next = timeline?.nextChangeAt(playerPositionMs, delayMs)
-        val wait = if (next == null) 0L else next - playerPositionMs
-        if (wait in 1 until TICK_MS) mainHandler.postDelayed(changeRender, wait)
-        render(playerPositionMs)
-    }
-
-    private fun render(playerPositionMs: Long) {
-        val active = embeddedCues
-            ?: timeline?.activeCuesAtPlayerPosition(playerPositionMs, delayMs).orEmpty()
-        val signature = active.joinToString("\u0000") {
-            "${it.text}|${it.line}|${it.lineType}|${it.lineAnchor}|${it.position}|${it.positionAnchor}|${it.size}|${it.alignment}"
-        }
-        if (signature == lastRenderedText) return
-        lastRenderedText = signature
-        renderCues(active)
-    }
-
-    private fun renderCues(active: List<TimedTextCue>) {
+    private fun renderCues() {
+        val active = secondaryCues.orEmpty()
         if (active.isEmpty()) {
             view.visibility = View.VISIBLE
             view.setCues(emptyList())
@@ -250,25 +113,25 @@ internal class SecondarySubtitleOverlay(
         val height = view.height
         if (width <= 0 || height <= 0) {
             view.visibility = View.VISIBLE
-            view.setCues(active.map { buildCue(listOf(it)) })
+            view.setCues(active.map(::buildCue))
             return
         }
         val primaryFontPx = (baseFontSize / 24f) * 0.06f * height
         val secondaryFontPx = ((fontSizeOverride ?: baseFontSize) / 24f) * 0.06f * height
         val primaryBoxes = primaryCues.map { estimatePrimaryBox(it, width, height, primaryFontPx) }
         val gapPx = MIN_GAP_DP * view.resources.displayMetrics.density
-        val fixed = active.filter { it.line != null }
-        val automatic = active.filter { it.line == null }
+        val fixed = active.filter { it.line != Cue.DIMEN_UNSET }
+        val automatic = active.filter { it.line == Cue.DIMEN_UNSET }
         val rendered = ArrayList<Cue>()
         val occupied = ArrayList<SubtitleBox>(primaryBoxes)
         val topFallback = ArrayList<Pair<String, Cue>>()
-        for (timedCue in fixed) {
-            var cue = buildCue(listOf(timedCue))
+        for (sourceCue in fixed) {
+            var cue = buildCue(sourceCue)
             val box = estimateSecondaryBox(
                 cue,
                 width,
                 height,
-                estimateTextHeight(timedCue.text, width * (timedCue.size ?: 0.9f), secondaryFontPx),
+                estimateTextHeight(sourceCue.text.toString(), width * (sourceCue.size.takeUnless { it == Cue.DIMEN_UNSET } ?: 0.9f), secondaryFontPx),
             )
             if (occupied.none { SubtitleLayoutPlanner.intersects(box, it, gapPx) }) {
                 rendered += cue
@@ -276,7 +139,7 @@ internal class SecondarySubtitleOverlay(
                 continue
             }
 
-            val lineAnchor = timedCue.lineAnchor ?: cue.lineAnchor
+            val lineAnchor = cue.lineAnchor
             val verticalAlignment = SubtitleLayoutPlanner.verticalAlignmentFor(box, height)
             val placed = SubtitleLayoutPlanner.placePositionedSecondary(
                 primary = occupied,
@@ -300,7 +163,7 @@ internal class SecondarySubtitleOverlay(
                 rendered += cue
                 occupied += placed
             } else if (verticalAlignment == SubtitleLayoutPlanner.ALIGN_TOP) {
-                topFallback.add(timedCue.text to cue)
+                topFallback.add(sourceCue.text.toString() to cue)
             }
         }
 
@@ -312,12 +175,12 @@ internal class SecondarySubtitleOverlay(
         }
 
         val automaticGroups = automatic.groupBy {
-            listOf(it.position, it.positionAnchor, it.size, it.alignment)
+            listOf(it.position, it.positionAnchor, it.size, it.textAlignment)
         }.values
         for (group in automaticGroups) {
-            val text = group.joinToString("\n") { it.text }
+            val text = group.joinToString("\n") { it.text.toString() }
             placeAutomaticCue(
-                buildCue(group), text, width, height, secondaryFontPx, occupied, gapPx,
+                buildCue(group.first()).buildUpon().setText(text).build(), text, width, height, secondaryFontPx, occupied, gapPx,
             )?.let(rendered::add)
         }
 
@@ -325,30 +188,18 @@ internal class SecondarySubtitleOverlay(
         view.setCues(rendered)
     }
 
-    private fun buildCue(cues: List<TimedTextCue>): Cue {
-        val settings = cues.first()
-        return Cue.Builder().setText(cues.joinToString("\n") { it.text }).apply {
-            settings.line?.let {
-                val lineType = if (settings.lineType == Cue.LINE_TYPE_NUMBER) {
-                    Cue.LINE_TYPE_NUMBER
-                } else Cue.LINE_TYPE_FRACTION
-                setLine(it, lineType)
-                setLineAnchor(
-                    settings.lineAnchor ?: if (it < 0f) Cue.ANCHOR_TYPE_END else Cue.ANCHOR_TYPE_START,
-                )
+    private fun buildCue(cue: Cue): Cue = cue.buildUpon().apply {
+        if (cue.line != Cue.DIMEN_UNSET) {
+            setLine(cue.line, if (cue.lineType == Cue.LINE_TYPE_NUMBER) Cue.LINE_TYPE_NUMBER else Cue.LINE_TYPE_FRACTION)
+            if (cue.lineAnchor == Cue.TYPE_UNSET) {
+                setLineAnchor(if (cue.line < 0f) Cue.ANCHOR_TYPE_END else Cue.ANCHOR_TYPE_START)
             }
-            settings.position?.let {
-                setPosition(it)
-                setPositionAnchor(settings.positionAnchor ?: Cue.ANCHOR_TYPE_MIDDLE)
-            }
-            settings.size?.let { setSize(it) }
-            when (settings.alignment) {
-                "start", "left" -> setTextAlignment(Layout.Alignment.ALIGN_NORMAL)
-                "end", "right" -> setTextAlignment(Layout.Alignment.ALIGN_OPPOSITE)
-                "center" -> setTextAlignment(Layout.Alignment.ALIGN_CENTER)
-            }
-        }.build()
-    }
+        }
+        if (cue.position != Cue.DIMEN_UNSET && cue.positionAnchor == Cue.TYPE_UNSET) {
+            setPositionAnchor(Cue.ANCHOR_TYPE_MIDDLE)
+        }
+        setTextAlignment(cue.textAlignment ?: Layout.Alignment.ALIGN_CENTER)
+    }.build()
 
     private fun placeAutomaticCue(
         cue: Cue,
@@ -453,7 +304,7 @@ internal class SecondarySubtitleOverlay(
 
     // Only while a secondary is loaded, and never past the bottom edge.
     private fun primaryOffsetPx(): Float {
-        if (!primaryCanShift || (timeline == null && embeddedCues == null)) return 0f
+        if (!primaryCanShift || secondaryCues == null) return 0f
         return -offsetDelta.coerceAtLeast(-primaryBottomPaddingFraction) * view.height
     }
 
@@ -462,39 +313,14 @@ internal class SecondarySubtitleOverlay(
     }
 
     fun clear() {
-        embeddedCues = null
-        mainHandler.removeCallbacks(changeRender)
-        generation++
-        selectedUrl = null
-        selectedCodec = null
-        timeline = null
-        delayMs = 0L
-        lastRenderedText = null
         primaryCues = emptyList()
         primaryCanShift = false
-        updatePrimaryOffset()
-        view.visibility = View.VISIBLE
-        view.setCues(emptyList())
+        select(false)
     }
 
     fun dispose() {
-        if (disposed) return
         disposed = true
         clear()
-        val source = synchronized(activeDataSourceLock) {
-            activeDataSource.also { activeDataSource = null }
-        }
-        // Closing unblocks a read in flight, but it can touch the network, so
-        // it runs off the main thread.
-        if (source != null) {
-            Thread {
-                try {
-                    source.close()
-                } catch (_: IOException) {
-                }
-            }.start()
-        }
-        executor.shutdownNow()
     }
 
     private fun applyStyle() {
@@ -519,43 +345,4 @@ internal class SecondarySubtitleOverlay(
         view.setBottomPaddingFraction(0f)
     }
 
-    private fun readSubtitle(url: String): String {
-        val source = dataSourceFactory().createDataSource()
-        val output = ByteArrayOutputStream()
-        synchronized(activeDataSourceLock) {
-            if (disposed) {
-                source.close()
-                throw IOException("Secondary subtitle overlay is disposed")
-            }
-            activeDataSource = source
-        }
-        try {
-            source.open(DataSpec(Uri.parse(url)))
-            if (disposed) throw IOException("Secondary subtitle overlay is disposed")
-            val buffer = ByteArray(8192)
-            while (true) {
-                if (disposed || Thread.currentThread().isInterrupted) {
-                    throw IOException("Secondary subtitle overlay is disposed")
-                }
-                val read = source.read(buffer, 0, buffer.size)
-                if (read == C.RESULT_END_OF_INPUT) break
-                if (read <= 0) continue
-                if (output.size() + read > MAX_SUBTITLE_BYTES) {
-                    throw IllegalArgumentException("Subtitle file exceeds 4 MiB")
-                }
-                output.write(buffer, 0, read)
-            }
-        } finally {
-            val closeSource = synchronized(activeDataSourceLock) {
-                if (activeDataSource === source) {
-                    activeDataSource = null
-                    true
-                } else {
-                    false
-                }
-            }
-            if (closeSource) source.close()
-        }
-        return SecondarySubtitleParser.decode(output.toByteArray())
-    }
 }
