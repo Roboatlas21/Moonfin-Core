@@ -806,7 +806,8 @@ class HtmlVideoBackend extends PlayerBackend
   }) async {
     if (_disposed) return;
     final size = fontSize?.clamp(6.0, 72.0);
-    final styleChanged = _secondaryFontSize != size ||
+    final sizeChanged = _secondaryFontSize != size;
+    final styleChanged = sizeChanged ||
         _secondaryTextColor != textColor ||
         _subtitleStyleElement == null;
     if (styleChanged) {
@@ -815,7 +816,7 @@ class HtmlVideoBackend extends PlayerBackend
       _applySubtitleAppearance();
     }
     final offset = (verticalOffset ?? 0.0).clamp(-0.4, 0.4);
-    if (_secondaryOffset == offset && !styleChanged) return;
+    if (_secondaryOffset == offset && !sizeChanged) return;
     _secondaryOffset = offset;
     _positionSecondaryCues();
   }

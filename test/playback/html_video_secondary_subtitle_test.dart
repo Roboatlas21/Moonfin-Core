@@ -373,16 +373,25 @@ void main() {
         fontSize: 32,
         textColor: 0xFFFFFF00,
       );
-      expect(writes, isEmpty);
+      // A font-size change repositions the cue but must not rewrite timing.
+      expect(writes, ['line', 'line']);
+      writes.clear();
       final styles = web.document.head!.textContent;
       expect(styles, contains('color: rgb(255, 255, 0)'));
       await backend.configureSecondarySubtitleStyle(
         fontSize: 36,
         textColor: 0xFFFFFF00,
       );
-      expect(writes, isEmpty);
+      expect(writes, ['line', 'line']);
+      writes.clear();
       expect(web.document.head!.textContent, isNot(styles));
 
+      // Changing colour alone is styling, not a position or timing change.
+      await backend.configureSecondarySubtitleStyle(
+        fontSize: 36,
+        textColor: 0xFF00FFFF,
+      );
+      expect(writes, isEmpty);
       await backend.configureSecondarySubtitleStyle(
         fontSize: 36,
         textColor: 0xFFFFFF00,
