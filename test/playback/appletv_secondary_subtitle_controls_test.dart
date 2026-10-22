@@ -1,14 +1,30 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations_en.dart';
+import 'package:moonfin/playback/appletv_backend.dart';
 import 'package:moonfin/playback/appletv_subtitles.dart';
 import 'package:moonfin/playback/subtitle_style.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+class _AppleTvBackend extends Fake implements AppleTvBackend {
+  @override
+  Future<void> configureSubtitleStyle({
+    int? textColor,
+    int? backgroundColor,
+    int? strokeColor,
+    double? fontSize,
+    int? fontWeight,
+    double? verticalOffset,
+  }) async {}
+}
+
 class _TrackManager extends PlaybackManager {
+  final _backend = _AppleTvBackend();
   final selections = <int?>[];
+  @override
+  PlayerBackend get backend => _backend;
   @override
   int? get subtitleStreamIndex => 2;
   @override
@@ -78,6 +94,40 @@ void main() {
       isNull,
     );
   });
+
+  test(
+    'native size menu and actions honor the current renderer bounds',
+    () async {
+      await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
+      final metadata = appleTvSubtitleMetadata(
+        manager: manager,
+        prefs: prefs,
+        l10n: AppLocalizationsEn(),
+        tracks: [],
+      );
+      expect(metadata['sizeAdjustment'], 9.0);
+      expect(metadata['maxSizeAdjustment'], 9.0);
+      expect(metadata['minSizeAdjustment'], -50.0);
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
+      await handleAppleTvSubtitleAction(
+        {'event': 'configureSecondarySubtitleStyle', 'sizeAdjustment': 50.0},
+        manager,
+        prefs,
+      );
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 9.0);
+      expect(manager.secondarySubtitleFontSize, closeTo(52.32, 0.0001));
+
+      await prefs.set(UserPreferences.subtitlesTextSize, 12.0);
+      await handleAppleTvSubtitleAction(
+        {'event': 'configureSecondarySubtitleStyle', 'sizeAdjustment': -50.0},
+        manager,
+        prefs,
+      );
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), -12.0);
+      expect(manager.secondarySubtitleFontSize, closeTo(10.56, 0.0001));
+    },
+  );
 
   test(
     'native primary size uses the saved setting and its existing bounds',

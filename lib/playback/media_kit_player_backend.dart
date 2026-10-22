@@ -2740,6 +2740,8 @@ class MediaKitPlayerBackend extends PlayerBackend
         _setSubtitleLoading(false);
       }
       _subtitleDebug('set track=$mpvTrackId threw: $e');
+    } finally {
+      if (isCurrentSelection()) await _applyPendingSecondarySubtitle();
     }
   }
 
@@ -2868,6 +2870,8 @@ class MediaKitPlayerBackend extends PlayerBackend
     await _nativeSetProperty(platform, 'sub-visibility', 'yes');
     if (!_isLatestSubtitleSelection(generation)) return;
     await _nativeSetProperty(platform, 'sub-ass', 'yes');
+    if (!_isLatestSubtitleSelection(generation)) return;
+    await _applyPendingSecondarySubtitle();
   }
 
   @override
@@ -2884,6 +2888,8 @@ class MediaKitPlayerBackend extends PlayerBackend
       if (!_isLatestSubtitleSelection(generation)) return;
       await _nativeSetProperty(native, 'sub-visibility', 'no');
     } catch (_) {}
+    if (!_isLatestSubtitleSelection(generation)) return;
+    await _applyPendingSecondarySubtitle();
   }
 
   @override
@@ -3009,9 +3015,21 @@ class MediaKitPlayerBackend extends PlayerBackend
               : null)
         : _externalSubtitleSid(raw, pending.url!);
     if (sid == null) return;
-    _pendingSecondarySubtitle = null;
     await _nativeSetProperty(native, 'secondary-sid', sid);
-    if (!_isCurrentSecondarySubtitle(pending.generation)) return;
+    if (!_isCurrentSecondarySubtitle(pending.generation) ||
+        _pendingSecondarySubtitle != pending) {
+      return;
+    }
+    // mpv rejects a track already selected as primary without throwing. On
+    // open that can be its automatic selection, before the manager applies
+    // the saved primary. Keep the request until primary selection frees it.
+    final selectedSid = await _tryNativeGetProperty(native, 'secondary-sid');
+    if (!_isCurrentSecondarySubtitle(pending.generation) ||
+        _pendingSecondarySubtitle != pending ||
+        selectedSid != sid) {
+      return;
+    }
+    _pendingSecondarySubtitle = null;
     await _nativeSetProperty(native, 'secondary-sub-visibility', 'yes');
     _subtitleDebug('secondary sid=$sid embedded=${ordinal != null}');
   }

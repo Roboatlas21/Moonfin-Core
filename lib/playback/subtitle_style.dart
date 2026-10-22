@@ -2,6 +2,33 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:playback_core/playback_core.dart';
 
 import '../preference/user_preferences.dart';
+import 'aether_backend.dart';
+import 'appletv_backend.dart';
+import 'media3_player_backend.dart';
+
+/// Apple keeps its existing 24–120 point renderer range on a 1080pt canvas.
+/// Round the percentage endpoints inward so every displayed size is usable.
+({double min, double max}) secondarySubtitleSizeBounds(
+  PlayerBackend? backend,
+  double primarySize,
+) {
+  if (backend is! AetherBackend && backend is! AppleTvBackend) {
+    return (min: -50, max: 50);
+  }
+  return (
+    min: ((24 * 24 / 55 / primarySize - 1) * 100).ceilToDouble().clamp(
+      -50.0,
+      0.0,
+    ),
+    max: ((120 * 24 / 55 / primarySize - 1) * 100).floorToDouble().clamp(
+      0.0,
+      50.0,
+    ),
+  );
+}
+
+double secondarySubtitleMaxOffset(PlayerBackend? backend) =>
+    backend is Media3PlayerBackend ? 0.2 : 0.4;
 
 /// Updates the active SDR/HDR appearance, including relative secondary size.
 Future<void> setPrimarySubtitleSize(
@@ -59,16 +86,19 @@ Future<void> syncSecondarySubtitleStyle(
   PlaybackManager manager,
   UserPreferences prefs,
 ) {
-  final adjustment = prefs
-      .get(UserPreferences.secondarySubtitleSizeAdjustment)
-      .clamp(-50.0, 50.0);
   final primarySize = SubtitleStyle.forResolution(
     prefs,
     manager.currentResolution,
   ).fontSize;
+  final bounds = secondarySubtitleSizeBounds(manager.backend, primarySize);
+  final adjustment = prefs
+      .get(UserPreferences.secondarySubtitleSizeAdjustment)
+      .clamp(bounds.min, bounds.max);
   return manager.configureSecondarySubtitleStyle(
     fontSize: adjustment == 0 ? null : primarySize * (1 + adjustment / 100),
-    verticalOffset: prefs.get(UserPreferences.secondarySubtitleOffsetPosition),
+    verticalOffset: prefs
+        .get(UserPreferences.secondarySubtitleOffsetPosition)
+        .clamp(-0.4, secondarySubtitleMaxOffset(manager.backend)),
     textColor: switch (prefs.get(UserPreferences.secondarySubtitleTextColor)) {
       -1 => null,
       final color => color,

@@ -85,7 +85,7 @@ internal class SecondarySubtitleOverlay(
     ) {
         fontSizeOverride = fontSize?.coerceIn(6f, 72f)
         textColorOverride = textColor
-        offsetDelta = (verticalOffset ?: 0f).coerceIn(-0.4f, 0.4f)
+        offsetDelta = (verticalOffset ?: 0f).coerceIn(-0.4f, 0.2f)
         applyStyle()
         renderCues()
     }

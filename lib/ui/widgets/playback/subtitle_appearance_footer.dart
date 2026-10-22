@@ -9,11 +9,16 @@ class SubtitleAppearanceFooter extends StatefulWidget {
     required this.initialOffset,
     required this.initialTextColor,
     required this.defaultTextColor,
-    required this.onChanged,
+    required this.onFontSizeChanged,
+    required this.onOffsetChanged,
+    required this.onTextColorChanged,
     this.secondary = false,
     this.showStyle = true,
     this.showPosition = true,
     this.showColor = true,
+    this.minFontSize,
+    this.maxFontSize,
+    this.maxOffset = 0.4,
   });
 
   final double initialFontSize;
@@ -24,7 +29,12 @@ class SubtitleAppearanceFooter extends StatefulWidget {
   final bool showStyle;
   final bool showPosition;
   final bool showColor;
-  final void Function(double fontSize, double offset, int? textColor) onChanged;
+  final double? minFontSize;
+  final double? maxFontSize;
+  final double maxOffset;
+  final ValueChanged<double> onFontSizeChanged;
+  final ValueChanged<double> onOffsetChanged;
+  final ValueChanged<int?> onTextColorChanged;
 
   @override
   State<SubtitleAppearanceFooter> createState() =>
@@ -32,9 +42,45 @@ class SubtitleAppearanceFooter extends StatefulWidget {
 }
 
 class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
-  late double _fontSize = widget.initialFontSize;
-  late double _offset = widget.initialOffset;
+  late double _fontSize = _clampFontSize(widget.initialFontSize);
+  late double _offset = _clampOffset(widget.initialOffset);
   late int? _textColor = widget.initialTextColor;
+
+  double _clampFontSize(double value) => value
+      .clamp(
+        widget.minFontSize ?? (widget.secondary ? -50.0 : 12.0),
+        widget.maxFontSize ?? (widget.secondary ? 50.0 : 48.0),
+      )
+      .toDouble();
+
+  double _clampOffset(double value) =>
+      value.clamp(widget.secondary ? -0.4 : 0.0, widget.maxOffset).toDouble();
+
+  @override
+  void didUpdateWidget(covariant SubtitleAppearanceFooter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialFontSize != oldWidget.initialFontSize ||
+        widget.minFontSize != oldWidget.minFontSize ||
+        widget.maxFontSize != oldWidget.maxFontSize) {
+      _fontSize = _clampFontSize(widget.initialFontSize);
+    }
+    if (widget.initialOffset != oldWidget.initialOffset ||
+        widget.maxOffset != oldWidget.maxOffset) {
+      _offset = _clampOffset(widget.initialOffset);
+    }
+    if (widget.initialTextColor != oldWidget.initialTextColor) {
+      _textColor = widget.initialTextColor;
+    }
+  }
+
+  double _stepFontSize(bool increase) {
+    if (!widget.secondary) return _fontSize + (increase ? 2 : -2);
+    // A shortened final step (for example +9%) returns to the regular grid.
+    return (increase
+            ? (_fontSize / 10).floor() + 1
+            : (_fontSize / 10).ceil() - 1) *
+        10.0;
+  }
 
   String _relativeLabel(double value) => value == 0
       ? AppLocalizations.of(context).defaultLabel
@@ -43,23 +89,17 @@ class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
   void _update({double? fontSize, double? offset}) {
     setState(() {
       if (fontSize != null) {
-        _fontSize = fontSize
-            .clamp(
-              widget.secondary ? -50.0 : 12.0,
-              widget.secondary ? 50.0 : 48.0,
-            )
-            .toDouble();
+        _fontSize = _clampFontSize(fontSize);
       }
-      _offset = (((offset ?? _offset) * 100).round() / 100)
-          .clamp(widget.secondary ? -0.4 : 0.0, 0.4)
-          .toDouble();
+      _offset = _clampOffset(((offset ?? _offset) * 100).round() / 100);
     });
-    widget.onChanged(_fontSize, _offset, _textColor);
+    if (fontSize != null) widget.onFontSizeChanged(_fontSize);
+    if (offset != null) widget.onOffsetChanged(_offset);
   }
 
   void _updateTextColor(int? textColor) {
     setState(() => _textColor = textColor);
-    widget.onChanged(_fontSize, _offset, _textColor);
+    widget.onTextColorChanged(_textColor);
   }
 
   @override
@@ -75,10 +115,8 @@ class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
             value: widget.secondary
                 ? _relativeLabel(_fontSize)
                 : _fontSize.toStringAsFixed(0),
-            onDecrease: () =>
-                _update(fontSize: _fontSize - (widget.secondary ? 10 : 2)),
-            onIncrease: () =>
-                _update(fontSize: _fontSize + (widget.secondary ? 10 : 2)),
+            onDecrease: () => _update(fontSize: _stepFontSize(false)),
+            onIncrease: () => _update(fontSize: _stepFontSize(true)),
             valueWidth: widget.secondary ? 80 : 48,
           ),
         if (widget.showStyle && widget.showColor) _buildColorControl(context),

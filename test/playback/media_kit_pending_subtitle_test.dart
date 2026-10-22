@@ -14,6 +14,7 @@ class _Native extends Fake implements NativePlayer {
   Completer<String>? delayedTracks;
   Completer<void>? delayedSubtitleLoad;
   final commands = <List<String>>[];
+  int rejectedSecondarySelections = 0;
 
   @override
   Future<void> command(
@@ -50,6 +51,13 @@ class _Native extends Fake implements NativePlayer {
     String value, {
     bool waitForInitialization = true,
   }) async {
+    if (int.tryParse(value) != null) {
+      if (property == 'secondary-sid' && properties['sid'] == value) {
+        rejectedSecondarySelections++;
+        return;
+      }
+      if (property == 'sid' && properties['secondary-sid'] == value) return;
+    }
     properties[property] = value;
   }
 }
@@ -71,15 +79,19 @@ class _Player extends Fake implements Player {
   PlayerState get state => const PlayerState();
   final selections = <String>[];
   final opened = <String>[];
+  String? automaticSubtitleSid;
   @override
   Future<void> setSubtitleTrack(SubtitleTrack track) async {
     selections.add(track.id);
-    platform.properties['sid'] = track.id;
+    await platform.setProperty('sid', track.id);
   }
 
   @override
   Future<void> open(Playable playable, {bool play = true}) async {
     opened.add((playable as Media).uri);
+    if (platform.properties['sid'] == 'auto' && automaticSubtitleSid != null) {
+      platform.properties['sid'] = automaticSubtitleSid!;
+    }
   }
 
   @override
@@ -177,6 +189,47 @@ void main() {
         'url': 'https://example.com/next.mkv',
         'autoPlay': false,
       });
+      expect(player.platform.properties['secondary-sid'], 'no');
+    },
+  );
+
+  for (final primary in ['Japanese', 'Off']) {
+    test(
+      'restores default English secondary after primary becomes $primary',
+      () async {
+        player.discover();
+        player.automaticSubtitleSid = '17';
+        await backend.play({
+          'url': 'https://example.com/video.mkv',
+          'autoPlay': false,
+          'secondarySubtitleTrackId': 2,
+        });
+        expect(player.platform.properties['sid'], '17');
+        expect(player.platform.properties['secondary-sid'], 'no');
+        expect(player.platform.rejectedSecondarySelections, greaterThan(0));
+
+        // The manager applies its primary selection after backend.play returns.
+        if (primary == 'Off') {
+          await backend.disableSubtitleTrack();
+        } else {
+          await backend.setSubtitleTrack(1);
+        }
+        expect(player.platform.properties['sid'], primary == 'Off' ? 'no' : '11');
+        expect(player.platform.properties['secondary-sid'], '17');
+        expect(player.platform.properties['secondary-sub-visibility'], 'yes');
+      },
+    );
+  }
+
+  test(
+    'secondary Off cancels a selection rejected by the automatic primary',
+    () async {
+      player.discover();
+      player.platform.properties['sid'] = '17';
+      await backend.setSecondarySubtitle(embeddedTrackId: 2);
+      expect(player.platform.rejectedSecondarySelections, greaterThan(0));
+      await backend.setSecondarySubtitle();
+      await backend.setSubtitleTrack(1);
       expect(player.platform.properties['secondary-sid'], 'no');
     },
   );

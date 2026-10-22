@@ -82,12 +82,29 @@ internal object SubtitleLayoutPlanner {
         if (viewportWidth <= 0 || viewportHeight <= 0 || secondaryHeight <= 0f) return null
         val left = horizontalInset.coerceAtLeast(0f)
         val right = (viewportWidth - horizontalInset).coerceAtLeast(left)
-        var bottom = desiredBottom.coerceAtMost(viewportHeight.toFloat())
+        val minimumBottom = lowerHalfTop + secondaryHeight
+        val maximumBottom = viewportHeight.toFloat()
+        if (minimumBottom > maximumBottom) return null
+        val requestedBottom = desiredBottom.coerceIn(minimumBottom, maximumBottom)
+        var bottom = requestedBottom
         val step = stepPx.coerceAtLeast(1f)
-        while (bottom - secondaryHeight >= lowerHalfTop) {
+        while (bottom >= minimumBottom) {
             val candidate = SubtitleBox(left, bottom - secondaryHeight, right, bottom)
             if (primary.none { intersects(candidate, it, gapPx) }) return candidate
             bottom -= step
+        }
+
+        // A manual offset may land at the halfway boundary or behind another
+        // cue. Check the exact free-space edges before hiding text: a lower
+        // position may fit, or the stepped search may have skipped a small gap.
+        val edges = listOf(minimumBottom, maximumBottom) + primary.flatMap {
+            listOf(it.top - gapPx, it.bottom + gapPx + secondaryHeight)
+        }
+        for (edge in edges.filter { it in minimumBottom..maximumBottom }
+            .distinct().sortedWith(compareBy<Float> { it > requestedBottom }
+                .thenBy { kotlin.math.abs(it - requestedBottom) })) {
+            val candidate = SubtitleBox(left, edge - secondaryHeight, right, edge)
+            if (primary.none { intersects(candidate, it, gapPx) }) return candidate
         }
         return null
     }

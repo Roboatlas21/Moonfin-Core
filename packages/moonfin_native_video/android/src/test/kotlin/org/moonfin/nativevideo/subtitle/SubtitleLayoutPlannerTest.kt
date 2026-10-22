@@ -138,6 +138,61 @@ class SubtitleLayoutPlannerTest {
     }
 
     @Test
+    fun twentyPercentUpwardOffsetClampsMultilineTextInsideLowerHalf() {
+        // At 1080p and size 20, two primary lines and three secondary lines.
+        val primary = SubtitleBox(96f, 901.8f, 1824f, 1036.8f)
+        val placed = SubtitleLayoutPlanner.placeSecondary(
+            primary = listOf(primary),
+            viewportWidth = 1920,
+            viewportHeight = 1080,
+            secondaryHeight = 202.5f,
+            desiredBottom = primary.top - 8f - 0.2f * 1080,
+            gapPx = 8f,
+            stepPx = 8f,
+        )!!
+
+        assertEquals(540f, placed.top)
+        assertEquals(742.5f, placed.bottom)
+        assertTrue(!SubtitleLayoutPlanner.intersects(placed, primary, 8f))
+    }
+
+    @Test
+    fun clampedCueFindsFreeSpaceBelowPositionedPrimaryWithoutOverlap() {
+        val positioned = SubtitleBox(50f, 500f, 950f, 600f)
+        val bottom = SubtitleBox(50f, 900f, 950f, 960f)
+        val placed = SubtitleLayoutPlanner.placeSecondary(
+            primary = listOf(positioned, bottom),
+            viewportWidth = 1000,
+            viewportHeight = 1000,
+            secondaryHeight = 100f,
+            desiredBottom = 560f,
+            gapPx = 8f,
+            stepPx = 8f,
+        )!!
+
+        assertEquals(608f, placed.top)
+        assertEquals(708f, placed.bottom)
+        assertTrue(listOf(positioned, bottom).none {
+            SubtitleLayoutPlanner.intersects(placed, it, 8f)
+        })
+    }
+
+    @Test
+    fun returnsNoPlacementWhenTextIsTallerThanLowerHalf() {
+        assertNull(
+            SubtitleLayoutPlanner.placeSecondary(
+                primary = emptyList(),
+                viewportWidth = 1000,
+                viewportHeight = 1000,
+                secondaryHeight = 501f,
+                desiredBottom = 900f,
+                gapPx = 8f,
+                stepPx = 8f,
+            ),
+        )
+    }
+
+    @Test
     fun returnsNoPlacementWhenLowerHalfIsOccupied() {
         val primary = listOf(SubtitleBox(0f, 500f, 1000f, 1000f))
 

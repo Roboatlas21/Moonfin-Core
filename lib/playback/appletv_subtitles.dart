@@ -11,44 +11,46 @@ Map<String, dynamic> appleTvSubtitleMetadata({
   required UserPreferences prefs,
   required AppLocalizations l10n,
   required List<Map<String, dynamic>> tracks,
-}) => {
-  'tracks': tracks.where((track) {
-    final index = track['index'];
-    return index is int &&
-        index != manager.subtitleStreamIndex &&
-        manager.canUseAsSecondarySubtitle(index);
-  }).toList(),
-  'title': l10n.secondarySubtitleSlot,
-  'menuTitle': l10n.subtitles,
-  'primaryTitle': l10n.primarySubtitleSlot,
-  'secondaryTitle': l10n.secondarySubtitleTrack,
-  'secondaryDelayLabel': l10n.secondaryDelayAdjustment,
-  'off': l10n.off,
-  'cancel': l10n.cancel,
-  'done': l10n.done,
-  'reset': l10n.reset,
-  'defaultLabel': l10n.defaultLabel,
-  'delayLabel': l10n.subtitleDelay,
-  'sizeLabel': l10n.subtitleSize,
-  'positionLabel': l10n.verticalOffset,
-  'colorLabel': l10n.subtitleColour,
-  'primaryFontSize': SubtitleStyle.forResolution(
-    prefs,
-    manager.currentResolution,
-  ).fontSize,
-  'sizeAdjustment': prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
-  'primaryVerticalOffset': SubtitleStyle.forResolution(
-    prefs,
-    manager.currentResolution,
-  ).verticalOffset,
-  'verticalOffset': manager.secondarySubtitleOffset,
-  'textColor': prefs.get(UserPreferences.secondarySubtitleTextColor),
-  'colors': [
-    {'label': l10n.defaultLabel, 'value': -1},
-    {'label': l10n.white, 'value': 0xFFFFFFFF},
-    {'label': l10n.yellow, 'value': 0xFFFFFF00},
-  ],
-};
+}) {
+  final style = SubtitleStyle.forResolution(prefs, manager.currentResolution);
+  final bounds = secondarySubtitleSizeBounds(manager.backend, style.fontSize);
+  return {
+    'tracks': tracks.where((track) {
+      final index = track['index'];
+      return index is int &&
+          index != manager.subtitleStreamIndex &&
+          manager.canUseAsSecondarySubtitle(index);
+    }).toList(),
+    'title': l10n.secondarySubtitleSlot,
+    'menuTitle': l10n.subtitles,
+    'primaryTitle': l10n.primarySubtitleSlot,
+    'secondaryTitle': l10n.secondarySubtitleTrack,
+    'secondaryDelayLabel': l10n.secondaryDelayAdjustment,
+    'off': l10n.off,
+    'cancel': l10n.cancel,
+    'done': l10n.done,
+    'reset': l10n.reset,
+    'defaultLabel': l10n.defaultLabel,
+    'delayLabel': l10n.subtitleDelay,
+    'sizeLabel': l10n.subtitleSize,
+    'positionLabel': l10n.verticalOffset,
+    'colorLabel': l10n.subtitleColour,
+    'primaryFontSize': style.fontSize,
+    'sizeAdjustment': prefs
+        .get(UserPreferences.secondarySubtitleSizeAdjustment)
+        .clamp(bounds.min, bounds.max),
+    'minSizeAdjustment': bounds.min,
+    'maxSizeAdjustment': bounds.max,
+    'primaryVerticalOffset': style.verticalOffset,
+    'verticalOffset': manager.secondarySubtitleOffset,
+    'textColor': prefs.get(UserPreferences.secondarySubtitleTextColor),
+    'colors': [
+      {'label': l10n.defaultLabel, 'value': -1},
+      {'label': l10n.white, 'value': 0xFFFFFFFF},
+      {'label': l10n.yellow, 'value': 0xFFFFFF00},
+    ],
+  };
+}
 
 /// Null means the action belongs to another player control.
 Future<void>? handleAppleTvSubtitleAction(
@@ -93,9 +95,13 @@ Future<void> _saveAppearance(
   final offset = (action['verticalOffset'] as num?)?.toDouble();
   final color = (action['textColor'] as num?)?.toInt();
   if (size != null && size.isFinite) {
+    final bounds = secondarySubtitleSizeBounds(
+      manager.backend,
+      SubtitleStyle.forResolution(prefs, manager.currentResolution).fontSize,
+    );
     await prefs.set(
       UserPreferences.secondarySubtitleSizeAdjustment,
-      size.clamp(-50, 50).toDouble(),
+      size.clamp(bounds.min, bounds.max).toDouble(),
     );
   }
   if (offset != null && offset.isFinite) {

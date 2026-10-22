@@ -1,9 +1,28 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
+import 'package:moonfin/playback/aether_backend.dart';
+import 'package:moonfin/playback/media3_player_backend.dart';
 import 'package:moonfin/playback/subtitle_style.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+class _AppleBackend extends Fake implements AetherBackend {}
+
+class _AndroidBackend extends Fake implements Media3PlayerBackend {}
+
+class _Manager extends PlaybackManager {
+  _Manager(this._backend);
+
+  final PlayerBackend _backend;
+  StreamResolutionResult? resolution;
+
+  @override
+  PlayerBackend get backend => _backend;
+
+  @override
+  StreamResolutionResult? get currentResolution => resolution;
+}
 
 Future<UserPreferences> _prefs() async {
   SharedPreferences.setMockInitialValues(<String, Object>{});
@@ -124,6 +143,81 @@ void main() {
       expect(manager.secondarySubtitleTextColor, isNull);
       expect(manager.secondarySubtitleOffset, 0.16);
       expect(prefs.get(UserPreferences.secondarySubtitleTextColor), -1);
+    },
+  );
+
+  test(
+    'Apple applies usable size bounds without overwriting saved intent',
+    () async {
+      final prefs = await _prefs();
+      final manager = _Manager(_AppleBackend());
+      addTearDown(prefs.dispose);
+      addTearDown(manager.dispose);
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
+      await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(secondarySubtitleSizeBounds(manager.backend, 48), (
+        min: -50.0,
+        max: 9.0,
+      ));
+      expect(manager.secondarySubtitleFontSize, closeTo(52.32, 0.0001));
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
+
+      await prefs.set(UserPreferences.subtitlesTextSize, 24.0);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleFontSize, 36.0);
+
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, -50.0);
+      await prefs.set(UserPreferences.subtitlesTextSize, 12.0);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(secondarySubtitleSizeBounds(manager.backend, 12), (
+        min: -12.0,
+        max: 50.0,
+      ));
+      expect(manager.secondarySubtitleFontSize, closeTo(10.56, 0.0001));
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), -50.0);
+    },
+  );
+
+  test('Apple size bounds follow the active SDR or HDR primary size', () async {
+    final prefs = await _prefs();
+    final manager = _Manager(_AppleBackend());
+    addTearDown(prefs.dispose);
+    addTearDown(manager.dispose);
+    await prefs.set(UserPreferences.subtitlesHdrSeparate, true);
+    await prefs.set(UserPreferences.subtitlesHdrTextSize, 48.0);
+    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
+    for (final (method, expected) in [
+      (StreamPlayMethod.directPlay, 52.32),
+      (StreamPlayMethod.transcode, 30.0),
+    ]) {
+      manager.resolution = StreamResolutionResult(
+        streamUrl: 'https://host/video',
+        mediaSourceId: 'source',
+        playMethod: method,
+        videoRangeType: 'HDR10',
+      );
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleFontSize, closeTo(expected, 0.0001));
+    }
+    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
+  });
+
+  test(
+    'Media3 bounds legacy positive offsets and retains negative travel',
+    () async {
+      final prefs = await _prefs();
+      final manager = _Manager(_AndroidBackend());
+      addTearDown(prefs.dispose);
+      addTearDown(manager.dispose);
+      await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, 0.4);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleOffset, 0.2);
+      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.4);
+
+      await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, -0.4);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleOffset, -0.4);
     },
   );
 }
