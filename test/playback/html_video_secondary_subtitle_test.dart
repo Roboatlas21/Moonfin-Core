@@ -6,13 +6,26 @@ import 'dart:js_interop';
 import 'dart:typed_data';
 import 'dart:ui_web' as ui_web;
 
-import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/playback/html_video_backend.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:web/web.dart' as web;
 
 class _Preferences extends Fake implements UserPreferences {}
+
+class _ViewRegistry extends ui_web.PlatformViewRegistry {
+  late web.HTMLVideoElement video;
+
+  @override
+  bool registerViewFactory(
+    String viewType,
+    Function viewFactory, {
+    bool isVisible = true,
+  }) {
+    video = Function.apply(viewFactory, [0]) as web.HTMLVideoElement;
+    return true;
+  }
+}
 
 Future<void> _until(bool Function() condition) async {
   final deadline = DateTime.now().add(const Duration(seconds: 5));
@@ -50,10 +63,10 @@ void main() {
   }
 
   setUp(() async {
+    final registry = _ViewRegistry();
+    ui_web.debugOverridePlatformViewRegistry(registry);
     backend = HtmlVideoBackend(_Preferences());
-    final view = backend.buildView() as HtmlElementView;
-    final factory = ui_web.platformViewRegistry.getViewFactory(view.viewType);
-    video = (factory as dynamic)(0) as web.HTMLVideoElement;
+    video = registry.video;
     web.document.body!.appendChild(video);
     // A short silent WAV keeps these tests independent of remote media and
     // exercises the real browser clock, track parser, and active cue list.
@@ -83,6 +96,7 @@ void main() {
   });
 
   tearDown(() {
+    ui_web.debugOverridePlatformViewRegistry(null);
     backend.dispose();
     video.remove();
     for (final url in urls) {

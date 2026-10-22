@@ -174,7 +174,7 @@ List<Map<String, dynamic>> _declared(Map<String, dynamic> payload) =>
 
 void main() {
   test('browser secondary requires file delivery even during direct play', () async {
-    const streams = [
+    const streams = <Map<String, dynamic>>[
       {'Type': 'Video', 'Index': 0},
       {'Type': 'Subtitle', 'Index': 2, 'Codec': 'subrip'},
     ];
