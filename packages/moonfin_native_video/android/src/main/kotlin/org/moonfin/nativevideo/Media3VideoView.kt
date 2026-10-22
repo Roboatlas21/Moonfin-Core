@@ -2363,6 +2363,7 @@ class Media3VideoView(
                     selectedSubtitleIsBitmap = false
                     selectedExternalSubtitleUrl = null
                     subtitleTrackEnabled = false
+                    secondarySubtitleOverlay.setPrimaryEnabled(false)
 
                     pendingSubtitleIndex = null
                     pendingSubtitleCodec = null
@@ -2544,6 +2545,7 @@ class Media3VideoView(
                     selectedSubtitleIsBitmap = false
                     selectedExternalSubtitleUrl = null
                     subtitleTrackEnabled = false
+                    secondarySubtitleOverlay.setPrimaryEnabled(false)
                     pendingSubtitleIndex = null
                     pendingSubtitleCodec = null
                     pendingSubtitleIsExternal = null
@@ -2694,6 +2696,7 @@ class Media3VideoView(
         selectedExternalSubtitleUrl = null
         val forceSubtitlesDisabledOnStart = args["forceSubtitlesDisabledOnStart"] as? Boolean ?: false
         subtitleTrackEnabled = !forceSubtitlesDisabledOnStart
+        secondarySubtitleOverlay.setPrimaryEnabled(subtitleTrackEnabled)
         pendingSubtitleIndex = null
         pendingSubtitleCodec = null
         pendingSubtitleIsExternal = null
@@ -5039,6 +5042,7 @@ class Media3VideoView(
             selectedSubtitleIsBitmap = pendingSubtitleIsBitmap ?: false
             selectedExternalSubtitleUrl = pendingExternalSubtitleUrl?.takeIf { it.isNotBlank() }
             subtitleTrackEnabled = true
+            secondarySubtitleOverlay.setPrimaryEnabled(true)
             applyTrackSelectorForCurrentSource()
             refreshSubtitleRendererMode()
 
@@ -5085,6 +5089,7 @@ class Media3VideoView(
         selectedSubtitleIsBitmap = false
         selectedExternalSubtitleUrl = null
         subtitleTrackEnabled = true
+        secondarySubtitleOverlay.setPrimaryEnabled(true)
         applyTrackSelectorForCurrentSource()
         refreshSubtitleRendererMode()
     }

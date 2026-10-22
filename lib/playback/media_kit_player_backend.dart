@@ -2899,6 +2899,10 @@ class MediaKitPlayerBackend extends PlayerBackend
     final generation = ++_subtitleSelectionGeneration;
     _pendingEmbeddedSubtitle = null;
     _subtitlesDisabled = true;
+    // Off is distinct from a dialogue gap: release the previous primary layout.
+    _lastPrimaryStack = null;
+    _lastSecondaryStackPosition = null;
+    _lastSecondaryPositionCheck = null;
     await _player.setSubtitleTrack(SubtitleTrack.no());
     if (!_isLatestSubtitleSelection(generation)) return;
     try {
@@ -2909,6 +2913,9 @@ class MediaKitPlayerBackend extends PlayerBackend
     } catch (_) {}
     if (!_isLatestSubtitleSelection(generation)) return;
     await _applyPendingSecondarySubtitle();
+    if (_isLatestSubtitleSelection(generation)) {
+      await _refreshStackedSecondaryPosition(force: true);
+    }
   }
 
   @override
@@ -3141,7 +3148,7 @@ class MediaKitPlayerBackend extends PlayerBackend
       if (!_isCurrentSecondarySubtitle(generation) || !_secondarySubtitleRequested) return;
       final fontSize = _lastFontSize ?? 24;
       final lineHeight = fontSize / 24 * 0.055;
-      if (primaryAss.isNotEmpty) {
+      if (!_subtitlesDisabled && primaryAss.isNotEmpty) {
         _lastPrimaryStack = (
           alignment: int.tryParse(_mpvSrtAlignment.firstMatch(primaryAss)?[1] ?? '') ?? 2,
           height: _subtitleLineCount(primaryAss, fontSize) * lineHeight,
@@ -3160,6 +3167,7 @@ class MediaKitPlayerBackend extends PlayerBackend
       // the visually fixed top anchor can expand downward. For middle/bottom
       // the bottom edge stays fixed regardless of secondary line count.
       final secondaryTop = stackedSecondaryTop(
+        primaryEnabled: !_subtitlesDisabled,
         alignment: alignment,
         primaryAnchor: primaryAnchor,
         primaryHeight: primaryHeight,

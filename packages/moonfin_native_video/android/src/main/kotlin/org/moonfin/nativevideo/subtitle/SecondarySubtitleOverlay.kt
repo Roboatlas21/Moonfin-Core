@@ -68,6 +68,7 @@ internal class SecondarySubtitleOverlay(
     private var unmodifiedPrimaryCues: List<Cue> = emptyList()
     private var lastPrimaryForStacking: Cue? = null
     private var lastPrimaryWasCentred = false
+    private var primaryEnabled = true
 
     init {
         view.setApplyEmbeddedStyles(false)
@@ -118,7 +119,18 @@ internal class SecondarySubtitleOverlay(
         renderCues()
     }
 
+    /** Explicit Off clears the saved cue anchor; an ordinary dialogue gap does not. */
+    fun setPrimaryEnabled(enabled: Boolean) {
+        if (primaryEnabled == enabled) return
+        primaryEnabled = enabled
+        unmodifiedPrimaryCues = emptyList()
+        lastPrimaryForStacking = null
+        lastPrimaryWasCentred = false
+        renderCues()
+    }
+
     fun updatePrimaryCues(cues: List<Cue>) {
+        if (!primaryEnabled) return
         unmodifiedPrimaryCues = cues
         renderCues()
     }
@@ -138,6 +150,20 @@ internal class SecondarySubtitleOverlay(
 
     private fun renderCues() {
         val active = secondaryCues.orEmpty()
+        if (!primaryEnabled) {
+            // Standalone secondary text: no invisible primary gap or relative
+            // offset; the saved settings take effect again when Primary is On.
+            primaryView.setCues(emptyList())
+            view.visibility = View.VISIBLE
+            view.setCues(if (active.isEmpty()) emptyList() else listOf(
+                Cue.Builder()
+                    .setText(active.joinToString("\n") { it.text.toString() })
+                    .setLine((1f - primaryBottomPaddingFraction).coerceIn(0f, 1f), Cue.LINE_TYPE_FRACTION)
+                    .setLineAnchor(Cue.ANCHOR_TYPE_END)
+                    .build(),
+            ))
+            return
+        }
         val width = view.width
         val height = view.height
         // Keep a fixed centre anchor while the secondary track is selected,

@@ -1033,7 +1033,7 @@ class HtmlVideoBackend extends PlayerBackend
     }
 
     final secondaryLine = placement == null
-        ? 0.96 - _secondaryOffset
+        ? 0.96 // Standalone bottom; secondary spacing remains saved.
         : switch (row) {
             2 => placement.bottom + gap,
             1 => placement.centre - gap / 2,

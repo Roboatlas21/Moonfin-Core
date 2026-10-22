@@ -457,6 +457,46 @@ void main() {
     expect(cue.has('moonfinStackedMiddleLine'), isFalse);
   });
 
+  test('Primary Off uses normal bottom and retains secondary spacing', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:03.000\n{\\an7}Top primary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:09.000\nSecondary\n'),
+      codec: 'vtt',
+    );
+    final second = (await loadedSecondary()).track.cues![0] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => primary.track.activeCues?.length == 1 &&
+        second.lineAlign == 'start');
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
+    final stackedLine = (second.line.dartify() as num).toDouble();
+
+    // Silence does not discard the layout of the selected primary track.
+    await backend.seekTo(const Duration(seconds: 4));
+    await _until(() => primary.track.activeCues?.length == 0);
+    expect(second.lineAlign, 'start');
+    expect(second.line.dartify(), closeTo(stackedLine, 0.01));
+
+    await backend.disableSubtitleTrack();
+    expect(second.lineAlign, 'end');
+    expect(second.line.dartify(), closeTo(96, 0.01));
+    expect(second.position.dartify(), 50);
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+    expect(second.line.dartify(), closeTo(96, 0.01));
+
+    // Restoring primary uses the newly saved +6% spacing again.
+    await backend.setSubtitleTrack(1);
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => primary.track.activeCues?.length == 1 &&
+        second.lineAlign == 'start');
+    expect(second.line.dartify(), closeTo(stackedLine + 2, 0.1));
+  });
+
   test('WebVTT custom middle alignment is centred and restored on Off', () async {
     await backend.setSubtitleTrack(
       1, isExternalSubtitle: true,
