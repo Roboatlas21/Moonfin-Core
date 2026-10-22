@@ -181,6 +181,15 @@ abstract final class TrackPicker {
         (!secondary ||
             secondaryControls?.supportsSecondarySubtitleStyle == true ||
             secondaryControls?.supportsSecondarySubtitlePosition == true)) {
+      final style = SubtitleStyle.forResolution(
+        prefs,
+        manager.currentResolution,
+      );
+      Future<void> saveSecondaryAppearance(Future<void> update) async {
+        await update;
+        await syncSecondarySubtitleStyle(manager, prefs);
+      }
+
       footer = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -192,83 +201,60 @@ abstract final class TrackPicker {
                 color: Colors.white.withValues(alpha: 0.08),
               ),
             ),
-          ListenableBuilder(
-            listenable: prefs,
-            builder: (context, _) {
-              final style = SubtitleStyle.forResolution(
-                prefs,
-                manager.currentResolution,
-              );
-              final bounds = secondarySubtitleSizeBounds(
-                backend,
-                style.fontSize,
-              );
-              Future<void> saveSecondaryAppearance(Future<void> update) async {
-                await update;
-                await syncSecondarySubtitleStyle(manager, prefs);
-              }
-
-              return SubtitleAppearanceFooter(
-                showStyle:
-                    !secondary ||
-                    secondaryControls!.supportsSecondarySubtitleStyle,
-                showPosition:
-                    !secondary ||
-                    secondaryControls!.supportsSecondarySubtitlePosition,
-                showColor: secondary,
-                secondary: secondary,
-                minFontSize: secondary ? bounds.min : null,
-                maxFontSize: secondary ? bounds.max : null,
-                maxOffset: secondary
-                    ? secondarySubtitleMaxOffset(backend)
-                    : 0.4,
-                initialFontSize: secondary
-                    ? prefs.get(UserPreferences.secondarySubtitleSizeAdjustment)
-                    : style.fontSize,
-                initialOffset: secondary
-                    ? prefs.get(UserPreferences.secondarySubtitleOffsetPosition)
-                    : style.verticalOffset,
-                initialTextColor: switch (prefs.get(
-                  UserPreferences.secondarySubtitleTextColor,
-                )) {
-                  -1 => null,
-                  final color => color,
-                },
-                defaultTextColor: style.textColor,
-                onFontSizeChanged: (fontSize) => unawaited(
-                  secondary
-                      ? saveSecondaryAppearance(
-                          prefs.set(
-                            UserPreferences.secondarySubtitleSizeAdjustment,
-                            fontSize,
-                          ),
-                        )
-                      : setPrimarySubtitleSize(manager, prefs, fontSize),
-                ),
-                onOffsetChanged: (offset) => unawaited(
-                  secondary
-                      ? saveSecondaryAppearance(
-                          prefs.set(
-                            UserPreferences.secondarySubtitleOffsetPosition,
-                            offset,
-                          ),
-                        )
-                      : setPrimarySubtitleAppearance(
-                          manager,
-                          prefs,
-                          verticalOffset: offset,
-                        ),
-                ),
-                onTextColorChanged: (textColor) => unawaited(
-                  saveSecondaryAppearance(
-                    prefs.set(
-                      UserPreferences.secondarySubtitleTextColor,
-                      textColor ?? -1,
-                    ),
-                  ),
-                ),
-              );
+          SubtitleAppearanceFooter(
+            showStyle:
+                !secondary || secondaryControls!.supportsSecondarySubtitleStyle,
+            showPosition:
+                !secondary ||
+                secondaryControls!.supportsSecondarySubtitlePosition,
+            showColor: secondary,
+            secondary: secondary,
+            maxOffset: secondary ? secondarySubtitleMaxOffset(backend) : 0.4,
+            initialFontSize: secondary
+                ? prefs.get(UserPreferences.secondarySubtitleSizeAdjustment)
+                : style.fontSize,
+            initialOffset: secondary
+                ? prefs.get(UserPreferences.secondarySubtitleOffsetPosition)
+                : style.verticalOffset,
+            initialTextColor: switch (prefs.get(
+              UserPreferences.secondarySubtitleTextColor,
+            )) {
+              -1 => null,
+              final color => color,
             },
+            defaultTextColor: style.textColor,
+            onFontSizeChanged: (fontSize) => unawaited(
+              secondary
+                  ? saveSecondaryAppearance(
+                      prefs.set(
+                        UserPreferences.secondarySubtitleSizeAdjustment,
+                        fontSize,
+                      ),
+                    )
+                  : setPrimarySubtitleSize(manager, prefs, fontSize),
+            ),
+            onOffsetChanged: (offset) => unawaited(
+              secondary
+                  ? saveSecondaryAppearance(
+                      prefs.set(
+                        UserPreferences.secondarySubtitleOffsetPosition,
+                        offset,
+                      ),
+                    )
+                  : setPrimarySubtitleAppearance(
+                      manager,
+                      prefs,
+                      verticalOffset: offset,
+                    ),
+            ),
+            onTextColorChanged: (textColor) => unawaited(
+              saveSecondaryAppearance(
+                prefs.set(
+                  UserPreferences.secondarySubtitleTextColor,
+                  textColor ?? -1,
+                ),
+              ),
+            ),
           ),
         ],
       );

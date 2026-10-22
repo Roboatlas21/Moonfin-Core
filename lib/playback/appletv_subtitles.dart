@@ -13,7 +13,6 @@ Map<String, dynamic> appleTvSubtitleMetadata({
   required List<Map<String, dynamic>> tracks,
 }) {
   final style = SubtitleStyle.forResolution(prefs, manager.currentResolution);
-  final bounds = secondarySubtitleSizeBounds(manager.backend, style.fontSize);
   return {
     'tracks': tracks.where((track) {
       final index = track['index'];
@@ -36,11 +35,7 @@ Map<String, dynamic> appleTvSubtitleMetadata({
     'positionLabel': l10n.verticalOffset,
     'colorLabel': l10n.textFillColor,
     'primaryFontSize': style.fontSize,
-    'sizeAdjustment': prefs
-        .get(UserPreferences.secondarySubtitleSizeAdjustment)
-        .clamp(bounds.min, bounds.max),
-    'minSizeAdjustment': bounds.min,
-    'maxSizeAdjustment': bounds.max,
+    'sizeAdjustment': prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
     'primaryVerticalOffset': style.verticalOffset,
     'verticalOffset': manager.secondarySubtitleOffset,
     'textColor': prefs.get(UserPreferences.secondarySubtitleTextColor),
@@ -95,13 +90,9 @@ Future<void> _saveAppearance(
   final offset = (action['verticalOffset'] as num?)?.toDouble();
   final color = (action['textColor'] as num?)?.toInt();
   if (size != null && size.isFinite) {
-    final bounds = secondarySubtitleSizeBounds(
-      manager.backend,
-      SubtitleStyle.forResolution(prefs, manager.currentResolution).fontSize,
-    );
     await prefs.set(
       UserPreferences.secondarySubtitleSizeAdjustment,
-      size.clamp(bounds.min, bounds.max).toDouble(),
+      size.clamp(-50.0, 50.0).toDouble(),
     );
   }
   if (offset != null && offset.isFinite) {

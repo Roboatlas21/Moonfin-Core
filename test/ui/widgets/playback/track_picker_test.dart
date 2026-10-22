@@ -282,78 +282,58 @@ void main() {
     },
   );
 
-  for (final (primary, saved, effective, reverse) in [
-    (48.0, 50.0, 9.0, 0.0),
-    (12.0, -50.0, -12.0, -10.0),
-    (20.0, -50.0, -47.0, -40.0),
-  ]) {
-    testWidgets(
-      'Apple size stops at $effective% and reverses onto the normal steps',
-      (tester) async {
-        final prefs = GetIt.instance<UserPreferences>();
-        await prefs.set(UserPreferences.subtitlesTextSize, primary);
-        await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, saved);
-        final manager = _Manager(_AppleBackend());
-        addTearDown(manager.dispose);
-        await syncSecondarySubtitleStyle(manager, prefs);
-        await openPicker(tester, manager, secondary: true);
-        final label = '${effective > 0 ? '+' : ''}${effective.round()}%';
-        expect(find.text(label), findsOneWidget);
-
-        await tester.tap(
-          find.byTooltip(
-            effective > 0
-                ? l10n.increaseValue(l10n.subtitleSize)
-                : l10n.decreaseValue(l10n.subtitleSize),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(find.text(label), findsOneWidget);
-        expect(
-          prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
-          effective,
-        );
-
-        await tester.tap(
-          find.byTooltip(
-            effective > 0
-                ? l10n.decreaseValue(l10n.subtitleSize)
-                : l10n.increaseValue(l10n.subtitleSize),
-          ),
-        );
-        await tester.pumpAndSettle();
-        expect(
-          prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
-          reverse,
-        );
-        expect(
-          manager.secondarySubtitleFontSize,
-          reverse == 0
-              ? isNull
-              : closeTo(primary * (1 + reverse / 100), 0.0001),
-        );
-      },
-    );
-  }
-
-  testWidgets('open Apple size control follows a changed primary size', (
+  testWidgets('Apple keeps the chosen size percentage when the cap is reached', (
     tester,
   ) async {
     final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
     await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
     final manager = _Manager(_AppleBackend());
     addTearDown(manager.dispose);
+    await syncSecondarySubtitleStyle(manager, prefs);
     await openPicker(tester, manager, secondary: true);
+
     expect(find.text('+50%'), findsOneWidget);
-    await setPrimarySubtitleSize(manager, prefs, 48.0);
+    expect(manager.secondarySubtitleFontSize, 48.0);
+    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.subtitleSize)));
     await tester.pumpAndSettle();
-    expect(find.text('+9%'), findsOneWidget);
-    expect(manager.secondarySubtitleFontSize, closeTo(52.32, 0.0001));
     expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
+    expect(find.text('+50%'), findsOneWidget);
+    expect(manager.secondarySubtitleFontSize, 48.0);
+
     await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.subtitleSize)));
     await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 0.0);
-    expect(manager.secondarySubtitleFontSize, isNull);
+    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 40.0);
+    expect(find.text('+40%'), findsOneWidget);
+    expect(manager.secondarySubtitleFontSize, 48.0);
+
+    await setPrimarySubtitleSize(manager, prefs, 24.0);
+    await tester.pumpAndSettle();
+    expect(find.text('+40%'), findsOneWidget);
+    expect(manager.secondarySubtitleFontSize, closeTo(33.6, 0.0001));
+  });
+
+  testWidgets('Apple retains -50% despite the minimum rendered size', (
+    tester,
+  ) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.subtitlesTextSize, 12.0);
+    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, -50.0);
+    final manager = _Manager(_AppleBackend());
+    addTearDown(manager.dispose);
+    await syncSecondarySubtitleStyle(manager, prefs);
+    await openPicker(tester, manager, secondary: true);
+
+    expect(find.text('-50%'), findsOneWidget);
+    expect(manager.secondarySubtitleFontSize, 12.0);
+    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.subtitleSize)));
+    await tester.pumpAndSettle();
+    expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), -50.0);
+
+    await setPrimarySubtitleSize(manager, prefs, 40.0);
+    await tester.pumpAndSettle();
+    expect(find.text('-50%'), findsOneWidget);
+    expect(manager.secondarySubtitleFontSize, 20.0);
   });
 
   testWidgets('colour and position edits preserve capped Apple size intent', (
@@ -365,7 +345,7 @@ void main() {
     final manager = _Manager(_AppleBackend());
     addTearDown(manager.dispose);
     await openPicker(tester, manager, secondary: true);
-    expect(find.text('+9%'), findsOneWidget);
+    expect(find.text('+50%'), findsOneWidget);
 
     await tester.tap(find.byTooltip(l10n.playerTooltipPrevious));
     await tester.pumpAndSettle();
@@ -375,7 +355,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.02);
     expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
-    expect(manager.secondarySubtitleFontSize, closeTo(52.32, 0.0001));
+    expect(manager.secondarySubtitleFontSize, 48.0);
 
     await setPrimarySubtitleSize(manager, prefs, 24.0);
     await tester.pumpAndSettle();

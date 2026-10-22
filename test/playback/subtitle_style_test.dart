@@ -147,39 +147,41 @@ void main() {
   );
 
   test(
-    'Apple applies usable size bounds without overwriting saved intent',
+    'Apple caps effective size at 12–48 without changing the saved percentage',
     () async {
       final prefs = await _prefs();
       final manager = _Manager(_AppleBackend());
       addTearDown(prefs.dispose);
       addTearDown(manager.dispose);
-      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
+
       await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
       await syncSecondarySubtitleStyle(manager, prefs);
-      expect(secondarySubtitleSizeBounds(manager.backend, 48), (
-        min: -50.0,
-        max: 9.0,
-      ));
-      expect(manager.secondarySubtitleFontSize, closeTo(52.32, 0.0001));
+      expect(manager.secondarySubtitleFontSize, 48.0);
       expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
 
       await prefs.set(UserPreferences.subtitlesTextSize, 24.0);
       await syncSecondarySubtitleStyle(manager, prefs);
       expect(manager.secondarySubtitleFontSize, 36.0);
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
 
-      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, -50.0);
       await prefs.set(UserPreferences.subtitlesTextSize, 12.0);
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, -50.0);
       await syncSecondarySubtitleStyle(manager, prefs);
-      expect(secondarySubtitleSizeBounds(manager.backend, 12), (
-        min: -12.0,
-        max: 50.0,
-      ));
-      expect(manager.secondarySubtitleFontSize, closeTo(10.56, 0.0001));
+      expect(manager.secondarySubtitleFontSize, 12.0);
       expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), -50.0);
+
+      await prefs.set(UserPreferences.subtitlesTextSize, 40.0);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleFontSize, 20.0);
+
+      await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 0.0);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleFontSize, isNull);
     },
   );
 
-  test('Apple size bounds follow the active SDR or HDR primary size', () async {
+  test('Apple cap follows the active SDR or HDR primary size', () async {
     final prefs = await _prefs();
     final manager = _Manager(_AppleBackend());
     addTearDown(prefs.dispose);
@@ -188,7 +190,7 @@ void main() {
     await prefs.set(UserPreferences.subtitlesHdrTextSize, 48.0);
     await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
     for (final (method, expected) in [
-      (StreamPlayMethod.directPlay, 52.32),
+      (StreamPlayMethod.directPlay, 48.0),
       (StreamPlayMethod.transcode, 30.0),
     ]) {
       manager.resolution = StreamResolutionResult(
@@ -198,7 +200,7 @@ void main() {
         videoRangeType: 'HDR10',
       );
       await syncSecondarySubtitleStyle(manager, prefs);
-      expect(manager.secondarySubtitleFontSize, closeTo(expected, 0.0001));
+      expect(manager.secondarySubtitleFontSize, expected);
     }
     expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
   });

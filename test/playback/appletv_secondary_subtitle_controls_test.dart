@@ -96,7 +96,7 @@ void main() {
   });
 
   test(
-    'native size menu and actions honor the current renderer bounds',
+    'native size menu keeps the percentage while rendering caps at 12–48',
     () async {
       await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
       await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
@@ -106,17 +106,16 @@ void main() {
         l10n: AppLocalizationsEn(),
         tracks: [],
       );
-      expect(metadata['sizeAdjustment'], 9.0);
-      expect(metadata['maxSizeAdjustment'], 9.0);
-      expect(metadata['minSizeAdjustment'], -50.0);
-      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
+      expect(metadata['sizeAdjustment'], 50.0);
+      expect(metadata.containsKey('minSizeAdjustment'), isFalse);
+      expect(metadata.containsKey('maxSizeAdjustment'), isFalse);
       await handleAppleTvSubtitleAction(
         {'event': 'configureSecondarySubtitleStyle', 'sizeAdjustment': 50.0},
         manager,
         prefs,
       );
-      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 9.0);
-      expect(manager.secondarySubtitleFontSize, closeTo(52.32, 0.0001));
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), 50.0);
+      expect(manager.secondarySubtitleFontSize, 48.0);
 
       await prefs.set(UserPreferences.subtitlesTextSize, 12.0);
       await handleAppleTvSubtitleAction(
@@ -124,8 +123,8 @@ void main() {
         manager,
         prefs,
       );
-      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), -12.0);
-      expect(manager.secondarySubtitleFontSize, closeTo(10.56, 0.0001));
+      expect(prefs.get(UserPreferences.secondarySubtitleSizeAdjustment), -50.0);
+      expect(manager.secondarySubtitleFontSize, 12.0);
     },
   );
 
