@@ -19,7 +19,7 @@ import '../overlay_sheet.dart';
 import '../progress_snack_bar.dart';
 import '../track_selector_dialog.dart';
 import 'delay_footer.dart';
-import 'secondary_subtitle_appearance_footer.dart';
+import 'subtitle_appearance_footer.dart';
 import 'track_choices.dart';
 
 /// Runs a change to the player, returning false when it was refused.
@@ -139,8 +139,9 @@ abstract final class TrackPicker {
       );
     }
     Widget? footer;
-    if (secondary &&
-        (secondaryControls?.supportsSecondarySubtitleStyle == true ||
+    if (!audio &&
+        (!secondary ||
+            secondaryControls?.supportsSecondarySubtitleStyle == true ||
             secondaryControls?.supportsSecondarySubtitlePosition == true)) {
       final style = SubtitleStyle.forResolution(
         prefs,
@@ -156,15 +157,26 @@ abstract final class TrackPicker {
               color: Colors.white.withValues(alpha: 0.08),
             ),
           ),
-          SecondarySubtitleAppearanceFooter(
-            showStyle: secondaryControls!.supportsSecondarySubtitleStyle,
-            showPosition: secondaryControls.supportsSecondarySubtitlePosition,
-            initialFontSize:
-                manager.secondarySubtitleFontSize ?? style.fontSize,
+          SubtitleAppearanceFooter(
+            showStyle:
+                !secondary || secondaryControls!.supportsSecondarySubtitleStyle,
+            showPosition:
+                secondary &&
+                secondaryControls!.supportsSecondarySubtitlePosition,
+            showColor: secondary,
+            minFontSize: secondary ? 8 : 12,
+            maxFontSize: secondary ? 72 : 48,
+            initialFontSize: secondary
+                ? manager.secondarySubtitleFontSize ?? style.fontSize
+                : style.fontSize,
             initialOffset: manager.secondarySubtitleOffset,
             initialTextColor: manager.secondarySubtitleTextColor,
             defaultTextColor: style.textColor,
             onChanged: (fontSize, offset, textColor) {
+              if (!secondary) {
+                unawaited(setPrimarySubtitleSize(manager, prefs, fontSize));
+                return;
+              }
               unawaited(
                 manager.configureSecondarySubtitleStyle(
                   fontSize: fontSize,

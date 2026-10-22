@@ -6,7 +6,7 @@ import 'subtitle_style.dart';
 
 /// The native tvOS menus use the same eligibility, selection and saved
 /// appearance as the Flutter picker. Both video and Live TV use this bridge.
-Map<String, dynamic> appleTvSecondarySubtitleMetadata({
+Map<String, dynamic> appleTvSubtitleMetadata({
   required PlaybackManager manager,
   required UserPreferences prefs,
   required AppLocalizations l10n,
@@ -27,6 +27,10 @@ Map<String, dynamic> appleTvSecondarySubtitleMetadata({
   'sizeLabel': l10n.subtitleSize,
   'positionLabel': l10n.verticalOffset,
   'colorLabel': l10n.textFillColor,
+  'primaryFontSize': SubtitleStyle.forResolution(
+    prefs,
+    manager.currentResolution,
+  ).fontSize,
   'fontSize':
       manager.secondarySubtitleFontSize ??
       SubtitleStyle.forResolution(prefs, manager.currentResolution).fontSize,
@@ -45,12 +49,16 @@ Map<String, dynamic> appleTvSecondarySubtitleMetadata({
 };
 
 /// Null means the action belongs to another player control.
-Future<void>? handleAppleTvSecondarySubtitleAction(
+Future<void>? handleAppleTvSubtitleAction(
   Map<String, dynamic> action,
   PlaybackManager manager,
   UserPreferences prefs,
 ) {
   switch (action['event']) {
+    case 'setSubtitleSize':
+      final size = (action['fontSize'] as num?)?.toDouble();
+      if (size == null) return Future<void>.value();
+      return setPrimarySubtitleSize(manager, prefs, size);
     case 'selectSecondarySubtitle':
       final index = (action['index'] as num?)?.toInt();
       if (index == null) return Future<void>.value();

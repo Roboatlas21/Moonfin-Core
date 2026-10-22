@@ -20,7 +20,7 @@ import '../../../data/repositories/item_mutation_repository.dart';
 import '../../../auth/repositories/user_repository.dart';
 import '../../../playback/cinema_skip_controller.dart';
 import '../../../playback/appletv_backend.dart';
-import '../../../playback/appletv_secondary_subtitles.dart';
+import '../../../playback/appletv_subtitles.dart';
 import '../../../playback/playback_profile_diagnostics.dart';
 import '../../../syncplay/syncplay_manager.dart';
 import '../../theme/app_theme_controller.dart';
@@ -1481,7 +1481,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         manager.subtitleStreamIndex,
         audio: false,
       ),
-      secondarySubtitles: appleTvSecondarySubtitleMetadata(
+      subtitleControls: appleTvSubtitleMetadata(
         manager: manager,
         prefs: GetIt.instance<UserPreferences>(),
         l10n: AppLocalizations.of(context),
@@ -1691,13 +1691,13 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   void _handleUiAction(Map<String, dynamic> action) {
     final manager = _manager;
     if (manager == null) return;
-    final secondaryAction = handleAppleTvSecondarySubtitleAction(
+    final subtitleAction = handleAppleTvSubtitleAction(
       action,
       manager,
       GetIt.instance<UserPreferences>(),
     );
-    if (secondaryAction != null) {
-      unawaited(secondaryAction.then((_) {
+    if (subtitleAction != null) {
+      unawaited(subtitleAction.then((_) {
         if (mounted) _pushMetadata();
       }));
       return;

@@ -12,15 +12,41 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _Backend extends Fake implements MediaKitPlayerBackend {
   final audioDelays = <double>[];
+  final fontSizes = <double?>[];
+  int? textColor;
+
+  @override
+  bool get supportsSecondarySubtitleDelay => true;
+  @override
+  bool get supportsSecondarySubtitleStyle => false;
+  @override
+  bool get supportsSecondarySubtitlePosition => true;
+
+  @override
+  Future<void> configureSubtitleStyle({
+    int? textColor,
+    int? backgroundColor,
+    int? strokeColor,
+    double? fontSize,
+    int? fontWeight,
+    double? verticalOffset,
+  }) async {
+    fontSizes.add(fontSize);
+    this.textColor = textColor;
+  }
 
   @override
   Future<void> setAudioDelay(double seconds) async => audioDelays.add(seconds);
 }
 
 class _Manager extends PlaybackManager {
-  _Manager(this._backend);
+  _Manager(this._backend, {this.resolution});
 
   final PlayerBackend _backend;
+  final StreamResolutionResult? resolution;
+
+  @override
+  StreamResolutionResult? get currentResolution => resolution;
 
   @override
   PlayerBackend? get backend => _backend;
@@ -48,6 +74,7 @@ void main() {
     WidgetTester tester,
     PlaybackManager manager, {
     bool secondary = false,
+    bool audio = true,
     ValueChanged<bool>? onDialogOpenChanged,
   }) async {
     await tester.pumpWidget(
@@ -59,7 +86,7 @@ void main() {
             onPressed: () => TrackPicker.show(
               context,
               manager: manager,
-              audio: !secondary,
+              audio: audio && !secondary,
               secondary: secondary,
               clientFor: (_) => throw UnimplementedError(),
               onDialogOpenChanged: onDialogOpenChanged,
@@ -75,7 +102,11 @@ void main() {
 
   testWidgets('reports its dialog opening and closing', (tester) async {
     final events = <bool>[];
-    await openPicker(tester, PlaybackManager(), onDialogOpenChanged: events.add);
+    await openPicker(
+      tester,
+      PlaybackManager(),
+      onDialogOpenChanged: events.add,
+    );
     expect(find.byType(Dialog), findsOneWidget);
     expect(events, [true]);
 
@@ -87,14 +118,18 @@ void main() {
 
   // Issue #1141: the delay is set from a bar that leaves the picture in view
   // rather than from under the track list.
-  testWidgets('the audio delay opens in a bar that leaves the picture undimmed', (
-    tester,
-  ) async {
-    final backend = _Backend();
-    final events = <bool>[];
-    await openPicker(tester, _Manager(backend), onDialogOpenChanged: events.add);
-    expect(find.text(l10n.none), findsOneWidget);
-    expect(find.byType(AnimatedModalBarrier), findsOneWidget);
+  testWidgets(
+    'the audio delay opens in a bar that leaves the picture undimmed',
+    (tester) async {
+      final backend = _Backend();
+      final events = <bool>[];
+      await openPicker(
+        tester,
+        _Manager(backend),
+        onDialogOpenChanged: events.add,
+      );
+      expect(find.text(l10n.none), findsOneWidget);
+      expect(find.byType(AnimatedModalBarrier), findsOneWidget);
 
     await tester.tap(find.text(l10n.audioDelay));
     await tester.pumpAndSettle();
@@ -107,15 +142,16 @@ void main() {
     expect(backend.audioDelays, [0.1]);
     expect(TrackPicker.audioDelay, 0.1);
 
-    Navigator.of(tester.element(find.byType(Dialog))).pop();
-    await tester.pumpAndSettle();
-    expect(events, [true, false, true, false]);
-  });
+      Navigator.of(tester.element(find.byType(Dialog))).pop();
+      await tester.pumpAndSettle();
+      expect(events, [true, false, true, false]);
+    },
+  );
 
   testWidgets('the secondary subtitle delay opens in the same bar', (
     tester,
   ) async {
-    final manager = PlaybackManager();
+    final manager = _Manager(_Backend());
     await openPicker(tester, manager, secondary: true);
 
     await tester.tap(find.text(l10n.subtitleDelay));
@@ -133,7 +169,10 @@ void main() {
     await openPicker(tester, _Manager(backend));
     await tester.tap(find.text(l10n.audioDelay));
     await tester.pumpAndSettle();
-    expect(Focus.of(tester.element(find.text(l10n.reset))).hasPrimaryFocus, isTrue);
+    expect(
+      Focus.of(tester.element(find.text(l10n.reset))).hasPrimaryFocus,
+      isTrue,
+    );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
@@ -141,4 +180,43 @@ void main() {
     await tester.pump();
     expect(backend.audioDelays, [0.1]);
   });
+
+  for (final (name, method, separate, hdr) in [
+    ('shared size for HDR', StreamPlayMethod.directPlay, false, false),
+    ('separate HDR size', StreamPlayMethod.directPlay, true, true),
+    ('SDR size for transcoded HDR', StreamPlayMethod.transcode, true, false),
+  ]) {
+    testWidgets('primary picker applies and saves $name', (tester) async {
+      final prefs = GetIt.instance<UserPreferences>();
+      await prefs.set(UserPreferences.subtitlesHdrSeparate, separate);
+      await prefs.set(UserPreferences.subtitlesHdrTextSize, 30.0);
+      await prefs.set(UserPreferences.subtitlesTextColor, 0xFF00FF00);
+      final backend = _Backend();
+      final manager = _Manager(
+        backend,
+        resolution: StreamResolutionResult(
+          streamUrl: 'https://host/stream',
+          mediaSourceId: 'source',
+          playMethod: method,
+          videoRangeType: 'HDR10',
+        ),
+      );
+      addTearDown(manager.dispose);
+      await openPicker(tester, manager, audio: false);
+      expect(find.text(l10n.subtitleSize), findsOneWidget);
+      expect(find.text(l10n.textFillColor), findsNothing);
+      expect(find.text(l10n.verticalOffset), findsNothing);
+
+      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.subtitleSize)));
+      await tester.pumpAndSettle();
+      expect(backend.fontSizes, [hdr ? 32.0 : 22.0]);
+      expect(backend.textColor, hdr ? 0xFF808080 : 0xFF00FF00);
+      expect(prefs.get(UserPreferences.subtitlesTextSize), hdr ? 20.0 : 22.0);
+      expect(
+        prefs.get(UserPreferences.subtitlesHdrTextSize),
+        hdr ? 32.0 : 30.0,
+      );
+      expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 0.0);
+    });
+  }
 }

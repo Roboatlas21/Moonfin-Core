@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations_en.dart';
-import 'package:moonfin/playback/appletv_secondary_subtitles.dart';
+import 'package:moonfin/playback/appletv_subtitles.dart';
 import 'package:moonfin/playback/subtitle_style.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:playback_core/playback_core.dart';
@@ -37,7 +37,7 @@ void main() {
 
   test('native menu excludes the primary and unsupported tracks', () {
     final l10n = AppLocalizationsEn();
-    final metadata = appleTvSecondarySubtitleMetadata(
+    final metadata = appleTvSubtitleMetadata(
       manager: manager,
       prefs: prefs,
       l10n: l10n,
@@ -53,6 +53,7 @@ void main() {
     ]);
     expect(metadata['title'], l10n.secondarySubtitleSlot);
     expect(metadata['sizeLabel'], l10n.subtitleSize);
+    expect(metadata['primaryFontSize'], 20.0);
     expect(
       metadata['colors'],
       contains(equals({'label': l10n.yellow, 'value': 0xFFFFFF00})),
@@ -61,7 +62,7 @@ void main() {
 
   test('native selection and off go through the shared manager', () async {
     for (final index in [3, -1]) {
-      await handleAppleTvSecondarySubtitleAction(
+      await handleAppleTvSubtitleAction(
         {'event': 'selectSecondarySubtitle', 'index': index},
         manager,
         prefs,
@@ -69,25 +70,42 @@ void main() {
     }
     expect(manager.selections, [3, null]);
     expect(
-      handleAppleTvSecondarySubtitleAction(
-        {'event': 'selectSubtitle'},
-        manager,
-        prefs,
-      ),
+      handleAppleTvSubtitleAction({'event': 'selectSubtitle'}, manager, prefs),
       isNull,
     );
   });
 
   test(
+    'native primary size uses the saved setting and its existing bounds',
+    () async {
+      for (final (size, expected) in [
+        (26.0, 26.0),
+        (80.0, 48.0),
+        (2.0, 12.0),
+        (double.nan, 12.0),
+      ]) {
+        await handleAppleTvSubtitleAction(
+          {'event': 'setSubtitleSize', 'fontSize': size},
+          manager,
+          prefs,
+        );
+        expect(prefs.get(UserPreferences.subtitlesTextSize), expected);
+      }
+      expect(prefs.get(UserPreferences.secondarySubtitleTextSize), 0.0);
+      expect(prefs.get(UserPreferences.subtitlesHdrTextSize), 20.0);
+    },
+  );
+
+  test(
     'native delay is bounded and appearance persists for the next session',
     () async {
-      await handleAppleTvSecondarySubtitleAction(
+      await handleAppleTvSubtitleAction(
         {'event': 'setSecondarySubtitleDelay', 'delayMs': 9000},
         manager,
         prefs,
       );
       expect(manager.secondarySubtitleDelaySeconds, 5);
-      await handleAppleTvSecondarySubtitleAction(
+      await handleAppleTvSubtitleAction(
         {
           'event': 'configureSecondarySubtitleStyle',
           'fontSize': 30.0,
@@ -107,7 +125,7 @@ void main() {
       expect(next.secondarySubtitleOffset, 0.16);
       expect(next.secondarySubtitleTextColor, 0xFFFFFF00);
       // Changing only position must keep the chosen font and colour.
-      await handleAppleTvSecondarySubtitleAction(
+      await handleAppleTvSubtitleAction(
         {'event': 'configureSecondarySubtitleStyle', 'verticalOffset': 0.3},
         manager,
         prefs,
@@ -119,7 +137,7 @@ void main() {
 
   test('native Default clears overrides instead of copying the primary preferences', () async {
     await prefs.set(UserPreferences.subtitlesTextColor, 0xFF00FF00);
-    await handleAppleTvSecondarySubtitleAction(
+    await handleAppleTvSubtitleAction(
       {'event': 'configureSecondarySubtitleStyle', 'textColor': -1},
       manager,
       prefs,

@@ -292,7 +292,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         vc.onSelectSubtitle = { [weak self] index in
             self?.send(["event": "selectSubtitle", "index": index])
         }
-        vc.onSecondarySubtitleAction = { [weak self] action in
+        vc.onSubtitleAction = { [weak self] action in
             self?.send(action)
         }
         // Keeps the stored delay on the Dart side in step with what the user

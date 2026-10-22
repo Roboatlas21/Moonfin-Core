@@ -3,6 +3,39 @@ import 'package:playback_core/playback_core.dart';
 
 import '../preference/user_preferences.dart';
 
+/// Updates the active SDR/HDR preference and applies it even in the mini player.
+Future<void> setPrimarySubtitleSize(
+  PlaybackManager manager,
+  UserPreferences prefs,
+  double size,
+) async {
+  if (!size.isFinite) return;
+  final resolution = manager.currentResolution;
+  final useHdr =
+      prefs.get(UserPreferences.subtitlesHdrSeparate) &&
+      isHdrSubtitleOutput(
+        videoRangeType: resolution?.videoRangeType,
+        isTranscoding: resolution?.playMethod == StreamPlayMethod.transcode,
+      );
+  final fontSize = size.clamp(12.0, 48.0);
+  await prefs.set(
+    useHdr
+        ? UserPreferences.subtitlesHdrTextSize
+        : UserPreferences.subtitlesTextSize,
+    fontSize,
+  );
+  // Some backends default omitted colours, so send the full saved appearance.
+  final style = SubtitleStyle.forResolution(prefs, manager.currentResolution);
+  await manager.backend?.configureSubtitleStyle(
+    textColor: style.textColor,
+    backgroundColor: style.backgroundColor,
+    strokeColor: style.strokeColor,
+    fontSize: style.fontSize,
+    fontWeight: style.fontWeight,
+    verticalOffset: style.verticalOffset,
+  );
+}
+
 /// Default keeps the override unset so the engine follows the primary style,
 /// including subsequent colour, size and HDR changes.
 Future<void> syncSecondarySubtitleStyle(

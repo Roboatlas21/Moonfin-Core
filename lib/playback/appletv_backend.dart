@@ -165,6 +165,7 @@ class AppleTvBackend implements PlayerBackend, SecondarySubtitleBackend {
       case 'previous':
       case 'selectAudio':
       case 'selectSubtitle':
+      case 'setSubtitleSize':
       case 'selectSecondarySubtitle':
       case 'setSecondarySubtitleDelay':
       case 'configureSecondarySubtitleStyle':
@@ -552,7 +553,7 @@ class AppleTvBackend implements PlayerBackend, SecondarySubtitleBackend {
     required int skipBackMs,
     required List<Map<String, dynamic>> audioTracks,
     required List<Map<String, dynamic>> subtitleTracks,
-    Map<String, dynamic>? secondarySubtitles,
+    Map<String, dynamic>? subtitleControls,
     String logoUrl = '',
     List<Map<String, dynamic>> streamInfoSections = const [],
     Map<String, dynamic>? trickplay,
@@ -583,7 +584,7 @@ class AppleTvBackend implements PlayerBackend, SecondarySubtitleBackend {
       'skipBackMs': skipBackMs,
       'audioTracks': audioTracks,
       'subtitleTracks': subtitleTracks,
-      'secondarySubtitles': ?secondarySubtitles,
+      'subtitleControls': ?subtitleControls,
       'logoUrl': logoUrl,
       'streamInfoSections': streamInfoSections,
       'trickplay': ?trickplay,

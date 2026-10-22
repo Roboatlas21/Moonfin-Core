@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../l10n/app_localizations.dart';
 
-class SecondarySubtitleAppearanceFooter extends StatefulWidget {
-  const SecondarySubtitleAppearanceFooter({
+class SubtitleAppearanceFooter extends StatefulWidget {
+  const SubtitleAppearanceFooter({
     super.key,
     required this.initialFontSize,
     required this.initialOffset,
@@ -12,6 +12,9 @@ class SecondarySubtitleAppearanceFooter extends StatefulWidget {
     required this.onChanged,
     this.showStyle = true,
     this.showPosition = true,
+    this.showColor = true,
+    this.minFontSize = 8,
+    this.maxFontSize = 72,
   });
 
   final double initialFontSize;
@@ -20,22 +23,26 @@ class SecondarySubtitleAppearanceFooter extends StatefulWidget {
   final int defaultTextColor;
   final bool showStyle;
   final bool showPosition;
+  final bool showColor;
+  final double minFontSize;
+  final double maxFontSize;
   final void Function(double fontSize, double offset, int? textColor) onChanged;
 
   @override
-  State<SecondarySubtitleAppearanceFooter> createState() =>
-      _SecondarySubtitleAppearanceFooterState();
+  State<SubtitleAppearanceFooter> createState() =>
+      _SubtitleAppearanceFooterState();
 }
 
-class _SecondarySubtitleAppearanceFooterState
-    extends State<SecondarySubtitleAppearanceFooter> {
+class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
   late double _fontSize = widget.initialFontSize;
   late double _offset = widget.initialOffset;
   late int? _textColor = widget.initialTextColor;
 
   void _update({double? fontSize, double? offset}) {
     setState(() {
-      _fontSize = (fontSize ?? _fontSize).clamp(8.0, 72.0).toDouble();
+      _fontSize = (fontSize ?? _fontSize)
+          .clamp(widget.minFontSize, widget.maxFontSize)
+          .toDouble();
       _offset = (offset ?? _offset).clamp(0.0, 0.4).toDouble();
     });
     widget.onChanged(_fontSize, _offset, _textColor);
@@ -67,7 +74,7 @@ class _SecondarySubtitleAppearanceFooterState
             onDecrease: () => _update(offset: _offset - 0.02),
             onIncrease: () => _update(offset: _offset + 0.02),
           ),
-        if (widget.showStyle) _buildColorControl(context),
+        if (widget.showStyle && widget.showColor) _buildColorControl(context),
       ],
     ),
   );
