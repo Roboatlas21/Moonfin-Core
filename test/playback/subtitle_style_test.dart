@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/playback/subtitle_style.dart';
 import 'package:moonfin/preference/user_preferences.dart';
+import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Future<UserPreferences> _prefs() async {
@@ -93,4 +94,29 @@ void main() {
     expect(style.fontWeight, 700);
     expect(style.verticalOffset, 0.2);
   });
+
+  test(
+    'secondary preferences retain overrides and restore inheritance',
+    () async {
+      final prefs = await _prefs();
+      final manager = PlaybackManager();
+      addTearDown(prefs.dispose);
+      addTearDown(manager.dispose);
+      await prefs.set(UserPreferences.secondarySubtitleTextSize, 36.0);
+      await prefs.set(UserPreferences.secondarySubtitleTextColor, 0xFFFFFF00);
+      await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, 0.16);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleFontSize, 36.0);
+      expect(manager.secondarySubtitleTextColor, 0xFFFFFF00);
+      expect(manager.secondarySubtitleOffset, 0.16);
+
+      await prefs.set(UserPreferences.secondarySubtitleTextSize, 0.0);
+      await prefs.set(UserPreferences.secondarySubtitleTextColor, -1);
+      await syncSecondarySubtitleStyle(manager, prefs);
+      expect(manager.secondarySubtitleFontSize, isNull);
+      expect(manager.secondarySubtitleTextColor, isNull);
+      expect(manager.secondarySubtitleOffset, 0.16);
+      expect(prefs.get(UserPreferences.secondarySubtitleTextColor), -1);
+    },
+  );
 }

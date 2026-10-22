@@ -81,6 +81,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     let secondarySubtitleOverlay = SubtitleOverlay()
     private var pendingSecondarySubtitle: (embeddedTrackId: Int?, url: URL?)?
     private var secondarySubtitlesReady = false
+    private var secondaryFontSize: Double?
+    private var secondaryTextColor: Int?
     private var cancellables = Set<AnyCancellable>()
     private var surfaceAttachedContinuations: [CheckedContinuation<Void, Never>] = []
     private var audioSessionActive = false
@@ -839,8 +841,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         pendingSecondarySubtitle = (secondary.embeddedTrackId, secondary.url)
         setSecondarySubtitleDelay(secondary.delay)
         configureSecondarySubtitleStyle(
-            fontSize: secondary.fontSize ?? 24, verticalOffset: secondary.offset,
-            textColor: secondary.textColor ?? 0xFFFFFFFF)
+            fontSize: secondary.fontSize, verticalOffset: secondary.offset,
+            textColor: secondary.textColor)
         externalSubIDsByURL.removeAll()
         declaredSubtitleURLs = Set(
             sourceConfiguration.externalSubtitles.map { $0.url.absoluteString })
@@ -1332,10 +1334,10 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         if let verticalOffset {
             secondarySubtitleOverlay.topOffset = min(max(verticalOffset, 0), 0.4)
         }
-        secondarySubtitleOverlay.applyStyle(
-            textColor: textColor, backgroundColor: nil, strokeColor: nil,
-            fontSize: fontSize.map { min(max($0, 8), 72) },
-            fontWeight: nil, verticalOffset: nil)
+        secondaryFontSize = fontSize
+        secondaryTextColor = textColor
+        secondarySubtitleOverlay.applySecondaryStyle(
+            from: subtitleOverlay, fontSize: fontSize, textColor: textColor)
     }
 
     // MARK: - Subtitles (cues, ASS, style)
@@ -1509,6 +1511,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             textColor: textColor, backgroundColor: backgroundColor,
             strokeColor: strokeColor, fontSize: fontSize,
             fontWeight: fontWeight, verticalOffset: verticalOffset)
+        secondarySubtitleOverlay.applySecondaryStyle(
+            from: subtitleOverlay, fontSize: secondaryFontSize, textColor: secondaryTextColor)
         if let verticalOffset {
             baseSubtitlePosition = 100 - Int((verticalOffset * 60).rounded())
         }

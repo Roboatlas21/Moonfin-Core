@@ -79,4 +79,51 @@ final class RunnerTests: XCTestCase {
         let originalFont = original.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
         XCTAssertGreaterThan(font!.pointSize, originalFont!.pointSize)
     }
+
+    @MainActor
+    func testDefaultClearsSecondaryOverridesAndFollowsLaterPrimaryChanges() {
+        let player = AetherPlayerWrapper()
+        defer { player.shutdown() }
+        let primary = player.subtitleOverlay
+        let secondary = player.secondarySubtitleOverlay
+        primary.frame = CGRect(x: 0, y: 0, width: 800, height: 400)
+        secondary.frame = primary.bounds
+        primary.setEvents([cue("Primary")])
+        secondary.setEvents([cue("Second language")])
+        primary.update(currentTime: 2)
+        secondary.update(currentTime: 2)
+        let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
+        let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        func color(_ label: UILabel) -> UIColor? {
+            label.attributedText?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
+        }
+        func font(_ label: UILabel) -> UIFont? {
+            label.attributedText?.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        }
+        player.applySubtitleStyle(
+            textColor: 0xFFFFFFFF, backgroundColor: nil, strokeColor: nil,
+            fontSize: 24, fontWeight: nil, verticalOffset: nil)
+        player.configureSecondarySubtitleStyle(fontSize: 36, verticalOffset: 0.12, textColor: 0xFFFFFF00)
+        XCTAssertEqual(color(primaryLabel), .white)
+        XCTAssertEqual(color(secondaryLabel), .yellow)
+        XCTAssertGreaterThan(font(secondaryLabel)!.pointSize, font(primaryLabel)!.pointSize)
+
+        // An explicit secondary choice survives changes to the primary style.
+        player.applySubtitleStyle(
+            textColor: 0xFF00FF00, backgroundColor: nil, strokeColor: nil,
+            fontSize: 28, fontWeight: nil, verticalOffset: nil)
+        XCTAssertEqual(color(secondaryLabel), .yellow)
+        player.configureSecondarySubtitleStyle(fontSize: nil, verticalOffset: nil, textColor: nil)
+        XCTAssertEqual(color(secondaryLabel), .green)
+        XCTAssertEqual(font(secondaryLabel), font(primaryLabel))
+        XCTAssertEqual(secondary.topOffset, 0.12)
+
+        // Default remains inherited when the primary appearance changes again.
+        player.applySubtitleStyle(
+            textColor: 0xFF0000FF, backgroundColor: nil, strokeColor: nil,
+            fontSize: 20, fontWeight: nil, verticalOffset: nil)
+        XCTAssertEqual(color(secondaryLabel), .blue)
+        XCTAssertEqual(font(secondaryLabel), font(primaryLabel))
+    }
+
 }

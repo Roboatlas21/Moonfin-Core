@@ -779,23 +779,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _themeMusicService.setExternalAudioActive(true);
     _segmentService = _createSegmentService();
     _zoomMode = _prefs.get(UserPreferences.playerZoomMode);
-    final savedSecondaryFontSize = _prefs.get(
-      UserPreferences.secondarySubtitleTextSize,
-    );
-    unawaited(
-      _manager.configureSecondarySubtitleStyle(
-        fontSize: savedSecondaryFontSize > 0 ? savedSecondaryFontSize : null,
-        verticalOffset: _prefs.get(
-          UserPreferences.secondarySubtitleOffsetPosition,
-        ),
-        textColor: switch (_prefs.get(
-          UserPreferences.secondarySubtitleTextColor,
-        )) {
-          -1 => null,
-          final color => color,
-        },
-      ),
-    );
+    unawaited(syncSecondarySubtitleStyle(_manager, _prefs));
     // Media3 only takes the zoom mode from this call, and the backend change it
     // listens for never fires when it was already the one playing.
     unawaited(_syncMedia3ZoomMode());

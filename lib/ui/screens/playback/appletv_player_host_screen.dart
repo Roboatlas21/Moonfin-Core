@@ -309,7 +309,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     try {
       final manager = _manager;
       if (manager == null) return;
-      unawaited(syncAppleTvSecondarySubtitleStyle(
+      unawaited(syncSecondarySubtitleStyle(
         manager, GetIt.instance<UserPreferences>(),
       ));
       final style = SubtitleStyle.forResolution(

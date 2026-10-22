@@ -343,6 +343,19 @@ final class SubtitleOverlay: PlatformView {
         }
     }
 
+    /// As on Media3, nil removes the secondary override and inherits the
+    /// current primary appearance. Position and delay remain independent.
+    func applySecondaryStyle(from primary: SubtitleOverlay, fontSize: Double?, textColor: Int?) {
+        subtitleUserFontSize = fontSize.map { CGFloat(min(max($0, 8), 72)) }
+            ?? primary.subtitleUserFontSize
+        subtitleTextColor = textColor.map { Self.colorFromARGB($0) } ?? primary.subtitleTextColor
+        subtitleFontWeight = primary.subtitleFontWeight
+        subtitleBgColor = primary.subtitleBgColor
+        subtitleStrokeColor = primary.subtitleStrokeColor
+        subtitleStrokeEnabled = primary.subtitleStrokeEnabled
+        if !activeTextEvents.isEmpty { showText(activeTextEvents) }
+    }
+
     /// Subtitle position on a 40 to 100 scale, where 100 is the bottom edge.
     /// It becomes a bottom offset in points at layout time. The OSD raise path
     /// calls this with min(base, 70) while controls are up.

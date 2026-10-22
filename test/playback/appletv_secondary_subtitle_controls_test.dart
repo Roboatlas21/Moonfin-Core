@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations_en.dart';
 import 'package:moonfin/playback/appletv_secondary_subtitles.dart';
+import 'package:moonfin/playback/subtitle_style.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -101,7 +102,7 @@ void main() {
       expect(prefs.get(UserPreferences.secondarySubtitleTextColor), 0xFFFFFF00);
       final next = PlaybackManager();
       addTearDown(next.dispose);
-      await syncAppleTvSecondarySubtitleStyle(next, prefs);
+      await syncSecondarySubtitleStyle(next, prefs);
       expect(next.secondarySubtitleFontSize, 30.0);
       expect(next.secondarySubtitleOffset, 0.16);
       expect(next.secondarySubtitleTextColor, 0xFFFFFF00);
@@ -116,17 +117,15 @@ void main() {
     },
   );
 
-  test(
-    'default secondary appearance follows the primary preferences',
-    () async {
-      await prefs.set(UserPreferences.subtitlesTextColor, 0xFF00FF00);
-      await handleAppleTvSecondarySubtitleAction(
-        {'event': 'configureSecondarySubtitleStyle', 'textColor': -1},
-        manager,
-        prefs,
-      );
-      expect(prefs.get(UserPreferences.secondarySubtitleTextColor), -1);
-      expect(manager.secondarySubtitleTextColor, 0xFF00FF00);
-    },
-  );
+  test('native Default clears overrides instead of copying the primary preferences', () async {
+    await prefs.set(UserPreferences.subtitlesTextColor, 0xFF00FF00);
+    await handleAppleTvSecondarySubtitleAction(
+      {'event': 'configureSecondarySubtitleStyle', 'textColor': -1},
+      manager,
+      prefs,
+    );
+    expect(prefs.get(UserPreferences.secondarySubtitleTextColor), -1);
+    expect(manager.secondarySubtitleTextColor, isNull);
+    expect(manager.secondarySubtitleFontSize, isNull);
+  });
 }

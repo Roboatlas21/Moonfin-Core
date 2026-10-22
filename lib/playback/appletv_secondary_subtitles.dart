@@ -44,24 +44,6 @@ Map<String, dynamic> appleTvSecondarySubtitleMetadata({
   ],
 };
 
-Future<void> syncAppleTvSecondarySubtitleStyle(
-  PlaybackManager manager,
-  UserPreferences prefs,
-) {
-  final primary = SubtitleStyle.forResolution(prefs, manager.currentResolution);
-  return manager.configureSecondarySubtitleStyle(
-    fontSize: switch (prefs.get(UserPreferences.secondarySubtitleTextSize)) {
-      final size when size > 0 => size,
-      _ => primary.fontSize,
-    },
-    verticalOffset: prefs.get(UserPreferences.secondarySubtitleOffsetPosition),
-    textColor: switch (prefs.get(UserPreferences.secondarySubtitleTextColor)) {
-      -1 => primary.textColor,
-      final color => color,
-    },
-  );
-}
-
 /// Null means the action belongs to another player control.
 Future<void>? handleAppleTvSecondarySubtitleAction(
   Map<String, dynamic> action,
@@ -107,5 +89,5 @@ Future<void> _saveAppearance(
   if (color != null) {
     await prefs.set(UserPreferences.secondarySubtitleTextColor, color);
   }
-  await syncAppleTvSecondarySubtitleStyle(manager, prefs);
+  await syncSecondarySubtitleStyle(manager, prefs);
 }

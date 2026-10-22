@@ -3,6 +3,25 @@ import 'package:playback_core/playback_core.dart';
 
 import '../preference/user_preferences.dart';
 
+/// Default keeps the override unset so the engine follows the primary style,
+/// including subsequent colour, size and HDR changes.
+Future<void> syncSecondarySubtitleStyle(
+  PlaybackManager manager,
+  UserPreferences prefs,
+) {
+  return manager.configureSecondarySubtitleStyle(
+    fontSize: switch (prefs.get(UserPreferences.secondarySubtitleTextSize)) {
+      final size when size > 0 => size,
+      _ => null,
+    },
+    verticalOffset: prefs.get(UserPreferences.secondarySubtitleOffsetPosition),
+    textColor: switch (prefs.get(UserPreferences.secondarySubtitleTextColor)) {
+      -1 => null,
+      final color => color,
+    },
+  );
+}
+
 /// Whether what reaches the screen is HDR. A transcode lands as SDR even when
 /// the source was HDR, so the subtitles have to follow the output rather than
 /// the file.

@@ -178,7 +178,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     final backend = _backend;
     if (backend == null) return;
     try {
-      unawaited(syncAppleTvSecondarySubtitleStyle(_manager, _prefs));
+      unawaited(syncSecondarySubtitleStyle(_manager, _prefs));
       final style = SubtitleStyle.forResolution(
         _prefs,
         _manager.currentResolution,

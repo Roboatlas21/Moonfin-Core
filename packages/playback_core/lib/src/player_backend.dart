@@ -131,6 +131,8 @@ abstract class PlayerBackend {
     int? embeddedTrackId,
   }) async {}
   Future<void> setSecondarySubtitleDelay(double seconds) async {}
+
+  /// Null size or colour clears the override and follows the primary style.
   Future<void> configureSecondarySubtitleStyle({
     double? fontSize,
     double? verticalOffset,
