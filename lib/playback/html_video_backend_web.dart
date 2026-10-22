@@ -10,6 +10,7 @@ import 'package:web/web.dart' as web;
 import '../preference/user_preferences.dart';
 import 'html_video_backend_profile.dart';
 import 'letterbox_croppers.dart';
+import 'secondary_subtitle_position.dart';
 import 'web_subtitle_overlay_web.dart';
 
 extension type _MoonfinHlsBridge._(JSObject _) implements JSObject {
@@ -55,6 +56,7 @@ class HtmlVideoBackend extends PlayerBackend
   static const _cueHookProperty = 'moonfinCuePlacement';
   static const _authoredSrtAlignment = 'moonfinAuthoredSrtAlignment';
   static const _autoPositionedCue = 'moonfinAutoPositionedCue';
+  static const _stackedMiddleLine = 'moonfinStackedMiddleLine';
   static final _srtAlignmentTag = RegExp(r'^\s*\{\\an([1-9])\}');
 
   /// The size the cue percentage is measured against, so the setting at its
@@ -780,6 +782,7 @@ class HtmlVideoBackend extends PlayerBackend
     _secondaryTrack?.remove();
     _secondaryTrack = null;
     _secondaryCues.clear();
+    _restorePrimaryMiddlePosition();
     _secondaryUrl = null;
     final objectUrl = _secondaryObjectUrl;
     _secondaryObjectUrl = null;
@@ -824,14 +827,100 @@ class HtmlVideoBackend extends PlayerBackend
     }
   }
 
+  void _restorePrimaryMiddlePosition() {
+    _forEachTextTrack((track) {
+      final cues = track.cues;
+      if (cues == null) return;
+      for (var i = 0; i < cues.length; i++) {
+        if (cues[i] is! web.VTTCue) continue;
+        final cue = cues[i] as web.VTTCue;
+        final original = cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
+        if (original != null) cue.line = original;
+      }
+    });
+  }
+
+  web.VTTCue? _activePrimaryCue() {
+    final tracks = _videoElement.textTracks;
+    for (var i = 0; i < tracks.length; i++) {
+      final track = tracks[i];
+      if (track == _secondaryTrack?.track || track.mode != 'showing') continue;
+      final cues = track.activeCues;
+      if (cues == null) continue;
+      for (var j = 0; j < cues.length; j++) {
+        if (cues[j] is web.VTTCue) return cues[j] as web.VTTCue;
+      }
+    }
+    return null;
+  }
+
+  int _primaryAlignment(web.VTTCue? cue) {
+    if (cue == null) return 2;
+    final authored = int.tryParse(
+      cue.getProperty<JSString?>(_authoredSrtAlignment.toJS)?.toDart ?? '',
+    );
+    if (authored != null) return authored;
+    final row = switch (cue.lineAlign) {
+      'start' => 2,
+      'center' => 1,
+      _ => 0,
+    };
+    final column = switch (cue.align) {
+      'left' || 'start' => 0,
+      'right' || 'end' => 2,
+      _ => 1,
+    };
+    return row * 3 + column + 1;
+  }
+
   void _positionSecondaryCues() {
+    if (_secondaryCues.isEmpty) return;
+    final primary = _activePrimaryCue();
+    final alignment = _primaryAlignment(primary);
+    final primaryRows = primary?.text.split('\n').length ?? 1;
+    final primaryHeight = primaryRows *
+        ((_subtitleFontSize ?? _referenceTextSize) / 24 * 0.055);
+    final secondaryRows = _secondaryCues.first.cue.text.split('\n').length;
+    final secondaryHeight = secondaryRows *
+        ((_secondaryFontSize ?? _subtitleFontSize ?? _referenceTextSize) /
+            24 * 0.055);
+    const gap = 0.015;
+    final originalCentre =
+        primary?.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
+    final primaryLine = originalCentre?.toDart ??
+        ((primary?.line.dartify() as num?)?.toDouble() ??
+            ((1 - _subtitleVerticalOffset) * 100));
+    final position = (primaryLine / 100).clamp(0.0, 1.0).toDouble();
+    if (primary != null && (alignment - 1) ~/ 3 == 1) {
+      if (originalCentre == null) {
+        primary.setProperty(_stackedMiddleLine.toJS, primaryLine.toJS);
+      }
+      primary.line = ((position + (secondaryHeight + gap) / 2) * 100)
+          .clamp(0.0, 100.0).toDouble().toJS;
+    }
+    final top = primary == null
+        ? (0.96 - secondaryHeight - _secondaryOffset)
+            .clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0)).toDouble()
+        : stackedSecondaryTop(
+            alignment: alignment,
+            primaryAnchor: position,
+            primaryHeight: primaryHeight,
+            secondaryHeight: secondaryHeight,
+            offset: _secondaryOffset,
+          );
+    final column = (alignment - 1) % 3;
     for (final original in _secondaryCues) {
       original.cue
         ..region = null
         ..vertical = ''
         ..snapToLines = false
         ..lineAlign = 'start'
-        ..line = ((0.08 - _secondaryOffset) * 100).clamp(0.0, 100.0).toJS;
+        ..line = (top * 100).toJS
+        ..align = column == 0 ? 'left' : column == 2 ? 'right' : 'center'
+        ..positionAlign =
+            column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center'
+        ..position = (column == 0 ? 5 : column == 2 ? 95 : 50).toJS
+        ..size = 90;
     }
   }
 
@@ -997,7 +1086,7 @@ class HtmlVideoBackend extends PlayerBackend
       }
       // A cue with explicit WebVTT line settings already has an authored
       // position. Only apply the user's bottom offset to automatic cues.
-      if (!vtt.has(_autoPositionedCue.toJS) &&
+      if (!vtt.has(_autoPositionedCue) &&
           vtt.line.dartify() != 'auto') {
         continue;
       }
@@ -1007,6 +1096,7 @@ class HtmlVideoBackend extends PlayerBackend
       vtt.snapToLines = false;
       vtt.line = line.toJS;
     }
+    _positionSecondaryCues();
   }
 
   /// A cue can only be placed once it exists, and the ones carried inside a

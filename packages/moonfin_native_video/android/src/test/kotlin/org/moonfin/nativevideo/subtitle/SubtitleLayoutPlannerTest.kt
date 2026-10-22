@@ -7,6 +7,34 @@ import org.junit.Test
 
 class SubtitleLayoutPlannerTest {
     @Test
+    fun stackedSecondaryFollowsTopOrBottomPrimary() {
+        val top = SubtitleBox(50f, 50f, 900f, 110f)
+        val middle = SubtitleBox(50f, 480f, 900f, 540f)
+        val bottom = SubtitleBox(50f, 860f, 900f, 920f)
+        assertEquals(
+            190f,
+            SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 70f, 10f, 0f),
+            0.01f,
+        )
+        assertEquals(
+            470f,
+            SubtitleLayoutPlanner.stackedDesiredBottom(middle, 1000, 70f, 10f, 0f),
+            0.01f,
+        )
+        assertEquals(
+            850f,
+            SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 70f, 10f, 0f),
+            0.01f,
+        )
+        assertEquals(
+            830f,
+            SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 70f, 10f, 0.02f),
+            0.01f,
+        )
+    }
+
+
+    @Test
     fun preferredSearchHalfFollowsCuePositionRatherThanItsLineAnchor() {
         val lowerStartAlignedCue = SubtitleBox(50f, 800f, 950f, 840f)
         val upperEndAlignedCue = SubtitleBox(50f, 70f, 950f, 150f)

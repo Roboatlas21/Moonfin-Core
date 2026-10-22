@@ -179,6 +179,34 @@ void main() {
     expect(authored.line.dartify(), 20);
   });
 
+  test('secondary follows top-left and centred primary alignment', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:03.000\n{\\an7}Top left\n'
+        '\n00:04.000 --> 00:06.000\n{\\an5}Middle\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecond\n'),
+      codec: 'vtt',
+    );
+    final second = await loadedSecondary();
+    final cue = second.track.cues![0] as web.VTTCue;
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => cue.align == 'left');
+    expect(cue.line.dartify(), greaterThan(5));
+
+    await backend.seekTo(const Duration(seconds: 5));
+    await _until(() => cue.align == 'center');
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    final centre = primary.track.cues![1] as web.VTTCue;
+    expect(centre.line.dartify(), greaterThan(50));
+    expect(cue.line.dartify(), lessThan(50));
+    await backend.setSecondarySubtitle();
+    expect(centre.line.dartify(), 50);
+  });
+
   test('SRT and primary VTT remain independently selectable', () async {
     await backend.setSubtitleTrack(
       1,
@@ -249,14 +277,14 @@ void main() {
       final second = await loadedSecondary();
       final cue = second.track.cues![0] as web.VTTCue;
       expect(cue.startTime, 1.5);
-      expect(cue.line.dartify(), 12);
+      expect(cue.line.dartify(), closeTo(94.5, 0.2));
       await backend.configureSubtitleStyle(fontSize: 48, verticalOffset: 0.2);
-      expect(cue.line.dartify(), 12);
+      expect(cue.line.dartify(), closeTo(94.5, 0.2));
       final styles = web.document.head!.textContent!;
       expect(styles, matches(RegExp(r'font-size: 50(?:\.0+)?%')));
       expect(styles, contains('color: rgb(255, 255, 0)'));
       await backend.configureSecondarySubtitleStyle();
-      expect(cue.line.dartify(), 8);
+      expect(cue.line.dartify(), closeTo(85, 0.2));
       expect(
         web.document.head!.textContent,
         matches(RegExp(r'font-size: 100(?:\.0+)?%')),
@@ -303,7 +331,7 @@ void main() {
         verticalOffset: -0.12,
       );
       expect(writes, ['line', 'line']);
-      expect((cues[0] as web.VTTCue).line.dartify(), 20);
+      expect((cues[0] as web.VTTCue).line.dartify(), closeTo(91.75, 0.2));
       writes.clear();
       await backend.setSecondarySubtitleDelay(1.25);
       expect(writes, ['startTime', 'endTime', 'startTime', 'endTime']);

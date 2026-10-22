@@ -22,6 +22,7 @@ import 'mpv_letterbox_crop.dart';
 import 'mpv_frame_sample.dart';
 import 'mpv_frame_sampler.dart';
 import 'pending_subtitle_choice.dart';
+import 'secondary_subtitle_position.dart';
 import 'server_transcode_capabilities.dart';
 
 class _ParsedMpvConfCacheEntry {
@@ -280,6 +281,13 @@ class MediaKitPlayerBackend extends PlayerBackend
   late final Future<void> _secondaryControlsReady;
   bool _secondaryDelaySupported = false;
   bool _secondaryPositionSupported = false;
+  bool _secondarySubtitleRequested = false;
+  double _secondaryVerticalOffset = 0;
+  int? _lastSecondaryStackPosition;
+  DateTime? _lastSecondaryPositionCheck;
+  bool _checkingSecondaryPosition = false;
+  StreamSubscription<Duration>? _secondaryPositionSub;
+  static final _mpvSrtAlignment = RegExp(r'\\an([1-9])');
 
   @override
   bool get supportsSecondarySubtitleDelay => _secondaryDelaySupported;
@@ -307,6 +315,9 @@ class MediaKitPlayerBackend extends PlayerBackend
     _secondarySubtitleGeneration++;
     _pendingSecondarySubtitle = null;
     _secondarySubtitleDelay = 0;
+    _secondarySubtitleRequested = false;
+    _lastSecondaryStackPosition = null;
+    _lastSecondaryPositionCheck = null;
     _externalSubtitleLoads.clear();
     _pendingSubtitleChoice.nextSource();
   }
@@ -578,6 +589,11 @@ class MediaKitPlayerBackend extends PlayerBackend
       unawaited(_applyPendingSecondarySubtitle());
     });
     _videoParamsSub = _player.stream.videoParams.listen(_onVideoParams);
+    _secondaryPositionSub = _player.stream.position.listen((_) {
+      if (_secondarySubtitleRequested && supportsSecondarySubtitlePosition) {
+        unawaited(_refreshStackedSecondaryPosition());
+      }
+    });
   }
 
   factory MediaKitPlayerBackend(
@@ -2964,6 +2980,8 @@ class MediaKitPlayerBackend extends PlayerBackend
     int? embeddedTrackId,
   }) async {
     final generation = ++_secondarySubtitleGeneration;
+    _secondarySubtitleRequested = embeddedTrackId != null || url?.isNotEmpty == true;
+    _lastSecondaryStackPosition = null;
     final ordinal = embeddedTrackId != null && embeddedTrackId > 0
         ? embeddedTrackId
         : null;
@@ -3080,14 +3098,59 @@ class MediaKitPlayerBackend extends PlayerBackend
   }) async {
     await _secondaryControlsReady;
     if (_isDisposed || !supportsSecondarySubtitlePosition) return;
-    // mpv draws the second track at the top; positive adjustment moves it up.
-    final offset = verticalOffset ?? PlaybackManager.defaultSecondarySubtitleOffset;
-    final position = ((0.08 - offset) * 100).clamp(0.0, 100.0).round();
-    await _nativeSetProperty(
-      _player.platform as NativePlayer,
-      'secondary-sub-pos',
-      position.toString(),
-    );
+    _secondaryVerticalOffset =
+        verticalOffset ?? PlaybackManager.defaultSecondarySubtitleOffset;
+    await _refreshStackedSecondaryPosition(force: true);
+  }
+
+  /// mpv exposes primary text in ASS form, including SRT \an alignment tags.
+  /// Its secondary renderer has independent vertical but not horizontal control.
+  Future<void> _refreshStackedSecondaryPosition({bool force = false}) async {
+    if (_isDisposed || !_secondarySubtitleRequested || !_secondaryPositionSupported ||
+        _checkingSecondaryPosition) return;
+    final now = DateTime.now();
+    if (!force && _lastSecondaryPositionCheck != null &&
+        now.difference(_lastSecondaryPositionCheck!) < const Duration(milliseconds: 350)) {
+      return;
+    }
+    _lastSecondaryPositionCheck = now;
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    _checkingSecondaryPosition = true;
+    final generation = _secondarySubtitleGeneration;
+    try {
+      final primaryAss = await _tryNativeGetProperty(native, 'sub-text/ass') ?? '';
+      final secondaryText = await _tryNativeGetProperty(native, 'secondary-sub-text') ?? '';
+      if (!_isCurrentSecondarySubtitle(generation) || !_secondarySubtitleRequested) return;
+      final alignment = int.tryParse(_mpvSrtAlignment.firstMatch(primaryAss)?[1] ?? '') ?? 2;
+      final rows = primaryAss.isEmpty ? 1
+          : primaryAss.split(RegExp(r'\\N|\n')).length;
+      final secondaryRows = secondaryText.isEmpty ? 1
+          : secondaryText.split('\n').length;
+      final primaryHeight = rows * ((_lastFontSize ?? 24) / 24 * 0.055);
+      final secondaryHeight = secondaryRows * ((_lastFontSize ?? 24) / 24 * 0.055);
+      final zone = (alignment - 1) ~/ 3;
+      final primaryAnchor = zone == 2 ? 0.05
+          : zone == 1 ? 0.5
+          : 1 - (_lastVerticalOffset ?? 0.04);
+      final position = (stackedSecondaryTop(
+        alignment: alignment,
+        primaryAnchor: primaryAnchor,
+        primaryHeight: primaryHeight,
+        secondaryHeight: secondaryHeight,
+        offset: _secondaryVerticalOffset,
+      ) * 100).round();
+      if (force || position != _lastSecondaryStackPosition) {
+        await _nativeSetProperty(native, 'secondary-sub-pos', '$position');
+        if (_isCurrentSecondarySubtitle(generation)) {
+          _lastSecondaryStackPosition = position;
+        }
+      }
+    } catch (_) {
+      // Unavailable properties leave the previously selected subtitle intact.
+    } finally {
+      _checkingSecondaryPosition = false;
+    }
   }
 
   @override
@@ -3316,6 +3379,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     _prefs.removeListener(_onPreferencesChanged);
     _ccTracksSub?.cancel();
     _videoParamsSub?.cancel();
+    _secondaryPositionSub?.cancel();
     _tracksChangedController.close();
     _playingGateChangedController.close();
     _subtitleLoadingStream.close();

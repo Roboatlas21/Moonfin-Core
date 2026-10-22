@@ -163,7 +163,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        secondarySubtitleOverlay.topOffset = 0.08
+        secondarySubtitleOverlay.primaryForStacking = subtitleOverlay
+        subtitleOverlay.secondaryForStacking = secondarySubtitleOverlay
         #if os(iOS) || os(tvOS)
             // On iOS the handlers only ever land on a session, the video
             // player's or the engine's music one, never the shared center.
@@ -1334,7 +1335,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         fontSize: Double?, verticalOffset: Double?, textColor: Int?
     ) {
         if let verticalOffset {
-            secondarySubtitleOverlay.topOffset = min(max(0.08 - verticalOffset, 0), 1)
+            secondarySubtitleOverlay.secondaryVerticalAdjustment = verticalOffset
         }
         secondaryFontSize = fontSize
         secondaryTextColor = textColor

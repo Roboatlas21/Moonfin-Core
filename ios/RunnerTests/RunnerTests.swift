@@ -62,27 +62,40 @@ final class RunnerTests: XCTestCase {
     }
 
     @MainActor
-    func testSecondaryPositionUsesTopMarginAndFollowsResize() {
+    func testSecondaryFollowsBottomTopAndCentredPrimary() {
         let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
         let secondary = SubtitleOverlay(frame: primary.bounds)
-        secondary.topOffset = 0.1
-        primary.setEvents([cue("Primary")])
-        secondary.setEvents([cue("Second language")])
-        primary.update(currentTime: 2)
-        secondary.update(currentTime: 2)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
         let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
         let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        XCTAssertEqual(primaryLabel.frame.maxY, 400, accuracy: 0.1)
-        XCTAssertEqual(secondaryLabel.frame.minY, 40, accuracy: 0.1)
-        XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
 
-        secondary.frame.size.height = 600
+        func show(_ alignment: Int) {
+            primary.setEvents([
+                SubtitleEvent(startTime: 1, endTime: 3, text: "First",
+                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0, alignment: alignment)
+            ])
+            secondary.setEvents([cue("Second language")])
+            primary.update(currentTime: 2)
+            secondary.update(currentTime: 2)
+        }
+        show(2)
+        XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
+        XCTAssertEqual(primaryLabel.frame.maxY, 400, accuracy: 0.1)
+
+        show(7)
+        XCTAssertGreaterThan(secondaryLabel.frame.minY, primaryLabel.frame.maxY)
+        XCTAssertEqual(primaryLabel.frame.minX, secondaryLabel.frame.minX, accuracy: 0.1)
+
+        show(5)
+        XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
+        XCTAssertGreaterThan(primaryLabel.frame.midY, 200)
+        XCTAssertLessThan(secondaryLabel.frame.midY, 200)
+
+        secondary.secondaryVerticalAdjustment = 0.04
         secondary.setNeedsLayout()
         secondary.layoutIfNeeded()
-        XCTAssertEqual(secondaryLabel.frame.minY, 60, accuracy: 0.1)
-        secondary.topOffset = 1
-        secondary.layoutIfNeeded()
-        XCTAssertEqual(secondaryLabel.frame.maxY, secondary.bounds.height, accuracy: 0.1)
+        XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
     }
 
     @MainActor
@@ -145,7 +158,7 @@ final class RunnerTests: XCTestCase {
         player.configureSecondarySubtitleStyle(fontSize: nil, verticalOffset: nil, textColor: nil)
         XCTAssertEqual(color(secondaryLabel), .green)
         XCTAssertEqual(font(secondaryLabel), font(primaryLabel))
-        XCTAssertEqual(secondary.topOffset!, 0.12, accuracy: 0.0001)
+        XCTAssertEqual(secondary.secondaryVerticalAdjustment, -0.04, accuracy: 0.0001)
 
         // Default remains inherited when the primary appearance changes again.
         player.applySubtitleStyle(
@@ -168,7 +181,7 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(player.secondarySubtitleOverlay.delaySeconds, -0.1, accuracy: 0.0001)
         let primaryPosition = player.baseSubtitlePos
         player.configureSecondarySubtitleStyle(fontSize: nil, verticalOffset: 0.02, textColor: nil)
-        XCTAssertEqual(player.secondarySubtitleOverlay.topOffset!, 0.06, accuracy: 0.0001)
+        XCTAssertEqual(player.secondarySubtitleOverlay.secondaryVerticalAdjustment, 0.02, accuracy: 0.0001)
         XCTAssertEqual(player.baseSubtitlePos, primaryPosition)
     }
 

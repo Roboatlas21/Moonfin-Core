@@ -39,6 +39,21 @@ final class SubtitleOverlay: PlatformView {
     var topOffset: Double? {
         didSet { requestLayout() }
     }
+    /// The second text block follows the actual frame of the primary block.
+    weak var primaryForStacking: SubtitleOverlay?
+    weak var secondaryForStacking: SubtitleOverlay?
+    var secondaryVerticalAdjustment: Double = 0 {
+        didSet { requestLayout() }
+    }
+
+    private var visibleTextFrame: CGRect? {
+        textLabel.isHidden ? nil : textLabel.frame
+    }
+
+    private var currentAlignment: Int {
+        let requested = activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2
+        return (1...9).contains(requested) ? requested : 2
+    }
 
     /// On while a subtitle track is selected. iPadOS 27 can drop these views
     /// from frames when a fullscreen video is the only other thing on screen,
@@ -381,6 +396,12 @@ final class SubtitleOverlay: PlatformView {
         setLabelText(activeText)
         setTextHidden(false)
         layoutTextLabel()
+        if let primary = primaryForStacking {
+            primary.layoutTextLabel()
+            layoutTextLabel()
+        } else {
+            secondaryForStacking?.layoutTextLabel()
+        }
     }
 
     private func showBitmap(_ event: SubtitleEvent?) {
@@ -420,10 +441,26 @@ final class SubtitleOverlay: PlatformView {
             ?? (topOffset.map { bounds.height * CGFloat(max($0, 0)) }
                 ?? (row == 0 ? bounds.height - textBottomOffset
                     : row == 1 ? bounds.height / 2 : bounds.height * 0.05))
-        let x = min(max(xAnchor - size.width * CGFloat(column) / 2, 0),
-                    max(0, bounds.width - size.width))
-        let y = min(max(yAnchor - size.height * CGFloat(2 - row) / 2, 0),
-                    max(0, bounds.height - size.height))
+        var x = xAnchor - size.width * CGFloat(column) / 2
+        var y = yAnchor - size.height * CGFloat(2 - row) / 2
+        let gap = 8 * canvasScale
+        if let primary = primaryForStacking, let parentFrame = primary.visibleTextFrame {
+            // Follow the primary's vertical zone and horizontal anchor.
+            let parentColumn = (primary.currentAlignment - 1) % 3
+            let parentRow = (primary.currentAlignment - 1) / 3
+            x = parentColumn == 0 ? parentFrame.minX
+                : parentColumn == 2 ? parentFrame.maxX - size.width
+                : parentFrame.midX - size.width / 2
+            y = parentRow == 2 ? parentFrame.maxY + gap
+                : parentFrame.minY - size.height - gap
+            y -= CGFloat(secondaryVerticalAdjustment) * bounds.height
+        } else if row == 1, let secondary = secondaryForStacking,
+                  let secondaryFrame = secondary.visibleTextFrame {
+            // Keep a centre-aligned pair centred around the authored anchor.
+            y += (secondaryFrame.height + gap) / 2
+        }
+        x = min(max(x, 0), max(0, bounds.width - size.width))
+        y = min(max(y, 0), max(0, bounds.height - size.height))
         let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
         textLabel.frame = frame
         outlineLabel.frame = frame

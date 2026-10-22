@@ -68,6 +68,8 @@ class _Streams extends Fake implements PlayerStream {
   Stream<Tracks> get tracks => changes.stream;
   @override
   Stream<VideoParams> get videoParams => const Stream.empty();
+  @override
+  Stream<Duration> get position => const Stream.empty();
 }
 
 class _Player extends Fake implements Player {
@@ -303,6 +305,23 @@ void main() {
     },
   );
 
+  test('secondary mpv vertical placement follows top-aligned SRT', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-delay': '0', 'secondary-sub-pos': '0',
+      'sub-text/ass': r'{\an8}Top text', 'secondary-sub-text': 'Other',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(other.platform.properties['secondary-sub-pos'], '12');
+    } finally {
+      second.dispose();
+    }
+  });
+
   test('mpv adds secondary delay to the primary and positions independently', () async {
     final other = _Player();
     other.platform.properties.addAll({
@@ -314,6 +333,8 @@ void main() {
     final second = MediaKitPlayerBackend.forTesting(other, prefs);
     try {
       await second.setSecondarySubtitleDelay(1.25);
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
       await second.configureSecondarySubtitleStyle(
         verticalOffset: -0.12,
         textColor: 0xFFFFFF00,
@@ -321,7 +342,7 @@ void main() {
       expect(second.supportsSecondarySubtitleDelay, isTrue);
       expect(second.supportsSecondarySubtitlePosition, isTrue);
       expect(other.platform.properties['secondary-sub-delay'], '1.750');
-      expect(other.platform.properties['secondary-sub-pos'], '20');
+      expect(other.platform.properties['secondary-sub-pos'], '95');
       expect(other.platform.properties['sub-delay'], '0.500');
       expect(other.platform.properties['sub-color'], '#ffffffff');
       await second.setSubtitleDelay(-0.25);

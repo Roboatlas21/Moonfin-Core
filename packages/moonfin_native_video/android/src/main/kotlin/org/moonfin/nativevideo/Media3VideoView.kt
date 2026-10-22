@@ -1122,21 +1122,19 @@ class Media3VideoView(
         @Suppress("DEPRECATION")
         override fun onCues(cues: List<Cue>) {
             val stacked = joinStackedCues(cues)
-            subtitleView.setCues(stacked)
             if (::secondarySubtitleOverlay.isInitialized) {
-                secondarySubtitleOverlay.updatePrimaryCues(
-                    stacked,
-                )
+                secondarySubtitleOverlay.updatePrimaryCues(stacked)
+            } else {
+                subtitleView.setCues(stacked)
             }
         }
 
         override fun onCues(cueGroup: CueGroup) {
             val stacked = joinStackedCues(cueGroup.cues)
-            subtitleView.setCues(stacked)
             if (::secondarySubtitleOverlay.isInitialized) {
-                secondarySubtitleOverlay.updatePrimaryCues(
-                    stacked,
-                )
+                secondarySubtitleOverlay.updatePrimaryCues(stacked)
+            } else {
+                subtitleView.setCues(stacked)
             }
         }
 
@@ -1532,6 +1530,7 @@ class Media3VideoView(
         player = createPlayer()
         secondarySubtitleOverlay = SecondarySubtitleOverlay(
             view = secondarySubtitleView,
+            primaryView = subtitleView,
         )
 
         applyTrackSelectorForCurrentSource()

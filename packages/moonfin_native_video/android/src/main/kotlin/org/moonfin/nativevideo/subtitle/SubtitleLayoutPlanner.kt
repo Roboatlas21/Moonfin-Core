@@ -14,6 +14,21 @@ internal object SubtitleLayoutPlanner {
     const val ALIGN_MIDDLE = 1
     const val ALIGN_BOTTOM = 2
 
+    /** Top dialogue gets the second language below; other dialogue gets it above. */
+    fun stackedDesiredBottom(
+        primary: SubtitleBox,
+        viewportHeight: Int,
+        secondaryHeight: Float,
+        gapPx: Float,
+        adjustment: Float,
+    ): Float {
+        val topAligned = (primary.top + primary.bottom) / 2f < viewportHeight / 3f
+        val anchor = if (topAligned)
+            primary.bottom + gapPx + secondaryHeight
+        else primary.top - gapPx
+        return anchor - adjustment * viewportHeight
+    }
+
     /** Chooses the search half from the cue's actual screen position. */
     fun verticalAlignmentFor(box: SubtitleBox, viewportHeight: Int): Int = when {
         box.top + box.bottom < viewportHeight -> ALIGN_TOP
