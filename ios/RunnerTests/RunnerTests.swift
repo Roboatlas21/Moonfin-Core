@@ -86,6 +86,9 @@ final class RunnerTests: XCTestCase {
         show(7)
         XCTAssertGreaterThan(secondaryLabel.frame.minY, primaryLabel.frame.maxY)
         XCTAssertEqual(primaryLabel.frame.minX, secondaryLabel.frame.minX, accuracy: 0.1)
+        let leftStyle = secondaryLabel.attributedText?.attribute(
+            .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        XCTAssertEqual(leftStyle?.alignment, .left)
 
         show(5)
         XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)

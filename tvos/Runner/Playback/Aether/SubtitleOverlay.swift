@@ -51,7 +51,9 @@ final class SubtitleOverlay: PlatformView {
     }
 
     private var currentAlignment: Int {
-        let requested = activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2
+        let authored = activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2
+        let requested = primaryForStacking?.activeTextEvents.isEmpty == false
+            ? (primaryForStacking?.currentAlignment ?? authored) : authored
         return (1...9).contains(requested) ? requested : 2
     }
 
@@ -509,7 +511,7 @@ final class SubtitleOverlay: PlatformView {
     /// font's leading as a gap between stacked lines.
     private func paragraphStyle(for font: PlatformFont) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        let column = ((activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2) - 1) % 3
+        let column = (currentAlignment - 1) % 3
         style.alignment = column == 0 ? .left : (column == 2 ? .right : .center)
         let glyphBox = font.ascender - font.descender
         style.minimumLineHeight = glyphBox
