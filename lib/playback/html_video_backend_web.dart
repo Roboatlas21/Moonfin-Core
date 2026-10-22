@@ -725,7 +725,8 @@ class HtmlVideoBackend extends PlayerBackend
               cue.text = '<c.moonfin-secondary>${cue.text}</c>';
             }
           }
-          _applySecondaryCues();
+          _retimeSecondaryCues();
+          _positionSecondaryCues();
           element.setAttribute('default', '');
           element.track.mode = 'showing';
         }).toJS,
@@ -785,8 +786,10 @@ class HtmlVideoBackend extends PlayerBackend
   @override
   Future<void> setSecondarySubtitleDelay(double seconds) async {
     if (_disposed) return;
-    _secondaryDelay = seconds.clamp(-5.0, 5.0);
-    _applySecondaryCues();
+    final delay = seconds.clamp(-5.0, 5.0);
+    if (_secondaryDelay == delay) return;
+    _secondaryDelay = delay;
+    _retimeSecondaryCues();
   }
 
   @override
@@ -796,18 +799,31 @@ class HtmlVideoBackend extends PlayerBackend
     int? textColor,
   }) async {
     if (_disposed) return;
-    _secondaryFontSize = fontSize?.clamp(8.0, 72.0);
-    _secondaryTextColor = textColor;
-    _secondaryOffset = (verticalOffset ?? 0.08).clamp(0.0, 0.4);
-    _applySubtitleAppearance();
-    _applySecondaryCues();
+    final size = fontSize?.clamp(8.0, 72.0);
+    if (_secondaryFontSize != size ||
+        _secondaryTextColor != textColor ||
+        _subtitleStyleElement == null) {
+      _secondaryFontSize = size;
+      _secondaryTextColor = textColor;
+      _applySubtitleAppearance();
+    }
+    final offset = (verticalOffset ?? 0.08).clamp(0.0, 0.4);
+    if (_secondaryOffset == offset) return;
+    _secondaryOffset = offset;
+    _positionSecondaryCues();
   }
 
-  void _applySecondaryCues() {
+  void _retimeSecondaryCues() {
     for (final original in _secondaryCues) {
       original.cue
         ..startTime = original.start + _secondaryDelay
-        ..endTime = original.end + _secondaryDelay
+        ..endTime = original.end + _secondaryDelay;
+    }
+  }
+
+  void _positionSecondaryCues() {
+    for (final original in _secondaryCues) {
+      original.cue
         ..region = null
         ..vertical = ''
         ..snapToLines = false

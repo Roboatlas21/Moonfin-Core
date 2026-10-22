@@ -3,6 +3,7 @@ library;
 
 import 'dart:async';
 import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
 import 'dart:typed_data';
 import 'dart:ui_web' as ui_web;
 
@@ -10,6 +11,45 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/playback/html_video_backend.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:web/web.dart' as web;
+
+@JS('Object.getOwnPropertyDescriptor')
+external JSObject _propertyDescriptor(JSObject object, JSString property);
+
+@JS('Object.defineProperty')
+external void _defineProperty(
+  JSObject object,
+  JSString property,
+  JSObject descriptor,
+);
+
+// Count assignments even when the value is unchanged, while still calling
+// the browser's real VTTCue/TextTrackCue accessors.
+void _watchCueWrites(
+  web.VTTCue cue,
+  String owner,
+  String property,
+  List<String> writes,
+) {
+  final prototype = globalContext
+      .getProperty<JSObject>(owner.toJS)
+      .getProperty<JSObject>('prototype'.toJS);
+  final descriptor = _propertyDescriptor(prototype, property.toJS);
+  final getter = descriptor.getProperty<JSFunction>('get'.toJS);
+  final setter = descriptor.getProperty<JSFunction>('set'.toJS);
+  _defineProperty(
+    cue,
+    property.toJS,
+    JSObject()
+      ..setProperty('get'.toJS, (() => getter.callAsFunction(cue)).toJS)
+      ..setProperty(
+        'set'.toJS,
+        ((JSAny? value) {
+          writes.add(property);
+          setter.callAsFunction(cue, value);
+        }).toJS,
+      ),
+  );
+}
 
 class _Preferences extends Fake implements UserPreferences {}
 
@@ -187,6 +227,64 @@ void main() {
         web.document.head!.textContent,
         matches(RegExp(r'font-size: 100(?:\.0+)?%')),
       );
+    },
+  );
+
+  test(
+    'appearance and position changes do not rewrite cue timestamps',
+    () async {
+      await backend.setSecondarySubtitle(
+        url: subtitle(
+          'WEBVTT\n\n00:01.000 --> 00:03.000\nFirst\n\n00:04.000 --> 00:06.000\nSecond\n',
+        ),
+        codec: 'vtt',
+      );
+      final second = await loadedSecondary();
+      final cues = second.track.cues!;
+      final writes = <String>[];
+      for (var i = 0; i < cues.length; i++) {
+        final cue = cues[i] as web.VTTCue;
+        _watchCueWrites(cue, 'TextTrackCue', 'startTime', writes);
+        _watchCueWrites(cue, 'TextTrackCue', 'endTime', writes);
+        _watchCueWrites(cue, 'VTTCue', 'line', writes);
+      }
+
+      await backend.configureSecondarySubtitleStyle(
+        fontSize: 32,
+        textColor: 0xFFFFFF00,
+      );
+      expect(writes, isEmpty);
+      final styles = web.document.head!.textContent;
+      expect(styles, contains('color: rgb(255, 255, 0)'));
+      await backend.configureSecondarySubtitleStyle(
+        fontSize: 36,
+        textColor: 0xFFFFFF00,
+      );
+      expect(writes, isEmpty);
+      expect(web.document.head!.textContent, isNot(styles));
+
+      await backend.configureSecondarySubtitleStyle(
+        fontSize: 36,
+        textColor: 0xFFFFFF00,
+        verticalOffset: 0.2,
+      );
+      expect(writes, ['line', 'line']);
+      expect((cues[0] as web.VTTCue).line.dartify(), 20);
+      writes.clear();
+      await backend.setSecondarySubtitleDelay(1.25);
+      expect(writes, ['startTime', 'endTime', 'startTime', 'endTime']);
+      expect(cues[0].startTime, 2.25);
+      expect(cues[0].endTime, 4.25);
+      expect(cues[1].startTime, 5.25);
+      expect(cues[1].endTime, 7.25);
+      writes.clear();
+      await backend.setSecondarySubtitleDelay(1.25);
+      await backend.configureSecondarySubtitleStyle(
+        fontSize: 36,
+        textColor: 0xFFFFFF00,
+        verticalOffset: 0.2,
+      );
+      expect(writes, isEmpty);
     },
   );
 
