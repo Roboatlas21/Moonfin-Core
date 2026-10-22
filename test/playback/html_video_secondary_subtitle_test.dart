@@ -423,6 +423,40 @@ void main() {
     expect(secondaryCue.size, primaryCue.size);
   });
 
+  test('authored top remains top when offset crosses middle boundary', () async {
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:08.000 line:30%,start '
+        'position:30% align:start\nPrimary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n'),
+      codec: 'vtt',
+    );
+    final second = (await loadedSecondary()).track.cues![0] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => primary.track.activeCues?.length == 1 &&
+        second.lineAlign == 'start');
+    final cue = primary.track.cues![0] as web.VTTCue;
+    final originalSecondary = (second.line.dartify() as num).toDouble();
+    expect(cue.line.dartify(), closeTo(30, 0.01));
+
+    await backend.configureSubtitleStyle(verticalOffset: 0.04);
+    expect(cue.line.dartify(), closeTo(34, 0.01));
+    expect(second.lineAlign, 'start');
+    expect(second.line.dartify(), closeTo(originalSecondary + 4, 0.1));
+
+    await backend.configureSubtitleStyle(verticalOffset: 0);
+    expect(cue.line.dartify(), closeTo(30, 0.01));
+    expect(second.lineAlign, 'start');
+    expect(second.line.dartify(), closeTo(originalSecondary, 0.1));
+    expect(cue.has('moonfinStackedMiddleLine'), isFalse);
+  });
+
   test('WebVTT custom middle alignment is centred and restored on Off', () async {
     await backend.setSubtitleTrack(
       1, isExternalSubtitle: true,
@@ -451,9 +485,11 @@ void main() {
           (secondaryCue.line.dartify() as num),
       closeTo(1.5, 0.1),
     );
+    expect(primaryCue.has('moonfinStackedMiddleLine'), isTrue);
     await backend.setSecondarySubtitle();
-    expect(primaryCue.line.dartify(), 45);
+    expect(primaryCue.has('moonfinStackedMiddleLine'), isFalse);
     expect(primaryCue.position.dartify(), 35);
+    expect(primaryCue.line.dartify(), 45);
     expect(primaryCue.snapToLines, isFalse);
   });
 

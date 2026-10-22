@@ -860,6 +860,14 @@ class HtmlVideoBackend extends PlayerBackend
     return fallback;
   }
 
+  // Discard saved middle-pair coordinates when the cue returns to normal.
+  void _clearPrimaryMiddleCueState(web.VTTCue cue) {
+    cue
+      ..delete(_stackedMiddleLine.toJS)
+      ..delete(_stackedMiddleLineAlign.toJS)
+      ..delete(_stackedMiddleSnapToLines.toJS);
+  }
+
   void _restorePrimaryMiddlePosition() {
     _forEachTextTrack((track) {
       final cues = track.cues;
@@ -877,6 +885,7 @@ class HtmlVideoBackend extends PlayerBackend
             ..snapToLines = cue.getProperty<JSBoolean?>(
               _stackedMiddleSnapToLines.toJS,
             )?.toDart ?? false;
+          _clearPrimaryMiddleCueState(cue);
         }
       }
     });
@@ -903,9 +912,13 @@ class HtmlVideoBackend extends PlayerBackend
     if (authored != null) return authored;
     // lineAlign describes which edge of the cue the coordinate measures,
     // not whether the caption is actually at the top or bottom of the video.
-    final row = cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS) != null
-        ? 1
-        : centre < 1 / 3 ? 2 : centre > 2 / 3 ? 0 : 1;
+    // Use the authored zone, not the position after the user offset.
+    final authoredCentre = cue.has(_autoPositionedCue)
+        ? 1.0
+        : cue.getProperty<JSNumber?>(_authoredLine.toJS) != null
+        ? _primaryCueBounds(cue, authored: true).centre
+        : centre;
+    final row = authoredCentre < 1 / 3 ? 2 : authoredCentre > 2 / 3 ? 0 : 1;
     final column = switch (cue.align) {
       'left' || 'start' => 0,
       'right' || 'end' => 2,
@@ -936,24 +949,26 @@ class HtmlVideoBackend extends PlayerBackend
   }
 
   ({double top, double bottom, double centre}) _primaryCueBounds(
-    web.VTTCue cue,
-  ) {
+    web.VTTCue cue, {
+    bool authored = false,
+  }) {
     final height = _primaryCueHeight(cue);
-    final originalLine =
-        cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
+    final originalLine = cue.getProperty<JSNumber?>(
+      (authored ? _authoredLine : _stackedMiddleLine).toJS,
+    );
     final rawLine = originalLine?.toDartDouble ?? cue.line.dartify();
     final line = rawLine is num
         ? rawLine.toDouble()
         : (1 - _subtitleVerticalOffset) * 100;
     final snapped = cue.getProperty<JSBoolean?>(
-      _stackedMiddleSnapToLines.toJS,
+      (authored ? _authoredSnapToLines : _stackedMiddleSnapToLines).toJS,
     )?.toDart ?? cue.snapToLines;
     final lineHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) *
         0.055 * 1.15;
     final top = snapped
         ? (line < 0 ? 1 + line * lineHeight : line * lineHeight)
         : switch (_cueAlignment(
-              cue, _stackedMiddleLineAlign,
+              cue, authored ? _authoredLineAlign : _stackedMiddleLineAlign,
               _cueAlignment(cue, 'lineAlign', 'start'),
             )) {
             'start' => line / 100,
@@ -971,9 +986,15 @@ class HtmlVideoBackend extends PlayerBackend
     if (_secondaryCues.isEmpty) return;
     final primary = _activePrimaryCue();
     if (primary != null) {
-      final bounds = _primaryCueBounds(primary);
+      var bounds = _primaryCueBounds(primary);
+      final alignment = _primaryAlignment(primary, bounds.centre);
+      if ((alignment - 1) ~/ 3 != 1 &&
+          primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS) != null) {
+        _clearPrimaryMiddleCueState(primary);
+        bounds = _primaryCueBounds(primary);
+      }
       _primaryPlacement = (
-        alignment: _primaryAlignment(primary, bounds.centre),
+        alignment: alignment,
         centre: bounds.centre,
         top: bounds.top,
         bottom: bounds.bottom,
