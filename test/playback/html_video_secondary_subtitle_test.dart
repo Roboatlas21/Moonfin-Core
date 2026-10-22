@@ -737,9 +737,10 @@ void main() {
       final cue = second.track.cues![0] as web.VTTCue;
       expect(cue.startTime, 1.5);
       expect(cue.lineAlign, 'end');
-      expect(cue.line.dartify(), closeTo(100, 0.2));
+      // With no primary selected, the saved secondary spacing is inactive.
+      expect(cue.line.dartify(), closeTo(96, 0.2));
       await backend.configureSubtitleStyle(fontSize: 48, verticalOffset: 0.2);
-      expect(cue.line.dartify(), closeTo(100, 0.2));
+      expect(cue.line.dartify(), closeTo(96, 0.2));
       final styles = web.document.head!.textContent!;
       expect(styles, matches(RegExp(r'font-size: 50(?:\.0+)?%')));
       expect(styles, contains('color: rgb(255, 255, 0)'));
@@ -800,7 +801,8 @@ void main() {
         verticalOffset: -0.12,
       );
       expect(writes, ['line', 'line']);
-      expect((cues[0] as web.VTTCue).line.dartify(), closeTo(100, 0.2));
+      // No primary means spacing changes are saved but do not move the cue.
+      expect((cues[0] as web.VTTCue).line.dartify(), closeTo(96, 0.2));
       writes.clear();
       await backend.setSecondarySubtitleDelay(1.25);
       expect(writes, ['startTime', 'endTime', 'startTime', 'endTime']);
