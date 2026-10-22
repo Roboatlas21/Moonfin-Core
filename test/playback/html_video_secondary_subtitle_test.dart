@@ -230,8 +230,11 @@ void main() {
     expect(centre.line.dartify(), greaterThan(50));
     expect(cue.line.dartify(), lessThan(50));
     final middlePosition = (cue.line.dartify() as num).toDouble();
+    final primaryMiddlePosition = (centre.line.dartify() as num).toDouble();
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0.02);
-    expect(cue.line.dartify(), closeTo(middlePosition - 2, 0.01));
+    // Half the adjustment goes into each line, keeping their group centred.
+    expect(cue.line.dartify(), closeTo(middlePosition - 1, 0.01));
+    expect(centre.line.dartify(), closeTo(primaryMiddlePosition + 1, 0.01));
     await backend.setSecondarySubtitle();
     expect(centre.line.dartify(), 50);
   });

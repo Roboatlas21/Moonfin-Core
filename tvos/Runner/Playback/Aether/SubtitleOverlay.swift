@@ -43,7 +43,10 @@ final class SubtitleOverlay: PlatformView {
     weak var primaryForStacking: SubtitleOverlay?
     weak var secondaryForStacking: SubtitleOverlay?
     var secondaryVerticalAdjustment: Double = 0 {
-        didSet { requestLayout() }
+        didSet {
+            primaryForStacking?.layoutTextLabel()
+            requestLayout()
+        }
     }
 
     private var visibleTextFrame: CGRect? {
@@ -467,7 +470,8 @@ final class SubtitleOverlay: PlatformView {
         } else if row == 1, let secondary = secondaryForStacking,
                   let secondaryFrame = secondary.visibleTextFrame {
             // Keep a centre-aligned pair centred around the authored anchor.
-            y += (secondaryFrame.height + gap) / 2
+            y += (secondaryFrame.height + gap +
+                  CGFloat(secondary.secondaryVerticalAdjustment) * bounds.height) / 2
         }
         x = min(max(x, 0), max(0, bounds.width - size.width))
         y = min(max(y, 0), max(0, bounds.height - size.height))

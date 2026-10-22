@@ -100,14 +100,18 @@ internal class SecondarySubtitleOverlay(
         // is showing. Restore the untouched source cue when it disappears.
         val shift = if (active.isNotEmpty() && height > 0) {
             val fontPx = ((fontSizeOverride ?: baseFontSize) / 24f) * 0.06f * height
-            (estimateTextHeight(active.first().text.toString(), width * 0.9f, fontPx) +
-                MIN_GAP_DP * view.resources.displayMetrics.density) / (2 * height)
+            SubtitleLayoutPlanner.middlePrimaryShift(
+                estimateTextHeight(active.first().text.toString(), width * 0.9f, fontPx),
+                MIN_GAP_DP * view.resources.displayMetrics.density,
+                offsetDelta,
+                height,
+            )
         } else 0f
         primaryCues = unmodifiedPrimaryCues.map { cue ->
             val positioned = withPrimaryEdgeOffset(cue)
-            if (shift > 0f && positioned.lineType == Cue.LINE_TYPE_FRACTION &&
+            if (active.isNotEmpty() && positioned.lineType == Cue.LINE_TYPE_FRACTION &&
                 positioned.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE && positioned.line in 0.35f..0.65f
-            ) positioned.buildUpon().setLine((positioned.line + shift).coerceAtMost(1f), Cue.LINE_TYPE_FRACTION).build()
+            ) positioned.buildUpon().setLine((positioned.line + shift).coerceIn(0f, 1f), Cue.LINE_TYPE_FRACTION).build()
             else positioned
         }
         primaryView.setCues(primaryCues)

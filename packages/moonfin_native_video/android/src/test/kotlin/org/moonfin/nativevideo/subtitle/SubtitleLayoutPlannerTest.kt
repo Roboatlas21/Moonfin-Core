@@ -44,6 +44,27 @@ class SubtitleLayoutPlannerTest {
         )
     }
 
+    @Test
+    fun middleOffsetMovesBothLinesHalfTheRequestedAmount() {
+        fun pair(offset: Float): Pair<Float, Float> {
+            val shift = SubtitleLayoutPlanner.middlePrimaryShift(
+                secondaryHeight = 70f, gapPx = 10f, adjustment = offset,
+                viewportHeight = 1000,
+            )
+            val primaryTop = 500f - 30f + shift * 1000f
+            val primaryBottom = primaryTop + 60f
+            val secondaryBottom = SubtitleLayoutPlanner.stackedDesiredBottom(
+                SubtitleBox(50f, primaryTop, 950f, primaryBottom),
+                1000, 70f, 10f, offset,
+            )
+            return Pair(primaryTop, secondaryBottom - 70f)
+        }
+        val (primaryAtZero, secondaryAtZero) = pair(0f)
+        val (primaryAtPlusTwo, secondaryAtPlusTwo) = pair(0.02f)
+        assertEquals(10f, primaryAtPlusTwo - primaryAtZero, 0.01f)
+        assertEquals(-10f, secondaryAtPlusTwo - secondaryAtZero, 0.01f)
+        assertEquals(500f, (primaryAtPlusTwo + 60f + secondaryAtPlusTwo) / 2f, 0.01f)
+    }
 
     @Test
     fun preferredSearchHalfFollowsCuePositionRatherThanItsLineAnchor() {

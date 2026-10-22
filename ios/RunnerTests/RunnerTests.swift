@@ -119,9 +119,16 @@ final class RunnerTests: XCTestCase {
         XCTAssertGreaterThan(primaryLabel.frame.midY, 200)
         XCTAssertLessThan(secondaryLabel.frame.midY, 200)
 
-        secondary.secondaryVerticalAdjustment = 0.04
-        secondary.setNeedsLayout()
+        let middlePrimary = primaryLabel.frame.midY
+        let middleSecondary = secondaryLabel.frame.midY
+        let groupMidY = (secondaryLabel.frame.minY + primaryLabel.frame.maxY) / 2
+
+        secondary.secondaryVerticalAdjustment = 0.02
         secondary.layoutIfNeeded()
+        XCTAssertEqual(primaryLabel.frame.midY, middlePrimary + 4, accuracy: 0.1)
+        XCTAssertEqual(secondaryLabel.frame.midY, middleSecondary - 4, accuracy: 0.1)
+        XCTAssertEqual((secondaryLabel.frame.minY + primaryLabel.frame.maxY) / 2,
+                       groupMidY, accuracy: 0.1)
         XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
     }
 

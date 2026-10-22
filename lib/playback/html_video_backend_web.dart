@@ -891,12 +891,14 @@ class HtmlVideoBackend extends PlayerBackend
         ((primary?.line.dartify() as num?)?.toDouble() ??
             ((1 - _subtitleVerticalOffset) * 100));
     final position = (primaryLine / 100).clamp(0.0, 1.0).toDouble();
-    if (primary != null && (alignment - 1) ~/ 3 == 1) {
+    final centred = primary != null && (alignment - 1) ~/ 3 == 1;
+    if (primary != null && centred) {
       if (originalCentre == null) {
         primary.setProperty(_stackedMiddleLine.toJS, primaryLine.toJS);
       }
-      primary.line = ((position + (secondaryHeight + gap) / 2) * 100)
-          .clamp(0.0, 100.0).toDouble().toJS;
+      primary.line =
+          ((position + (secondaryHeight + gap + _secondaryOffset) / 2) * 100)
+              .clamp(0.0, 100.0).toDouble().toJS;
     }
     final top = primary == null
         ? (0.96 - secondaryHeight - _secondaryOffset)
@@ -906,7 +908,7 @@ class HtmlVideoBackend extends PlayerBackend
             primaryAnchor: position,
             primaryHeight: primaryHeight,
             secondaryHeight: secondaryHeight,
-            offset: _secondaryOffset,
+            offset: centred ? _secondaryOffset / 2 : _secondaryOffset,
           );
     final column = (alignment - 1) % 3;
     for (final original in _secondaryCues) {
