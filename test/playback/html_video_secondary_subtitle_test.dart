@@ -512,13 +512,15 @@ void main() {
     final bottom = cues[1] as web.VTTCue;
     final middle = cues[2] as web.VTTCue;
     await backend.seekTo(const Duration(seconds: 2));
-    await _until(() => track.track.activeCues?.length == 1);
+    await _until(() => track.track.activeCues?.length == 1 &&
+        (track.track.activeCues![0] as web.VTTCue).text.contains('Top'));
     await backend.configureSubtitleStyle(verticalOffset: 0.04);
     expect(top.line.dartify(), closeTo(12, 0.01));
     expect(top.position.dartify(), 30);
 
     await backend.seekTo(const Duration(seconds: 5));
-    await _until(() => track.track.activeCues?.length == 1);
+    await _until(() => track.track.activeCues?.length == 1 &&
+        (track.track.activeCues![0] as web.VTTCue).text.contains('Bottom'));
     expect(bottom.line.dartify(), closeTo(88, 0.01));
     expect(bottom.position.dartify(), 70);
     await backend.configureSubtitleStyle(verticalOffset: 0.02);
@@ -527,14 +529,17 @@ void main() {
     expect(bottom.line.dartify(), closeTo(88, 0.01));
 
     await backend.seekTo(const Duration(seconds: 8));
-    await _until(() => track.track.activeCues?.length == 1);
+    await _until(() => track.track.activeCues?.length == 1 &&
+        (track.track.activeCues![0] as web.VTTCue).text.contains('Middle'));
     expect(middle.line.dartify(), 50);
     await backend.configureSubtitleStyle(verticalOffset: 0);
     await backend.seekTo(const Duration(seconds: 2));
-    await _until(() => track.track.activeCues?.length == 1);
+    await _until(() => track.track.activeCues?.length == 1 &&
+        (track.track.activeCues![0] as web.VTTCue).text.contains('Top'));
     expect(top.line.dartify(), 8);
     await backend.seekTo(const Duration(seconds: 5));
-    await _until(() => track.track.activeCues?.length == 1);
+    await _until(() => track.track.activeCues?.length == 1 &&
+        (track.track.activeCues![0] as web.VTTCue).text.contains('Bottom'));
     expect(bottom.line.dartify(), 92);
   });
 
@@ -551,19 +556,22 @@ void main() {
     final top = track.track.cues![0] as web.VTTCue;
     final bottom = track.track.cues![1] as web.VTTCue;
     await backend.seekTo(const Duration(seconds: 2));
-    await _until(() => track.track.activeCues?.length == 1);
+    await _until(() => track.track.activeCues?.length == 1 &&
+        (track.track.activeCues![0] as web.VTTCue).text.contains('Top'));
     await backend.configureSubtitleStyle(verticalOffset: 0.04);
     expect(top.snapToLines, isFalse);
     expect(top.line.dartify(), closeTo(4, 0.01));
     await backend.seekTo(const Duration(seconds: 5));
-    await _until(() => track.track.activeCues?.length == 1);
+    await _until(() => track.track.activeCues?.length == 1 &&
+        (track.track.activeCues![0] as web.VTTCue).text.contains('Bottom'));
     expect(bottom.snapToLines, isFalse);
     expect(bottom.line.dartify(), closeTo(96, 0.01));
     await backend.configureSubtitleStyle(verticalOffset: 0);
     expect(bottom.snapToLines, isTrue);
     expect(bottom.line.dartify(), -1);
     await backend.seekTo(const Duration(seconds: 2));
-    await _until(() => track.track.activeCues?.length == 1);
+    await _until(() => track.track.activeCues?.length == 1 &&
+        (track.track.activeCues![0] as web.VTTCue).text.contains('Top'));
     expect(top.snapToLines, isTrue);
     expect(top.line.dartify(), 0);
   });
