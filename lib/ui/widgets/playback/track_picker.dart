@@ -114,10 +114,11 @@ abstract final class TrackPicker {
       final stream = streams
           .where((entry) => entry['Index'] == index)
           .firstOrNull;
-      return stream?['DisplayTitle'] as String? ??
-          stream?['Title'] as String? ??
-          stream?['Language'] as String? ??
-          l10n.off;
+      for (final key in ['DisplayTitle', 'Title', 'Language']) {
+        final title = (stream?[key] as String?)?.trim();
+        if (title != null && title.isNotEmpty) return title;
+      }
+      return l10n.off;
     }
 
     final options = <TrackOption>[

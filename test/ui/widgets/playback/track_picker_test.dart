@@ -47,10 +47,23 @@ class _Backend extends Fake implements MediaKitPlayerBackend {
 }
 
 class _Manager extends PlaybackManager {
-  _Manager(this._backend, {this.resolution});
+  _Manager(
+    this._backend, {
+    this.resolution,
+    this.primaryIndex,
+    this.secondaryIndex,
+  });
 
   final PlayerBackend _backend;
   final StreamResolutionResult? resolution;
+  final int? primaryIndex;
+  final int? secondaryIndex;
+
+  @override
+  int? get subtitleStreamIndex => primaryIndex;
+
+  @override
+  int? get secondarySubtitleStreamIndex => secondaryIndex;
 
   @override
   StreamResolutionResult? get currentResolution => resolution;
@@ -207,6 +220,80 @@ void main() {
       expect(find.textContaining('English'), findsOneWidget);
     },
   );
+
+  testWidgets('slot descriptions ignore blank display titles and titles', (
+    tester,
+  ) async {
+    final manager = _Manager(
+      _Backend(secondaryStyle: true),
+      primaryIndex: 2,
+      secondaryIndex: 3,
+      resolution: StreamResolutionResult(
+        streamUrl: 'https://host/stream',
+        mediaSourceId: 'source',
+        playMethod: StreamPlayMethod.directPlay,
+        mediaStreams: [
+          {
+            'Type': 'Subtitle',
+            'Index': 2,
+            'DisplayTitle': '   ',
+            'Title': '  English - SRT  ',
+            'Language': 'eng',
+          },
+          {
+            'Type': 'Subtitle',
+            'Index': 3,
+            'DisplayTitle': '',
+            'Title': '  ',
+            'Language': '  French  ',
+          },
+        ],
+      ),
+    );
+    addTearDown(manager.dispose);
+    await openPicker(tester, manager, audio: false);
+
+    expect(find.text(l10n.primarySubtitleSlot), findsOneWidget);
+    expect(find.text(l10n.secondarySubtitleSlot), findsOneWidget);
+    expect(find.text('English - SRT'), findsOneWidget);
+    expect(find.text('French'), findsOneWidget);
+  });
+
+  testWidgets('slot descriptions prefer a nonempty display title and fall back to Off', (
+    tester,
+  ) async {
+    final manager = _Manager(
+      _Backend(secondaryStyle: true),
+      primaryIndex: 2,
+      secondaryIndex: 3,
+      resolution: StreamResolutionResult(
+        streamUrl: 'https://host/stream',
+        mediaSourceId: 'source',
+        playMethod: StreamPlayMethod.directPlay,
+        mediaStreams: [
+          {
+            'Type': 'Subtitle',
+            'Index': 2,
+            'DisplayTitle': '  English SDH  ',
+            'Title': 'Ignored',
+          },
+          {
+            'Type': 'Subtitle',
+            'Index': 3,
+            'DisplayTitle': '',
+            'Title': '   ',
+            'Language': '  ',
+          },
+        ],
+      ),
+    );
+    addTearDown(manager.dispose);
+    await openPicker(tester, manager, audio: false);
+
+    expect(find.text('English SDH'), findsOneWidget);
+    expect(find.text('Ignored'), findsNothing);
+    expect(find.text(l10n.off), findsOneWidget);
+  });
 
   testWidgets('the secondary subtitle delay opens in the same bar', (
     tester,
