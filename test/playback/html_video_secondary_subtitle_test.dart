@@ -164,8 +164,8 @@ void main() {
     expect(top.position, 5);
     expect(top.text, 'Top left');
 
-    await backend.configureSubtitleStyle(verticalOffset: 0.2);
-    expect(top.line.dartify(), 5);
+    await backend.configureSubtitleStyle(verticalOffset: 0.02);
+    expect(top.line.dartify(), 7);
     await backend.seekTo(const Duration(seconds: 5));
     final middle = primary.track.cues![1] as web.VTTCue;
     await _until(() => middle.line.dartify() == 50);
@@ -175,8 +175,28 @@ void main() {
     await _until(() => primary.track.activeCues?.length == 1);
     final authored = primary.track.cues![2] as web.VTTCue;
     expect(authored.line.dartify(), 20);
-    await backend.configureSubtitleStyle(verticalOffset: 0.3);
+    await backend.configureSubtitleStyle(verticalOffset: 0.04);
     expect(authored.line.dartify(), 20);
+  });
+
+  test('bottom-aligned primary SRT moves upward from the bottom edge', () async {
+    await backend.setSubtitleTrack(
+      1,
+      isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:03.000\n{\\an2}Bottom\n',
+      ),
+    );
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => primary.track.activeCues?.length == 1);
+    final cue = primary.track.cues![0] as web.VTTCue;
+    expect(cue.line.dartify(), 100);
+    await backend.configureSubtitleStyle(verticalOffset: 0.02);
+    expect(cue.line.dartify(), 98);
+    await backend.configureSubtitleStyle(verticalOffset: 0);
+    expect(cue.line.dartify(), 100);
   });
 
   test('secondary follows top-left and centred primary alignment', () async {
@@ -196,6 +216,12 @@ void main() {
     await backend.seekTo(const Duration(seconds: 2));
     await _until(() => cue.align == 'left');
     expect(cue.line.dartify(), greaterThan(5));
+    final topPosition = (cue.line.dartify() as num).toDouble();
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.02);
+    expect(cue.line.dartify(), closeTo(topPosition + 2, 0.01));
+    await backend.configureSecondarySubtitleStyle(verticalOffset: -0.02);
+    expect(cue.line.dartify(), closeTo(topPosition - 2, 0.01));
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
 
     await backend.seekTo(const Duration(seconds: 5));
     await _until(() => cue.align == 'center');
@@ -203,6 +229,9 @@ void main() {
     final centre = primary.track.cues![1] as web.VTTCue;
     expect(centre.line.dartify(), greaterThan(50));
     expect(cue.line.dartify(), lessThan(50));
+    final middlePosition = (cue.line.dartify() as num).toDouble();
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.02);
+    expect(cue.line.dartify(), closeTo(middlePosition - 2, 0.01));
     await backend.setSecondarySubtitle();
     expect(centre.line.dartify(), 50);
   });

@@ -1076,7 +1076,12 @@ class HtmlVideoBackend extends PlayerBackend
         vtt
           ..snapToLines = false
           ..lineAlign = row == 0 ? 'end' : row == 1 ? 'center' : 'start'
-          ..line = (row == 0 ? line : row == 1 ? 50 : 5).toJS
+          ..line = (row == 0
+                  ? line
+                  : row == 1
+                      ? 50
+                      : 5 + _subtitleVerticalOffset * 100)
+              .clamp(0.0, 100.0).toDouble().toJS
           ..align = column == 0 ? 'left' : column == 2 ? 'right' : 'center'
           ..positionAlign =
               column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center'

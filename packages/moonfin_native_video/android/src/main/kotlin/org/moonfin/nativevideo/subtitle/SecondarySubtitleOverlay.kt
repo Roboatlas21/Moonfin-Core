@@ -104,10 +104,11 @@ internal class SecondarySubtitleOverlay(
                 MIN_GAP_DP * view.resources.displayMetrics.density) / (2 * height)
         } else 0f
         primaryCues = unmodifiedPrimaryCues.map { cue ->
-            if (shift > 0f && cue.lineType == Cue.LINE_TYPE_FRACTION &&
-                cue.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE && cue.line in 0.35f..0.65f
-            ) cue.buildUpon().setLine((cue.line + shift).coerceAtMost(1f), Cue.LINE_TYPE_FRACTION).build()
-            else cue
+            val positioned = withPrimaryEdgeOffset(cue)
+            if (shift > 0f && positioned.lineType == Cue.LINE_TYPE_FRACTION &&
+                positioned.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE && positioned.line in 0.35f..0.65f
+            ) positioned.buildUpon().setLine((positioned.line + shift).coerceAtMost(1f), Cue.LINE_TYPE_FRACTION).build()
+            else positioned
         }
         primaryView.setCues(primaryCues)
         if (active.isEmpty()) {
@@ -139,7 +140,9 @@ internal class SecondarySubtitleOverlay(
                 height,
                 estimateTextHeight(sourceCue.text.toString(), width * (sourceCue.size.takeUnless { it == Cue.DIMEN_UNSET } ?: 0.9f), secondaryFontPx),
             )
-            val shift = (-offsetDelta * height)
+            val inward = if (SubtitleLayoutPlanner.verticalAlignmentFor(originalBox, height) ==
+                SubtitleLayoutPlanner.ALIGN_TOP) offsetDelta else -offsetDelta
+            val shift = (inward * height)
                 .coerceAtLeast(-originalBox.top).coerceAtMost(height - originalBox.bottom)
             val box = originalBox.copy(top = originalBox.top + shift, bottom = originalBox.bottom + shift)
             cue = cue.buildUpon().setLine(box.bottom / height, Cue.LINE_TYPE_FRACTION)
@@ -190,6 +193,23 @@ internal class SecondarySubtitleOverlay(
 
         view.visibility = if (rendered.isEmpty()) View.INVISIBLE else View.VISIBLE
         view.setCues(rendered)
+    }
+
+    /** Media3's SubRip alignment tags use 8%/92% edge anchors.
+     * Offset those captions inward while leaving other authored cue lines intact.
+     */
+    private fun withPrimaryEdgeOffset(cue: Cue): Cue {
+        if (cue.bitmap != null || cue.lineType != Cue.LINE_TYPE_FRACTION) return cue
+        val line = when {
+            cue.lineAnchor == Cue.ANCHOR_TYPE_START && cue.line in 0.079f..0.081f ->
+                cue.line + primaryBottomPaddingFraction
+            cue.lineAnchor == Cue.ANCHOR_TYPE_END && cue.line in 0.919f..0.921f ->
+                cue.line - primaryBottomPaddingFraction
+            else -> return cue
+        }
+        return cue.buildUpon()
+            .setLine(line.coerceIn(0f, 1f), Cue.LINE_TYPE_FRACTION)
+            .build()
     }
 
     private fun buildCue(cue: Cue): Cue = cue.buildUpon().apply {

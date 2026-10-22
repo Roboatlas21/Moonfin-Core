@@ -26,7 +26,7 @@ internal object SubtitleLayoutPlanner {
         val anchor = if (topAligned)
             primary.bottom + gapPx + secondaryHeight
         else primary.top - gapPx
-        return anchor - adjustment * viewportHeight
+        return anchor + (if (topAligned) adjustment else -adjustment) * viewportHeight
     }
 
     /** Chooses the search half from the cue's actual screen position. */

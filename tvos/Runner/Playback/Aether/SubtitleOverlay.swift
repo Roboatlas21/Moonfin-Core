@@ -215,6 +215,7 @@ final class SubtitleOverlay: PlatformView {
             setLabelText(activeText)
         }
         layoutTextLabel()
+        secondaryForStacking?.layoutTextLabel()
         layoutBitmapView()
         assImageView.frame = assCanvas
     }
@@ -446,7 +447,8 @@ final class SubtitleOverlay: PlatformView {
         let yAnchor = placement?.position.map { picture.minY + $0.y * picture.height }
             ?? (topOffset.map { bounds.height * CGFloat(max($0, 0)) }
                 ?? (row == 0 ? bounds.height - textBottomOffset
-                    : row == 1 ? bounds.height / 2 : bounds.height * 0.05))
+                    : row == 1 ? bounds.height / 2
+                        : bounds.height * 0.05 + textBottomOffset))
         var x = xAnchor - size.width * CGFloat(column) / 2
         var y = yAnchor - size.height * CGFloat(2 - row) / 2
         let gap = 8 * canvasScale
@@ -459,7 +461,9 @@ final class SubtitleOverlay: PlatformView {
                 : parentFrame.midX - size.width / 2
             y = parentRow == 2 ? parentFrame.maxY + gap
                 : parentFrame.minY - size.height - gap
-            y -= CGFloat(secondaryVerticalAdjustment) * bounds.height
+            // Top-positioned subtitles move downward; bottom and centre move upward.
+            let direction: CGFloat = parentRow == 2 ? 1 : -1
+            y += direction * CGFloat(secondaryVerticalAdjustment) * bounds.height
         } else if row == 1, let secondary = secondaryForStacking,
                   let secondaryFrame = secondary.visibleTextFrame {
             // Keep a centre-aligned pair centred around the authored anchor.

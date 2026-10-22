@@ -35,6 +35,16 @@ final class RunnerTests: XCTestCase {
         let anchored = placed(5, position: CGPoint(x: 0.3, y: 0.4))
         XCTAssertEqual(anchored.midX, 240, accuracy: 0.1)
         XCTAssertEqual(anchored.midY, 160, accuracy: 0.1)
+
+        // Primary offsets move text inward from either edge, not away from it.
+        overlay.applyStyle(
+            textColor: nil, backgroundColor: nil, strokeColor: nil,
+            fontSize: nil, fontWeight: nil, verticalOffset: 0.02)
+        XCTAssertGreaterThan(placed(7).minY, topLeft.minY)
+        XCTAssertLessThan(placed(2).maxY, bottom.maxY)
+        XCTAssertEqual(placed(5).midY, 200, accuracy: 0.1)
+        XCTAssertEqual(placed(5, position: CGPoint(x: 0.3, y: 0.4)).midY,
+                       160, accuracy: 0.1)
     }
 
     @MainActor
@@ -85,10 +95,24 @@ final class RunnerTests: XCTestCase {
 
         show(7)
         XCTAssertGreaterThan(secondaryLabel.frame.minY, primaryLabel.frame.maxY)
+        let topSecondary = secondaryLabel.frame.minY
+        secondary.secondaryVerticalAdjustment = 0.02
+        secondary.layoutIfNeeded()
+        XCTAssertGreaterThan(secondaryLabel.frame.minY, topSecondary)
+        secondary.secondaryVerticalAdjustment = 0
+        secondary.layoutIfNeeded()
         XCTAssertEqual(primaryLabel.frame.minX, secondaryLabel.frame.minX, accuracy: 0.1)
         let leftStyle = secondaryLabel.attributedText?.attribute(
             .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
         XCTAssertEqual(leftStyle?.alignment, .left)
+
+        show(2)
+        let bottomSecondary = secondaryLabel.frame.minY
+        secondary.secondaryVerticalAdjustment = 0.02
+        secondary.layoutIfNeeded()
+        XCTAssertLessThan(secondaryLabel.frame.minY, bottomSecondary)
+        secondary.secondaryVerticalAdjustment = 0
+        secondary.layoutIfNeeded()
 
         show(5)
         XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)

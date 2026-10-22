@@ -31,6 +31,17 @@ class SubtitleLayoutPlannerTest {
             SubtitleLayoutPlanner.stackedDesiredBottom(bottom, 1000, 70f, 10f, 0.02f),
             0.01f,
         )
+        // Top-aligned second subtitles move inward (down) on positive offsets.
+        assertEquals(
+            210f,
+            SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 70f, 10f, 0.02f),
+            0.01f,
+        )
+        assertEquals(
+            170f,
+            SubtitleLayoutPlanner.stackedDesiredBottom(top, 1000, 70f, 10f, -0.02f),
+            0.01f,
+        )
     }
 
 

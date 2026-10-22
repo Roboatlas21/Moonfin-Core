@@ -14,6 +14,8 @@ double stackedSecondaryTop({
     1 => primaryAnchor - primaryHeight / 2 - (secondaryHeight + gap) / 2,
     _ => primaryAnchor - primaryHeight - secondaryHeight - gap,
   };
-  return (top - offset).clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0))
+  // A positive adjustment moves inward: down from the top, up elsewhere.
+  final adjustedTop = row == 2 ? top + offset : top - offset;
+  return adjustedTop.clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0))
       .toDouble();
 }
