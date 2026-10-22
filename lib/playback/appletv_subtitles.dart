@@ -80,7 +80,7 @@ Future<void>? handleAppleTvSubtitleAction(
       if (delay == null || !delay.isFinite) return Future<void>.value();
       return manager.setSecondarySubtitleDelay(delay / 1000);
     case 'configureSecondarySubtitleStyle':
-      return _saveAppearance(action, prefs);
+      return _saveAppearance(action, manager, prefs);
     default:
       return null;
   }
@@ -88,29 +88,28 @@ Future<void>? handleAppleTvSubtitleAction(
 
 Future<void> _saveAppearance(
   Map<String, dynamic> action,
+  PlaybackManager manager,
   UserPreferences prefs,
 ) async {
   final size = (action['sizeAdjustment'] as num?)?.toDouble();
   final offset = (action['verticalOffset'] as num?)?.toDouble();
   final color = (action['textColor'] as num?)?.toInt();
-  // One menu action should cause one playback-style refresh.
-  await prefs.batchNotifications(() async {
-    if (size != null && size.isFinite) {
-      await prefs.set(
-        UserPreferences.secondarySubtitleSizeAdjustment,
-        size.clamp(-50.0, 50.0).toDouble(),
-      );
-    }
-    if (offset != null && offset.isFinite) {
-      await prefs.set(
-        UserPreferences.secondarySubtitleOffsetPosition,
-        offset
-            .clamp(-secondarySubtitleMaxOffset, secondarySubtitleMaxOffset)
-            .toDouble(),
-      );
-    }
-    if (color != null) {
-      await prefs.set(UserPreferences.secondarySubtitleTextColor, color);
-    }
-  });
+  if (size != null && size.isFinite) {
+    await prefs.set(
+      UserPreferences.secondarySubtitleSizeAdjustment,
+      size.clamp(-50.0, 50.0).toDouble(),
+    );
+  }
+  if (offset != null && offset.isFinite) {
+    await prefs.set(
+      UserPreferences.secondarySubtitleOffsetPosition,
+      offset
+          .clamp(-secondarySubtitleMaxOffset, secondarySubtitleMaxOffset)
+          .toDouble(),
+    );
+  }
+  if (color != null) {
+    await prefs.set(UserPreferences.secondarySubtitleTextColor, color);
+  }
+  await syncSecondarySubtitleStyle(manager, prefs);
 }

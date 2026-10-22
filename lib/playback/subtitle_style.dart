@@ -45,11 +45,6 @@ Future<void> setPrimarySubtitleAppearance(
       verticalOffset.clamp(0.0, primarySubtitleMaxOffset),
     );
   }
-  // Apple playback screens apply preference changes and refresh on new streams.
-  if (manager.backend is AppleTvBackend ||
-      manager.backend is AetherBackend) {
-    return;
-  }
   // Some backends default omitted colours, so send the full saved appearance.
   final style = SubtitleStyle.forResolution(prefs, manager.currentResolution);
   await manager.backend?.configureSubtitleStyle(

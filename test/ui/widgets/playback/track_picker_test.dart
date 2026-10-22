@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -104,14 +102,6 @@ void main() {
   });
 
   tearDown(() => GetIt.instance.reset());
-
-  // These tests don't mount the player screen that listens for style changes.
-  void listenForAppleSubtitleChanges(_Manager manager) {
-    final prefs = GetIt.instance<UserPreferences>();
-    prefs.addListener(
-      () => unawaited(syncSecondarySubtitleStyle(manager, prefs)),
-    );
-  }
 
   Future<void> openPicker(
     WidgetTester tester,
@@ -415,7 +405,6 @@ void main() {
     await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
     await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
     final manager = _Manager(_AppleBackend());
-    listenForAppleSubtitleChanges(manager);
     addTearDown(manager.dispose);
     await syncSecondarySubtitleStyle(manager, prefs);
     await openPicker(tester, manager, secondary: true);
@@ -447,7 +436,6 @@ void main() {
     await prefs.set(UserPreferences.subtitlesTextSize, 12.0);
     await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, -50.0);
     final manager = _Manager(_AppleBackend());
-    listenForAppleSubtitleChanges(manager);
     addTearDown(manager.dispose);
     await syncSecondarySubtitleStyle(manager, prefs);
     await openPicker(tester, manager, secondary: true);
@@ -471,7 +459,6 @@ void main() {
     await prefs.set(UserPreferences.subtitlesTextSize, 48.0);
     await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 50.0);
     final manager = _Manager(_AppleBackend());
-    listenForAppleSubtitleChanges(manager);
     addTearDown(manager.dispose);
     await openPicker(tester, manager, secondary: true);
     expect(find.text('+50%'), findsOneWidget);
