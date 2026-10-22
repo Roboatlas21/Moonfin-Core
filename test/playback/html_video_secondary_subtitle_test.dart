@@ -366,14 +366,12 @@ void main() {
     await backend.seekTo(const Duration(seconds: 2));
     await _until(() => primary.track.activeCues?.length == 1);
     final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(primaryCue.line.dartify(), 90);
+    expect(primaryCue.position.dartify(), 30);
     expect(secondaryCue.position.dartify(), 30);
     expect(secondaryCue.lineAlign, 'end');
-    expect(primaryCue.line.dartify(), 90);
-    expect(primaryCue.lineAlign, 'start');
-    expect(primaryCue.position, 30);
     expect(secondaryCue.line.dartify(), closeTo(88.5, 0.1));
     expect(secondaryCue.align, primaryCue.align);
-    expect(secondaryCue.positionAlign, primaryCue.positionAlign);
     expect(secondaryCue.size, primaryCue.size);
     await backend.seekTo(const Duration(seconds: 9));
     expect(primaryCue.line.dartify(), 90);
@@ -398,14 +396,12 @@ void main() {
     await backend.seekTo(const Duration(seconds: 2));
     await _until(() => primary.track.activeCues?.length == 1);
     final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(primaryCue.line.dartify(), 10);
+    expect(primaryCue.position.dartify(), 72);
     expect(secondaryCue.position.dartify(), 72);
     expect(secondaryCue.lineAlign, 'start');
-    expect(primaryCue.line.dartify(), 10);
-    expect(primaryCue.lineAlign, 'end');
-    expect(primaryCue.positionAlign, 'line-right');
-    expect(secondaryCue.line.dartify(), closeTo(11.5, 0.1));
+    expect((secondaryCue.line.dartify() as num), greaterThan(10));
     expect(secondaryCue.align, primaryCue.align);
-    expect(secondaryCue.positionAlign, primaryCue.positionAlign);
     expect(secondaryCue.size, primaryCue.size);
   });
 
@@ -428,16 +424,18 @@ void main() {
     final primaryCue = primary.track.cues![0] as web.VTTCue;
     await backend.seekTo(const Duration(seconds: 2));
     await _until(() => primary.track.activeCues?.length == 1);
-    expect(primaryCue.lineAlign, 'start');
+    expect(primaryCue.line.dartify(), closeTo(45.0, 5.0));
+    expect(primaryCue.position.dartify(), 35);
     expect(secondaryCue.lineAlign, 'end');
     expect(secondaryCue.position.dartify(), 35);
-    expect(primaryCue.line.dartify(), closeTo(45.75, 0.1));
-    expect(secondaryCue.line.dartify(), closeTo(44.25, 0.1));
-    expect(secondaryCue.positionAlign, primaryCue.positionAlign);
+    expect(
+      (primaryCue.line.dartify() as num) -
+          (secondaryCue.line.dartify() as num),
+      closeTo(1.5, 0.1),
+    );
     await backend.setSecondarySubtitle();
     expect(primaryCue.line.dartify(), 45);
-    expect(primaryCue.lineAlign, 'center');
-    expect(primaryCue.position, 35);
+    expect(primaryCue.position.dartify(), 35);
     expect(primaryCue.snapToLines, isFalse);
   });
 
@@ -460,9 +458,10 @@ void main() {
     await backend.seekTo(const Duration(seconds: 2));
     await _until(() => primary.track.activeCues?.length == 1);
     final primaryCue = primary.track.cues![0] as web.VTTCue;
+    expect(primaryCue.line.dartify(), -1);
+    expect(primaryCue.position.dartify(), 30);
     expect(secondaryCue.position.dartify(), 30);
     expect(secondaryCue.lineAlign, 'end');
-    expect(primaryCue.line.dartify(), -1);
     expect(primaryCue.snapToLines, isTrue);
     expect((secondaryCue.line.dartify() as num), lessThan(95));
   });

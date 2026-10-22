@@ -846,6 +846,17 @@ class HtmlVideoBackend extends PlayerBackend
     }
   }
 
+  // Some browsers implement WebVTT positioning but do not expose these
+  // optional alignment properties on VTTCue. Read them safely rather than
+  // losing placement when the property's getter is unavailable.
+  String _cueAlignment(web.VTTCue cue, String property, String fallback) {
+    try {
+      final value = cue.getProperty<JSAny?>(property.toJS)?.dartify();
+      if (value is String) return value;
+    } catch (_) {}
+    return fallback;
+  }
+
   void _restorePrimaryMiddlePosition() {
     _forEachTextTrack((track) {
       final cues = track.cues;
@@ -857,9 +868,9 @@ class HtmlVideoBackend extends PlayerBackend
         if (original != null) {
           cue
             ..line = original
-            ..lineAlign = cue.getProperty<JSString?>(
-              _stackedMiddleLineAlign.toJS,
-            )?.toDart ?? 'center'
+            ..lineAlign = _cueAlignment(
+              cue, _stackedMiddleLineAlign, 'center',
+            )
             ..snapToLines = cue.getProperty<JSBoolean?>(
               _stackedMiddleSnapToLines.toJS,
             )?.toDart ?? false;
@@ -938,9 +949,10 @@ class HtmlVideoBackend extends PlayerBackend
         0.055 * 1.15;
     final top = snapped
         ? (line < 0 ? 1 + line * lineHeight : line * lineHeight)
-        : switch (cue.getProperty<JSString?>(
-              _stackedMiddleLineAlign.toJS,
-            )?.toDart ?? cue.lineAlign) {
+        : switch (_cueAlignment(
+              cue, _stackedMiddleLineAlign,
+              _cueAlignment(cue, 'lineAlign', 'start'),
+            )) {
             'start' => line / 100,
             'center' => line / 100 - height / 2,
             _ => line / 100 - height,
@@ -962,9 +974,12 @@ class HtmlVideoBackend extends PlayerBackend
         centre: bounds.centre,
         top: bounds.top,
         bottom: bounds.bottom,
-        position: (primary.position.dartify() as num).toDouble(),
+        position: switch (primary.position.dartify()) {
+          num value => value.toDouble(),
+          _ => 50.0,
+        },
         align: primary.align,
-        positionAlign: primary.positionAlign,
+        positionAlign: _cueAlignment(primary, 'positionAlign', 'auto'),
         size: primary.size,
       );
     }
@@ -981,7 +996,8 @@ class HtmlVideoBackend extends PlayerBackend
           primary
             ..setProperty(_stackedMiddleLine.toJS, originalLine.toJS)
             ..setProperty(
-              _stackedMiddleLineAlign.toJS, primary.lineAlign.toJS,
+              _stackedMiddleLineAlign.toJS,
+              _cueAlignment(primary, 'lineAlign', 'start').toJS,
             )
             ..setProperty(
               _stackedMiddleSnapToLines.toJS, primary.snapToLines.toJS,
