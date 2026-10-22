@@ -167,8 +167,8 @@ void main() {
     await backend.configureSubtitleStyle(verticalOffset: 0.2);
     expect(top.line.dartify(), 5);
     await backend.seekTo(const Duration(seconds: 5));
-    await _until(() => primary.track.activeCues?.length == 1);
     final middle = primary.track.cues![1] as web.VTTCue;
+    await _until(() => middle.line.dartify() == 50);
     expect(middle.line.dartify(), 50);
 
     await backend.seekTo(const Duration(seconds: 8));
