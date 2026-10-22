@@ -54,7 +54,7 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(secondaryLabel.frame.minY, 60, accuracy: 0.1)
         secondary.topOffset = 1
         secondary.layoutIfNeeded()
-        XCTAssertEqual(secondaryLabel.frame.minY, 240, accuracy: 0.1)
+        XCTAssertEqual(secondaryLabel.frame.maxY, secondary.bounds.height, accuracy: 0.1)
     }
 
     @MainActor
@@ -104,7 +104,8 @@ final class RunnerTests: XCTestCase {
             textColor: 0xFFFFFFFF, backgroundColor: nil, strokeColor: nil,
             fontSize: 24, fontWeight: nil, verticalOffset: nil)
         player.configureSecondarySubtitleStyle(fontSize: 36, verticalOffset: -0.04, textColor: 0xFFFFFF00)
-        XCTAssertEqual(color(primaryLabel), .white)
+        // Compare RGB white with RGB white; UIColor.white uses grayscale.
+        XCTAssertEqual(color(primaryLabel), UIColor(red: 1, green: 1, blue: 1, alpha: 1))
         XCTAssertEqual(color(secondaryLabel), .yellow)
         XCTAssertGreaterThan(font(secondaryLabel)!.pointSize, font(primaryLabel)!.pointSize)
 

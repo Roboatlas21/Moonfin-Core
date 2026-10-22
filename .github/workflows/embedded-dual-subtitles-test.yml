@@ -74,7 +74,25 @@ jobs:
           DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")))')
           xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner \
             -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -resultBundlePath "$RUNNER_TEMP/ios-subtitle-tests.xcresult" \
             -only-testing:RunnerTests/RunnerTests CODE_SIGNING_ALLOWED=NO
+      - name: Summarize native subtitle tests
+        if: always()
+        run: |
+          if [ -d "$RUNNER_TEMP/ios-subtitle-tests.xcresult" ]; then
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/ios-subtitle-tests.xcresult" \
+              | tee "$RUNNER_TEMP/ios-subtitle-tests-summary.json"
+          fi
+      - name: Upload native subtitle test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moonfin-iOS-subtitle-test-results
+          path: |
+            ${{ runner.temp }}/ios-subtitle-tests.xcresult
+            ${{ runner.temp }}/ios-subtitle-tests-summary.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   tvos:
     runs-on: macos-26
