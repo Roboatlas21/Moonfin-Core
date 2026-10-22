@@ -1,4 +1,4 @@
-name: Embedded dual subtitle Android test
+name: Native dual subtitle checks
 
 on:
   push:
@@ -23,9 +23,9 @@ jobs:
           cache: true
       - run: flutter pub get
       - name: Check subtitle routing
-        run: flutter test test/playback/backend_payload_external_subtitles_test.dart test/playback/media3_declared_subtitles_test.dart test/playback/media_kit_pending_subtitle_test.dart test/playback/media_kit_player_backend_subtitle_error_test.dart test/playback/media_kit_player_backend_subtitle_background_test.dart
+        run: flutter test test/playback/aether_secondary_subtitle_test.dart test/playback/aether_stall_payload_test.dart test/playback/backend_payload_external_subtitles_test.dart test/playback/media3_declared_subtitles_test.dart test/playback/media_kit_pending_subtitle_test.dart test/playback/media_kit_player_backend_subtitle_error_test.dart test/playback/media_kit_player_backend_subtitle_background_test.dart
       - name: Check shared subtitle controls
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib/playback/media_kit_player_backend.dart lib/ui/widgets/playback/track_picker.dart lib/ui/screens/playback/video_player_screen.dart lib/ui/widgets/playback/secondary_subtitle_appearance_footer.dart
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings lib/playback/aether_backend.dart lib/playback/media_kit_player_backend.dart lib/ui/widgets/playback/track_picker.dart lib/ui/screens/playback/video_player_screen.dart lib/ui/widgets/playback/secondary_subtitle_appearance_footer.dart
       - name: Build phone APK
         env:
           MOONFIN_TEST_ID_SUFFIX: .dualsubtitletest
@@ -37,3 +37,24 @@ jobs:
         with:
           name: Moonfin-Android-embedded-dual-subtitles
           path: build/app/outputs/flutter-apk/app-mobile-release.apk
+
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          cache: true
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+      - run: flutter pub get
+      - name: Configure iOS simulator build
+        run: flutter build ios --simulator --debug --config-only
+      - name: Build iOS and test native subtitle overlays
+        run: |
+          DEVICE_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")))')
+          xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner \
+            -configuration Debug -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+            -only-testing:RunnerTests/RunnerTests CODE_SIGNING_ALLOWED=NO

@@ -34,6 +34,11 @@ final class SubtitleOverlay: PlatformView {
     private var activeBitmapEvent: SubtitleEvent?
     private var lastUpdateTime: TimeInterval = 0
     var delaySeconds: TimeInterval = 0
+    /// A second overlay measures its text margin from the top of the view.
+    /// Nil keeps the primary subtitle's bottom-based positioning.
+    var topOffset: Double? {
+        didSet { requestLayout() }
+    }
 
     /// On while a subtitle track is selected. iPadOS 27 can drop these views
     /// from frames when a fullscreen video is the only other thing on screen,
@@ -391,7 +396,8 @@ final class SubtitleOverlay: PlatformView {
         let size = textLabel.sizeThatFits(CGSize(width: maxWidth, height: bounds.height * 0.4))
         let frame = CGRect(
             x: (bounds.width - size.width) / 2,
-            y: bounds.height - size.height - textBottomOffset,
+            y: topOffset.map { bounds.height * CGFloat(min(max($0, 0), 0.4)) }
+                ?? (bounds.height - size.height - textBottomOffset),
             width: size.width,
             height: size.height
         )
