@@ -46,8 +46,11 @@ internal class SecondarySubtitleOverlay(
 
     /** A track switch clears old cues; Media3 owns loading, timing and seeking. */
     fun select(enabled: Boolean) {
+        val alreadySelected = secondaryCues != null
         secondaryCues = if (enabled) emptyList() else null
-        if (!enabled) {
+        if (!enabled || !alreadySelected) {
+            // Switching the slot on needs a fresh primary anchor; switching
+            // secondary languages keeps its last placement through cue gaps.
             lastPrimaryForStacking = null
             lastPrimaryWasCentred = false
         }
