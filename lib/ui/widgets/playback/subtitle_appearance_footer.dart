@@ -47,12 +47,8 @@ class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
       .clamp(widget.secondary ? -50.0 : 12.0, widget.secondary ? 50.0 : 48.0)
       .toDouble();
 
-  double _clampOffset(double value) => value
-      .clamp(
-        widget.secondary ? -secondarySubtitleMaxOffset : 0.0,
-        widget.maxOffset,
-      )
-      .toDouble();
+  double _clampOffset(double value) =>
+      value.clamp(0.0, widget.maxOffset).toDouble();
 
   String _relativeLabel(double value) => value == 0
       ? AppLocalizations.of(context).defaultLabel

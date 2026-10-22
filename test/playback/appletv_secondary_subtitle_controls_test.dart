@@ -232,8 +232,8 @@ void main() {
         manager,
         prefs,
       );
-      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), -0.06);
-      expect(manager.secondarySubtitleOffset, -0.06);
+      expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.0);
+      expect(manager.secondarySubtitleOffset, 0.0);
     },
   );
 

@@ -80,7 +80,7 @@ Future<void> syncSecondarySubtitleStyle(
         : (isApple ? adjustedSize.clamp(12.0, 48.0).toDouble() : adjustedSize),
     verticalOffset: prefs
         .get(UserPreferences.secondarySubtitleOffsetPosition)
-        .clamp(-secondarySubtitleMaxOffset, secondarySubtitleMaxOffset),
+        .clamp(0.0, secondarySubtitleMaxOffset),
     textColor: switch (prefs.get(UserPreferences.secondarySubtitleTextColor)) {
       -1 => null,
       final color => color,

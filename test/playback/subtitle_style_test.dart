@@ -237,7 +237,7 @@ void main() {
 
       await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, -0.4);
       await syncSecondarySubtitleStyle(manager, prefs);
-      expect(manager.secondarySubtitleOffset, -0.06);
+      expect(manager.secondarySubtitleOffset, 0.0);
       expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), -0.4);
     },
   );

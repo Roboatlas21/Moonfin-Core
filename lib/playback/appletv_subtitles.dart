@@ -104,7 +104,7 @@ Future<void> _saveAppearance(
     await prefs.set(
       UserPreferences.secondarySubtitleOffsetPosition,
       offset
-          .clamp(-secondarySubtitleMaxOffset, secondarySubtitleMaxOffset)
+          .clamp(0.0, secondarySubtitleMaxOffset)
           .toDouble(),
     );
   }

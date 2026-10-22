@@ -550,31 +550,59 @@ void main() {
     expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.0);
   });
 
-  testWidgets('secondary offset has seven steps from −6% to +6%', (
+  testWidgets('secondary offset uses 0%, +2%, +4%, +6% only', (
     tester,
   ) async {
     final prefs = GetIt.instance<UserPreferences>();
     final manager = _Manager(_AndroidBackend());
     addTearDown(manager.dispose);
     await openPicker(tester, manager, secondary: true);
-    for (final expected in ['-2%', '-4%', '-6%']) {
+    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
+    await tester.pumpAndSettle();
+    expect(find.text('-2%'), findsNothing);
+    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.0);
+    for (final expected in ['+2%', '+4%', '+6%']) {
+      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
+      await tester.pumpAndSettle();
+      expect(find.text(expected), findsOneWidget);
+    }
+    await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
+    await tester.pumpAndSettle();
+    expect(find.text('+6%'), findsOneWidget);
+    expect(manager.secondarySubtitleOffset, 0.06);
+    for (final expected in ['+4%', '+2%']) {
       await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
       await tester.pumpAndSettle();
       expect(find.text(expected), findsOneWidget);
     }
     await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
     await tester.pumpAndSettle();
-    expect(find.text('-6%'), findsOneWidget);
-    expect(manager.secondarySubtitleOffset, -0.06);
-    for (var i = 0; i < 6; i++) {
-      await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
-      await tester.pumpAndSettle();
-    }
-    expect(find.text('+6%'), findsOneWidget);
+    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
+    await tester.pumpAndSettle();
+    expect(find.text('-2%'), findsNothing);
+    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.0);
+    expect(manager.secondarySubtitleOffset, 0.0);
+  });
+
+  testWidgets('legacy negative spacing displays as Default and cannot go lower', (
+    tester,
+  ) async {
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.secondarySubtitleOffsetPosition, -0.04);
+    final manager = _Manager(_AndroidBackend());
+    addTearDown(manager.dispose);
+    await syncSecondarySubtitleStyle(manager, prefs);
+    await openPicker(tester, manager, secondary: true);
+    expect(manager.secondarySubtitleOffset, 0.0);
+    expect(find.text('-4%'), findsNothing);
+    await tester.tap(find.byTooltip(l10n.decreaseValue(l10n.verticalOffset)));
+    await tester.pumpAndSettle();
+    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), -0.04);
     await tester.tap(find.byTooltip(l10n.increaseValue(l10n.verticalOffset)));
     await tester.pumpAndSettle();
-    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.06);
-    expect(manager.secondarySubtitleOffset, 0.06);
+    expect(find.text('+2%'), findsOneWidget);
+    expect(prefs.get(UserPreferences.secondarySubtitleOffsetPosition), 0.02);
+    expect(manager.secondarySubtitleOffset, 0.02);
   });
 
   for (final (name, method, separate, hdr) in [
