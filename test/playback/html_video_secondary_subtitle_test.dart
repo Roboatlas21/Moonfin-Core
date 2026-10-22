@@ -175,7 +175,8 @@ void main() {
     await _until(() => primary.track.activeCues?.length == 1 &&
         (primary.track.activeCues![0] as web.VTTCue).text.contains('Authored VTT'));
     final authored = primary.track.cues![2] as web.VTTCue;
-    expect(authored.line.dartify(), 20);
+    // The 2% adjustment remains active when this new cue is selected.
+    expect(authored.line.dartify(), 22);
     await backend.configureSubtitleStyle(verticalOffset: 0.04);
     expect(authored.line.dartify(), 24);
     await backend.configureSubtitleStyle(verticalOffset: 0.02);
