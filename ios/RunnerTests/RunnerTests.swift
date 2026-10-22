@@ -148,6 +148,73 @@ final class RunnerTests: XCTestCase {
     }
 
     @MainActor
+    func testAppleSpacingFollowsPrimaryHeightNotSecondaryDialogue() {
+        for alignment in [2, 7] {
+            let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+            let secondary = SubtitleOverlay(frame: primary.bounds)
+            primary.secondaryForStacking = secondary
+            secondary.primaryForStacking = primary
+            secondary.stackingEnabled = true
+
+            let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
+            let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
+
+            func showPrimary(_ text: String) {
+                primary.setEvents([
+                    SubtitleEvent(startTime: 1, endTime: 4, text: text,
+                        bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                        alignment: alignment)
+                ])
+                primary.update(currentTime: 2)
+            }
+            secondary.setEvents([cue("Secondary")])
+            secondary.update(currentTime: 2)
+            showPrimary("One")
+            let oneLinePrimary = primaryLabel.frame
+            let startingTop = secondaryLabel.frame.minY
+            let startingBottom = secondaryLabel.frame.maxY
+
+            // Secondary text grows away from the primary without changing
+            // the primary position or the secondary's adjacent edge.
+            secondary.setEvents([cue("One\nTwo\nThree")])
+            secondary.update(currentTime: 2)
+            XCTAssertEqual(primaryLabel.frame, oneLinePrimary)
+            if alignment == 2 {
+                XCTAssertEqual(secondaryLabel.frame.maxY, startingBottom, accuracy: 0.1)
+            } else {
+                XCTAssertEqual(secondaryLabel.frame.minY, startingTop, accuracy: 0.1)
+            }
+
+            // The primary's measured size is the only reason to shift the
+            // adjacent secondary anchor.
+            showPrimary("One\nTwo\nThree")
+            XCTAssertGreaterThan(primaryLabel.frame.height, oneLinePrimary.height)
+            if alignment == 2 {
+                XCTAssertLessThan(secondaryLabel.frame.maxY, startingBottom)
+            } else {
+                XCTAssertGreaterThan(secondaryLabel.frame.minY, startingTop)
+            }
+            let activeTop = secondaryLabel.frame.minY
+            let activeBottom = secondaryLabel.frame.maxY
+
+            // Dialogue gaps must not discard the last known primary placement.
+            primary.setEvents([])
+            primary.update(currentTime: 2)
+            XCTAssertEqual(secondaryLabel.frame.minY, activeTop, accuracy: 0.1)
+            XCTAssertEqual(secondaryLabel.frame.maxY, activeBottom, accuracy: 0.1)
+            secondary.setEvents([])
+            secondary.update(currentTime: 2)
+            secondary.setEvents([cue("Another")])
+            secondary.update(currentTime: 2)
+            if alignment == 2 {
+                XCTAssertEqual(secondaryLabel.frame.maxY, activeBottom, accuracy: 0.1)
+            } else {
+                XCTAssertEqual(secondaryLabel.frame.minY, activeTop, accuracy: 0.1)
+            }
+        }
+    }
+
+    @MainActor
     func testSecondaryStyleDoesNotChangePrimary() {
         let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
         let secondary = SubtitleOverlay(frame: primary.bounds)
