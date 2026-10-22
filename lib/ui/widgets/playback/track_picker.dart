@@ -107,7 +107,9 @@ abstract final class TrackPicker {
 
     final backend = manager.backend;
     final SecondarySubtitleBackend? secondaryControls =
-        backend is SecondarySubtitleBackend ? backend : null;
+        backend is SecondarySubtitleBackend
+            ? backend as SecondarySubtitleBackend
+            : null;
     final delayLimits = secondary
         ? secondaryControls?.supportsSecondarySubtitleDelay == true
               ? (
