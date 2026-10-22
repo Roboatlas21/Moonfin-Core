@@ -36,15 +36,62 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(anchored.midX, 240, accuracy: 0.1)
         XCTAssertEqual(anchored.midY, 160, accuracy: 0.1)
 
-        // Primary offsets move text inward from either edge, not away from it.
+        // An authored coordinate is the baseline for the same vertical offset.
+        let authoredTop = placed(7, position: CGPoint(x: 0.3, y: 0.08))
+        let authoredBottom = placed(2, position: CGPoint(x: 0.3, y: 0.92))
+        XCTAssertEqual(authoredTop.minY, 32, accuracy: 0.1)
+        XCTAssertEqual(authoredBottom.maxY, 368, accuracy: 0.1)
         overlay.applyStyle(
             textColor: nil, backgroundColor: nil, strokeColor: nil,
             fontSize: nil, fontWeight: nil, verticalOffset: 0.02)
         XCTAssertGreaterThan(placed(7).minY, topLeft.minY)
         XCTAssertLessThan(placed(2).maxY, bottom.maxY)
+        XCTAssertEqual(placed(7, position: CGPoint(x: 0.3, y: 0.08)).minY,
+                       40, accuracy: 0.1)
+        XCTAssertEqual(placed(2, position: CGPoint(x: 0.3, y: 0.92)).maxY,
+                       360, accuracy: 0.1)
         XCTAssertEqual(placed(5).midY, 200, accuracy: 0.1)
         XCTAssertEqual(placed(5, position: CGPoint(x: 0.3, y: 0.4)).midY,
                        160, accuracy: 0.1)
+        overlay.applyStyle(
+            textColor: nil, backgroundColor: nil, strokeColor: nil,
+            fontSize: nil, fontWeight: nil, verticalOffset: 0)
+        XCTAssertEqual(placed(7, position: CGPoint(x: 0.3, y: 0.08)).minY,
+                       32, accuracy: 0.1)
+        XCTAssertEqual(placed(2, position: CGPoint(x: 0.3, y: 0.92)).maxY,
+                       368, accuracy: 0.1)
+    }
+
+
+    @MainActor
+    func testAuthoredTopBottomOffsetsMoveSecondaryWithPrimary() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
+        let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        secondary.setEvents([cue("Second language")])
+        secondary.update(currentTime: 2)
+
+        for (alignment, yPosition) in [(7, 0.08), (2, 0.92)] {
+            primary.applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
+                               fontSize: nil, fontWeight: nil, verticalOffset: 0)
+            primary.setEvents([
+                SubtitleEvent(startTime: 1, endTime: 3, text: "Primary",
+                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                    alignment: alignment, position: CGPoint(x: 0.3, y: yPosition))
+            ])
+            primary.update(currentTime: 2)
+            let beforePrimary = primaryLabel.frame.minY
+            let beforeSecondary = secondaryLabel.frame.minY
+            primary.applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
+                               fontSize: nil, fontWeight: nil, verticalOffset: 0.04)
+            let expectedDelta: CGFloat = alignment == 7 ? 16 : -16
+            XCTAssertEqual(primaryLabel.frame.minY - beforePrimary, expectedDelta, accuracy: 0.1)
+            XCTAssertEqual(secondaryLabel.frame.minY - beforeSecondary, expectedDelta, accuracy: 0.1)
+        }
     }
 
     @MainActor

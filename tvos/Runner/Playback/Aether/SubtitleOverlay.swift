@@ -114,6 +114,9 @@ final class SubtitleOverlay: PlatformView {
     /// the view has bounds doesn't get baked in at the fallback size.
     private var subtitleUserFontSize: CGFloat = 24
     private var subtitlePositionBase = 100
+    // The authored cue's vertical position remains the baseline; this offset
+    // moves top cues down and bottom cues up, never middle cues.
+    private var authoredVerticalOffset: CGFloat = 0
     private var subtitleFontWeight: PlatformFontWeight = .semibold
     private var subtitleTextColor: PlatformColor = .white
     private var subtitleBgColor: PlatformColor = .clear
@@ -381,6 +384,7 @@ final class SubtitleOverlay: PlatformView {
             subtitleFontWeight = fontWeight >= 600 ? .bold : .semibold
         }
         if let verticalOffset {
+            authoredVerticalOffset = CGFloat(min(max(verticalOffset, 0), 1))
             setSubtitlePosition(basePosition: 100 - Int((verticalOffset * 60).rounded()))
         }
         if !activeTextEvents.isEmpty {
@@ -474,8 +478,12 @@ final class SubtitleOverlay: PlatformView {
         let picture = videoBox
         let xAnchor = placement?.position.map { picture.minX + $0.x * picture.width }
             ?? bounds.width * ([0.05, 0.5, 0.95][column])
-        let yAnchor = placement?.position.map { picture.minY + $0.y * picture.height }
-            ?? (topOffset.map { bounds.height * CGFloat(max($0, 0)) }
+        let yAnchor = placement?.position.map { position -> CGFloat in
+            let direction: CGFloat = position.y < 1.0 / 3 ? 1
+                : position.y > 2.0 / 3 ? -1 : 0
+            let adjusted = min(max(position.y + direction * authoredVerticalOffset, 0), 1)
+            return picture.minY + adjusted * picture.height
+        } ?? (topOffset.map { bounds.height * CGFloat(max($0, 0)) }
                 ?? (row == 0 ? bounds.height - textBottomOffset
                     : row == 1 ? bounds.height / 2
                         : bounds.height * 0.05 + textBottomOffset))
