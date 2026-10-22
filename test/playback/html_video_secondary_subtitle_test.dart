@@ -179,11 +179,14 @@ void main() {
       await backend.configureSubtitleStyle(fontSize: 48, verticalOffset: 0.2);
       expect(cue.line.dartify(), 12);
       final styles = web.document.head!.textContent!;
-      expect(styles, contains('font-size: 50.0%'));
+      expect(styles, matches(RegExp(r'font-size: 50(?:\.0+)?%')));
       expect(styles, contains('color: rgb(255, 255, 0)'));
       await backend.configureSecondarySubtitleStyle();
       expect(cue.line.dartify(), 8);
-      expect(web.document.head!.textContent, contains('font-size: 100.0%'));
+      expect(
+        web.document.head!.textContent,
+        matches(RegExp(r'font-size: 100(?:\.0+)?%')),
+      );
     },
   );
 
