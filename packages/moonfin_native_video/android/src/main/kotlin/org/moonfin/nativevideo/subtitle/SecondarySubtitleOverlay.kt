@@ -132,7 +132,6 @@ internal class SecondarySubtitleOverlay(
                 continue
             }
 
-            val lineAnchor = cue.lineAnchor
             val verticalAlignment = SubtitleLayoutPlanner.verticalAlignmentFor(box, height)
             val placed = SubtitleLayoutPlanner.placePositionedSecondary(
                 primary = occupied,
@@ -144,14 +143,8 @@ internal class SecondarySubtitleOverlay(
                 stepPx = gapPx,
             )
             if (placed != null) {
-                val line = when (lineAnchor) {
-                    Cue.ANCHOR_TYPE_END -> placed.bottom / height
-                    Cue.ANCHOR_TYPE_MIDDLE -> (placed.top + placed.bottom) / (2f * height)
-                    else -> placed.top / height
-                }
                 cue = cue.buildUpon()
-                    .setLine(line, Cue.LINE_TYPE_FRACTION)
-                    .setLineAnchor(lineAnchor)
+                    .setLine(placed.bottom / height, Cue.LINE_TYPE_FRACTION)
                     .build()
                 rendered += cue
                 occupied += placed

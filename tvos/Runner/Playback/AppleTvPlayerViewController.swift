@@ -2865,13 +2865,15 @@ final class AppleTvPlayerViewController: UIViewController {
     }
 
     private func applySubtitleAppearance(field: String, value: Double) {
-        subtitleControls[field] = value
-        if field == "primaryFontSize" {
-            onSubtitleAction?(["event": "setSubtitleSize", "fontSize": value])
-        } else if field == "primaryVerticalOffset" {
-            onSubtitleAction?(["event": "setSubtitlePosition", "verticalOffset": value])
-        } else {
-            onSubtitleAction?(["event": "configureSecondarySubtitleStyle", field: value])
+        if (subtitleControls[field] as? NSNumber)?.doubleValue != value {
+            subtitleControls[field] = value
+            if field == "primaryFontSize" {
+                onSubtitleAction?(["event": "setSubtitleSize", "fontSize": value])
+            } else if field == "primaryVerticalOffset" {
+                onSubtitleAction?(["event": "setSubtitlePosition", "verticalOffset": value])
+            } else {
+                onSubtitleAction?(["event": "configureSecondarySubtitleStyle", field: value])
+            }
         }
         presentSubtitleAppearanceMenu(field: field)
     }

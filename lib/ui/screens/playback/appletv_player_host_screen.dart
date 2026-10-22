@@ -62,7 +62,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   final _chaptersFetchedItemIds = <String>{};
   StreamSubscription<Duration>? _positionSub;
   UserPreferences? _prefsListened;
-  SubtitleStyle? _lastSubtitleStyle;
+  (SubtitleStyle, double, double, int)? _lastSubtitleStyle;
   String _lastTrickplayPrefs = '';
   String _lastTimeSlots = '';
   TrickplayInfo? _trickplayInfo;
@@ -309,15 +309,22 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     try {
       final manager = _manager;
       if (manager == null) return;
-      unawaited(syncSecondarySubtitleStyle(
-        manager, GetIt.instance<UserPreferences>(),
-      ));
+      final prefs = GetIt.instance<UserPreferences>();
       final style = SubtitleStyle.forResolution(
-        GetIt.instance<UserPreferences>(),
-        _manager?.currentResolution,
+        prefs,
+        manager.currentResolution,
       );
-      if (!force && style == _lastSubtitleStyle) return;
-      _lastSubtitleStyle = style;
+      final appearance = (
+        style,
+        prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
+        prefs.get(UserPreferences.secondarySubtitleOffsetPosition),
+        prefs.get(UserPreferences.secondarySubtitleTextColor),
+      );
+      final previous = _lastSubtitleStyle;
+      if (!force && appearance == previous) return;
+      _lastSubtitleStyle = appearance;
+      unawaited(syncSecondarySubtitleStyle(manager, prefs));
+      if (!force && style == previous?.$1) return;
       backend.configureSubtitleStyle(
         textColor: style.textColor,
         backgroundColor: style.backgroundColor,
