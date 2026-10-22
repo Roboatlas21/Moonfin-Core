@@ -321,12 +321,18 @@ void main() {
       );
       final second = await loadedSecondary();
       final cue = second.track.cues![0] as web.VTTCue;
+      final primary = video.querySelector('track')! as web.HTMLTrackElement;
       await backend.seekTo(const Duration(seconds: 2));
+      // Wait until the first authored primary cue has actually determined
+      // the pair's position; the bottom-only fallback uses the same alignment.
       await _until(() =>
-          cue.align == horizontalAlign && cue.lineAlign == lineAlign);
+          primary.track.activeCues?.length == 1 &&
+          (primary.track.activeCues![0] as web.VTTCue).text.contains('One') &&
+          cue.align == horizontalAlign &&
+          cue.lineAlign == lineAlign &&
+          (tag != 2 || (cue.line.dartify() as num) < 90));
       final anchor = cue.line.dartify();
       await backend.seekTo(const Duration(seconds: 5));
-      final primary = video.querySelector('track')! as web.HTMLTrackElement;
       await _until(() =>
           primary.track.activeCues?.length == 1 &&
           (primary.track.activeCues![0] as web.VTTCue).text.contains('Three'));
