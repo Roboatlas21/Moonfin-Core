@@ -12,6 +12,26 @@ class _Native extends Fake implements NativePlayer {
   List<Map<String, dynamic>> tracks = [];
   final properties = <String, String>{'sid': 'no'};
   Completer<String>? delayedTracks;
+  Completer<void>? delayedSubtitleLoad;
+  final commands = <List<String>>[];
+
+  @override
+  Future<void> command(
+    List<String> args, {
+    bool waitForInitialization = true,
+  }) async {
+    commands.add(args);
+    if (args.first == 'sub-add') {
+      await delayedSubtitleLoad?.future;
+      tracks.add({
+        'type': 'sub',
+        'id': 52,
+        'codec': 'subrip',
+        'external': true,
+        'external-filename': args[1],
+      });
+    }
+  }
 
   @override
   Future<String> getProperty(
@@ -104,6 +124,156 @@ void main() {
   tearDown(() {
     if (!disposed) backend.dispose();
     prefs.dispose();
+  });
+
+  test(
+    'secondary embedded track uses its real sid and survives primary changes',
+    () async {
+      player.discover();
+      await backend.setSubtitleTrack(1);
+      await backend.setSecondarySubtitle(embeddedTrackId: 2);
+      expect(player.platform.properties['sid'], '11');
+      expect(player.platform.properties['secondary-sid'], '17');
+      await backend.setSubtitleTrack(1);
+      await backend.disableSubtitleTrack();
+      expect(player.platform.properties['secondary-sid'], '17');
+      expect(player.platform.properties['secondary-sub-visibility'], 'yes');
+      await backend.setSubtitleTrack(1);
+      await backend.setSecondarySubtitle();
+      expect(player.platform.properties['sid'], '11');
+      expect(player.platform.properties['secondary-sid'], 'no');
+    },
+  );
+
+  test(
+    'secondary selection waits for discovery and off cancels a pending read',
+    () async {
+      await backend.setSecondarySubtitle(embeddedTrackId: 2);
+      player.discover();
+      await _flush();
+      expect(player.platform.properties['secondary-sid'], '17');
+      final read = Completer<String>();
+      player.platform.delayedTracks = read;
+      final selection = backend.setSecondarySubtitle(embeddedTrackId: 1);
+      await _flush();
+      await backend.setSecondarySubtitle();
+      read.complete(jsonEncode(player.platform.tracks));
+      await selection;
+      expect(player.platform.properties['secondary-sid'], 'no');
+    },
+  );
+
+  test(
+    'restores secondary selection on open and resets it on the next source',
+    () async {
+      player.discover();
+      await backend.play({
+        'url': 'https://example.com/video.mkv',
+        'autoPlay': false,
+        'secondarySubtitleTrackId': 2,
+      });
+      expect(player.platform.properties['secondary-sid'], '17');
+      await backend.play({
+        'url': 'https://example.com/next.mkv',
+        'autoPlay': false,
+      });
+      expect(player.platform.properties['secondary-sid'], 'no');
+    },
+  );
+
+  test('external secondary uses sub-add auto without changing primary or adding duplicates', () async {
+    const url = '/downloads/secondary.srt';
+    player.discover();
+    await backend.setSubtitleTrack(1);
+    await backend.setSecondarySubtitle(url: url, codec: 'srt');
+    await _flush();
+    expect(player.platform.properties['sid'], '11');
+    expect(player.platform.properties['secondary-sid'], '52');
+    expect(player.platform.commands.single.take(3), ['sub-add', url, 'auto']);
+    await backend.addExternalSubtitle(url);
+    await backend.setSecondarySubtitle(url: url);
+    expect(player.platform.commands, hasLength(1));
+  });
+
+  for (final action in ['off', 'stop', 'source', 'choice', 'dispose']) {
+    test(
+      '$action prevents a late external load from selecting the secondary track',
+      () async {
+        player.discover();
+        final load = Completer<void>();
+        player.platform.delayedSubtitleLoad = load;
+        await backend.setSecondarySubtitle(url: '/downloads/secondary.srt');
+        await _flush();
+        switch (action) {
+          case 'off':
+            await backend.setSecondarySubtitle();
+          case 'stop':
+            await backend.stop();
+          case 'source':
+            await backend.play({
+              'url': 'https://example.com/next.mkv',
+              'autoPlay': false,
+            });
+          case 'choice':
+            await backend.setSecondarySubtitle(embeddedTrackId: 2);
+          case 'dispose':
+            backend.dispose();
+            disposed = true;
+        }
+        load.complete();
+        await _flush();
+        expect(
+          player.platform.properties['secondary-sid'],
+          action == 'choice' ? '17' : 'no',
+        );
+      },
+    );
+  }
+
+  test(
+    'older mpv exposes selection without unsupported delay or style controls',
+    () async {
+      await backend.setSecondarySubtitleDelay(1);
+      await backend.configureSecondarySubtitleStyle(
+        verticalOffset: 0.2,
+        fontSize: 30,
+        textColor: 0xFFFFFF00,
+      );
+      expect(backend.supportsSecondarySubtitleDelay, isFalse);
+      expect(backend.supportsSecondarySubtitlePosition, isFalse);
+      expect(backend.supportsSecondarySubtitleStyle, isFalse);
+      expect(
+        player.platform.properties.containsKey('secondary-sub-delay'),
+        isFalse,
+      );
+      expect(player.platform.properties.containsKey('sub-font-size'), isFalse);
+    },
+  );
+
+  test('newer mpv changes only secondary delay and position', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-delay': '0',
+      'secondary-sub-pos': '0',
+      'sub-delay': '0.500',
+      'sub-color': '#ffffffff',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      await second.setSecondarySubtitleDelay(1.25);
+      await second.configureSecondarySubtitleStyle(
+        verticalOffset: 0.2,
+        textColor: 0xFFFFFF00,
+      );
+      expect(second.supportsSecondarySubtitleDelay, isTrue);
+      expect(second.supportsSecondarySubtitlePosition, isTrue);
+      expect(other.platform.properties['secondary-sub-delay'], '1.250');
+      expect(other.platform.properties['secondary-sub-pos'], '20');
+      expect(other.platform.properties['sub-delay'], '0.500');
+      expect(other.platform.properties['sub-color'], '#ffffffff');
+    } finally {
+      second.dispose();
+    }
   });
 
   test('discovery selects the embedded ordinal once, excluding external and CC tracks', () async {

@@ -70,6 +70,13 @@ abstract interface class SubtitleLoadingBackend {
   Stream<bool> get subtitleLoadingStream;
 }
 
+/// Optional controls for engines that can render two subtitle tracks.
+abstract interface class SecondarySubtitleBackend {
+  bool get supportsSecondarySubtitleDelay;
+  bool get supportsSecondarySubtitlePosition;
+  bool get supportsSecondarySubtitleStyle;
+}
+
 abstract class PlayerBackend {
   Future<void> play(
     dynamic mediaItem, {
@@ -116,8 +123,8 @@ abstract class PlayerBackend {
   });
   Future<void> disableSubtitleTrack();
 
-  /// Selects an independent text sidecar for the Android Media3 overlay.
-  /// Backends without a separate subtitle layer leave it disabled.
+  /// Selects a second subtitle using an embedded ordinal or an external URL.
+  /// Backends opt in through [SecondarySubtitleBackend].
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,

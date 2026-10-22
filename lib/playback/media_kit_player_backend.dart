@@ -177,7 +177,7 @@ class _MediaKitDeviceProfileCapabilities {
 }
 
 class MediaKitPlayerBackend extends PlayerBackend
-    implements SubtitleLoadingBackend {
+    implements SubtitleLoadingBackend, SecondarySubtitleBackend {
   static const Duration _linuxHwdecFirstFrameTimeout = Duration(
     milliseconds: 1500,
   );
@@ -274,6 +274,28 @@ class MediaKitPlayerBackend extends PlayerBackend
       <String, ({String? title, String? language, int sourceGeneration})>{};
   final _externalSubtitleLoads = <String, Future<void>>{};
   final _pendingSubtitleChoice = PendingSubtitleChoice();
+  int _secondarySubtitleGeneration = 0;
+  ({int? ordinal, String? url, int generation})? _pendingSecondarySubtitle;
+  late final Future<void> _secondaryControlsReady;
+  bool _secondaryDelaySupported = false;
+  bool _secondaryPositionSupported = false;
+
+  @override
+  bool get supportsSecondarySubtitleDelay => _secondaryDelaySupported;
+  @override
+  bool get supportsSecondarySubtitlePosition => _secondaryPositionSupported;
+  // mpv's font and colour settings apply to both subtitle tracks.
+  @override
+  bool get supportsSecondarySubtitleStyle => false;
+
+  Future<void> _probeSecondaryControls() async {
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    _secondaryDelaySupported =
+        await _tryNativeGetProperty(native, 'secondary-sub-delay') != null;
+    _secondaryPositionSupported =
+        await _tryNativeGetProperty(native, 'secondary-sub-pos') != null;
+  }
 
   static const _externalSubtitleRetries = 5;
   static const _externalSubtitleRetryDelay = Duration(seconds: 10);
@@ -281,6 +303,8 @@ class MediaKitPlayerBackend extends PlayerBackend
   void _resetSubtitleState() {
     _subtitleSelectionGeneration++;
     _pendingEmbeddedSubtitle = null;
+    _secondarySubtitleGeneration++;
+    _pendingSecondarySubtitle = null;
     _externalSubtitleLoads.clear();
     _pendingSubtitleChoice.nextSource();
   }
@@ -531,6 +555,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     this._hwDecodingEnabled,
   ) {
     _liveStartupObserverReady = _installLiveStartupObserver();
+    _secondaryControlsReady = _probeSecondaryControls();
     _letterboxHost = _MediaKitLetterboxHost(this);
     _letterboxCropper = MpvLetterboxCropper(
       _letterboxHost,
@@ -548,6 +573,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     _ccTracksSub = _player.stream.tracks.listen((_) {
       unawaited(_refreshEmbeddedCaptionTracks());
       unawaited(_retryPendingEmbeddedSubtitle());
+      unawaited(_applyPendingSecondarySubtitle());
     });
     _videoParamsSub = _player.stream.videoParams.listen(_onVideoParams);
   }
@@ -784,6 +810,7 @@ class MediaKitPlayerBackend extends PlayerBackend
       payload['selectedExternalSubtitleUrl'] as String?,
     );
     final subtitleGeneration = _subtitleSelectionGeneration;
+    final secondaryGeneration = _secondarySubtitleGeneration;
     final media = Media(url);
     _currentUrl = media.uri;
     _isStale = true;
@@ -864,6 +891,21 @@ class MediaKitPlayerBackend extends PlayerBackend
       _enableNativeSubtitleRendering();
     }
     await _maybeEngageNativeHdr();
+    await setSecondarySubtitleDelay(
+      ((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000,
+    );
+    if (!_ownsPlayback(generation)) return;
+    await configureSecondarySubtitleStyle(
+      verticalOffset: (payload['secondarySubtitleOffset'] as num?)?.toDouble(),
+    );
+    if (!_ownsPlayback(generation)) return;
+    if (secondaryGeneration == _secondarySubtitleGeneration) {
+      await setSecondarySubtitle(
+        embeddedTrackId: payload['secondarySubtitleTrackId'] as int?,
+        url: payload['secondarySubtitleUrl'] as String?,
+        codec: payload['secondarySubtitleCodec'] as String?,
+      );
+    }
     unawaited(() async {
       await _configureLetterboxCropper();
       await _letterboxCropper.onSourceOpened(media.uri);
@@ -2616,8 +2658,6 @@ class MediaKitPlayerBackend extends PlayerBackend
         if (!isCurrentSelection()) return;
         await _nativeSetProperty(native, 'sid', 'no');
         if (!isCurrentSelection()) return;
-        await _nativeSetProperty(native, 'secondary-sid', 'no');
-        if (!isCurrentSelection()) return;
         // Recheck after registering: discovery may have completed while the
         // original track-list read was in flight.
         if (!isExternalSubtitle) {
@@ -2675,9 +2715,6 @@ class MediaKitPlayerBackend extends PlayerBackend
         sidAfter = await _tryNativeGetProperty(native, 'sid');
         if (!isCurrentSelection()) return;
       }
-
-      await _nativeSetProperty(native, 'secondary-sid', 'no');
-      if (!isCurrentSelection()) return;
 
       // Moonfin never shows a Flutter subtitle overlay (media_kit disables its
       // SubtitleView when libass is on, and it stays hidden otherwise), so mpv
@@ -2826,8 +2863,6 @@ class MediaKitPlayerBackend extends PlayerBackend
     final sid = _ccTrackSids[id - 1].toString();
     await _nativeSetProperty(platform, 'sid', sid);
     if (!_isLatestSubtitleSelection(generation)) return;
-    await _nativeSetProperty(platform, 'secondary-sid', 'no');
-    if (!_isLatestSubtitleSelection(generation)) return;
     await _nativeSetProperty(platform, 'sub-visibility', 'yes');
     if (!_isLatestSubtitleSelection(generation)) return;
     await _nativeSetProperty(platform, 'sub-ass', 'yes');
@@ -2844,8 +2879,6 @@ class MediaKitPlayerBackend extends PlayerBackend
     try {
       final native = _player.platform as NativePlayer;
       await _nativeSetProperty(native, 'sid', 'no');
-      if (!_isLatestSubtitleSelection(generation)) return;
-      await _nativeSetProperty(native, 'secondary-sid', 'no');
       if (!_isLatestSubtitleSelection(generation)) return;
       await _nativeSetProperty(native, 'sub-visibility', 'no');
     } catch (_) {}
@@ -2916,6 +2949,123 @@ class MediaKitPlayerBackend extends PlayerBackend
   }
 
   @override
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    int? embeddedTrackId,
+  }) async {
+    final generation = ++_secondarySubtitleGeneration;
+    final ordinal = embeddedTrackId != null && embeddedTrackId > 0
+        ? embeddedTrackId
+        : null;
+    final externalUrl = url?.isNotEmpty == true ? url : null;
+    _pendingSecondarySubtitle = ordinal == null && externalUrl == null
+        ? null
+        : (ordinal: ordinal, url: externalUrl, generation: generation);
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    await _nativeSetProperty(native, 'secondary-sid', 'no');
+    if (!_isCurrentSecondarySubtitle(generation)) return;
+    await _applyPendingSecondarySubtitle();
+    if (!_isCurrentSecondarySubtitle(generation) ||
+        _pendingSecondarySubtitle == null ||
+        ordinal != null ||
+        externalUrl == null) {
+      return;
+    }
+    // External files may still be extracting. Let playback and later choices
+    // continue while reusing the existing deduplicated sub-add/retry path.
+    unawaited(_loadSecondarySubtitle(externalUrl, codec, generation));
+  }
+
+  bool _isCurrentSecondarySubtitle(int generation) =>
+      !_isDisposed && generation == _secondarySubtitleGeneration;
+
+  Future<void> _applyPendingSecondarySubtitle() async {
+    final pending = _pendingSecondarySubtitle;
+    final native = _player.platform;
+    if (pending == null ||
+        native is! NativePlayer ||
+        !_isCurrentSecondarySubtitle(pending.generation)) {
+      return;
+    }
+    final raw = await _tryNativeGetProperty(native, 'track-list');
+    if (!_isCurrentSecondarySubtitle(pending.generation) ||
+        _pendingSecondarySubtitle != pending) {
+      return;
+    }
+    final embedded = _extractTrackEntries(raw, type: 'sub')
+        .where(
+          (entry) => !entry.external && !_isClosedCaptionCodec(entry.codec),
+        )
+        .toList();
+    final ordinal = pending.ordinal;
+    final sid = ordinal != null
+        ? (ordinal <= embedded.length
+              ? embedded[ordinal - 1].id.toString()
+              : null)
+        : _externalSubtitleSid(raw, pending.url!);
+    if (sid == null) return;
+    _pendingSecondarySubtitle = null;
+    await _nativeSetProperty(native, 'secondary-sid', sid);
+    if (!_isCurrentSecondarySubtitle(pending.generation)) return;
+    await _nativeSetProperty(native, 'secondary-sub-visibility', 'yes');
+    _subtitleDebug('secondary sid=$sid embedded=${ordinal != null}');
+  }
+
+  Future<void> _loadSecondarySubtitle(
+    String url,
+    String? codec,
+    int generation,
+  ) async {
+    bool isCurrent() =>
+        _isCurrentSecondarySubtitle(generation) &&
+        _pendingSecondarySubtitle != null;
+    try {
+      await addExternalSubtitle(url, codec: codec);
+      if (!isCurrent()) return;
+      await _applyPendingSecondarySubtitle();
+      if (!isCurrent()) return;
+      await _retryExternalSubtitle(
+        url,
+        isCurrentSelection: isCurrent,
+        selectTrack: _applyPendingSecondarySubtitle,
+      );
+    } catch (error) {
+      _subtitleDebug('secondary subtitle load failed: $error');
+    }
+  }
+
+  @override
+  Future<void> setSecondarySubtitleDelay(double seconds) async {
+    await _secondaryControlsReady;
+    if (_isDisposed || !supportsSecondarySubtitleDelay) return;
+    await _nativeSetProperty(
+      _player.platform as NativePlayer,
+      'secondary-sub-delay',
+      seconds.clamp(-5.0, 5.0).toStringAsFixed(3),
+    );
+  }
+
+  @override
+  Future<void> configureSecondarySubtitleStyle({
+    double? fontSize,
+    double? verticalOffset,
+    int? textColor,
+  }) async {
+    await _secondaryControlsReady;
+    if (_isDisposed || !supportsSecondarySubtitlePosition) return;
+    // mpv draws the second track at the top; offset it down from that edge.
+    final offset = verticalOffset ?? PlaybackManager.defaultSecondarySubtitleOffset;
+    final position = (offset.clamp(0.0, 0.4) * 100).round();
+    await _nativeSetProperty(
+      _player.platform as NativePlayer,
+      'secondary-sub-pos',
+      position.toString(),
+    );
+  }
+
+  @override
   Future<void> addExternalSubtitle(
     String url, {
     String? title,
@@ -2923,11 +3073,25 @@ class MediaKitPlayerBackend extends PlayerBackend
     String? codec,
   }) async {
     final sourceGeneration = _pendingSubtitleChoice.source;
+    final alreadyRegistered =
+        _externalSubtitles[url]?.sourceGeneration == sourceGeneration;
     _externalSubtitles[url] = (
       title: title,
       language: language,
       sourceGeneration: sourceGeneration,
     );
+    if (alreadyRegistered) {
+      final raw = await _tryNativeGetProperty(
+        _player.platform as NativePlayer, 'track-list',
+      );
+      if (_isDisposed || sourceGeneration != _pendingSubtitleChoice.source) {
+        return;
+      }
+      if (_externalSubtitleSid(raw, url) != null) {
+        await _pendingSubtitleChoice.added(url, sourceGeneration);
+        return;
+      }
+    }
     await _addExternalSubtitle(url);
     await _pendingSubtitleChoice.added(url, sourceGeneration);
 

@@ -17,7 +17,14 @@ import 'media3_letterbox_crop.dart';
 import 'server_transcode_capabilities.dart';
 
 class Media3PlayerBackend extends PlayerBackend
-    implements SubtitleLoadingBackend {
+    implements SubtitleLoadingBackend, SecondarySubtitleBackend {
+  @override
+  bool get supportsSecondarySubtitleDelay => true;
+  @override
+  bool get supportsSecondarySubtitlePosition => true;
+  @override
+  bool get supportsSecondarySubtitleStyle => true;
+
   static const _discontinuityWindowMs = 15000;
   static const _discontinuityThreshold = 3;
   static const _audioSinkErrorThreshold = 2;

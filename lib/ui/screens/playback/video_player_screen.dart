@@ -7463,11 +7463,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _showControls();
   }
 
-  /// Only Media3 draws a secondary track, and only from an SRT or WebVTT file
-  /// other than the primary, so the subtitle button skips the slot question
-  /// when there is nothing to put in the second slot.
+  /// Skip the slot question when the engine or available tracks cannot fill it.
   bool get _offersSecondarySubtitles {
-    if (_activeBackend is! Media3PlayerBackend) return false;
+    if (_activeBackend is! SecondarySubtitleBackend) return false;
     if (_manager.secondarySubtitleStreamIndex != null) return true;
     final primary = _manager.subtitleStreamIndex;
     final streams =

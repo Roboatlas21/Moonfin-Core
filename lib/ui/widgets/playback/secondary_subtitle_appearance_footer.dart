@@ -10,12 +10,16 @@ class SecondarySubtitleAppearanceFooter extends StatefulWidget {
     required this.initialTextColor,
     required this.defaultTextColor,
     required this.onChanged,
+    this.showStyle = true,
+    this.showPosition = true,
   });
 
   final double initialFontSize;
   final double initialOffset;
   final int? initialTextColor;
   final int defaultTextColor;
+  final bool showStyle;
+  final bool showPosition;
   final void Function(double fontSize, double offset, int? textColor) onChanged;
 
   @override
@@ -49,19 +53,21 @@ class _SecondarySubtitleAppearanceFooterState
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _AppearanceControlRow(
-          label: AppLocalizations.of(context).subtitleSize,
-          value: _fontSize.toStringAsFixed(0),
-          onDecrease: () => _update(fontSize: _fontSize - 2),
-          onIncrease: () => _update(fontSize: _fontSize + 2),
-        ),
-        _AppearanceControlRow(
-          label: AppLocalizations.of(context).verticalOffset,
-          value: '${(_offset * 100).round()}%',
-          onDecrease: () => _update(offset: _offset - 0.02),
-          onIncrease: () => _update(offset: _offset + 0.02),
-        ),
-        _buildColorControl(context),
+        if (widget.showStyle)
+          _AppearanceControlRow(
+            label: AppLocalizations.of(context).subtitleSize,
+            value: _fontSize.toStringAsFixed(0),
+            onDecrease: () => _update(fontSize: _fontSize - 2),
+            onIncrease: () => _update(fontSize: _fontSize + 2),
+          ),
+        if (widget.showPosition)
+          _AppearanceControlRow(
+            label: AppLocalizations.of(context).verticalOffset,
+            value: '${(_offset * 100).round()}%',
+            onDecrease: () => _update(offset: _offset - 0.02),
+            onIncrease: () => _update(offset: _offset + 0.02),
+          ),
+        if (widget.showStyle) _buildColorControl(context),
       ],
     ),
   );

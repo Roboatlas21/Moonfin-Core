@@ -613,6 +613,7 @@ class PlaybackManager implements AudioOwnable {
   double get secondarySubtitleOffset => _secondarySubtitleOffset;
 
   bool canUseAsSecondarySubtitle(int streamIndex) {
+    if (_backend is! SecondarySubtitleBackend) return false;
     final stream = _currentMediaStreams
         .where((s) => s['Type'] == 'Subtitle' && s['Index'] == streamIndex)
         .firstOrNull;
@@ -3608,8 +3609,7 @@ class PlaybackManager implements AudioOwnable {
   }
 
   /// The sidecar the server offers for [streamIndex], or else the file it can
-  /// serve from an embedded SRT or WebVTT track. Only the secondary overlay
-  /// takes the second kind.
+  /// serve from an embedded SRT or WebVTT track when it cannot be read natively.
   String? _secondarySubtitleUrlForStream(int streamIndex) {
     final sidecar = _externalSubtitleUrlForStream(streamIndex);
     if (sidecar != null && sidecar.isNotEmpty) return sidecar;
@@ -3694,8 +3694,7 @@ class PlaybackManager implements AudioOwnable {
     ),
   );
 
-  /// Picks the SRT or WebVTT track the secondary overlay draws, or none for
-  /// null. A track the server can't serve as a file stays primary-only.
+  /// Picks a second SRT or WebVTT track, or none for null.
   Future<void> changeSecondarySubtitleTrack(int? streamIndex) async {
     final selectedIndex = streamIndex == _subtitleStreamIndex
         ? null

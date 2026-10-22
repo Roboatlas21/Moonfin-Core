@@ -18,7 +18,8 @@ const _transcodedDownloadStreams = <Map<String, dynamic>>[
   },
 ];
 
-class _CapturingBackend extends Fake implements PlayerBackend {
+class _CapturingBackend extends Fake
+    implements PlayerBackend, SecondarySubtitleBackend {
   Map<String, dynamic>? payload;
 
   @override

@@ -106,11 +106,15 @@ abstract final class TrackPicker {
     if (!context.mounted) return;
 
     final backend = manager.backend;
+    final SecondarySubtitleBackend? secondaryControls =
+        backend is SecondarySubtitleBackend ? backend : null;
     final delayLimits = secondary
-        ? (
-            -PlaybackManager.secondarySubtitleMaxDelaySeconds,
-            PlaybackManager.secondarySubtitleMaxDelaySeconds,
-          )
+        ? secondaryControls?.supportsSecondarySubtitleDelay == true
+              ? (
+                  -PlaybackManager.secondarySubtitleMaxDelaySeconds,
+                  PlaybackManager.secondarySubtitleMaxDelaySeconds,
+                )
+              : null
         : delayLimitsFor(backend, audio: audio);
     final delay = secondary
         ? manager.secondarySubtitleDelaySeconds
@@ -133,7 +137,9 @@ abstract final class TrackPicker {
       );
     }
     Widget? footer;
-    if (secondary) {
+    if (secondary &&
+        (secondaryControls?.supportsSecondarySubtitleStyle == true ||
+            secondaryControls?.supportsSecondarySubtitlePosition == true)) {
       final style = SubtitleStyle.forResolution(
         prefs,
         manager.currentResolution,
@@ -149,6 +155,8 @@ abstract final class TrackPicker {
             ),
           ),
           SecondarySubtitleAppearanceFooter(
+            showStyle: secondaryControls!.supportsSecondarySubtitleStyle,
+            showPosition: secondaryControls.supportsSecondarySubtitlePosition,
             initialFontSize:
                 manager.secondarySubtitleFontSize ?? style.fontSize,
             initialOffset: manager.secondarySubtitleOffset,
