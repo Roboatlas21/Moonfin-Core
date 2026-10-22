@@ -337,12 +337,43 @@ void main() {
 
       other.platform.properties['sub-text/ass'] = r'{\an2}Bottom';
       await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '89');
+      expect(other.platform.properties['secondary-sub-pos'], '93');
       other.platform.properties['sub-text/ass'] = '';
       await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(other.platform.properties['secondary-sub-pos'], '89');
+      expect(other.platform.properties['secondary-sub-pos'], '93');
       await second.setSecondarySubtitle();
       expect(other.platform.properties['sub-pos'], '100');
+    } finally {
+      second.dispose();
+    }
+  });
+
+  test('mpv bottom spacing stays fixed across primary offsets', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-delay': '0',
+      'secondary-sub-pos': '0',
+      'sub-text/ass': r'{\an2}Bottom',
+      'secondary-sub-text': 'Other language',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
+      for (final spacing in [0.0, 0.02, 0.04]) {
+        final expectedPosition = 93 - (spacing * 100).round();
+        for (final primaryOffset in [0.0, 0.04, 0.08]) {
+          await second.configureSubtitleStyle(verticalOffset: primaryOffset);
+          await second.configureSecondarySubtitleStyle(verticalOffset: spacing);
+          // sub-margin-y is shared by mpv's two text renderers. Secondary
+          // positioning must not subtract that same primary offset again.
+          expect(other.platform.properties['sub-margin-y'],
+              '${(primaryOffset * 720).round()}');
+          expect(other.platform.properties['secondary-sub-pos'],
+              '$expectedPosition');
+        }
+      }
+      expect(other.platform.properties['sub-pos'], isNot('89'));
     } finally {
       second.dispose();
     }
@@ -385,7 +416,7 @@ void main() {
       expect(second.supportsSecondarySubtitleDelay, isTrue);
       expect(second.supportsSecondarySubtitlePosition, isTrue);
       expect(other.platform.properties['secondary-sub-delay'], '1.750');
-      expect(other.platform.properties['secondary-sub-pos'], '95');
+      expect(other.platform.properties['secondary-sub-pos'], '99');
       expect(other.platform.properties['sub-delay'], '0.500');
       expect(other.platform.properties['sub-color'], '#ffffffff');
       await second.setSubtitleDelay(-0.25);
