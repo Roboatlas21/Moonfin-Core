@@ -832,7 +832,7 @@ class HtmlVideoBackend extends PlayerBackend
       final cues = track.cues;
       if (cues == null) return;
       for (var i = 0; i < cues.length; i++) {
-        if (cues[i] is! web.VTTCue) continue;
+        if (!cues[i].isA<web.VTTCue>()) continue;
         final cue = cues[i] as web.VTTCue;
         final original = cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
         if (original != null) cue.line = original;
@@ -848,7 +848,7 @@ class HtmlVideoBackend extends PlayerBackend
       final cues = track.activeCues;
       if (cues == null) continue;
       for (var j = 0; j < cues.length; j++) {
-        if (cues[j] is web.VTTCue) return cues[j] as web.VTTCue;
+        if (cues[j].isA<web.VTTCue>()) return cues[j] as web.VTTCue;
       }
     }
     return null;
@@ -887,7 +887,7 @@ class HtmlVideoBackend extends PlayerBackend
     const gap = 0.015;
     final originalCentre =
         primary?.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
-    final primaryLine = originalCentre?.toDart ??
+    final primaryLine = originalCentre?.toDartDouble ??
         ((primary?.line.dartify() as num?)?.toDouble() ??
             ((1 - _subtitleVerticalOffset) * 100));
     final position = (primaryLine / 100).clamp(0.0, 1.0).toDouble();
