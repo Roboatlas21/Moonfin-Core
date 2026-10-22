@@ -3102,8 +3102,8 @@ class MediaKitPlayerBackend extends PlayerBackend
   }) async {
     await _secondaryControlsReady;
     if (_isDisposed || !supportsSecondarySubtitlePosition) return;
-    _secondaryVerticalOffset =
-        verticalOffset ?? PlaybackManager.defaultSecondarySubtitleOffset;
+    _secondaryVerticalOffset = (verticalOffset ??
+        PlaybackManager.defaultSecondarySubtitleOffset).clamp(0.0, 0.06).toDouble();
     await _refreshStackedSecondaryPosition(force: true);
   }
 
