@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
+import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:server_core/server_core.dart';
 
@@ -185,8 +186,8 @@ abstract final class TrackPicker {
         prefs,
         manager.currentResolution,
       );
-      Future<void> saveSecondaryAppearance(Future<void> update) async {
-        await update;
+      Future<void> saveSecondaryAppearance<T>(Preference<T> key, T value) async {
+        await prefs.set(key, value);
         await syncSecondarySubtitleStyle(manager, prefs);
       }
 
@@ -226,20 +227,16 @@ abstract final class TrackPicker {
             onFontSizeChanged: (fontSize) => unawaited(
               secondary
                   ? saveSecondaryAppearance(
-                      prefs.set(
-                        UserPreferences.secondarySubtitleSizeAdjustment,
-                        fontSize,
-                      ),
+                      UserPreferences.secondarySubtitleSizeAdjustment,
+                      fontSize,
                     )
                   : setPrimarySubtitleSize(manager, prefs, fontSize),
             ),
             onOffsetChanged: (offset) => unawaited(
               secondary
                   ? saveSecondaryAppearance(
-                      prefs.set(
-                        UserPreferences.secondarySubtitleOffsetPosition,
-                        offset,
-                      ),
+                      UserPreferences.secondarySubtitleOffsetPosition,
+                      offset,
                     )
                   : setPrimarySubtitleAppearance(
                       manager,
@@ -249,10 +246,8 @@ abstract final class TrackPicker {
             ),
             onTextColorChanged: (textColor) => unawaited(
               saveSecondaryAppearance(
-                prefs.set(
-                  UserPreferences.secondarySubtitleTextColor,
-                  textColor ?? -1,
-                ),
+                UserPreferences.secondarySubtitleTextColor,
+                textColor ?? -1,
               ),
             ),
           ),

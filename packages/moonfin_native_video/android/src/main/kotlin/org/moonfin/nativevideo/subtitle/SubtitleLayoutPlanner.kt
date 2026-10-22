@@ -94,19 +94,17 @@ internal object SubtitleLayoutPlanner {
             bottom -= step
         }
 
-        // A manual offset may land at the halfway boundary or behind another
-        // cue. Check the exact free-space edges before hiding text: a lower
-        // position may fit, or the stepped search may have skipped a small gap.
-        val edges = listOf(minimumBottom, maximumBottom) + primary.flatMap {
-            listOf(it.top - gapPx, it.bottom + gapPx + secondaryHeight)
-        }
-        for (edge in edges.filter { it in minimumBottom..maximumBottom }
-            .distinct().sortedWith(compareBy<Float> { it > requestedBottom }
-                .thenBy { kotlin.math.abs(it - requestedBottom) })) {
-            val candidate = SubtitleBox(left, edge - secondaryHeight, right, edge)
-            if (primary.none { intersects(candidate, it, gapPx) }) return candidate
-        }
-        return null
+        // The stepped search may miss a narrow gap. Check the exact cue
+        // boundaries before giving up, preferring positions above the request.
+        val edges = sequenceOf(minimumBottom, maximumBottom) + primary.asSequence()
+            .flatMap { sequenceOf(it.top - gapPx, it.bottom + gapPx + secondaryHeight) }
+        return edges
+            .filter { it in minimumBottom..maximumBottom }
+            .distinct()
+            .sortedWith(compareBy<Float> { it > requestedBottom }
+                .thenBy { kotlin.math.abs(it - requestedBottom) })
+            .map { SubtitleBox(left, it - secondaryHeight, right, it) }
+            .firstOrNull { candidate -> primary.none { intersects(candidate, it, gapPx) } }
     }
 
     fun intersects(a: SubtitleBox, b: SubtitleBox, gapPx: Float = 0f): Boolean =
