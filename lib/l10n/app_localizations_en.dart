@@ -4214,9 +4214,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get secondaryDelayAdjustment => 'Secondary Delay Adjustment';
 
   @override
-  String get subtitleColour => 'Subtitle Colour';
-
-  @override
   String decreaseValue(String setting) {
     return 'Decrease $setting';
   }

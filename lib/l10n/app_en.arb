@@ -5597,10 +5597,6 @@
   "@secondaryDelayAdjustment": {
     "description": "Title of the secondary subtitle delay popup; adjustment is added to the main subtitle delay"
   },
-  "subtitleColour": "Subtitle Colour",
-  "@subtitleColour": {
-    "description": "Colour control in the secondary subtitle menu"
-  },
   "@secondarySubtitleTrack": {
     "description": "Title of the picker for the secondary subtitle track"
   },

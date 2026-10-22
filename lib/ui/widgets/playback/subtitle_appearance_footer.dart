@@ -153,7 +153,7 @@ class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
       children: [
         Expanded(
           child: Text(
-            AppLocalizations.of(context).subtitleColour,
+            AppLocalizations.of(context).textFillColor,
             style: const TextStyle(color: Colors.white70),
           ),
         ),

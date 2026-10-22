@@ -34,7 +34,7 @@ Map<String, dynamic> appleTvSubtitleMetadata({
     'delayLabel': l10n.subtitleDelay,
     'sizeLabel': l10n.subtitleSize,
     'positionLabel': l10n.verticalOffset,
-    'colorLabel': l10n.subtitleColour,
+    'colorLabel': l10n.textFillColor,
     'primaryFontSize': style.fontSize,
     'sizeAdjustment': prefs
         .get(UserPreferences.secondarySubtitleSizeAdjustment)
