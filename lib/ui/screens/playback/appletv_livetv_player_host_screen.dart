@@ -48,7 +48,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   StreamSubscription<Map<String, dynamic>>? _actionSub;
   StreamSubscription<PlaybackBringupState>? _bringupSub;
 
-  (SubtitleStyle, double, double, int)? _lastSubtitleStyle;
+  SubtitleStyle? _lastSubtitleStyle;
 
   late int _currentIndex;
   bool _exiting = false;
@@ -182,17 +182,8 @@ class _AppleTvLiveTvPlayerHostScreenState
         _prefs,
         _manager.currentResolution,
       );
-      final appearance = (
-        style,
-        _prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
-        _prefs.get(UserPreferences.secondarySubtitleOffsetPosition),
-        _prefs.get(UserPreferences.secondarySubtitleTextColor),
-      );
-      final previous = _lastSubtitleStyle;
-      if (!force && appearance == previous) return;
-      _lastSubtitleStyle = appearance;
-      unawaited(syncSecondarySubtitleStyle(_manager, _prefs));
-      if (!force && style == previous?.$1) return;
+      if (!force && style == _lastSubtitleStyle) return;
+      _lastSubtitleStyle = style;
       backend.configureSubtitleStyle(
         textColor: style.textColor,
         backgroundColor: style.backgroundColor,
@@ -683,10 +674,8 @@ class _AppleTvLiveTvPlayerHostScreenState
         manager: _manager,
         prefs: _prefs,
         l10n: AppLocalizations.of(context),
-        tracks: _trackOptions(
-          subtitleStreams,
-          _manager.secondarySubtitleStreamIndex,
-        ),
+        // Live TV keeps primary subtitle controls, not dual subtitle slots.
+        tracks: const [],
       ),
       streamInfoSections: _liveStreamInfoSections(),
       isLive: true,
