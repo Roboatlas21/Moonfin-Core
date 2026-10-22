@@ -202,6 +202,17 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             player?.setClosedCaptionTrack((args["id"] as? NSNumber)?.int32Value ?? 0)
         case "disableSubtitleTrack":
             player?.disableSubtitles()
+        case "setSecondarySubtitle":
+            player?.setSecondarySubtitle(
+                embeddedTrackId: (args["embeddedTrackId"] as? NSNumber)?.intValue,
+                url: (args["url"] as? String).flatMap { urlFrom($0) })
+        case "setSecondarySubtitleDelay":
+            player?.setSecondarySubtitleDelay(ms(args["delayMs"]))
+        case "configureSecondarySubtitleStyle":
+            player?.configureSecondarySubtitleStyle(
+                fontSize: (args["fontSize"] as? NSNumber)?.doubleValue,
+                verticalOffset: (args["verticalOffset"] as? NSNumber)?.doubleValue,
+                textColor: (args["textColor"] as? NSNumber)?.intValue)
         case "setAudioDelay":
             player?.setAudioDelay(ms(args["delayMs"]))
         case "setSubtitleDelay":
@@ -280,6 +291,9 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
         }
         vc.onSelectSubtitle = { [weak self] index in
             self?.send(["event": "selectSubtitle", "index": index])
+        }
+        vc.onSecondarySubtitleAction = { [weak self] action in
+            self?.send(action)
         }
         // Keeps the stored delay on the Dart side in step with what the user
         // set here. Audio delay has no control on this path, so it stays zero.
@@ -452,7 +466,8 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                 audioBridgeLossless: (args["audioBridgeLossless"] as? Bool) ?? false,
                 dolbyVisionBaseLayerOnly: (args["dolbyVisionBaseLayerOnly"] as? Bool) ?? false,
                 externalSubtitles: AetherPlayerWrapper.externalSubtitleTracks(
-                    from: args["externalSubtitles"])))
+                    from: args["externalSubtitles"]),
+                secondarySubtitle: AetherPlayerWrapper.secondarySubtitleConfiguration(from: args)))
         player.setForceSubtitlesDisabledOnStart(
             (args["forceSubtitlesDisabledOnStart"] as? Bool) ?? false)
         player.setReplayGainDb((args["normalizationGainDb"] as? NSNumber)?.doubleValue)

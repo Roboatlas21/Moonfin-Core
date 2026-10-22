@@ -11,6 +11,7 @@ import '../../../playback/subtitle_style.dart';
 import '../../../data/models/aggregated_item.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../playback/appletv_backend.dart';
+import '../../../playback/appletv_secondary_subtitles.dart';
 import '../../../playback/appletv_preview_player.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../l10n/app_localizations.dart';
@@ -177,6 +178,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     final backend = _backend;
     if (backend == null) return;
     try {
+      unawaited(syncAppleTvSecondarySubtitleStyle(_manager, _prefs));
       final style = SubtitleStyle.forResolution(
         _prefs,
         _manager.currentResolution,
@@ -669,6 +671,15 @@ class _AppleTvLiveTvPlayerHostScreenState
         ),
         ..._captionTrackOptions(),
       ],
+      secondarySubtitles: appleTvSecondarySubtitleMetadata(
+        manager: _manager,
+        prefs: _prefs,
+        l10n: AppLocalizations.of(context),
+        tracks: _trackOptions(
+          subtitleStreams,
+          _manager.secondarySubtitleStreamIndex,
+        ),
+      ),
       streamInfoSections: _liveStreamInfoSections(),
       isLive: true,
       liveProgram: _liveProgramPayload(),
@@ -739,6 +750,17 @@ class _AppleTvLiveTvPlayerHostScreenState
   }
 
   void _handleUiAction(Map<String, dynamic> action) {
+    final secondaryAction = handleAppleTvSecondarySubtitleAction(
+      action,
+      _manager,
+      _prefs,
+    );
+    if (secondaryAction != null) {
+      unawaited(secondaryAction.then((_) {
+        if (mounted) _pushMetadata();
+      }));
+      return;
+    }
     switch (action['event']?.toString()) {
       case 'play':
         unawaited(_manager.resume());

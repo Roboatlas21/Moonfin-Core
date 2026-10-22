@@ -20,6 +20,7 @@ import '../../../data/repositories/item_mutation_repository.dart';
 import '../../../auth/repositories/user_repository.dart';
 import '../../../playback/cinema_skip_controller.dart';
 import '../../../playback/appletv_backend.dart';
+import '../../../playback/appletv_secondary_subtitles.dart';
 import '../../../playback/playback_profile_diagnostics.dart';
 import '../../../syncplay/syncplay_manager.dart';
 import '../../theme/app_theme_controller.dart';
@@ -306,6 +307,11 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     final backend = _backend;
     if (backend == null) return;
     try {
+      final manager = _manager;
+      if (manager == null) return;
+      unawaited(syncAppleTvSecondarySubtitleStyle(
+        manager, GetIt.instance<UserPreferences>(),
+      ));
       final style = SubtitleStyle.forResolution(
         GetIt.instance<UserPreferences>(),
         _manager?.currentResolution,
@@ -1475,6 +1481,16 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
         manager.subtitleStreamIndex,
         audio: false,
       ),
+      secondarySubtitles: appleTvSecondarySubtitleMetadata(
+        manager: manager,
+        prefs: GetIt.instance<UserPreferences>(),
+        l10n: AppLocalizations.of(context),
+        tracks: _trackOptions(
+          subtitleStreams,
+          manager.secondarySubtitleStreamIndex,
+          audio: false,
+        ),
+      ),
       logoUrl: _logoUrlForItem(item),
       streamInfoSections: _streamInfoSections(manager),
       trickplay: _trickplayPayload(item, manager),
@@ -1675,6 +1691,17 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
   void _handleUiAction(Map<String, dynamic> action) {
     final manager = _manager;
     if (manager == null) return;
+    final secondaryAction = handleAppleTvSecondarySubtitleAction(
+      action,
+      manager,
+      GetIt.instance<UserPreferences>(),
+    );
+    if (secondaryAction != null) {
+      unawaited(secondaryAction.then((_) {
+        if (mounted) _pushMetadata();
+      }));
+      return;
+    }
     switch (action['event']?.toString()) {
       case 'play':
         unawaited(manager.resume());

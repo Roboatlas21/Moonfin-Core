@@ -19,7 +19,7 @@ import 'letterbox_croppers.dart';
 import 'lossless_audio_bridge.dart';
 import 'server_transcode_capabilities.dart';
 
-class AppleTvBackend implements PlayerBackend {
+class AppleTvBackend implements PlayerBackend, SecondarySubtitleBackend {
   AppleTvBackend(this._prefs) {
     _eventSub = _events.receiveBroadcastStream().listen(
       _handleEvent,
@@ -165,6 +165,9 @@ class AppleTvBackend implements PlayerBackend {
       case 'previous':
       case 'selectAudio':
       case 'selectSubtitle':
+      case 'selectSecondarySubtitle':
+      case 'setSecondarySubtitleDelay':
+      case 'configureSecondarySubtitleStyle':
       case 'setSpeed':
       case 'setBitrate':
       case 'selectChannel':
@@ -342,6 +345,13 @@ class AppleTvBackend implements PlayerBackend {
       'videoDvProfile': payload['videoDvProfile'],
       'dolbyVisionBaseLayerOnly': needsBaseLayerOnlyForDolbyVisionAv1(payload),
       'externalSubtitles': payload['externalSubtitles'] ?? const [],
+      'secondarySubtitleTrackId': payload['secondarySubtitleTrackId'],
+      'secondarySubtitleUrl': payload['secondarySubtitleUrl'],
+      'secondarySubtitleCodec': payload['secondarySubtitleCodec'],
+      'secondarySubtitleDelayMs': payload['secondarySubtitleDelayMs'] ?? 0,
+      'secondarySubtitleOffset': payload['secondarySubtitleOffset'] ?? 0.08,
+      'secondarySubtitleFontSize': payload['secondarySubtitleFontSize'],
+      'secondarySubtitleTextColor': payload['secondarySubtitleTextColor'],
       'videoFrameRate': payload['videoFrameRate'],
       'videoWidth': payload['videoWidth'],
       'videoHeight': payload['videoHeight'],
@@ -542,6 +552,7 @@ class AppleTvBackend implements PlayerBackend {
     required int skipBackMs,
     required List<Map<String, dynamic>> audioTracks,
     required List<Map<String, dynamic>> subtitleTracks,
+    Map<String, dynamic>? secondarySubtitles,
     String logoUrl = '',
     List<Map<String, dynamic>> streamInfoSections = const [],
     Map<String, dynamic>? trickplay,
@@ -572,6 +583,7 @@ class AppleTvBackend implements PlayerBackend {
       'skipBackMs': skipBackMs,
       'audioTracks': audioTracks,
       'subtitleTracks': subtitleTracks,
+      'secondarySubtitles': ?secondarySubtitles,
       'logoUrl': logoUrl,
       'streamInfoSections': streamInfoSections,
       'trickplay': ?trickplay,
@@ -764,21 +776,47 @@ class AppleTvBackend implements PlayerBackend {
   }
 
   @override
+  bool get supportsSecondarySubtitleDelay => true;
+
+  @override
+  bool get supportsSecondarySubtitlePosition => true;
+
+  @override
+  bool get supportsSecondarySubtitleStyle => true;
+
+  @override
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,
     int? embeddedTrackId,
-  }) async {}
+  }) async {
+    await _invoke<void>('setSecondarySubtitle', {
+      'embeddedTrackId': embeddedTrackId,
+      'url': url,
+      'codec': codec,
+    });
+  }
 
   @override
-  Future<void> setSecondarySubtitleDelay(double seconds) async {}
+  Future<void> setSecondarySubtitleDelay(double seconds) async {
+    await _invoke<void>('setSecondarySubtitleDelay', {
+      'delayMs': (seconds.clamp(-5.0, 5.0) * 1000).round(),
+    });
+  }
 
   @override
   Future<void> configureSecondarySubtitleStyle({
     double? fontSize,
     double? verticalOffset,
     int? textColor,
-  }) async {}
+  }) async {
+    await _invoke<void>('configureSecondarySubtitleStyle', {
+      if (fontSize != null) 'fontSize': fontSize.clamp(8.0, 72.0),
+      if (verticalOffset != null)
+        'verticalOffset': verticalOffset.clamp(0.0, 0.4),
+      if (textColor != null) 'textColor': textColor,
+    });
+  }
 
   @override
   int? get activeSubtitleTrackIndex => _activeSubtitleTrackIndex;

@@ -738,6 +738,19 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         var textColor: Int?
     }
 
+    static func secondarySubtitleConfiguration(from args: [String: Any]) -> SecondarySubtitleConfiguration {
+        let url = (args["secondarySubtitleUrl"] as? String).flatMap {
+            $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : URL(string: $0)
+        }
+        return SecondarySubtitleConfiguration(
+            embeddedTrackId: (args["secondarySubtitleTrackId"] as? NSNumber)?.intValue,
+            url: url,
+            delay: ((args["secondarySubtitleDelayMs"] as? NSNumber)?.doubleValue ?? 0) / 1000,
+            offset: (args["secondarySubtitleOffset"] as? NSNumber)?.doubleValue ?? 0.08,
+            fontSize: (args["secondarySubtitleFontSize"] as? NSNumber)?.doubleValue,
+            textColor: (args["secondarySubtitleTextColor"] as? NSNumber)?.intValue)
+    }
+
     /// Reads the sidecars out of a `setSource` payload. Anything without a
     /// usable url is dropped rather than sent on as a track that can't open.
     nonisolated static func externalSubtitleTracks(from raw: Any?) -> [ExternalSubtitleTrack] {

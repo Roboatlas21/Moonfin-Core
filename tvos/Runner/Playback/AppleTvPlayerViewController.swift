@@ -60,6 +60,7 @@ final class AppleTvPlayerViewController: UIViewController {
     var onPrevious: (() -> Void)?
     var onSelectAudio: ((Int) -> Void)?
     var onSelectSubtitle: ((Int) -> Void)?
+    var onSecondarySubtitleAction: (([String: Any]) -> Void)?
     var onSetSpeed: ((Double) -> Void)?
     var onSetBitrate: ((Int) -> Void)?
     var onSelectChannel: ((String) -> Void)?
@@ -98,6 +99,7 @@ final class AppleTvPlayerViewController: UIViewController {
     private var skipBackMs = 10000
     private var audioTracks: [(index: Int, label: String, subtitle: String, selected: Bool)] = []
     private var subtitleTracks: [(index: Int, label: String, subtitle: String, selected: Bool)] = []
+    private var secondarySubtitles: [String: Any] = [:]
     private var streamInfoSections: [[String: Any]] = []
     private var hasCast = false
     private var castPeople:
@@ -1291,6 +1293,7 @@ final class AppleTvPlayerViewController: UIViewController {
             backward: Double(skipBackMs) / 1000.0)
         audioTracks = parseTracks(args["audioTracks"])
         subtitleTracks = parseTracks(args["subtitleTracks"])
+        secondarySubtitles = (args["secondarySubtitles"] as? [String: Any]) ?? [:]
         streamInfoSections = (args["streamInfoSections"] as? [[String: Any]]) ?? []
         selectedBitrateMbps = (args["selectedBitrateMbps"] as? NSNumber)?.intValue ?? -1
         hasCast = (args["hasCast"] as? Bool) ?? false
@@ -2733,70 +2736,134 @@ final class AppleTvPlayerViewController: UIViewController {
         present(sheet, animated: true)
     }
 
-    private func presentSubtitleMenu() {
+    private func secondaryText(_ key: String) -> String {
+        (secondarySubtitles[key] as? String) ?? ""
+    }
+
+    private func presentSubtitleMenu(secondary: Bool = false) {
+        let secondaryTracks = parseTracks(secondarySubtitles["tracks"])
+        let tracks = secondary ? secondaryTracks : subtitleTracks
         let sheet = self.makePlayerMenu(
-            title: "Subtitles", message: nil, preferredStyle: .actionSheet)
-        let anySelected = subtitleTracks.contains { $0.selected }
-        let offTitle = (anySelected ? "" : "\u{2713} ") + "Off"
+            title: secondary ? secondaryText("title") : "Subtitles",
+            message: nil, preferredStyle: .actionSheet)
+        if !secondary && !secondaryTracks.isEmpty {
+            sheet.addAction(self.makePlayerAction(title: secondaryText("title") + "…", style: .default) {
+                [weak self] _ in self?.presentSubtitleMenu(secondary: true)
+            })
+        }
+        let anySelected = tracks.contains { $0.selected }
+        let offTitle = (anySelected ? "" : "\u{2713} ") + (secondary ? secondaryText("off") : "Off")
         sheet.addAction(
             self.makePlayerAction(title: offTitle, style: .default) { [weak self] _ in
-                self?.onSelectSubtitle?(-1)
+                self?.selectSubtitle(-1, secondary: secondary)
             })
-        for track in subtitleTracks {
+        for track in tracks {
             sheet.addAction(
                 self.makePlayerAction(title: trackActionTitle(track), style: .default) {
-                    [weak self] _ in
-                    self?.onSelectSubtitle?(track.index)
+                    [weak self] _ in self?.selectSubtitle(track.index, secondary: secondary)
                 })
         }
         if anySelected {
             sheet.addAction(
-                self.makePlayerAction(title: "Subtitle Offset\u{2026}", style: .default) {
-                    [weak self] _ in
-                    self?.presentSubtitleDelayMenu()
-                })
+                self.makePlayerAction(
+                    title: secondary ? secondaryText("delayLabel") + "…" : "Subtitle Offset…", style: .default
+                ) { [weak self] _ in self?.presentSubtitleDelayMenu(secondary: secondary) })
         }
-        if canDownloadSubtitles {
+        if secondary {
+            for field in ["fontSize", "verticalOffset", "textColor"] {
+                let key = field == "fontSize" ? "sizeLabel" : field == "verticalOffset" ? "positionLabel" : "colorLabel"
+                sheet.addAction(self.makePlayerAction(title: secondaryText(key) + "…", style: .default) {
+                    [weak self] _ in self?.presentSecondaryAppearanceMenu(field: field)
+                })
+            }
+        } else if canDownloadSubtitles {
             sheet.addAction(
-                self.makePlayerAction(title: "Download Subtitles\u{2026}", style: .default) {
-                    [weak self] _ in
-                    self?.beginSubtitleSearch()
+                self.makePlayerAction(title: "Download Subtitles…", style: .default) {
+                    [weak self] _ in self?.beginSubtitleSearch()
                 })
         }
-        sheet.addAction(self.makePlayerAction(title: "Cancel", style: .cancel))
+        sheet.addAction(self.makePlayerAction(title: secondary ? secondaryText("cancel") : "Cancel", style: .cancel))
         present(sheet, animated: true)
     }
 
-    /// Alerts have no slider on tvOS, so the offset is stepped through a sheet
-    /// that reopens after each adjustment until the user is done.
-    private func presentSubtitleDelayMenu() {
-        let current = player.subtitleOverlay.delaySeconds
+    private func selectSubtitle(_ index: Int, secondary: Bool) {
+        if secondary {
+            onSecondarySubtitleAction?(["event": "selectSecondarySubtitle", "index": index])
+        } else {
+            onSelectSubtitle?(index)
+        }
+    }
+
+    /// Alerts have no slider on tvOS, so adjustments reopen their sheet.
+    private func presentSubtitleDelayMenu(secondary: Bool = false) {
+        let current = secondary ? player.secondarySubtitleOverlay.delaySeconds : player.subtitleOverlay.delaySeconds
         let sheet = self.makePlayerMenu(
-            title: "Subtitle Offset",
+            title: secondary ? secondaryText("delayLabel") : "Subtitle Offset",
             message: String(format: "%+.1f s", current),
             preferredStyle: .actionSheet)
         for step in [-0.5, -0.1, 0.1, 0.5] {
             sheet.addAction(
                 self.makePlayerAction(title: String(format: "%+.1f s", step), style: .default) {
-                    [weak self] _ in
-                    self?.applySubtitleDelay(current + step)
+                    [weak self] _ in self?.applySubtitleDelay(current + step, secondary: secondary)
                 })
         }
         if current != 0 {
             sheet.addAction(
-                self.makePlayerAction(title: "Reset", style: .default) { [weak self] _ in
-                    self?.applySubtitleDelay(0)
+                self.makePlayerAction(title: secondary ? secondaryText("reset") : "Reset", style: .default) {
+                    [weak self] _ in self?.applySubtitleDelay(0, secondary: secondary)
                 })
         }
-        sheet.addAction(self.makePlayerAction(title: "Done", style: .cancel))
+        sheet.addAction(self.makePlayerAction(title: secondary ? secondaryText("done") : "Done", style: .cancel))
         present(sheet, animated: true)
     }
 
-    private func applySubtitleDelay(_ seconds: TimeInterval) {
+    private func applySubtitleDelay(_ seconds: TimeInterval, secondary: Bool = false) {
         let rounded = (seconds * 10).rounded() / 10
-        player.setSubtitleDelay(rounded)
-        onSubtitleDelayChanged?(Int((rounded * 1000).rounded()))
-        presentSubtitleDelayMenu()
+        if secondary {
+            let bounded = min(max(rounded, -5), 5)
+            player.setSecondarySubtitleDelay(bounded)
+            onSecondarySubtitleAction?(["event": "setSecondarySubtitleDelay", "delayMs": Int((bounded * 1000).rounded())])
+        } else {
+            player.setSubtitleDelay(rounded)
+            onSubtitleDelayChanged?(Int((rounded * 1000).rounded()))
+        }
+        presentSubtitleDelayMenu(secondary: secondary)
+    }
+
+    private func presentSecondaryAppearanceMenu(field: String) {
+        let color = field == "textColor"
+        let size = field == "fontSize"
+        let current = (secondarySubtitles[field] as? NSNumber)?.doubleValue ?? (size ? 24 : color ? -1 : 0.08)
+        let label = secondaryText(size ? "sizeLabel" : color ? "colorLabel" : "positionLabel")
+        let sheet = makePlayerMenu(
+            title: label,
+            message: color ? nil : size ? String(format: "%.0f", current) : String(format: "%.0f%%", current * 100),
+            preferredStyle: .actionSheet)
+        if color {
+            for entry in (secondarySubtitles["colors"] as? [[String: Any]]) ?? [] {
+                guard let value = entry["value"] as? NSNumber, let title = entry["label"] as? String else { continue }
+                sheet.addAction(makePlayerAction(
+                    title: (value.doubleValue == current ? "\u{2713} " : "") + title, style: .default
+                ) { [weak self] _ in self?.applySecondaryAppearance(field: field, value: value.doubleValue) })
+            }
+        } else {
+            for direction in [-1.0, 1.0] {
+                let step = direction * (size ? 2 : 0.02)
+                let title = size ? String(format: "%+.0f", step) : String(format: "%+.0f%%", step * 100)
+                sheet.addAction(makePlayerAction(title: title, style: .default) {
+                    [weak self] _ in
+                    self?.applySecondaryAppearance(field: field, value: min(max(current + step, size ? 8 : 0), size ? 72 : 0.4))
+                })
+            }
+        }
+        sheet.addAction(makePlayerAction(title: secondaryText("done"), style: .cancel))
+        present(sheet, animated: true)
+    }
+
+    private func applySecondaryAppearance(field: String, value: Double) {
+        secondarySubtitles[field] = value
+        onSecondarySubtitleAction?(["event": "configureSecondarySubtitleStyle", field: value])
+        presentSecondaryAppearanceMenu(field: field)
     }
 
     private func beginSubtitleSearch() {
