@@ -166,4 +166,70 @@ final class RunnerTests: XCTestCase {
     }
 
 
+    @MainActor
+    func testSecondaryAvoidsBitmapAndAssBoundsThroughDialogueGaps() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        primary.videoRectProvider = { CGRect(x: 0, y: 50, width: 800, height: 300) }
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 100, height: 40)).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 100, height: 40))
+        }.cgImage!
+        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        secondary.setEvents([cue("Secondary", start: 1, end: 8)])
+        secondary.update(currentTime: 2)
+
+        primary.setEvents([SubtitleEvent(
+            startTime: 1, endTime: 3, text: nil, bitmap: image,
+            bitmapWidth: 100, bitmapHeight: 40,
+            normalizedRect: CGRect(x: 0.25, y: 0.8, width: 0.5, height: 0.1),
+            canvasSize: CGSize(width: 800, height: 300))])
+        primary.update(currentTime: 2)
+        XCTAssertLessThan(label.frame.maxY, 290)
+        XCTAssertEqual(label.frame.midX, 400, accuracy: 0.1)
+        let bitmapTop = label.frame.minY
+        primary.update(currentTime: 4)
+        XCTAssertEqual(label.frame.minY, bitmapTop, accuracy: 0.1)
+
+        // An ASS image fills the canvas, but only its visible glyphs reserve space.
+        primary.clear()
+        primary.showAssImage(image, bounds: CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1))
+        XCTAssertGreaterThan(label.frame.minY, 110)
+        XCTAssertEqual(label.frame.midX, 320, accuracy: 0.1)
+        let assTop = label.frame.minY
+        primary.showAssImage(nil)
+        XCTAssertEqual(label.frame.minY, assTop, accuracy: 0.1)
+        primary.clear()
+        XCTAssertEqual(label.frame.maxY, 400, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testSecondaryWithoutPrimaryKeepsOffsetAndControlsLift() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        let picture = CGRect(x: 0, y: 50, width: 800, height: 300)
+        primary.videoRectProvider = { picture }
+        secondary.videoRectProvider = { picture }
+        primary.applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
+                           fontSize: nil, fontWeight: nil, verticalOffset: 0.12)
+        secondary.applySecondaryStyle(from: primary, fontSize: nil, textColor: nil)
+        secondary.secondaryVerticalAdjustment = 0.06
+        secondary.setEvents([cue("Secondary")])
+        secondary.update(currentTime: 2)
+        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        XCTAssertEqual(label.frame.maxY, 364, accuracy: 0.1)
+        secondary.setSubtitlePosition(basePosition: 70)
+        secondary.layoutIfNeeded()
+        XCTAssertEqual(label.frame.maxY, 300, accuracy: 0.1)
+        secondary.setSubtitlePosition(basePosition: 93)
+        secondary.layoutIfNeeded()
+        XCTAssertEqual(label.frame.maxY, 364, accuracy: 0.1)
+    }
+
 }
