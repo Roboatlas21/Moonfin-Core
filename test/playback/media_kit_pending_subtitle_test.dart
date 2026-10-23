@@ -12,6 +12,27 @@ class _Native extends Fake implements NativePlayer {
   List<Map<String, dynamic>> tracks = [];
   final properties = <String, String>{'sid': 'no'};
   Completer<String>? delayedTracks;
+  Completer<void>? delayedSubtitleLoad;
+  final commands = <List<String>>[];
+  int rejectedSecondarySelections = 0;
+
+  @override
+  Future<void> command(
+    List<String> args, {
+    bool waitForInitialization = true,
+  }) async {
+    commands.add(args);
+    if (args.first == 'sub-add') {
+      await delayedSubtitleLoad?.future;
+      tracks.add({
+        'type': 'sub',
+        'id': 52,
+        'codec': 'subrip',
+        'external': true,
+        'external-filename': args[1],
+      });
+    }
+  }
 
   @override
   Future<String> getProperty(
@@ -30,6 +51,13 @@ class _Native extends Fake implements NativePlayer {
     String value, {
     bool waitForInitialization = true,
   }) async {
+    if (int.tryParse(value) != null) {
+      if (property == 'secondary-sid' && properties['sid'] == value) {
+        rejectedSecondarySelections++;
+        return;
+      }
+      if (property == 'sid' && properties['secondary-sid'] == value) return;
+    }
     properties[property] = value;
   }
 }
@@ -40,6 +68,8 @@ class _Streams extends Fake implements PlayerStream {
   Stream<Tracks> get tracks => changes.stream;
   @override
   Stream<VideoParams> get videoParams => const Stream.empty();
+  @override
+  Stream<Duration> get position => const Stream.empty();
 }
 
 class _Player extends Fake implements Player {
@@ -51,15 +81,19 @@ class _Player extends Fake implements Player {
   PlayerState get state => const PlayerState();
   final selections = <String>[];
   final opened = <String>[];
+  String? automaticSubtitleSid;
   @override
   Future<void> setSubtitleTrack(SubtitleTrack track) async {
     selections.add(track.id);
-    platform.properties['sid'] = track.id;
+    await platform.setProperty('sid', track.id);
   }
 
   @override
   Future<void> open(Playable playable, {bool play = true}) async {
     opened.add((playable as Media).uri);
+    if (platform.properties['sid'] == 'auto' && automaticSubtitleSid != null) {
+      platform.properties['sid'] = automaticSubtitleSid!;
+    }
   }
 
   @override
@@ -105,6 +139,88 @@ void main() {
     if (!disposed) backend.dispose();
     prefs.dispose();
   });
+
+
+  test(
+    'secondary embedded track uses its real sid and survives primary changes',
+    () async {
+      player.discover();
+      await backend.setSubtitleTrack(1);
+      await backend.setSecondarySubtitle(embeddedTrackId: 2);
+      expect(player.platform.properties['sid'], '11');
+      expect(player.platform.properties['secondary-sid'], '17');
+      await backend.setSubtitleTrack(1);
+      await backend.disableSubtitleTrack();
+      expect(player.platform.properties['secondary-sid'], '17');
+      expect(player.platform.properties['secondary-sub-visibility'], 'yes');
+      await backend.setSubtitleTrack(1);
+      await backend.setSecondarySubtitle();
+      expect(player.platform.properties['sid'], '11');
+      expect(player.platform.properties['secondary-sid'], 'no');
+    },
+  );
+
+
+  test(
+    'secondary Off cancels a selection rejected by the automatic primary',
+    () async {
+      player.discover();
+      player.platform.properties['sid'] = '17';
+      await backend.setSecondarySubtitle(embeddedTrackId: 2);
+      expect(player.platform.rejectedSecondarySelections, greaterThan(0));
+      await backend.setSecondarySubtitle();
+      await backend.setSubtitleTrack(1);
+      expect(player.platform.properties['secondary-sid'], 'no');
+    },
+  );
+
+
+  test('external secondary uses sub-add auto without changing primary or adding duplicates', () async {
+    const url = '/downloads/secondary.srt';
+    player.discover();
+    await backend.setSubtitleTrack(1);
+    await backend.setSecondarySubtitle(url: url, codec: 'srt');
+    await _flush();
+    expect(player.platform.properties['sid'], '11');
+    expect(player.platform.properties['secondary-sid'], '52');
+    expect(player.platform.commands.single.take(3), ['sub-add', url, 'auto']);
+    await backend.addExternalSubtitle(url);
+    await backend.setSecondarySubtitle(url: url);
+    expect(player.platform.commands, hasLength(1));
+  });
+
+
+  test('mpv bottom spacing stays fixed across primary offsets', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-delay': '0',
+      'secondary-sub-pos': '0',
+      'sub-text/ass': r'{\an2}Bottom',
+      'secondary-sub-text': 'Other language',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
+      for (final spacing in [0.0, 0.02, 0.04]) {
+        final expectedPosition = 93 - (spacing * 100).round();
+        for (final primaryOffset in [0.0, 0.04, 0.08]) {
+          await second.configureSubtitleStyle(verticalOffset: primaryOffset);
+          await second.configureSecondarySubtitleStyle(verticalOffset: spacing);
+          // sub-margin-y is shared by mpv's two text renderers. Secondary
+          // positioning must not subtract that same primary offset again.
+          expect(other.platform.properties['sub-margin-y'],
+              '${(primaryOffset * 720).round()}');
+          expect(other.platform.properties['secondary-sub-pos'],
+              '$expectedPosition');
+        }
+      }
+      expect(other.platform.properties['sub-pos'], isNot('89'));
+    } finally {
+      second.dispose();
+    }
+  });
+
 
   test('discovery selects the embedded ordinal once, excluding external and CC tracks', () async {
     await backend.setSubtitleTrack(2);

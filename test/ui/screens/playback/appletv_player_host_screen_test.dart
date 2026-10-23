@@ -69,6 +69,7 @@ void main() {
       () => manager.sessionEndedStream,
     ).thenAnswer((_) => const Stream<void>.empty());
     when(() => manager.state).thenReturn(playerState);
+    when(() => manager.secondarySubtitleOffset).thenReturn(0.0);
     when(
       () => manager.stop(userInitiated: any(named: 'userInitiated')),
     ).thenAnswer((_) async {});
