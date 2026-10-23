@@ -8,11 +8,37 @@ internal data class SubtitleBox(
     val bottom: Float,
 )
 
-/** Finds the closest position above the primary captions, inside the lower half. */
+/**
+ * Places secondary subtitles near the primary while keeping them inside the viewport
+ * and avoiding overlap.
+ */
 internal object SubtitleLayoutPlanner {
     const val ALIGN_TOP = 0
     const val ALIGN_MIDDLE = 1
     const val ALIGN_BOTTOM = 2
+
+    /**
+     * Keep a minimum gap when a negative adjustment pulls centred subtitles together.
+     */
+    fun middleGap(gapPx: Float, adjustment: Float, viewportHeight: Int, minimumGapPx: Float): Float =
+        (gapPx + adjustment * viewportHeight).coerceAtLeast(minimumGapPx)
+
+    /**
+     * Place the secondary subtitle below a top-aligned primary, and above it otherwise.
+     */
+    fun stackedDesiredBottom(
+        primary: SubtitleBox,
+        viewportHeight: Int,
+        secondaryHeight: Float,
+        gapPx: Float,
+        adjustment: Float,
+    ): Float {
+        val topAligned = (primary.top + primary.bottom) / 2f < viewportHeight / 3f
+        val anchor = if (topAligned)
+            primary.bottom + gapPx + secondaryHeight
+        else primary.top - gapPx
+        return anchor + (if (topAligned) adjustment else -adjustment) * viewportHeight
+    }
 
     /** Chooses the search half from the cue's actual screen position. */
     fun verticalAlignmentFor(box: SubtitleBox, viewportHeight: Int): Int = when {
@@ -82,14 +108,29 @@ internal object SubtitleLayoutPlanner {
         if (viewportWidth <= 0 || viewportHeight <= 0 || secondaryHeight <= 0f) return null
         val left = horizontalInset.coerceAtLeast(0f)
         val right = (viewportWidth - horizontalInset).coerceAtLeast(left)
-        var bottom = desiredBottom.coerceAtMost(viewportHeight.toFloat())
+        val minimumBottom = lowerHalfTop + secondaryHeight
+        val maximumBottom = viewportHeight.toFloat()
+        if (minimumBottom > maximumBottom) return null
+        val requestedBottom = desiredBottom.coerceIn(minimumBottom, maximumBottom)
+        var bottom = requestedBottom
         val step = stepPx.coerceAtLeast(1f)
-        while (bottom - secondaryHeight >= lowerHalfTop) {
+        while (bottom >= minimumBottom) {
             val candidate = SubtitleBox(left, bottom - secondaryHeight, right, bottom)
             if (primary.none { intersects(candidate, it, gapPx) }) return candidate
             bottom -= step
         }
-        return null
+
+        // The stepped search may miss a narrow gap. Check the exact cue
+        // boundaries before giving up, preferring positions above the request.
+        val edges = sequenceOf(minimumBottom, maximumBottom) + primary.asSequence()
+            .flatMap { sequenceOf(it.top - gapPx, it.bottom + gapPx + secondaryHeight) }
+        return edges
+            .filter { it in minimumBottom..maximumBottom }
+            .distinct()
+            .sortedWith(compareBy<Float> { it > requestedBottom }
+                .thenBy { kotlin.math.abs(it - requestedBottom) })
+            .map { SubtitleBox(left, it - secondaryHeight, right, it) }
+            .firstOrNull { candidate -> primary.none { intersects(candidate, it, gapPx) } }
     }
 
     fun intersects(a: SubtitleBox, b: SubtitleBox, gapPx: Float = 0f): Boolean =
