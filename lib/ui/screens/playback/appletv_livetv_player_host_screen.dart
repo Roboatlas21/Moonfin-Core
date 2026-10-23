@@ -11,6 +11,7 @@ import '../../../playback/subtitle_style.dart';
 import '../../../data/models/aggregated_item.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../playback/appletv_backend.dart';
+import '../../../playback/appletv_subtitles.dart';
 import '../../../playback/appletv_preview_player.dart';
 import '../../../playback/playback_info_sections.dart';
 import '../../../preference/user_preferences.dart';
@@ -599,6 +600,13 @@ class _AppleTvLiveTvPlayerHostScreenState
         ),
         ..._captionTrackOptions(),
       ],
+      subtitleControls: appleTvSubtitleMetadata(
+        manager: _manager,
+        prefs: _prefs,
+        l10n: AppLocalizations.of(context),
+        // Live TV uses a single subtitle menu, so skip the Primary/Secondary chooser.
+        tracks: const [],
+      ),
       streamInfoSections: _liveStreamInfoSections(),
       streamInfoTitle: AppLocalizations.of(context).playbackInformation,
       streamInfoDroppedFramesLabel: AppLocalizations.of(
@@ -673,6 +681,17 @@ class _AppleTvLiveTvPlayerHostScreenState
   }
 
   void _handleUiAction(Map<String, dynamic> action) {
+    final subtitleAction = handleAppleTvSubtitleAction(
+      action,
+      _manager,
+      _prefs,
+    );
+    if (subtitleAction != null) {
+      unawaited(subtitleAction.then((_) {
+        if (mounted) _pushMetadata();
+      }));
+      return;
+    }
     switch (action['event']?.toString()) {
       case 'play':
         unawaited(_manager.resume());
