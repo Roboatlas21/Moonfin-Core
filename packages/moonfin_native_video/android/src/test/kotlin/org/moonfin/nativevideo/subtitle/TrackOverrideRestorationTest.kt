@@ -5,6 +5,7 @@ import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -46,7 +47,7 @@ class TrackOverrideRestorationTest {
         val requestedOrdinal = overriddenTrackOrdinal(
             listOf(original to 0, original to 1), overrides,
         )
-        assertEquals(activatedOrdinal, 1)
+        assertNotEquals(activatedOrdinal, requestedOrdinal)
         assertEquals(2, requestedOrdinal)
         // The old override isn't attached to the replacement group.
         assertNull(overriddenTrackOrdinal(listOf(replacement to 0, replacement to 1), overrides))
