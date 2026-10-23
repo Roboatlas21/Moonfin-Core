@@ -334,10 +334,19 @@ internal class SecondarySubtitleOverlay(
             val desired = SubtitleBox(left, desiredBottom - textHeight, left + cueWidth, desiredBottom)
             val alignment = if (centred) SubtitleLayoutPlanner.ALIGN_MIDDLE
                 else SubtitleLayoutPlanner.verticalAlignmentFor(refBox, height)
+            val clearance = if (centred) minimumGapPx / 2f else gapPx
             SubtitleLayoutPlanner.placePositionedSecondary(
-                occupied, width, height, desired, alignment,
-                if (centred) minimumGapPx / 2f else gapPx, gapPx,
-            )
+                occupied, width, height, desired, alignment, clearance, gapPx,
+            ) ?: if (alignment == SubtitleLayoutPlanner.ALIGN_MIDDLE) null
+            else {
+                // At high primary offsets, both subtitle rows may not fit in one
+                // half. Preserve their order and gap rather than hiding a row.
+                SubtitleLayoutPlanner.placePositionedSecondary(
+                    occupied, width, height, desired, alignment, clearance, gapPx,
+                    lowerHalfTop = if (alignment == SubtitleLayoutPlanner.ALIGN_TOP)
+                        height.toFloat() else 0f,
+                )
+            }
         } else SubtitleLayoutPlanner.placeSecondary(
             primary = occupied,
             viewportWidth = width,

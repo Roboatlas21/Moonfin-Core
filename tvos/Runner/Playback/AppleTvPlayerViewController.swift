@@ -2863,7 +2863,7 @@ final class AppleTvPlayerViewController: UIViewController {
                     : String(format: "%+.0f%%", size ? step : step * 100)
                 sheet.addAction(makePlayerAction(title: title, style: .default) { [weak self] _ in
                     let minimum = size ? (primary ? 12.0 : -50.0) : 0.0
-                    let maximum = size ? (primary ? 48.0 : 50.0) : (primary ? 0.12 : 0.06)
+                    let maximum = size ? (primary ? 48.0 : 50.0) : (primary ? 0.20 : 0.06)
                     let next = min(max(current + step, minimum), maximum)
                     self?.applySubtitleAppearance(field: field, value: (next * 100).rounded() / 100)
                 })
