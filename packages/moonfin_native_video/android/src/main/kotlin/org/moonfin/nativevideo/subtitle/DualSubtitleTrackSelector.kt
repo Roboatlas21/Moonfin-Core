@@ -30,7 +30,7 @@ internal class DualSubtitleTrackSelector(context: Context) : TrackSelector() {
     private val primary = DefaultTrackSelector(context)
     @Volatile private var secondary: TrackSelectionOverride? = null
     @Volatile private var suspended = false
-    private var primaryTracks = Tracks.EMPTY
+    @Volatile private var primaryTracks = Tracks.EMPTY
     private data class SelectionInfo(val primary: TrackSelectorResult)
 
     val currentMappedTrackInfo get() = primary.currentMappedTrackInfo
