@@ -467,6 +467,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                 dolbyVisionBaseLayerOnly: (args["dolbyVisionBaseLayerOnly"] as? Bool) ?? false,
                 externalSubtitles: AetherPlayerWrapper.externalSubtitleTracks(
                     from: args["externalSubtitles"]),
+                subtitleDelay: ((args["subtitleDelayMs"] as? NSNumber)?.doubleValue ?? 0) / 1000,
                 secondarySubtitle: AetherPlayerWrapper.secondarySubtitleConfiguration(from: args)))
         player.setForceSubtitlesDisabledOnStart(
             (args["forceSubtitlesDisabledOnStart"] as? Bool) ?? false)
@@ -486,11 +487,6 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
                     + "subtitleTracks=\(player.subtitleTracks.count)")
             if let speed = (args["speed"] as? NSNumber)?.floatValue, speed != 1.0 {
                 player.setRate(speed)
-            }
-            if let delayMs = (args["subtitleDelayMs"] as? NSNumber)?.doubleValue,
-                delayMs != 0
-            {
-                player.setSubtitleDelay(delayMs / 1000.0)
             }
         }
     }

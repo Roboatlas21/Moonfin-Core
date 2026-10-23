@@ -77,6 +77,20 @@ abstract interface class SecondarySubtitleBackend {
   bool get supportsSecondarySubtitleStyle;
 }
 
+/// Keeps subtitle timing through source reloads within a viewing session.
+mixin SubtitleDelayState {
+  double subtitleDelaySeconds = 0;
+  int? _subtitleDelaySessionId;
+
+  void updateSubtitleDelaySession(int? sessionId) {
+    // A source without a session ID is a fresh playback request.
+    if (sessionId == null || sessionId != _subtitleDelaySessionId) {
+      subtitleDelaySeconds = 0;
+    }
+    _subtitleDelaySessionId = sessionId;
+  }
+}
+
 abstract class PlayerBackend {
   Future<void> play(
     dynamic mediaItem, {
@@ -147,6 +161,7 @@ abstract class PlayerBackend {
   Future<void> waitForEmbeddedSubtitleCount(int count);
   Future<void> setVolume(double volume);
   Future<void> setAudioDelay(double seconds);
+  double get subtitleDelaySeconds => 0;
   Future<void> setSubtitleDelay(double seconds);
   Future<void> addExternalSubtitle(
     String url, {

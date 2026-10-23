@@ -30,6 +30,7 @@ extension type _MoonfinHlsBridge._(JSObject _) implements JSObject {
 }
 
 class HtmlVideoBackend extends PlayerBackend
+    with SubtitleDelayState
     implements SecondarySubtitleBackend {
   HtmlVideoBackend(this._prefs)
     : _viewType = 'moonfin-html-video-${_nextViewId++}' {
@@ -48,12 +49,14 @@ class HtmlVideoBackend extends PlayerBackend
   JSAny? _hlsController;
 
   WebSubtitleOverlay? _subtitleOverlay;
-  WebSubtitleOverlay get _overlay =>
-      _subtitleOverlay ??= WebSubtitleOverlay(_videoElement);
+  WebSubtitleOverlay get _overlay => _subtitleOverlay ??=
+      WebSubtitleOverlay(_videoElement)..setDelay(subtitleDelaySeconds);
 
   /// Marks a track whose cues are already being placed, so a track seen twice
   /// does not collect a second listener.
   static const _cueHookProperty = 'moonfinCuePlacement';
+  static const _cueStartTime = 'moonfinCueStartTime';
+  static const _cueEndTime = 'moonfinCueEndTime';
   static const _authoredSrtAlignment = 'moonfinAuthoredSrtAlignment';
   static const _autoPositionedCue = 'moonfinAutoPositionedCue';
   static const _authoredLine = 'moonfinAuthoredLine';
@@ -218,6 +221,8 @@ class HtmlVideoBackend extends PlayerBackend
         _tracksChangedStream.add(null);
       }
     }
+    // HLS and live caption tracks can receive new cues after their initial load.
+    if (subtitleDelaySeconds != 0) _forEachTextTrack(_retimePrimaryCues);
   }
 
   /// The caption tracks the browser found in the stream itself.
@@ -417,6 +422,7 @@ class HtmlVideoBackend extends PlayerBackend
         : payload['url']?.toString() ?? '';
     final container = payload['container']?.toString();
     if (url.isEmpty) return;
+    updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
 
     _tracksKnown = false;
     _tracksReadyCompleter = null;
@@ -425,6 +431,7 @@ class HtmlVideoBackend extends PlayerBackend
     _completedStream.add(false);
 
     await _applySource(url, container: container, startPosition: startPosition);
+    await setSubtitleDelay(subtitleDelaySeconds);
     await setSecondarySubtitleDelay(
       ((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000,
     );
@@ -693,7 +700,37 @@ class HtmlVideoBackend extends PlayerBackend
   Future<void> setAudioDelay(double seconds) async {}
 
   @override
-  Future<void> setSubtitleDelay(double seconds) async {}
+  Future<void> setSubtitleDelay(double seconds) async {
+    if (_disposed) return;
+    subtitleDelaySeconds = seconds;
+    _forEachTextTrack(_retimePrimaryCues);
+    _subtitleOverlay?.setDelay(seconds);
+    _retimeSecondaryCues();
+  }
+
+  void _retimePrimaryCues(web.TextTrack track) {
+    if (track == _secondaryTrack?.track) return;
+    final cues = track.cues;
+    if (cues == null) return;
+    // Changing a start time can reorder the browser's live cue list.
+    final snapshot = List.generate(cues.length, (i) => cues[i]);
+    for (final cue in snapshot) {
+      final savedStart = cue.getProperty<JSNumber?>(_cueStartTime.toJS);
+      if (savedStart == null && subtitleDelaySeconds == 0) continue;
+      final start = savedStart?.toDartDouble ?? cue.startTime;
+      final end = cue.getProperty<JSNumber?>(_cueEndTime.toJS)?.toDartDouble ??
+          cue.endTime;
+      if (savedStart == null) {
+        cue
+          ..setProperty(_cueStartTime.toJS, start.toJS)
+          ..setProperty(_cueEndTime.toJS, end.toJS);
+      }
+      final shiftedStart = start + subtitleDelaySeconds;
+      final shiftedEnd = end + subtitleDelaySeconds;
+      if (cue.startTime != shiftedStart) cue.startTime = shiftedStart;
+      if (cue.endTime != shiftedEnd) cue.endTime = shiftedEnd;
+    }
+  }
 
   @override
   Future<void> setSecondarySubtitle({
@@ -838,10 +875,11 @@ class HtmlVideoBackend extends PlayerBackend
   }
 
   void _retimeSecondaryCues() {
+    final delay = subtitleDelaySeconds + _secondaryDelay;
     for (final original in _secondaryCues) {
       original.cue
-        ..startTime = original.start + _secondaryDelay
-        ..endTime = original.end + _secondaryDelay;
+        ..startTime = original.start + delay
+        ..endTime = original.end + delay;
     }
   }
 
@@ -1088,6 +1126,10 @@ class HtmlVideoBackend extends PlayerBackend
       ..src = url
       ..label = title ?? language ?? 'External Subtitle'
       ..srclang = language ?? 'en';
+    element.addEventListener(
+      'load',
+      ((web.Event _) => _retimePrimaryCues(element.track)).toJS,
+    );
 
     if (codec != null && codec.isNotEmpty) {
       element.setAttribute('data-codec', codec);
@@ -1276,7 +1318,10 @@ class HtmlVideoBackend extends PlayerBackend
     track.setProperty(_cueHookProperty.toJS, true.toJS);
     track.addEventListener(
       'cuechange',
-      ((web.Event _) => _positionCues(track)).toJS,
+      ((web.Event _) {
+        _retimePrimaryCues(track);
+        _positionCues(track);
+      }).toJS,
     );
   }
 
