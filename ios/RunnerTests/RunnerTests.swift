@@ -333,4 +333,87 @@ final class RunnerTests: XCTestCase {
         XCTAssertFalse(reset.fontDescriptor.symbolicTraits.contains(.traitItalic))
     }
 
+
+    @MainActor
+    func testCrowdedSecondaryUsesTheOtherSideInsteadOfOverlapping() {
+        let top = SubtitleOverlay.stackedSecondaryTop(
+            primary: CGRect(x: 0, y: 15, width: 300, height: 60),
+            height: 40, gap: 8, preferBelow: false, minimumY: 20, maximumY: 375)
+        XCTAssertTrue(top.fits)
+        XCTAssertEqual(top.top, 83, accuracy: 0.1)
+
+        let bottom = SubtitleOverlay.stackedSecondaryTop(
+            primary: CGRect(x: 0, y: 300, width: 300, height: 70),
+            height: 50, gap: 8, preferBelow: true, minimumY: 20, maximumY: 375)
+        XCTAssertTrue(bottom.fits)
+        XCTAssertEqual(bottom.top, 242, accuracy: 0.1)
+
+        let crowded = SubtitleOverlay.stackedSecondaryTop(
+            primary: CGRect(x: 0, y: 80, width: 300, height: 240),
+            height: 100, gap: 8, preferBelow: false, minimumY: 0, maximumY: 400)
+        XCTAssertFalse(crowded.fits)
+        XCTAssertLessThanOrEqual(crowded.top + 100, 80)
+    }
+
+    @MainActor
+    func testIndependentPrimaryCuePositionsAndInlineStyle() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        var top = cue("Top")
+        top.alignment = 8
+        top.position = CGPoint(x: 0.5, y: 0.1)
+        var bottom = cue("Italic")
+        bottom.alignment = 2
+        bottom.position = CGPoint(x: 0.5, y: 0.85)
+        bottom.styledRuns = [SubtitleStyledRun(
+            text: "Italic", isBold: false, isItalic: true,
+            isUnderlined: false, isStruckThrough: false)]
+        primary.setEvents([top, bottom])
+        primary.update(currentTime: 2)
+
+        let topLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
+        let positioned = primary.subviews.compactMap { $0 as? SubtitleOverlay }
+        XCTAssertEqual(positioned.count, 1)
+        let bottomLabel = positioned[0].subviews.compactMap { $0 as? UILabel }.last!
+        XCTAssertEqual(topLabel.text, "Top")
+        XCTAssertEqual(bottomLabel.text, "Italic")
+        XCTAssertLessThan(topLabel.frame.maxY, bottomLabel.frame.minY)
+        let font = bottomLabel.attributedText!.attribute(
+            .font, at: 0, effectiveRange: nil) as! UIFont
+        XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains(.traitItalic))
+        primary.clear()
+        XCTAssertTrue(primary.subviews.compactMap { $0 as? SubtitleOverlay }.isEmpty)
+    }
+
+    @MainActor
+    func testSimultaneousBitmapRegionsRemainVisibleAndReserveTheirFullBounds() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 60, height: 20))
+            .image { context in
+                UIColor.white.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 60, height: 20))
+            }.cgImage!
+        func bitmap(_ y: CGFloat) -> SubtitleEvent {
+            SubtitleEvent(startTime: 1, endTime: 3, text: nil,
+                bitmap: image, bitmapWidth: 60, bitmapHeight: 20,
+                normalizedRect: CGRect(x: 0.25, y: y, width: 0.5, height: 0.1),
+                canvasSize: CGSize(width: 800, height: 400))
+        }
+        secondary.setEvents([cue("Secondary")])
+        secondary.update(currentTime: 2)
+        primary.setEvents([bitmap(0.65), bitmap(0.75)])
+        primary.update(currentTime: 2)
+        let visible = primary.subviews.compactMap { $0 as? UIImageView }
+            .filter { !$0.isHidden && $0.image != nil }
+        XCTAssertEqual(visible.count, 2)
+        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        XCTAssertLessThan(label.frame.maxY, visible.map(\.frame.minY).min()!)
+        primary.setEvents([bitmap(0.65)])
+        XCTAssertEqual(primary.subviews.compactMap { $0 as? UIImageView }
+            .filter { !$0.isHidden && $0.image != nil }.count, 1)
+    }
+
 }
