@@ -49,7 +49,9 @@ final class SubtitleOverlay: PlatformView {
             requestLayout()
         }
     }
-    private var lastPrimaryTextFrame: CGRect?
+    // Store the last frame in relative coordinates so dialogue gaps survive a resize.
+    private var lastPrimaryFrame: CGRect?
+    private var assVisibleBounds: CGRect?
     private var lastPrimaryAlignment = 2
     var secondaryVerticalAdjustment: Double = 0 {
         didSet {
@@ -58,18 +60,58 @@ final class SubtitleOverlay: PlatformView {
         }
     }
 
-    private var visibleTextFrame: CGRect? {
-        textLabel.isHidden ? nil : textLabel.frame
+    private var visibleFrame: CGRect? {
+        var frame = CGRect.null
+        if !textLabel.isHidden { frame = frame.union(textLabel.frame) }
+        if !bitmapView.isHidden { frame = frame.union(bitmapView.frame) }
+        if !assImageView.isHidden, let rect = assVisibleBounds {
+            let canvas = assCanvas
+            frame = frame.union(CGRect(
+                x: canvas.minX + rect.minX * canvas.width,
+                y: canvas.minY + rect.minY * canvas.height,
+                width: rect.width * canvas.width, height: rect.height * canvas.height))
+        }
+        return frame.isNull || frame.isEmpty ? nil : frame
+    }
+
+    private var stackingFrame: CGRect? {
+        if let frame = visibleFrame { return frame }
+        return lastPrimaryFrame.map {
+            CGRect(x: $0.minX * bounds.width, y: $0.minY * bounds.height,
+                   width: $0.width * bounds.width, height: $0.height * bounds.height)
+        }
     }
 
     private var currentAlignment: Int {
-        let authored = activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2
-        let requested = primaryForStacking != nil && stackingEnabled
-            ? (primaryForStacking?.activeTextEvents.isEmpty == false
-                ? primaryForStacking?.currentAlignment
-                : primaryForStacking?.lastPrimaryAlignment) ?? authored
-            : authored
-        return (1...9).contains(requested) ? requested : 2
+        if let primary = primaryForStacking, stackingEnabled {
+            return primary.currentAlignment
+        }
+        if !activeTextEvents.isEmpty {
+            let authored = activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2
+            return (1...9).contains(authored) ? authored : 2
+        }
+        if let frame = visibleFrame {
+            let row = frame.midY < bounds.height / 3 ? 2
+                : frame.midY > bounds.height * 2 / 3 ? 0 : 1
+            return row * 3 + 2
+        }
+        return lastPrimaryAlignment
+    }
+
+    private func rememberPrimaryPlacement() {
+        guard secondaryForStacking != nil, let frame = visibleFrame,
+              bounds.width > 0, bounds.height > 0 else { return }
+        lastPrimaryFrame = CGRect(
+            x: frame.minX / bounds.width, y: frame.minY / bounds.height,
+            width: frame.width / bounds.width, height: frame.height / bounds.height)
+        lastPrimaryAlignment = currentAlignment
+    }
+
+    private func updateSecondaryPlacement() {
+        rememberPrimaryPlacement()
+        guard let secondary = secondaryForStacking else { return }
+        if !secondary.activeTextEvents.isEmpty { secondary.setLabelText(secondary.activeText) }
+        secondary.layoutTextLabel()
     }
 
     /// On while a subtitle track is selected. iPadOS 27 can drop these views
@@ -241,9 +283,9 @@ final class SubtitleOverlay: PlatformView {
         // tracks.
         primaryForStacking?.layoutTextLabel()
         layoutTextLabel()
-        secondaryForStacking?.layoutTextLabel()
         layoutBitmapView()
         assImageView.frame = assCanvas
+        updateSecondaryPlacement()
     }
 
     private func requestLayout() {
@@ -276,7 +318,8 @@ final class SubtitleOverlay: PlatformView {
         #endif
     }
 
-    func showAssImage(_ image: CGImage?) {
+    func showAssImage(_ image: CGImage?, bounds: CGRect? = nil) {
+        assVisibleBounds = image == nil ? nil : bounds
         if let image {
             // A zoom change moves the picture without a layout pass, so the frame
             // follows each render instead of waiting for one.
@@ -287,6 +330,7 @@ final class SubtitleOverlay: PlatformView {
             assImageView.image = nil
             assImageView.isHidden = true
         }
+        updateSecondaryPlacement()
     }
 
     /// The engine republishes the full active-cue set, so replace the queue
@@ -352,9 +396,12 @@ final class SubtitleOverlay: PlatformView {
     func clear() {
         eventQueue.removeAll()
         lastUpdateTime = 0
-        lastPrimaryTextFrame = nil
-        lastPrimaryAlignment = 2
+        assImageView.image = nil
+        assImageView.isHidden = true
+        assVisibleBounds = nil
         hideAll()
+        lastPrimaryFrame = nil
+        lastPrimaryAlignment = 2
         // Clearing the primary track resets the secondary text alignment. A gap in
         // dialogue calls showText([]) and preserves it.
         if let secondary = secondaryForStacking,
@@ -362,8 +409,6 @@ final class SubtitleOverlay: PlatformView {
             secondary.setLabelText(secondary.activeText)
             secondary.layoutTextLabel()
         }
-        assImageView.image = nil
-        assImageView.isHidden = true
     }
 
     /// Applies the Dart subtitle style. Colours are ARGB integers and fontSize uses the
@@ -399,7 +444,7 @@ final class SubtitleOverlay: PlatformView {
     }
 
     /// Use the primary size and colour when the secondary override is nil. Leave
-    /// position and delay unchanged.
+    /// extra spacing and delay unchanged.
     func applySecondaryStyle(from primary: SubtitleOverlay, fontSize: Double?, textColor: Int?) {
         subtitleUserFontSize = fontSize.map { CGFloat(min(max($0, 6), 72)) }
             ?? primary.subtitleUserFontSize
@@ -408,6 +453,8 @@ final class SubtitleOverlay: PlatformView {
         subtitleBgColor = primary.subtitleBgColor
         subtitleStrokeColor = primary.subtitleStrokeColor
         subtitleStrokeEnabled = primary.subtitleStrokeEnabled
+        authoredVerticalOffset = primary.authoredVerticalOffset
+        subtitlePositionBase = primary.subtitlePositionBase
         if !activeTextEvents.isEmpty { showText(activeTextEvents) }
     }
 
@@ -448,6 +495,7 @@ final class SubtitleOverlay: PlatformView {
     }
 
     private func showBitmap(_ event: SubtitleEvent?) {
+        defer { updateSecondaryPlacement() }
         activeBitmapEvent = event
         guard let bitmap = event?.bitmap else {
             bitmapView.isHidden = true
@@ -473,7 +521,8 @@ final class SubtitleOverlay: PlatformView {
         guard !textLabel.isHidden else { return }
         let maxWidth = bounds.width * 0.9
         let size = textLabel.sizeThatFits(CGSize(width: maxWidth, height: bounds.height * 0.4))
-        let placement = activeTextEvents.first { $0.alignment != nil || $0.position != nil }
+        let placement = primaryForStacking != nil && stackingEnabled ? nil
+            : activeTextEvents.first { $0.alignment != nil || $0.position != nil }
         let authoredAlignment = (1...9).contains(placement?.alignment ?? 2)
             ? (placement?.alignment ?? 2) : 2
         let alignment = primaryForStacking != nil && stackingEnabled
@@ -496,11 +545,10 @@ final class SubtitleOverlay: PlatformView {
         var y = yAnchor - size.height * CGFloat(2 - row) / 2
         let gap = 8 * canvasScale
         if let primary = primaryForStacking, stackingEnabled,
-           let parentFrame = primary.visibleTextFrame ?? primary.lastPrimaryTextFrame {
+           let parentFrame = primary.stackingFrame {
             // Use the primary's top, middle or bottom alignment and match its
             // horizontal anchor.
-            let parentAlignment = primary.activeTextEvents.isEmpty
-                ? primary.lastPrimaryAlignment : primary.currentAlignment
+            let parentAlignment = primary.currentAlignment
             let parentColumn = (parentAlignment - 1) % 3
             let parentRow = (parentAlignment - 1) / 3
             x = parentColumn == 0 ? parentFrame.minX
@@ -529,10 +577,7 @@ final class SubtitleOverlay: PlatformView {
         let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
         textLabel.frame = frame
         outlineLabel.frame = frame
-        if secondaryForStacking != nil {
-            lastPrimaryTextFrame = frame
-            lastPrimaryAlignment = alignment
-        }
+        rememberPrimaryPlacement()
     }
 
     private func layoutBitmapView() {

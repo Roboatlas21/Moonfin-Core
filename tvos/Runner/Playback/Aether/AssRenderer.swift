@@ -7,7 +7,7 @@ import Libass
 enum AssRenderResult {
     case unchanged
     case cleared
-    case image(CGImage)
+    case image(CGImage, bounds: CGRect)
 }
 
 final class AssRenderer {
@@ -87,7 +87,7 @@ final class AssRenderer {
             return .cleared
         }
         if let image = composite(first) {
-            return .image(image)
+            return .image(image.image, bounds: image.bounds)
         }
         return .cleared
     }
@@ -121,7 +121,7 @@ final class AssRenderer {
         close()
     }
 
-    private func composite(_ first: UnsafeMutablePointer<ASS_Image>) -> CGImage? {
+    private func composite(_ first: UnsafeMutablePointer<ASS_Image>) -> (image: CGImage, bounds: CGRect)? {
         let width = Int(frameWidth)
         let height = Int(frameHeight)
         let bytesPerRow = width * 4
@@ -129,10 +129,18 @@ final class AssRenderer {
         dest.initialize(repeating: 0, count: bytesPerRow * height)
         defer { dest.deallocate() }
 
+        var visibleBounds = CGRect.null
         var node: UnsafeMutablePointer<ASS_Image>? = first
         while let current = node {
             let image = current.pointee
             blend(image, into: dest, width: width, height: height, bytesPerRow: bytesPerRow)
+            // Combine the visible image rectangles, leaving out the transparent
+            // canvas around the subtitle.
+            if image.bitmap != nil, image.w > 0, image.h > 0, (image.color & 0xFF) < 255 {
+                visibleBounds = visibleBounds.union(CGRect(
+                    x: CGFloat(image.dst_x), y: CGFloat(image.dst_y),
+                    width: CGFloat(image.w), height: CGFloat(image.h)))
+            }
             node = image.next
         }
 
@@ -140,7 +148,7 @@ final class AssRenderer {
             data: Data(bytes: dest, count: bytesPerRow * height) as CFData
         ) else { return nil }
 
-        return CGImage(
+        guard let result = CGImage(
             width: width,
             height: height,
             bitsPerComponent: 8,
@@ -152,7 +160,12 @@ final class AssRenderer {
             decode: nil,
             shouldInterpolate: false,
             intent: .defaultIntent
-        )
+        ) else { return nil }
+        let clipped = visibleBounds.intersection(CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height)))
+        guard !clipped.isNull, !clipped.isEmpty else { return nil }
+        return (result, CGRect(
+            x: clipped.minX / CGFloat(width), y: clipped.minY / CGFloat(height),
+            width: clipped.width / CGFloat(width), height: clipped.height / CGFloat(height)))
     }
 
     private func blend(

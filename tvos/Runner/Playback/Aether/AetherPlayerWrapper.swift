@@ -628,6 +628,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         subtitleOverlay.videoRectProvider = { [weak self] in
             self?.currentVideoRect() ?? .zero
         }
+        secondarySubtitleOverlay.videoRectProvider = subtitleOverlay.videoRectProvider
         Self.sharedEngine()?.bind(view: playerView)
         if view.window != nil {
             resumeSurfaceWaiters()
@@ -675,6 +676,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         playerView.removeFromSuperview()
         subtitleOverlay.removeFromSuperview()
         subtitleOverlay.videoRectProvider = nil
+        secondarySubtitleOverlay.videoRectProvider = nil
         secondarySubtitleOverlay.removeFromSuperview()
         videoView = nil
     }
@@ -1499,8 +1501,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 break
             case .cleared:
                 subtitleOverlay.showAssImage(nil)
-            case .image(let image):
-                subtitleOverlay.showAssImage(image)
+            case .image(let image, let bounds):
+                subtitleOverlay.showAssImage(image, bounds: bounds)
             }
         }
     #endif
@@ -1535,6 +1537,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     /// while transport controls are visible.
     func setSubtitlePosition(_ pos: Int) {
         subtitleOverlay.setSubtitlePosition(basePosition: pos)
+        secondarySubtitleOverlay.setSubtitlePosition(basePosition: pos)
     }
 
     var baseSubtitlePos: Int { baseSubtitlePosition }

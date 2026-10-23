@@ -3,13 +3,14 @@
 double middleSubtitleGap(double gap, double offset) =>
     (gap + offset).clamp(0.002, 1.0).toDouble();
 
-/// mpv applies sub-margin-y separately to both tracks. These anchors exclude that
-/// margin so it is not applied twice.
-double mpvPrimaryStackingAnchor(int alignment) => switch ((alignment - 1) ~/ 3) {
-  2 => 0.05,
-  1 => 0.5,
-  _ => 1.0,
-};
+/// The primary edge in screen coordinates. mpv measures its vertical margin on a
+/// 720-line canvas; callers convert sub-margin-y to a fraction before passing it.
+double mpvPrimaryStackingAnchor(int alignment, {double margin = 0.04}) =>
+    switch ((alignment - 1) ~/ 3) {
+      2 => margin,
+      1 => 0.5,
+      _ => 1 - margin,
+    };
 
 /// Returns the secondary subtitle's top edge as a fraction of the height. Place it
 /// below a top-aligned primary and above a middle- or bottom-aligned primary. The
