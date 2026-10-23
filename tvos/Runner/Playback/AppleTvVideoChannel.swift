@@ -261,6 +261,7 @@ final class AppleTvVideoChannel: NSObject, FlutterStreamHandler {
             fontWeight: (args["fontWeight"] as? NSNumber)?.intValue,
             verticalOffset: (args["verticalOffset"] as? NSNumber)?.doubleValue)
         vc?.baseSubtitlePos = player.baseSubtitlePos
+        vc?.reapplySubtitleClearance()
     }
 
     private func present(audioOnly: Bool) {

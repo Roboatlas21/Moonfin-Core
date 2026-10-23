@@ -1552,7 +1552,14 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     func setSubtitleDelay(_ interval: TimeInterval) {
         subtitleOverlay.delaySeconds = interval
+        let sourceTime = Self._sharedEngine?.sourceTime ?? 0
+        subtitleOverlay.update(currentTime: sourceTime)
         setSecondarySubtitleDelay(secondaryDelayAdjustment)
+        #if canImport(Libass)
+        if assConfiguredForTrackID != nil {
+            renderAss(atSeconds: sourceTime - interval)
+        }
+        #endif
     }
 
     /// No audio-delay control exists on the AVFoundation path.

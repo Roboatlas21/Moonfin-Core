@@ -2699,8 +2699,12 @@ final class AppleTvPlayerViewController: UIViewController {
     private func setSubtitlesRaised(_ raised: Bool) {
         guard raised != subtitlesRaised else { return }
         subtitlesRaised = raised
-        let pos = raised ? min(baseSubtitlePos, 70) : baseSubtitlePos
-        player.setSubtitlePosition(pos)
+        reapplySubtitleClearance()
+    }
+
+    /// An appearance change can reset the native position while the OSD is still visible.
+    func reapplySubtitleClearance() {
+        player.setSubtitlePosition(subtitlesRaised ? min(baseSubtitlePos, 70) : baseSubtitlePos)
     }
 
     private func hideOsd() {
