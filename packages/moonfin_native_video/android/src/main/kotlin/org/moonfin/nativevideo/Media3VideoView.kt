@@ -118,7 +118,7 @@ import org.moonfin.nativevideo.subtitle.declaredSubtitleFrom
 import org.moonfin.nativevideo.subtitle.declaredSubtitlesFrom
 import org.moonfin.nativevideo.subtitle.externalFormatIdMatches
 import org.moonfin.nativevideo.subtitle.joinStackedCues
-import org.moonfin.nativevideo.subtitle.primaryTrackRestoreTarget
+import org.moonfin.nativevideo.subtitle.overriddenTrackOrdinal
 import org.moonfin.nativevideo.subtitle.sourceTreeFor
 import org.moonfin.nativevideo.subtitle.syncDelaysPayload
 import org.moonfin.nativevideo.ts.withHdmvTsSupport
@@ -4143,27 +4143,25 @@ class Media3VideoView(
         )
     }
 
-    /** Carry the current primary track across a source rebuild, unless the user chose Off or a new track. */
-    private fun rememberPrimarySelectionForSourceRebuild() {
+    /** Preserve explicit audio and primary subtitle choices when source track groups change. */
+    private fun rememberTrackOverridesForSourceRebuild() {
         if (!playerHasLoadedSource) return
-        val restore = primaryTrackRestoreTarget(
-            primaryEnabled = subtitleTrackEnabled,
-            selectionPending = pendingSubtitleIndex != null || pendingClosedCaptionId != null,
-            subtitleSelected = collectTracks(C.TRACK_TYPE_TEXT).map {
-                trackSelector.isPrimaryTrackSelected(it.group, it.trackIndex)
-            },
-            captionSelected = collectClosedCaptionTracks().map {
-                trackSelector.isPrimaryTrackSelected(it.group, it.trackIndex)
-            },
-        ) ?: return
-        if (restore.subtitleIndex != null) {
-            pendingSubtitleIndex = restore.subtitleIndex
+        val overrides = trackSelector.parameters.overrides
+        fun ordinal(entries: List<TrackEntry>): Int? = overriddenTrackOrdinal(
+            entries.map { it.group to it.trackIndex }, overrides,
+        )
+
+        if (pendingAudioIndex == null) pendingAudioIndex = ordinal(collectTracks(C.TRACK_TYPE_AUDIO))
+        if (!subtitleTrackEnabled || pendingSubtitleIndex != null || pendingClosedCaptionId != null) return
+        val subtitle = ordinal(collectTracks(C.TRACK_TYPE_TEXT))
+        if (subtitle != null) {
+            pendingSubtitleIndex = subtitle
             pendingSubtitleCodec = selectedSubtitleCodec
             pendingSubtitleIsExternal = selectedSubtitleIsExternal
             pendingSubtitleIsBitmap = selectedSubtitleIsBitmap
             pendingExternalSubtitleUrl = selectedExternalSubtitleUrl
         } else {
-            pendingClosedCaptionId = restore.closedCaptionId
+            pendingClosedCaptionId = ordinal(collectClosedCaptionTracks())
         }
     }
 
@@ -4177,7 +4175,7 @@ class Media3VideoView(
         val url = currentUrl ?: return
         // Rebuilding may change Media3 track-group IDs. Retry the existing
         // primary choice when the replacement tracks become available.
-        rememberPrimarySelectionForSourceRebuild()
+        rememberTrackOverridesForSourceRebuild()
         cancelPendingRetime()
 
         val mediaItemBuilder = MediaItem.Builder()
