@@ -49,7 +49,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   StreamSubscription<Map<String, dynamic>>? _actionSub;
   StreamSubscription<PlaybackBringupState>? _bringupSub;
 
-  SubtitleStyle? _lastSubtitleStyle;
+  (SubtitleStyle, double, double, int)? _lastSubtitleStyle;
 
   late int _currentIndex;
   bool _exiting = false;
@@ -106,7 +106,7 @@ class _AppleTvLiveTvPlayerHostScreenState
         _pushSubtitleStyle(force: true);
       }
     });
-    _prefs.addListener(_pushSubtitleStyle);
+    _prefs.addListener(_onPrefsChanged);
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _pushSubtitleStyle();
@@ -166,13 +166,19 @@ class _AppleTvLiveTvPlayerHostScreenState
     _carouselPrewarm?.dispose();
     _screensaverController?.setNativePlayerPresented(false);
     _themeController?.removeListener(_onThemeChanged);
-    _prefs.removeListener(_pushSubtitleStyle);
+    _prefs.removeListener(_onPrefsChanged);
     unawaited(_pipPlayer?.dispose());
     unawaited(_backend?.dismissPlayer() ?? Future<void>.value());
     try {
       GetIt.instance<PlaybackManager>().stop(userInitiated: true);
     } catch (_) {}
     super.dispose();
+  }
+
+  void _onPrefsChanged() {
+    final previous = _lastSubtitleStyle;
+    _pushSubtitleStyle();
+    if (previous != _lastSubtitleStyle) _pushMetadata();
   }
 
   /// [force] pushes even when nothing changed, for a new stream or backend.
@@ -184,8 +190,16 @@ class _AppleTvLiveTvPlayerHostScreenState
         _prefs,
         _manager.currentResolution,
       );
-      if (!force && style == _lastSubtitleStyle) return;
-      _lastSubtitleStyle = style;
+      final appearance = (
+        style,
+        _prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
+        _prefs.get(UserPreferences.secondarySubtitleOffsetPosition),
+        _prefs.get(UserPreferences.secondarySubtitleTextColor),
+      );
+      final previous = _lastSubtitleStyle;
+      if (!force && appearance == previous) return;
+      _lastSubtitleStyle = appearance;
+      if (!force && style == previous?.$1) return;
       backend.configureSubtitleStyle(
         textColor: style.textColor,
         backgroundColor: style.backgroundColor,
