@@ -1179,6 +1179,15 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         selectSubtitleTrack(trackIndex, externalUrl: nil)
     }
 
+    /// A new primary track must not inherit the previous track's placement.
+    /// Ordinary dialogue gaps still keep that placement inside SubtitleOverlay.
+    private func selectResolvedSubtitleTrack(_ id: Int, engine: AetherEngine) {
+        if engine.activeSubtitleTrackIndex != id {
+            subtitleOverlay.clear()
+        }
+        engine.selectSubtitleTrack(index: id)
+    }
+
     func selectSubtitleTrack(_ trackIndex: Int32, externalUrl: String?) {
         guard let engine = Self.sharedEngine() else { return }
         if trackIndex < 0 {
@@ -1188,7 +1197,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         resetAssState()
         if let externalUrl, let id = externalSubIDsByURL[externalUrl] {
             logSubtitleSelection(requested: trackIndex, route: "urlMap", resolvedID: id)
-            engine.selectSubtitleTrack(index: id)
+            selectResolvedSubtitleTrack(id, engine: engine)
             return
         }
         if let externalUrl,
@@ -1199,7 +1208,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             })
         {
             logSubtitleSelection(requested: trackIndex, route: "filename", resolvedID: match.id)
-            engine.selectSubtitleTrack(index: match.id)
+            selectResolvedSubtitleTrack(match.id, engine: engine)
             return
         }
         let index = Int(trackIndex) - 1
@@ -1209,7 +1218,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         }
         logSubtitleSelection(
             requested: trackIndex, route: "ordinal", resolvedID: subtitleTable[index].id)
-        engine.selectSubtitleTrack(index: subtitleTable[index].id)
+        selectResolvedSubtitleTrack(subtitleTable[index].id, engine: engine)
     }
 
     private func hostLog(_ line: String) {
@@ -1240,7 +1249,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         let index = Int(id) - 1
         guard index >= 0, index < closedCaptionTable.count else { return }
         resetAssState()
-        engine.selectSubtitleTrack(index: closedCaptionTable[index].id)
+        selectResolvedSubtitleTrack(closedCaptionTable[index].id, engine: engine)
     }
 
     func disableSubtitles() {

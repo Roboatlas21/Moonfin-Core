@@ -44,7 +44,11 @@ final class SubtitleOverlay: PlatformView {
     private let textOverflowMask = CAShapeLayer()
     private let outlineOverflowMask = CAShapeLayer()
     private var lastUpdateTime: TimeInterval = 0
-    var delaySeconds: TimeInterval = 0
+    var delaySeconds: TimeInterval = 0 {
+        didSet {
+            for overlay in extraTextOverlays { overlay.delaySeconds = delaySeconds }
+        }
+    }
     /// The secondary text follows the primary frame, using its last frame during gaps
     /// in dialogue.
     weak var primaryForStacking: SubtitleOverlay?
@@ -541,6 +545,7 @@ final class SubtitleOverlay: PlatformView {
     }
 
     private func copyAppearance(to overlay: SubtitleOverlay) {
+        overlay.delaySeconds = delaySeconds
         overlay.subtitleUserFontSize = subtitleUserFontSize
         overlay.subtitlePositionBase = subtitlePositionBase
         overlay.authoredVerticalOffset = authoredVerticalOffset
