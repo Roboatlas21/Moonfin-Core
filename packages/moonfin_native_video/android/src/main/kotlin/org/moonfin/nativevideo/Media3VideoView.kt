@@ -3456,7 +3456,10 @@ class Media3VideoView(
         val changed = secondarySubtitleDelayMs != next
         secondarySubtitleDelayMs = next
         rememberSourceArguments("secondarySubtitleDelayMs" to next)
-        if (changed && (secondarySubtitleTrackId != null || secondarySubtitleUrl != null)) applySubtitleDelay()
+        if (changed && (secondarySubtitleTrackId != null || secondarySubtitleUrl != null)) {
+            secondarySubtitleOverlay.clearSecondaryCues()
+            applySubtitleDelay()
+        }
     }
 
     private fun configureSecondarySubtitleStyle(args: Map<*, *>?) {
@@ -4176,6 +4179,7 @@ class Media3VideoView(
         // Rebuilding may change Media3 track-group IDs. Retry the existing
         // primary choice when the replacement tracks become available.
         rememberTrackOverridesForSourceRebuild()
+        clearSubtitleCues()
         cancelPendingRetime()
 
         val mediaItemBuilder = MediaItem.Builder()
