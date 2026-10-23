@@ -607,6 +607,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
     if (prefs == null) return;
     _configureCinemaSkip();
     _syncCinemaSkipButton();
+    final previousSubtitleAppearance = _lastSubtitleStyle;
     _pushSubtitleStyle();
     final slots = _timeSlotsSnapshot(prefs);
     if (slots != _lastTimeSlots) {
@@ -614,7 +615,10 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
       _pushTimeSlots();
     }
     final next = _trickplayPrefsSnapshot(prefs);
-    if (next == _lastTrickplayPrefs) return;
+    if (next == _lastTrickplayPrefs &&
+        previousSubtitleAppearance == _lastSubtitleStyle) {
+      return;
+    }
     _lastTrickplayPrefs = next;
     _pushMetadata();
   }

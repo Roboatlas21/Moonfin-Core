@@ -1615,6 +1615,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         case .zoomToFill: engine.videoGravity = .resizeAspectFill
         case .stretch: engine.videoGravity = .resize
         }
+        subtitleOverlay.refreshVideoGeometry()
+        secondarySubtitleOverlay.refreshVideoGeometry()
     }
 
     func cycleZoomMode() {

@@ -599,4 +599,41 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(nested.delaySeconds, 3, accuracy: 0.001)
         XCTAssertEqual(visibleText(), Set(["Early top", "Early bottom"]))
     }
+
+    @MainActor
+    func testVideoGeometryRefreshRepositionsPrimaryAndSecondary() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+
+        let letterboxed = CGRect(x: 0, y: 60, width: 800, height: 280)
+        primary.videoRectProvider = { letterboxed }
+        secondary.videoRectProvider = { letterboxed }
+        var authored = cue("Primary")
+        authored.position = CGPoint(x: 0.5, y: 0.85)
+        primary.setEvents([authored])
+        secondary.setEvents([cue("Secondary")])
+        primary.update(currentTime: 2)
+        secondary.update(currentTime: 2)
+
+        let mainLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
+        let secondLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        let firstY = mainLabel.frame.midY
+        let secondY = secondLabel.frame.midY
+
+        let filled = CGRect(x: 0, y: 0, width: 800, height: 400)
+        primary.videoRectProvider = { filled }
+        secondary.videoRectProvider = { filled }
+        primary.refreshVideoGeometry()
+        secondary.refreshVideoGeometry()
+        primary.layoutIfNeeded()
+        secondary.layoutIfNeeded()
+
+        XCTAssertGreaterThan(mainLabel.frame.midY, firstY)
+        XCTAssertGreaterThan(secondLabel.frame.midY, secondY)
+        XCTAssertEqual(mainLabel.text, "Primary")
+        XCTAssertEqual(secondLabel.text, "Secondary")
+    }
 }
