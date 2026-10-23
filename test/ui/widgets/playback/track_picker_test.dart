@@ -13,6 +13,8 @@ import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _Backend extends Fake implements MediaKitPlayerBackend {
+  @override
+  double subtitleDelaySeconds = 0;
   _Backend({this.secondaryStyle = false});
   final bool secondaryStyle;
   final audioDelays = <double>[];
@@ -141,6 +143,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(Dialog), findsNothing);
     expect(events, [true, false]);
+  });
+
+  testWidgets('subtitle menu reads the player delay after a route reset', (tester) async {
+    final backend = _Backend()..subtitleDelaySeconds = 1.25;
+    TrackPicker.resetDelays();
+    await openPicker(tester, _Manager(backend), audio: false);
+    expect(find.text('+1250 ms'), findsOneWidget);
   });
 
   // Issue #1141: the delay is set from a bar that leaves the picture in view
