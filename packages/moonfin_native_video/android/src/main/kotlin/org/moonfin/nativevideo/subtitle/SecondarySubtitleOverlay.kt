@@ -70,7 +70,7 @@ internal class SecondarySubtitleOverlay(
     private var primaryEnabled = true
 
     init {
-        view.setApplyEmbeddedStyles(false)
+        view.setApplyEmbeddedStyles(true)
         view.setApplyEmbeddedFontSizes(false)
         view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             renderCues()
@@ -95,7 +95,12 @@ internal class SecondarySubtitleOverlay(
 
     fun updateCues(cues: List<Cue>) {
         if (secondaryCues == null || disposed) return
-        secondaryCues = cues.filter { it.text != null }
+        secondaryCues = cues.filter { it.text != null }.map { cue ->
+            cue.buildUpon()
+                .setText(keepSubtitleEmphasis(requireNotNull(cue.text)))
+                .clearWindowColor()
+                .build()
+        }
         renderCues()
     }
 
@@ -106,7 +111,9 @@ internal class SecondarySubtitleOverlay(
         fontSize: Float?,
         fontWeight: Int,
         verticalOffset: Float?,
+        embeddedStylesEnabled: Boolean = true,
     ) {
+        view.setApplyEmbeddedStyles(embeddedStylesEnabled)
         baseTextColor = textColor
         baseBackgroundColor = backgroundColor
         baseStrokeColor = strokeColor
@@ -160,7 +167,7 @@ internal class SecondarySubtitleOverlay(
             view.visibility = View.VISIBLE
             view.setCues(if (active.isEmpty()) emptyList() else listOf(
                 Cue.Builder()
-                    .setText(active.joinToString("\n") { it.text.toString() })
+                    .setText(joinKeepingSpans(active.map { requireNotNull(it.text) }))
                     .setLine((1f - primaryBottomPaddingFraction).coerceIn(0f, 1f), Cue.LINE_TYPE_FRACTION)
                     .setLineAnchor(Cue.ANCHOR_TYPE_END)
                     .build(),
@@ -275,9 +282,9 @@ internal class SecondarySubtitleOverlay(
             listOf(it.position, it.positionAnchor, it.size, it.textAlignment)
         }.values
         for (group in automaticGroups) {
-            val text = group.joinToString("\n") { it.text.toString() }
+            val text = joinKeepingSpans(group.map { requireNotNull(it.text) })
             placeAutomaticCue(
-                buildCue(group.first()).buildUpon().setText(text).build(), text, width, height, secondaryFontPx, occupied, gapPx,
+                buildCue(group.first()).buildUpon().setText(text).build(), text.toString(), width, height, secondaryFontPx, occupied, gapPx,
             )?.let(rendered::add)
         }
 
