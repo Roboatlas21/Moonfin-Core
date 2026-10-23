@@ -127,16 +127,23 @@ internal class SecondarySubtitleOverlay(
     }
 
     /**
-     * Turning the primary track off clears its saved position; a gap in dialogue keeps
-     * it.
+     * A seek or new primary track must not reuse the previous primary cue's
+     * placement. Clearing secondary cues on seek keeps the track selected.
      */
+    fun resetPrimaryCues(clearSecondary: Boolean = false) {
+        unmodifiedPrimaryCues = emptyList()
+        primaryCues = emptyList()
+        lastPrimaryForStacking = null
+        lastPrimaryWasCentred = false
+        if (clearSecondary && secondaryCues != null) secondaryCues = emptyList()
+        renderCues()
+    }
+
+    /** Switching primary On/Off resets placement; ordinary dialogue gaps do not. */
     fun setPrimaryEnabled(enabled: Boolean) {
         if (primaryEnabled == enabled) return
         primaryEnabled = enabled
-        unmodifiedPrimaryCues = emptyList()
-        lastPrimaryForStacking = null
-        lastPrimaryWasCentred = false
-        renderCues()
+        resetPrimaryCues()
     }
 
     fun updatePrimaryCues(cues: List<Cue>) {

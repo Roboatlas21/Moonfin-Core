@@ -1335,7 +1335,7 @@ class Media3VideoView(
             if (reason == Player.DISCONTINUITY_REASON_SEEK ||
                 reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
             ) {
-                clearSubtitleCues()
+                secondarySubtitleOverlay.resetPrimaryCues(clearSecondary = true)
                 scheduleAudioRekickAfterSeek()
                 // Otherwise Dart only learns the seek landed from the next
                 // 250ms ticker tick, which can still report the pre-seek
@@ -4990,12 +4990,15 @@ class Media3VideoView(
         return try {
             val override = TrackSelectionOverride(entry.group, listOf(entry.trackIndex))
 
+            val primaryChanged = trackType == C.TRACK_TYPE_TEXT &&
+                !trackSelector.isPrimaryTrackSelected(entry.group, entry.trackIndex)
             trackSelector.parameters = trackSelector.parameters
                 .buildUpon()
                 .setTrackTypeDisabled(trackType, false)
                 .clearOverridesOfType(trackType)
                 .addOverride(override)
                 .build()
+            if (primaryChanged) secondarySubtitleOverlay.resetPrimaryCues()
 
             emitTracksChanged()
             emitState()
