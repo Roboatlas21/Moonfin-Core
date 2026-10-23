@@ -160,6 +160,25 @@ void main() {
     expect(backend.subtitleDelaySeconds, 0);
   });
 
+  test('reselecting a detached primary applies its current delay', () async {
+    final first = subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nFirst\n');
+    final other = subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nOther\n');
+    await backend.setSubtitleDelay(3);
+    await backend.setSubtitleTrack(1,
+        isExternalSubtitle: true, externalSubtitleUrl: first);
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
+    await _until(() => primary.track.cues![0].startTime == 4);
+    await backend.setSubtitleTrack(2,
+        isExternalSubtitle: true, externalSubtitleUrl: other);
+    await backend.setSubtitleDelay(0);
+    await backend.seekTo(const Duration(seconds: 2));
+    await backend.setSubtitleTrack(1);
+    expect(primary.track.cues![0].startTime, 1);
+    expect(primary.track.cues![0].endTime, 3);
+    await _until(() => primary.track.activeCues?.length == 1);
+  });
+
 
   // These bounds follow the browser's native percentage-line semantics. Checking
   // lineAlign alone used to pass in Chrome even though it ignored that property.
@@ -277,6 +296,36 @@ void main() {
     await backend.seekTo(const Duration(seconds: 2));
     await _until(() => second.align == 'left');
     expect(bounds(second).top, closeTo(stackedTop + 0.02, 0.001));
+  });
+
+  test('overlay primaries reserve the top while Primary Off uses the bottom', () async {
+    // Stub only the canvas renderers; exercise real browser track coordinates.
+    final script = web.HTMLScriptElement()..text = '''
+      window.JASSUB = class { destroy() {} setCurrentTime() {} };
+      window.libpgs = { PgsRenderer: class { dispose() {} } };
+    ''';
+    web.document.head!.appendChild(script);
+    script.remove();
+    try {
+      await backend.configureSubtitleStyle(verticalOffset: 0.12);
+      await backend.setSecondarySubtitle(
+        url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecond\n'),
+      );
+      final cue = (await loadedSecondary()).track.cues![0] as web.VTTCue;
+      await backend.seekTo(const Duration(seconds: 2));
+      for (final codec in ['ass', 'pgs']) {
+        await backend.setSubtitleTrack(1, isExternalSubtitle: true,
+            externalSubtitleUrl: subtitle('overlay'), subtitleCodec: codec);
+        expect(bounds(cue).top, closeTo(0.12, 0.001));
+        await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+        expect(bounds(cue).top, closeTo(0.12, 0.001));
+        await backend.disableSubtitleTrack();
+        expect(bounds(cue).bottom, closeTo(0.88, 0.001));
+      }
+    } finally {
+      web.window.delete('JASSUB'.toJS);
+      web.window.delete('libpgs'.toJS);
+    }
   });
 
   test('multiline cues and larger secondary text grow away from the gap', () async {
