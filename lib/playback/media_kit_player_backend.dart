@@ -239,6 +239,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   // The viewer asked for no subtitles. Held here so the deferred visibility
   // pass can tell a fresh source apart from a choice it must not undo.
   bool _subtitlesDisabled = false;
+  bool _primaryIsBitmapSubtitle = false;
 
   String? _selectedExternalSubtitleUrl;
   bool _isSubtitleLoading = false;
@@ -321,6 +322,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     _secondarySubtitleRequested = false;
     _lastSecondaryStackPosition = null;
     _lastPrimaryStack = null;
+    _primaryIsBitmapSubtitle = false;
     _lastSecondaryPositionCheck = null;
     _externalSubtitleLoads.clear();
     _pendingSubtitleChoice.nextSource();
@@ -2640,6 +2642,8 @@ class MediaKitPlayerBackend extends PlayerBackend
       isExternalSubtitle ? externalSubtitleUrl : null,
     );
     _subtitlesDisabled = false;
+    _primaryIsBitmapSubtitle = isBitmapSubtitle;
+    if (isBitmapSubtitle) _lastPrimaryStack = null;
     try {
       final native = _player.platform as NativePlayer;
       final trackListBefore = await _tryNativeGetProperty(native, 'track-list');
@@ -2766,7 +2770,12 @@ class MediaKitPlayerBackend extends PlayerBackend
       }
       _subtitleDebug('set track=$mpvTrackId threw: $e');
     } finally {
-      if (isCurrentSelection()) await _applyPendingSecondarySubtitle();
+      if (isCurrentSelection()) {
+        await _applyPendingSecondarySubtitle();
+        if (isCurrentSelection()) {
+          await _refreshStackedSecondaryPosition(force: true);
+        }
+      }
     }
   }
 
@@ -2887,6 +2896,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     _setSelectedExternalSubtitle(null);
     final generation = ++_subtitleSelectionGeneration;
     _subtitlesDisabled = false;
+    _primaryIsBitmapSubtitle = false;
     final platform = _player.platform;
     if (platform is! NativePlayer) return;
     final sid = _ccTrackSids[id - 1].toString();
@@ -2897,6 +2907,9 @@ class MediaKitPlayerBackend extends PlayerBackend
     await _nativeSetProperty(platform, 'sub-ass', 'yes');
     if (!_isLatestSubtitleSelection(generation)) return;
     await _applyPendingSecondarySubtitle();
+    if (_isLatestSubtitleSelection(generation)) {
+      await _refreshStackedSecondaryPosition(force: true);
+    }
   }
 
   @override
@@ -3219,7 +3232,9 @@ class MediaKitPlayerBackend extends PlayerBackend
           !_secondarySubtitleRequested) {
         return;
       }
-      if (!_subtitlesDisabled && primaryAss.isNotEmpty) {
+      if (!_subtitlesDisabled &&
+          !_primaryIsBitmapSubtitle &&
+          primaryAss.isNotEmpty) {
         _lastPrimaryStack = (
           alignment:
               int.tryParse(_mpvSrtAlignment.firstMatch(primaryAss)?[1] ?? '') ??
@@ -3243,17 +3258,20 @@ class MediaKitPlayerBackend extends PlayerBackend
       // secondary-sub-pos sets the bottom edge. For top captions, add the secondary
       // height to keep the top edge fixed as lines are added. For middle and bottom
       // captions, keep the bottom edge fixed.
-      final secondaryTop = stackedSecondaryTop(
-        primaryEnabled: !_subtitlesDisabled && _lastPrimaryStack != null,
-        alignment: alignment,
-        primaryAnchor: primaryAnchor,
-        primaryHeight: primaryHeight,
-        secondaryHeight: secondaryHeight,
-        offset: _secondaryVerticalOffset,
-      );
+      // Bitmap primaries have no text bounds. Reserve the top until a text cue
+      // supplies measurable placement; only explicit Primary Off uses the bottom.
+      final secondaryTop = _lastPrimaryStack == null
+          ? margin.clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0))
+          : stackedSecondaryTop(
+              alignment: alignment,
+              primaryAnchor: primaryAnchor,
+              primaryHeight: primaryHeight,
+              secondaryHeight: secondaryHeight,
+              offset: _secondaryVerticalOffset,
+            );
       // sub-pos is relative to the bottom margin, not the full screen height.
       // Convert the screen edge back to mpv's scale after calculating the gap.
-      final position = _subtitlesDisabled || _lastPrimaryStack == null
+      final position = _subtitlesDisabled
           ? 100
           : ((secondaryTop + secondaryHeight) /
                     (1 - margin).clamp(0.01, 1.0) *
