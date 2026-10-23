@@ -480,4 +480,79 @@ final class RunnerTests: XCTestCase {
         XCTAssertNil(caption.layer.mask)
     }
 
+
+    @MainActor
+    func testExtraPositionedCueFollowsPlaybackControlsWithoutReplacingCues() {
+        let overlay = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        var top = cue("Top")
+        top.alignment = 8
+        top.position = CGPoint(x: 0.5, y: 0.1)
+        var bottom = cue("Bottom")
+        bottom.alignment = 2
+        bottom.position = CGPoint(x: 0.5, y: 0.85)
+        overlay.setEvents([top, bottom])
+        overlay.update(currentTime: 2)
+
+        let topLabel = overlay.subviews.compactMap { $0 as? UILabel }.last!
+        let extra = overlay.subviews.compactMap { $0 as? SubtitleOverlay }.first!
+        let bottomLabel = extra.subviews.compactMap { $0 as? UILabel }.last!
+        let beforeTop = topLabel.frame.minY
+        let beforeBottom = bottomLabel.frame.maxY
+
+        overlay.setSubtitlePosition(basePosition: 70)
+        overlay.layoutIfNeeded()
+        XCTAssertEqual(topLabel.frame.minY, beforeTop, accuracy: 0.1)
+        XCTAssertEqual(bottomLabel.frame.maxY, beforeBottom - 100, accuracy: 0.1)
+        XCTAssertTrue(overlay.subviews.contains(extra))
+        XCTAssertEqual(bottomLabel.text, "Bottom")
+
+        overlay.setSubtitlePosition(basePosition: 100)
+        overlay.layoutIfNeeded()
+        XCTAssertEqual(bottomLabel.frame.maxY, beforeBottom, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testSafeAreaFallbackUsesOverlayCoordinates() {
+        let full = CGRect(x: 0, y: 0, width: 800, height: 400)
+        let safe = SubtitleOverlay.resolvedSafeAreaInsets(
+            bounds: full, local: .zero,
+            inheritedRects: [CGRect(x: 44, y: 20, width: 736, height: 360)])
+        XCTAssertEqual(safe.left, 44, accuracy: 0.1)
+        XCTAssertEqual(safe.right, 20, accuracy: 0.1)
+        XCTAssertEqual(safe.top, 20, accuracy: 0.1)
+        XCTAssertEqual(safe.bottom, 20, accuracy: 0.1)
+
+        // With the entire surface already inside the safe region, no second
+        // inset should be applied.
+        let inset = CGRect(x: 0, y: 0, width: 736, height: 360)
+        let alreadyInset = SubtitleOverlay.resolvedSafeAreaInsets(
+            bounds: inset, local: .zero, inheritedRects: [inset])
+        XCTAssertEqual(alreadyInset.left, 0, accuracy: 0.1)
+        XCTAssertEqual(alreadyInset.right, 0, accuracy: 0.1)
+
+        // If Flutter only applied part of the housing inset, retain the rest.
+        let partial = SubtitleOverlay.resolvedSafeAreaInsets(
+            bounds: inset, local: UIEdgeInsets(top: 0, left: 10, bottom: 0, right: 0),
+            inheritedRects: [CGRect(x: 24, y: 0, width: 712, height: 360)])
+        XCTAssertEqual(partial.left, 24, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testSecondarySubtitleRouteWaitsOrFallsBackAfterLoad() {
+        XCTAssertEqual(AetherPlayerWrapper.secondarySubtitleRoute(
+            embeddedOrdinal: 2, availableEmbeddedTracks: 2, hasSidecar: true),
+            .embedded(index: 1))
+        XCTAssertEqual(AetherPlayerWrapper.secondarySubtitleRoute(
+            embeddedOrdinal: 2, availableEmbeddedTracks: 1, hasSidecar: true),
+            .sidecar)
+        XCTAssertEqual(AetherPlayerWrapper.secondarySubtitleRoute(
+            embeddedOrdinal: 2, availableEmbeddedTracks: 1, hasSidecar: false),
+            .pending)
+        XCTAssertEqual(AetherPlayerWrapper.secondarySubtitleRoute(
+            embeddedOrdinal: nil, availableEmbeddedTracks: 0, hasSidecar: true),
+            .sidecar)
+        XCTAssertEqual(AetherPlayerWrapper.secondarySubtitleRoute(
+            embeddedOrdinal: nil, availableEmbeddedTracks: 0, hasSidecar: false),
+            .disabled)
+    }
 }
