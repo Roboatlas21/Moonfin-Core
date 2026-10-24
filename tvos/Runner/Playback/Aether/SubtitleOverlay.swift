@@ -303,8 +303,8 @@ final class SubtitleOverlay: PlatformView {
 
     private func setLabelText(_ text: String?) {
         appliedFontSize = subtitleFontSize
-        let fill = text.map(fillText)
-        let outline = text.map(outlineText)
+        let fill = text.map { applyInlineEmphasis(to: fillText($0)) }
+        let outline = text.map { applyInlineEmphasis(to: outlineText($0)) }
         #if canImport(UIKit)
         textLabel.attributedText = fill
         outlineLabel.attributedText = outline
@@ -379,6 +379,7 @@ final class SubtitleOverlay: PlatformView {
                 $0.startTime == $1.startTime && $0.endTime == $1.endTime
                     && $0.text == $1.text && $0.alignment == $1.alignment
                     && $0.position == $1.position
+                    && $0.styledRuns == $1.styledRuns
             }
     }
 
@@ -636,6 +637,53 @@ final class SubtitleOverlay: PlatformView {
         style.minimumLineHeight = glyphBox
         style.maximumLineHeight = glyphBox
         return style
+    }
+
+    private func styledFont(for run: SubtitleStyledRun) -> PlatformFont {
+        let font = PlatformFont.systemFont(
+            ofSize: appliedFontSize, weight: run.isBold ? .bold : subtitleFontWeight)
+        guard run.isItalic else { return font }
+        #if canImport(UIKit)
+        let traits = font.fontDescriptor.symbolicTraits.union(.traitItalic)
+        guard let descriptor = font.fontDescriptor.withSymbolicTraits(traits) else { return font }
+        return PlatformFont(descriptor: descriptor, size: appliedFontSize)
+        #else
+        return NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        #endif
+    }
+
+    private func applyInlineEmphasis(to text: NSAttributedString) -> NSAttributedString {
+        guard activeTextEvents.contains(where: { $0.styledRuns != nil }) else { return text }
+        let result = NSMutableAttributedString(attributedString: text)
+        var location = 0
+        for (index, event) in activeTextEvents.enumerated() {
+            if index > 0 { location += 1 }  // Joined cues have one newline between them.
+            let length = event.text?.utf16.count ?? 0
+            if let runs = event.styledRuns,
+               runs.reduce(0, { $0 + $1.text.utf16.count }) == length {
+                var runStart = location
+                for run in runs {
+                    let runLength = run.text.utf16.count
+                    let range = NSRange(location: runStart, length: runLength)
+                    if runLength > 0 {
+                        if run.isBold || run.isItalic {
+                            result.addAttribute(.font, value: styledFont(for: run), range: range)
+                        }
+                        if run.isUnderlined {
+                            result.addAttribute(
+                                .underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+                        }
+                        if run.isStruckThrough {
+                            result.addAttribute(
+                                .strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: range)
+                        }
+                    }
+                    runStart += runLength
+                }
+            }
+            location += length
+        }
+        return result
     }
 
     private func fillText(_ text: String) -> NSAttributedString {

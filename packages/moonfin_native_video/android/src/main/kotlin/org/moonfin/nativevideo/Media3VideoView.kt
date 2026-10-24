@@ -4065,6 +4065,7 @@ class Media3VideoView(
             fontSize = fontSize,
             fontWeight = fontWeight,
             verticalOffset = verticalOffset,
+            embeddedStylesEnabled = subtitleEmbeddedStylesEnabled,
         )
     }
 

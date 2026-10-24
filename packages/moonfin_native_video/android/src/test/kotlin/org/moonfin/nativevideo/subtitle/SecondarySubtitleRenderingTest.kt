@@ -4,10 +4,18 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Rect
+import android.graphics.Typeface
+import android.text.Html
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
+import android.text.style.UnderlineSpan
 import android.view.View
 import androidx.media3.common.text.Cue
 import androidx.media3.ui.SubtitleView
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -117,6 +125,52 @@ class SecondarySubtitleRenderingTest {
         val primaryPixels = inkBounds(primary)
         assertTrue("Secondary should remain above primary at maximum spacing",
             secondPixels.bottom < primaryPixels.top)
+    }
+
+
+    @Test
+    fun secondaryKeepsEmphasisInBothStackedAndPrimaryOffModes() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val styled = Html.fromHtml(
+            "<i>italic</i> <b>bold</b> <u>underlined</u> <font color='#ff0000'>red</font> <big>large</big>",
+            Html.FROM_HTML_MODE_COMPACT,
+        )
+        val second = Html.fromHtml("<u>second line</u>", Html.FROM_HTML_MODE_COMPACT)
+        overlay.select(true)
+        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary").build()))
+        overlay.updateCues(listOf(
+            Cue.Builder().setText(styled).setWindowColor(Color.BLUE).build(),
+            Cue.Builder().setText(second).build(),
+        ))
+
+        // SubtitleView has no public cue getter. Read its input cues rather than
+        // depending on renderer-specific drawing internals.
+        val field = SubtitleView::class.java.getDeclaredField("cues").apply { isAccessible = true }
+        fun displayed(): Spanned {
+            val cues = field.get(secondary) as List<*>
+            return (cues.single() as Cue).text as Spanned
+        }
+        fun check(text: Spanned) {
+            val italicAt = text.indexOf("italic")
+            val boldAt = text.indexOf("bold")
+            val underlinedAt = text.indexOf("underlined")
+            val secondAt = text.indexOf("second line")
+            assertTrue(text.getSpans(italicAt, italicAt + 6, StyleSpan::class.java)
+                .any { it.style and Typeface.ITALIC != 0 })
+            assertTrue(text.getSpans(boldAt, boldAt + 4, StyleSpan::class.java)
+                .any { it.style and Typeface.BOLD != 0 })
+            assertTrue(text.getSpans(underlinedAt, underlinedAt + 10, UnderlineSpan::class.java).isNotEmpty())
+            assertTrue(text.getSpans(secondAt, secondAt + 11, UnderlineSpan::class.java).isNotEmpty())
+            assertTrue(text.getSpans(0, text.length, ForegroundColorSpan::class.java).isEmpty())
+            assertTrue(text.getSpans(0, text.length, RelativeSizeSpan::class.java).isEmpty())
+        }
+        check(displayed())
+        assertFalse(((field.get(secondary) as List<*>).single() as Cue).windowColorSet)
+        overlay.setPrimaryEnabled(false)
+        check(displayed())
     }
 
 }

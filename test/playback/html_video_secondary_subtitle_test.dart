@@ -394,4 +394,18 @@ void main() {
   });
 
 
+  test('secondary WebVTT retains italic, bold and underline markup', () async {
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\n'
+          '<i>italic</i> <b>bold</b> <u>underline</u>\n'),
+    );
+    final track = await loadedSecondary();
+    final cue = track.track.cues![0] as web.VTTCue;
+    final html = cue.getCueAsHTML();
+    expect(html.querySelector('i')?.textContent, 'italic');
+    expect(html.querySelector('b')?.textContent, 'bold');
+    expect(html.querySelector('u')?.textContent, 'underline');
+  });
+
+
 }
