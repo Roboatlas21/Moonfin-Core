@@ -905,7 +905,6 @@ class HtmlVideoBackend extends PlayerBackend
           }
           _retimeSecondaryCues();
           _positionSecondaryCues();
-          element.setAttribute('default', '');
           element.track.mode = 'showing';
         }).toJS,
       );
