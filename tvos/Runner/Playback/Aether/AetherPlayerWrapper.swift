@@ -306,6 +306,17 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             .sink { [weak self] value in self?.tickSubtitles(at: value) }
             .store(in: &cancellables)
 
+        // Native controls can seek without going through this wrapper. Wait for
+        // a landing so rejected or superseded seeks do not erase placement.
+        engine.seekEvents
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak engine] event in
+                guard case .landed = event.outcome, let self, let engine else { return }
+                self.subtitleOverlay.resetPlacement()
+                self.tickSubtitles(at: engine.sourceTime)
+            }
+            .store(in: &cancellables)
+
         engine.$audioTracks
             .receive(on: DispatchQueue.main)
             .sink { [weak self] tracks in self?.rebuildAudioTable(tracks) }

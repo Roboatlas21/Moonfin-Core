@@ -450,11 +450,16 @@ final class SubtitleOverlay: PlatformView {
         assImageView.image = nil
         assImageView.isHidden = true
         assVisibleBounds = nil
+        resetPlacement()
+    }
+
+    /// Forget the previous position after a seek without discarding sidecar cues.
+    /// Text and bitmap cues redraw on the next update; libass updates its image separately.
+    func resetPlacement() {
         hideAll()
         lastPrimaryFrames = []
         lastPrimaryAlignment = 2
-        // Clearing the primary track resets the secondary text alignment. A gap in
-        // dialogue calls showText([]) and preserves it.
+        // Track changes and seeks reset alignment. Ordinary dialogue gaps preserve it.
         if let secondary = secondaryForStacking,
            secondary.stackingEnabled, !secondary.activeTextEvents.isEmpty {
             secondary.setLabelText(secondary.baseText)

@@ -219,6 +219,50 @@ final class RunnerTests: XCTestCase {
 
 
     @MainActor
+    func testSeekResetsPrimaryPlacementWithoutDiscardingQueuedCues() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        primary.setEvents([
+            SubtitleEvent(startTime: 1, endTime: 3, text: "Top left",
+                bitmap: nil, bitmapWidth: 0, bitmapHeight: 0, alignment: 7),
+            cue("Later primary", start: 10, end: 12),
+        ])
+        secondary.setEvents([cue("Secondary", start: 0, end: 15)])
+        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        func update(_ time: Double) {
+            primary.update(currentTime: time)
+            secondary.update(currentTime: time)
+        }
+
+        // Seek forward and backward into a primary gap, then back into its cue.
+        // Neither track republishes its file during these seeks.
+        for target in [6.0, 0.5] {
+            update(2)
+            let previousTop = label.frame.minY
+            primary.resetPlacement()
+            update(target)
+            let style = label.attributedText?.attribute(
+                .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+            XCTAssertEqual(primary.activeText, "")
+            XCTAssertEqual(secondary.activeText, "Secondary")
+            XCTAssertEqual(style?.alignment, .center)
+            XCTAssertGreaterThan(label.frame.minY, primary.bounds.midY)
+            XCTAssertGreaterThan(label.frame.minY, previousTop)
+
+            primary.resetPlacement()
+            update(2)
+            XCTAssertEqual(primary.activeText, "Top left")
+            XCTAssertEqual(label.frame.minY, previousTop, accuracy: 0.1)
+        }
+        update(11)
+        XCTAssertEqual(primary.activeText, "Later primary")
+        XCTAssertEqual(secondary.activeText, "Secondary")
+    }
+
+    @MainActor
     func testSecondaryAvoidsBitmapAndAssBoundsThroughDialogueGaps() {
         let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
         let secondary = SubtitleOverlay(frame: primary.bounds)
@@ -255,6 +299,16 @@ final class RunnerTests: XCTestCase {
         primary.showAssImage(nil)
         XCTAssertEqual(label.frame.minY, assTop, accuracy: 0.1)
         primary.clear()
+        XCTAssertEqual(label.frame.maxY, 400, accuracy: 0.1)
+
+        // A seek within an unchanged ASS cue must keep its image. Once libass
+        // clears it at the destination, the old placement must not come back.
+        primary.showAssImage(image, bounds: CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1))
+        primary.resetPlacement()
+        XCTAssertTrue(primary.subviews.compactMap { $0 as? UIImageView }
+            .contains { !$0.isHidden && $0.image != nil })
+        XCTAssertEqual(label.frame.minY, assTop, accuracy: 0.1)
+        primary.showAssImage(nil)
         XCTAssertEqual(label.frame.maxY, 400, accuracy: 0.1)
     }
 
