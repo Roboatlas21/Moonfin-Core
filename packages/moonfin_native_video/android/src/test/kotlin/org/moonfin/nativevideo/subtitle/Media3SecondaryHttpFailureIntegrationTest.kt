@@ -110,9 +110,9 @@ class Media3SecondaryHttpFailureIntegrationTest {
             )))
             TestPlayerRunHelper.play(player)
                 .untilPositionAtLeast(1_000L)
-            TestPlayerRunHelper.advance(player).runUntil {
-                requestCount.get() > 0 && (subtitleErrors.isNotEmpty() || failures.isNotEmpty())
-            }
+            // Advance an independent playback clock long enough for the
+            // injected subtitle request to fail and Media3 to attempt recovery.
+            TestPlayerRunHelper.advance(player).untilPositionAtLeast(10_000L)
             assertTrue("Injected subtitle request never happened", requestCount.get() > 0)
             assertTrue("Secondary stream error wasn't reported", subtitleErrors.isNotEmpty())
             assertTrue("Movie clock should remain active", player.isPlaying)
