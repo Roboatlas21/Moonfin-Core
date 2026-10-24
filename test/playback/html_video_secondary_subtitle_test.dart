@@ -368,7 +368,7 @@ void main() {
     expect(cue.has('moonfinStackedMiddleLine'), isFalse);
   });
 
-  test('Primary Off keeps the normal offset and saves secondary spacing', () async {
+  test('Seeking into a gap clears placement; Primary Off stays at the normal offset', () async {
     await backend.configureSubtitleStyle(verticalOffset: 0.12);
     await backend.setSubtitleTrack(
       1, isExternalSubtitle: true,
@@ -384,8 +384,11 @@ void main() {
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
     final stackedTop = bounds(second).top;
     await backend.seekTo(const Duration(seconds: 4));
-    await _until(() => primary.track.activeCues?.length == 0);
-    expect(bounds(second).top, closeTo(stackedTop, 0.001));
+    await _until(() =>
+        primary.track.activeCues?.length == 0 &&
+        (bounds(second).bottom - 0.88).abs() < 0.001);
+    expect(second.align, 'center');
+    expect(bounds(second).bottom, closeTo(0.88, 0.001));
     await backend.disableSubtitleTrack();
     expect(bounds(second).bottom, closeTo(0.88, 0.001));
     expect(second.position.dartify(), 50);
@@ -395,6 +398,36 @@ void main() {
     await backend.seekTo(const Duration(seconds: 2));
     await _until(() => second.align == 'left');
     expect(bounds(second).top, closeTo(stackedTop + 0.02, 0.001));
+  });
+
+  test('Normal dialogue gaps retain the previous primary position', () async {
+    await backend.configureSubtitleStyle(verticalOffset: 0.12);
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle(
+        'WEBVTT\n\n00:01.000 --> 00:01.500\n{\\an7}Top primary\n',
+      ),
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:06.000\nSecondary\n'),
+    );
+    final second = (await loadedSecondary()).track.cues![0] as web.VTTCue;
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+
+    await backend.seekTo(const Duration(milliseconds: 1250));
+    await _until(() =>
+        primary.track.activeCues?.length == 1 && second.align == 'left');
+    final top = bounds(second).top;
+    video.muted = true;
+    try {
+      await backend.resume();
+      await _until(() =>
+          video.currentTime > 1.6 && primary.track.activeCues?.length == 0);
+      expect(second.align, 'left');
+      expect(bounds(second).top, closeTo(top, 0.001));
+    } finally {
+      await backend.pause();
+    }
   });
 
   test('overlay primaries reserve the top while Primary Off uses the bottom', () async {
