@@ -5,7 +5,9 @@ import 'dart:js_interop_unsafe';
 import 'package:web/web.dart' as web;
 
 class WebSubtitleOverlay {
-  WebSubtitleOverlay(this._video);
+  WebSubtitleOverlay(this._video, {this.onError});
+
+  final void Function(String message)? onError;
 
   static String _localUrl(String path) {
     final base = web.document.baseURI;
@@ -65,6 +67,12 @@ class WebSubtitleOverlay {
   static Future<void>? _jassubLoad;
   static Future<void>? _libpgsLoad;
 
+  void _reportFailure(int generation, String format, Object error) {
+    if (!_disposed && generation == _rendererGeneration) {
+      onError?.call('$format subtitle renderer failed: $error');
+    }
+  }
+
   static bool isOverlayCodec(String? codec) =>
       _isAssCodec(codec) || _isPgsCodec(codec);
 
@@ -92,7 +100,8 @@ class WebSubtitleOverlay {
     final generation = _rendererGeneration;
     try {
       await _ensureJassub();
-    } catch (_) {
+    } catch (error) {
+      _reportFailure(generation, 'ASS', error);
       return;
     }
     if (_disposed || generation != _rendererGeneration) return;
@@ -111,8 +120,9 @@ class WebSubtitleOverlay {
       ..setProperty('availableFonts'.toJS, _cjkAvailableFonts());
     try {
       _assRenderer = _Jassub(options);
-    } catch (_) {
+    } catch (error) {
       _assRenderer = null;
+      _reportFailure(generation, 'ASS', error);
     }
   }
 
@@ -147,7 +157,8 @@ class WebSubtitleOverlay {
     final generation = _rendererGeneration;
     try {
       await _ensureLibpgs();
-    } catch (_) {
+    } catch (error) {
+      _reportFailure(generation, 'PGS', error);
       return;
     }
     if (_disposed || generation != _rendererGeneration) return;
@@ -158,11 +169,14 @@ class WebSubtitleOverlay {
       ..setProperty('workerUrl'.toJS, '$_libpgsBase/libpgs.worker.js'.toJS);
     try {
       final ctor = _libpgsRendererCtor();
-      if (ctor != null) {
-        _pgsRenderer = ctor.callAsConstructor<_PgsRenderer>(options);
+      if (ctor == null) {
+        _reportFailure(generation, 'PGS', StateError('renderer unavailable'));
+        return;
       }
-    } catch (_) {
+      _pgsRenderer = ctor.callAsConstructor<_PgsRenderer>(options);
+    } catch (error) {
       _pgsRenderer = null;
+      _reportFailure(generation, 'PGS', error);
     }
   }
 
