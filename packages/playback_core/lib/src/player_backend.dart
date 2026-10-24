@@ -123,10 +123,21 @@ abstract class PlayerBackend {
   });
   Future<void> disableSubtitleTrack();
 
-  /// Selects an independent text sidecar for the Android Media3 overlay.
-  /// Backends without a separate subtitle layer leave it disabled.
-  Future<void> setSecondarySubtitle({String? url, String? codec}) async {}
+  /// Selects a secondary subtitle by a 1-based embedded track number or an external
+  /// URL. Omit both to turn it off. Backends advertise support through
+  /// [SecondarySubtitleBackend].
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    int? embeddedTrackId,
+  }) async {}
+  /// Additional delay, in seconds, on top of the primary subtitle delay.
   Future<void> setSecondarySubtitleDelay(double seconds) async {}
+
+  /// Null fontSize or textColor follows the primary style. verticalOffset adds spacing
+  /// between the tracks as a fraction of player height; positive values increase the
+  /// gap. Top-aligned secondary text moves down, and centred layouts may move both
+  /// tracks.
   Future<void> configureSecondarySubtitleStyle({
     double? fontSize,
     double? verticalOffset,
