@@ -1288,6 +1288,7 @@ class _AppleTvPlayerHostScreenState extends State<AppleTvPlayerHostScreen> {
           manager.secondarySubtitleStreamIndex,
           audio: false,
         ),
+        sourceStreams: subtitleStreams,
       ),
       logoUrl: _logoUrlForItem(item),
       streamInfoSections: _streamInfoSections(manager),

@@ -2,6 +2,7 @@ import 'package:playback_core/playback_core.dart';
 
 import '../l10n/app_localizations.dart';
 import '../preference/user_preferences.dart';
+import '../util/secondary_subtitle_track_selection.dart';
 import 'subtitle_style.dart';
 
 /// Builds native tvOS subtitle menu data from the same track rules and saved appearance
@@ -12,15 +13,31 @@ Map<String, dynamic> appleTvSubtitleMetadata({
   required UserPreferences prefs,
   required AppLocalizations l10n,
   required List<Map<String, dynamic>> tracks,
+  List<Map<String, dynamic>> sourceStreams = const [],
 }) {
   final style = SubtitleStyle.forResolution(prefs, manager.currentResolution);
+  final eligible = tracks.where((track) {
+    final index = track['index'];
+    return index is int &&
+        index != manager.subtitleStreamIndex &&
+        manager.canUseAsSecondarySubtitle(index);
+  });
+  // Native menu entries have labels but no language codes. Use their original
+  // stream indexes to rank them without changing the selected track.
+  final languages = {
+    for (final stream in sourceStreams)
+      if (stream['Index'] is int)
+        stream['Index'] as int: stream['Language'],
+  };
+  final ranked = rankSecondarySubtitleStreams(
+    [
+      for (final track in eligible)
+        {'Language': languages[track['index']], 'track': track},
+    ],
+    prefs.get(UserPreferences.preferredSecondarySubtitleLanguage),
+  );
   return {
-    'tracks': tracks.where((track) {
-      final index = track['index'];
-      return index is int &&
-          index != manager.subtitleStreamIndex &&
-          manager.canUseAsSecondarySubtitle(index);
-    }).toList(),
+    'tracks': [for (final entry in ranked) entry['track']],
     'title': l10n.secondarySubtitleSlot,
     'menuTitle': l10n.subtitles,
     'primaryTitle': l10n.primarySubtitleSlot,
