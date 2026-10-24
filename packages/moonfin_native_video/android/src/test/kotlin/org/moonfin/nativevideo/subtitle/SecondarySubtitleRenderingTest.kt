@@ -173,4 +173,50 @@ class SecondarySubtitleRenderingTest {
         check(displayed())
     }
 
+
+    private fun displayedCues(view: SubtitleView): List<Cue> =
+        (SubtitleView::class.java.getDeclaredField("cues").apply { isAccessible = true }
+            .get(view) as List<*>).filterIsInstance<Cue>()
+
+    @Test
+    fun seekDropsOldCuesWithoutDisablingSecondarySelection() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        overlay.select(true)
+        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Old primary").build()))
+        overlay.updateCues(listOf(Cue.Builder().setText("Old secondary").build()))
+
+        overlay.resetPrimaryCues(clearSecondary = true)
+
+        assertTrue(displayedCues(primary).isEmpty())
+        assertTrue(displayedCues(secondary).isEmpty())
+        overlay.updateCues(listOf(Cue.Builder().setText("New secondary").build()))
+        assertEquals("New secondary", displayedCues(secondary).single().text.toString())
+    }
+
+    @Test
+    fun dialogueGapKeepsPositionButNewPrimaryTrackResetsIt() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val top = Cue.Builder().setText("Top primary")
+            .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()
+        overlay.select(true)
+        overlay.updatePrimaryCues(listOf(top))
+        overlay.updateCues(listOf(Cue.Builder().setText("Translation").build()))
+        val previousLine = displayedCues(secondary).single().line
+
+        overlay.updatePrimaryCues(emptyList()) // Dialogue gap, not a new track.
+        assertEquals(previousLine, displayedCues(secondary).single().line, 0.0001f)
+
+        overlay.resetPrimaryCues() // Primary-track change.
+        assertTrue(displayedCues(primary).isEmpty())
+        val displayed = displayedCues(secondary).single()
+        assertEquals("Translation", displayed.text.toString())
+        assertTrue(displayed.line > previousLine + 0.2f)
+    }
 }
