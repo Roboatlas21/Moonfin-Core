@@ -1,4 +1,5 @@
 import UIKit
+import QuartzCore
 import XCTest
 @testable import Runner
 
@@ -336,23 +337,26 @@ final class RunnerTests: XCTestCase {
 
     @MainActor
     func testCrowdedSecondaryUsesTheOtherSideInsteadOfOverlapping() {
+        let atTop = CGRect(x: 0, y: 15, width: 300, height: 60)
         let top = SubtitleOverlay.stackedSecondaryTop(
-            primary: CGRect(x: 0, y: 15, width: 300, height: 60),
+            occupied: [atTop], anchor: atTop, x: 0, width: 300,
             height: 40, gap: 8, preferBelow: false, minimumY: 20, maximumY: 375)
-        XCTAssertTrue(top.fits)
+        XCTAssertNil(top.clip)
         XCTAssertEqual(top.top, 83, accuracy: 0.1)
 
+        let atBottom = CGRect(x: 0, y: 300, width: 300, height: 70)
         let bottom = SubtitleOverlay.stackedSecondaryTop(
-            primary: CGRect(x: 0, y: 300, width: 300, height: 70),
+            occupied: [atBottom], anchor: atBottom, x: 0, width: 300,
             height: 50, gap: 8, preferBelow: true, minimumY: 20, maximumY: 375)
-        XCTAssertTrue(bottom.fits)
+        XCTAssertNil(bottom.clip)
         XCTAssertEqual(bottom.top, 242, accuracy: 0.1)
 
+        let large = CGRect(x: 0, y: 80, width: 300, height: 240)
         let crowded = SubtitleOverlay.stackedSecondaryTop(
-            primary: CGRect(x: 0, y: 80, width: 300, height: 240),
+            occupied: [large], anchor: large, x: 0, width: 300,
             height: 100, gap: 8, preferBelow: false, minimumY: 0, maximumY: 400)
-        XCTAssertFalse(crowded.fits)
-        XCTAssertLessThanOrEqual(crowded.top + 100, 80)
+        XCTAssertNotNil(crowded.clip)
+        XCTAssertEqual(crowded.clip!.upperBound, 72, accuracy: 0.1)
     }
 
     @MainActor
@@ -414,6 +418,66 @@ final class RunnerTests: XCTestCase {
         primary.setEvents([bitmap(0.65)])
         XCTAssertEqual(primary.subviews.compactMap { $0 as? UIImageView }
             .filter { !$0.isHidden && $0.image != nil }.count, 1)
+    }
+
+
+    @MainActor
+    func testDefaultAndExplicitBottomCenterShareOneTextBlock() {
+        let overlay = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        var explicit = cue("Second speaker")
+        explicit.alignment = 2
+        overlay.setEvents([cue("First speaker"), explicit])
+        overlay.update(currentTime: 2)
+        XCTAssertTrue(overlay.subviews.compactMap { $0 as? SubtitleOverlay }.isEmpty)
+        XCTAssertEqual(overlay.subviews.compactMap { $0 as? UILabel }.last?.text,
+                       "First speaker\nSecond speaker")
+    }
+
+    @MainActor
+    func testSecondaryCanUseSpaceBetweenSeparatedPrimaryCues() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        var top = cue("Top cue")
+        top.alignment = 8
+        top.position = CGPoint(x: 0.5, y: 0.1)
+        var bottom = cue("Bottom cue")
+        bottom.alignment = 2
+        bottom.position = CGPoint(x: 0.5, y: 0.9)
+        primary.setEvents([top, bottom])
+        primary.update(currentTime: 2)
+        secondary.setEvents([cue("Secondary")])
+        secondary.update(currentTime: 2)
+
+        let first = primary.subviews.compactMap { $0 as? UILabel }.last!
+        let positioned = primary.subviews.compactMap { $0 as? SubtitleOverlay }.first!
+        let second = positioned.subviews.compactMap { $0 as? UILabel }.last!
+        let caption = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        XCTAssertGreaterThan(caption.frame.minY, first.frame.maxY)
+        XCTAssertLessThan(caption.frame.maxY, second.frame.minY)
+        XCTAssertNil(caption.layer.mask)
+    }
+
+    @MainActor
+    func testOversizedSecondaryIsMaskedAndRecoversOnPrimaryOff() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        primary.setEvents([cue("Primary")])
+        primary.update(currentTime: 2)
+        secondary.setEvents([cue(Array(repeating: "Long subtitle line", count: 40)
+            .joined(separator: "\n"))])
+        secondary.update(currentTime: 2)
+        let caption = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        let mask = caption.layer.mask as? CAShapeLayer
+        XCTAssertNotNil(mask)
+        XCTAssertLessThan(mask!.path!.boundingBox.height, caption.frame.height)
+        primary.clear()
+        XCTAssertNil(caption.layer.mask)
     }
 
 }
