@@ -280,10 +280,13 @@ class TimeOffsetMediaPeriodTest {
         val video = object : SequenceableLoader {
             var loadCalls = 0
             override fun getBufferedPositionUs(): Long = 5_000_000L
-            override fun getNextLoadPositionUs(): Long = 5_000_000L
+            override fun getNextLoadPositionUs(): Long =
+                if (loadCalls == 0) 5_000_000L else C.TIME_END_OF_SOURCE
             override fun continueLoading(loadingInfo: LoadingInfo): Boolean {
+                // The composite loader retries whenever a child reports progress.
+                // Simulate one successful video load, then end instead of looping forever.
                 loadCalls++
-                return true
+                return loadCalls == 1
             }
             override fun isLoading(): Boolean = false
             override fun reevaluateBuffer(positionUs: Long) {}
