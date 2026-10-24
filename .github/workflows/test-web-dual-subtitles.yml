@@ -1,0 +1,25 @@
+name: Web Dual Subtitle Browser Tests
+
+on:
+  push:
+    branches:
+      - test/web-dual-subtitles-browser
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chrome:
+    name: Chrome subtitle regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+      - name: Test Web secondary subtitle rendering in Chrome
+        run: flutter test --platform chrome --reporter expanded test/playback/html_video_secondary_subtitle_test.dart
