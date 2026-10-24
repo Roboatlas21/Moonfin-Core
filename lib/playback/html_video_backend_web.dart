@@ -61,7 +61,14 @@ class HtmlVideoBackend extends PlayerBackend
   WebSubtitleOverlay? _subtitleOverlay;
   bool _primaryUsesOverlay = false;
   WebSubtitleOverlay get _overlay => _subtitleOverlay ??=
-      WebSubtitleOverlay(_videoElement)..setDelay(subtitleDelaySeconds);
+      (WebSubtitleOverlay(
+        _videoElement,
+        onError: (message) {
+          if (!_disposed) {
+            _errorStream.add({'event': 'subtitleError', 'message': message});
+          }
+        },
+      )..setDelay(subtitleDelaySeconds));
 
   /// Marks a track whose cues are already being placed, so a track seen twice
   /// does not collect a second listener.
@@ -849,14 +856,22 @@ class HtmlVideoBackend extends PlayerBackend
       // Request server-converted WebVTT when the URL is a Jellyfin/Emby
       // subtitle endpoint; unrelated external SRT files still work locally.
       final preferredUrl = preferServerWebVttSubtitleUrl(url);
-      var response = await web.window
-          .fetch(preferredUrl.toJS, web.RequestInit(signal: abort.signal))
-          .toDart;
-      if (!response.ok && preferredUrl != url) {
+      web.Response? response;
+      try {
+        response = await web.window
+            .fetch(preferredUrl.toJS, web.RequestInit(signal: abort.signal))
+            .toDart;
+      } catch (_) {
+        if (preferredUrl == url) rethrow;
+      }
+      if (preferredUrl != url && response?.ok != true) {
+        if (_disposed || generation != _secondaryGeneration ||
+            abort.signal.aborted) return;
         response = await web.window
             .fetch(url.toJS, web.RequestInit(signal: abort.signal))
             .toDart;
       }
+      if (response == null) throw StateError('Subtitle request failed');
       if (!response.ok) throw StateError('HTTP ${response.status}');
       final content = (await response.text().toDart).toDart;
       if (_disposed || generation != _secondaryGeneration) return;
