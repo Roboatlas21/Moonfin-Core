@@ -51,11 +51,9 @@ internal enum class SourceTree {
 }
 
 /**
- * Which way a source is built. Live TV, previews and audio never get the
- * tree, so their playback is untouched by any of this. Video gets it when a
- * sideloaded subtitle exists, when the user has set a delay, or once it is in
- * place for this source, since taking it out again would mean a re-prepare
- * for nothing.
+ * Builds the playback source when subtitle timing needs custom handling.
+ * Once built, keep it for the current video so changing subtitle settings
+ * does not require preparing playback again.
  */
 internal fun sourceTreeFor(
     isLive: Boolean,
@@ -64,7 +62,10 @@ internal fun sourceTreeFor(
     externalCount: Int,
     manualDelayMs: Long,
     hasEmbeddedWrapper: Boolean,
+    hasSecondarySidecar: Boolean = false,
 ): SourceTree {
+    // External secondary tracks need independent timing on every playback path.
+    if (hasSecondarySidecar) return SourceTree.CUSTOM_TREE
     if (isLive || isPreview || mediaType == "audio") return SourceTree.PLAYER_ITEM
     if (externalCount > 0 || manualDelayMs != 0L || hasEmbeddedWrapper) return SourceTree.CUSTOM_TREE
     return SourceTree.PLAYER_ITEM
