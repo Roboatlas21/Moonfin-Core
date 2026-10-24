@@ -12,6 +12,23 @@ final class RunnerTests: XCTestCase {
 
 
     @MainActor
+    func testNewSubtitleCuesCanBeEvaluatedWhilePausedIncludingAtZero() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        primary.update(currentTime: 42)
+        primary.clear() // Switching primary resets its remembered playback time.
+        primary.setEvents([cue("New language", start: 41, end: 45)])
+        XCTAssertEqual(primary.activeText, "")
+        primary.update(currentTime: 42)
+        XCTAssertEqual(primary.activeText, "New language")
+
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        secondary.setEvents([cue("At start", start: 0, end: 3)])
+        XCTAssertEqual(secondary.activeText, "")
+        secondary.update(currentTime: 0)
+        XCTAssertEqual(secondary.activeText, "At start")
+    }
+
+    @MainActor
     func testAppleOffsetUsesPictureHeightAndPreservesControlsLift() {
         let overlay = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
         // Letterboxing must not change the offset distance for default or explicitly

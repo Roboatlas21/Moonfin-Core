@@ -380,9 +380,11 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         engine.$secondarySubtitleCues
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak engine] _ in
-                guard let engine else { return }
-                self?.secondarySubtitleOverlay.setEvents(
+                guard let self, let engine else { return }
+                self.secondarySubtitleOverlay.setEvents(
                     Self.subtitleEvents(from: engine.secondarySubtitleCues))
+                // A newly loaded secondary must appear while paused, including at time zero.
+                self.secondarySubtitleOverlay.update(currentTime: engine.sourceTime)
             }
             .store(in: &cancellables)
 
@@ -1792,11 +1794,9 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
         resetAssState()
         subtitleOverlay.setEvents(Self.subtitleEvents(from: cues))
-        if nativePrimaryBridge != nil {
-            // A paused source (including time zero) must show a newly decoded
-            // primary without waiting for an advancing clock tick.
-            subtitleOverlay.update(currentTime: engine.sourceTime)
-        }
+        // A paused source (including time zero) has no advancing clock tick.
+        // Always evaluate a new cue batch, not only during the HLS handoff.
+        subtitleOverlay.update(currentTime: engine.sourceTime)
     }
 
     private static func subtitleEvents(from cues: [SubtitleCue]) -> [SubtitleEvent] {
