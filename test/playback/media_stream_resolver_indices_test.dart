@@ -44,6 +44,70 @@ void main() {
     });
   });
 
+
+  group('MediaStreamResolver.extractExternalSubtitles', () {
+    test('joins relative paths without duplicating slashes', () {
+      const streams = <Map<String, dynamic>>[
+        {
+          'Type': 'Subtitle',
+          'Index': 1,
+          'Codec': 'vtt',
+          'IsExternal': true,
+          'DeliveryUrl': '/Videos/item/Subtitles/1/Stream.vtt?ApiKey=abc',
+        },
+        {
+          'Type': 'Subtitle',
+          'Index': 2,
+          'Codec': 'vtt',
+          'IsExternal': true,
+          'DeliveryUrl': 'Videos/item/Subtitles/2/Stream.vtt',
+        },
+      ];
+      for (final base in [
+        'https://media.example.com/jellyfin',
+        'https://media.example.com/jellyfin/',
+      ]) {
+        final urls = MediaStreamResolver.extractExternalSubtitles(streams, base)
+            .map((subtitle) => subtitle.deliveryUrl).toList();
+        expect(urls, [
+          'https://media.example.com/jellyfin/Videos/item/Subtitles/1/Stream.vtt?ApiKey=abc',
+          'https://media.example.com/jellyfin/Videos/item/Subtitles/2/Stream.vtt',
+        ]);
+      }
+    });
+
+    test('keeps absolute external subtitle hosts and query tokens unchanged', () {
+      const streams = <Map<String, dynamic>>[
+        {
+          'Type': 'Subtitle',
+          'Index': 3,
+          'Codec': 'vtt',
+          'IsExternal': true,
+          'DeliveryUrl': 'https://subtitles.example.org/movie.vtt?sig=123',
+        },
+        {
+          'Type': 'Subtitle',
+          'Index': 4,
+          'Codec': 'vtt',
+          'IsExternal': true,
+          'DeliveryUrl': 'http://other.example.org/movie.vtt',
+        },
+      ];
+      final urls = MediaStreamResolver.extractExternalSubtitles(
+        streams, 'https://media.example.com/jellyfin',
+      ).map((subtitle) => subtitle.deliveryUrl).toList();
+      expect(urls, [
+        'https://subtitles.example.org/movie.vtt?sig=123',
+        'http://other.example.org/movie.vtt',
+      ]);
+      for (final url in urls) {
+        expect(MediaStreamResolver.isServerUrl(
+          url, 'https://media.example.com/jellyfin',
+        ), isFalse);
+      }
+    });
+  });
+
   group('MediaStreamResolver.applyStreamIndices', () {
     test('emits a single canonical AudioStreamIndex', () {
       final url = MediaStreamResolver.applyStreamIndices(
