@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
@@ -179,7 +180,7 @@ class _MediaKitDeviceProfileCapabilities {
 }
 
 class MediaKitPlayerBackend extends PlayerBackend
-    with SubtitleDelayState
+    with SubtitleDelayState, WidgetsBindingObserver
     implements SubtitleLoadingBackend, SecondarySubtitleBackend {
   static const Duration _linuxHwdecFirstFrameTimeout = Duration(
     milliseconds: 1500,
@@ -292,6 +293,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   DateTime? _lastSecondaryPositionCheck;
   Completer<void>? _secondaryPositionUpdate;
   StreamSubscription<Duration>? _secondaryPositionSub;
+  Timer? _secondaryMetricsTimer;
   static final _mpvSrtAlignment = RegExp(r'\\an([1-9])');
 
   @override
@@ -597,6 +599,7 @@ class MediaKitPlayerBackend extends PlayerBackend
       );
     }
     _prefs.addListener(_onPreferencesChanged);
+    WidgetsBinding.instance.addObserver(this);
     _ccTracksSub = _player.stream.tracks.listen((_) {
       unawaited(_refreshEmbeddedCaptionTracks());
       unawaited(_retryPendingEmbeddedSubtitle());
@@ -608,6 +611,17 @@ class MediaKitPlayerBackend extends PlayerBackend
       if (_secondarySubtitleRequested && supportsSecondarySubtitlePosition) {
         unawaited(_refreshStackedSecondaryPosition());
       }
+    });
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (_isDisposed || !_secondarySubtitleRequested) return;
+    // mpv's OSD dimensions may settle after Flutter reports the new viewport.
+    // Debounce resize events so a paused player still recomputes wrapping.
+    _secondaryMetricsTimer?.cancel();
+    _secondaryMetricsTimer = Timer(const Duration(milliseconds: 100), () {
+      if (!_isDisposed) unawaited(_refreshStackedSecondaryPosition(force: true));
     });
   }
 
@@ -3031,6 +3045,9 @@ class MediaKitPlayerBackend extends PlayerBackend
     if (native is! NativePlayer) return;
     await _nativeSetProperty(native, 'sub-delay', seconds.toStringAsFixed(3));
     await setSecondarySubtitleDelay(_secondarySubtitleDelay);
+    if (!supportsSecondarySubtitleDelay) {
+      await _refreshStackedSecondaryPosition(force: true);
+    }
   }
 
   @override
@@ -3149,6 +3166,12 @@ class MediaKitPlayerBackend extends PlayerBackend
       native, 'secondary-sub-delay',
       (subtitleDelaySeconds + _secondarySubtitleDelay).toStringAsFixed(3),
     );
+    if (_secondarySubtitleRequested && supportsSecondarySubtitlePosition) {
+      // The native subtitle cue can change after the delay property returns.
+      // Re-read its bounds once the playback thread has had time to settle.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await _refreshStackedSecondaryPosition(force: true);
+    }
   }
 
   @override
@@ -3611,6 +3634,8 @@ class MediaKitPlayerBackend extends PlayerBackend
     _ccTracksSub?.cancel();
     _videoParamsSub?.cancel();
     _secondaryPositionSub?.cancel();
+    _secondaryMetricsTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _tracksChangedController.close();
     _playingGateChangedController.close();
     _subtitleLoadingStream.close();

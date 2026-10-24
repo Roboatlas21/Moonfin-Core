@@ -331,6 +331,57 @@ void main() {
     }
   });
 
+  test('paused subtitle delay refreshes secondary placement for the current cue', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-delay': '0',
+      'secondary-sub-pos': '0',
+      'sub-text/ass': 'One line',
+      'secondary-sub-text': 'Translation',
+      'osd-width': '1280',
+      'osd-height': '720',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
+      final before = int.parse(other.platform.properties['secondary-sub-pos']!);
+      // No position-stream tick occurs while this fake player is paused.
+      other.platform.properties['sub-text/ass'] = r'One\\NTwo\\NThree';
+      await second.setSubtitleDelay(1.0);
+      final after = int.parse(other.platform.properties['secondary-sub-pos']!);
+      expect(after, lessThan(before));
+      expect(other.platform.properties['secondary-sub-delay'], '1.000');
+    } finally {
+      second.dispose();
+    }
+  });
+
+  testWidgets('window resize refreshes secondary placement without playback ticks', (tester) async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-delay': '0',
+      'secondary-sub-pos': '0',
+      'sub-text/ass': 'A long primary subtitle which wraps only in a narrow window',
+      'secondary-sub-text': 'Translation',
+      'osd-width': '1280',
+      'osd-height': '720',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
+      final before = int.parse(other.platform.properties['secondary-sub-pos']!);
+      other.platform.properties['osd-width'] = '400';
+      second.didChangeMetrics();
+      await tester.pump(const Duration(milliseconds: 150));
+      await _flush();
+      expect(int.parse(other.platform.properties['secondary-sub-pos']!), lessThan(before));
+    } finally {
+      second.dispose();
+    }
+  });
+
   test('delay survives source reloads but resets for the next session', () async {
     Future<void> open(int? session, {int secondaryDelayMs = 0}) => backend.play({
       'url': 'https://server/video-$session',
