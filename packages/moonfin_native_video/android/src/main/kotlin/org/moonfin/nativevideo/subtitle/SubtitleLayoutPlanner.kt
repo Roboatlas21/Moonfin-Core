@@ -62,12 +62,18 @@ internal object SubtitleLayoutPlanner {
         lowerHalfTop: Float = viewportHeight / 2f,
     ): SubtitleBox? {
         if (viewportWidth <= 0 || viewportHeight <= 0 || desired.top >= desired.bottom) return null
+        val cueHeight = desired.bottom - desired.top
+        val minimumBottom = if (verticalAlignment == ALIGN_BOTTOM) lowerHalfTop + cueHeight else cueHeight
+        val maximumBottom = if (verticalAlignment == ALIGN_TOP) lowerHalfTop else viewportHeight.toFloat()
+        if (minimumBottom > maximumBottom) return null
+        val requestedBottom = desired.bottom.coerceIn(minimumBottom, maximumBottom)
+        fun at(bottom: Float) = desired.copy(top = bottom - cueHeight, bottom = bottom)
         val step = stepPx.coerceAtLeast(1f)
         val maxDistance = when (verticalAlignment) {
-            ALIGN_TOP -> lowerHalfTop - desired.bottom
-            ALIGN_BOTTOM -> desired.top - lowerHalfTop
-            else -> maxOf(desired.top, viewportHeight - desired.bottom)
-        }.coerceAtLeast(0f)
+            ALIGN_TOP -> maximumBottom - requestedBottom
+            ALIGN_BOTTOM -> requestedBottom - minimumBottom
+            else -> maxOf(requestedBottom - minimumBottom, maximumBottom - requestedBottom)
+        }
         val maxSteps = kotlin.math.ceil(maxDistance / step).toInt()
 
         for (stepIndex in 0..maxSteps) {
@@ -79,19 +85,31 @@ internal object SubtitleLayoutPlanner {
                 else -> if (stepIndex == 0) listOf(0f) else listOf(distance, -distance)
             }
             for (offset in offsets) {
-                val candidate = desired.copy(top = desired.top + offset, bottom = desired.bottom + offset)
-                val inViewport = candidate.top >= 0f && candidate.bottom <= viewportHeight
-                val inPreferredHalf = when (verticalAlignment) {
-                    ALIGN_TOP -> candidate.bottom <= lowerHalfTop
-                    ALIGN_BOTTOM -> candidate.top >= lowerHalfTop
-                    else -> true
-                }
-                if (inViewport && inPreferredHalf && primary.none { intersects(candidate, it, gapPx) }) {
+                val candidate = at(requestedBottom + offset)
+                if (candidate.bottom in minimumBottom..maximumBottom &&
+                    primary.none { intersects(candidate, it, gapPx) }
+                ) {
                     return candidate
                 }
             }
         }
-        return null
+
+        // A stepped search can miss a narrow gap. Check the exact boundaries
+        // before giving up, keeping the same preferred direction.
+        val edges = sequenceOf(minimumBottom, maximumBottom) + primary.asSequence()
+            .flatMap { sequenceOf(it.top - gapPx, it.bottom + gapPx + cueHeight) }
+        return edges
+            .filter { it in minimumBottom..maximumBottom }
+            .distinct()
+            .sortedWith(compareBy<Float> {
+                when (verticalAlignment) {
+                    ALIGN_TOP -> it < requestedBottom
+                    ALIGN_BOTTOM -> it > requestedBottom
+                    else -> false
+                }
+            }.thenBy { kotlin.math.abs(it - requestedBottom) }.thenByDescending { it })
+            .map(::at)
+            .firstOrNull { candidate -> primary.none { intersects(candidate, it, gapPx) } }
     }
 
     fun placeSecondary(
@@ -108,29 +126,11 @@ internal object SubtitleLayoutPlanner {
         if (viewportWidth <= 0 || viewportHeight <= 0 || secondaryHeight <= 0f) return null
         val left = horizontalInset.coerceAtLeast(0f)
         val right = (viewportWidth - horizontalInset).coerceAtLeast(left)
-        val minimumBottom = lowerHalfTop + secondaryHeight
-        val maximumBottom = viewportHeight.toFloat()
-        if (minimumBottom > maximumBottom) return null
-        val requestedBottom = desiredBottom.coerceIn(minimumBottom, maximumBottom)
-        var bottom = requestedBottom
-        val step = stepPx.coerceAtLeast(1f)
-        while (bottom >= minimumBottom) {
-            val candidate = SubtitleBox(left, bottom - secondaryHeight, right, bottom)
-            if (primary.none { intersects(candidate, it, gapPx) }) return candidate
-            bottom -= step
-        }
-
-        // The stepped search may miss a narrow gap. Check the exact cue
-        // boundaries before giving up, preferring positions above the request.
-        val edges = sequenceOf(minimumBottom, maximumBottom) + primary.asSequence()
-            .flatMap { sequenceOf(it.top - gapPx, it.bottom + gapPx + secondaryHeight) }
-        return edges
-            .filter { it in minimumBottom..maximumBottom }
-            .distinct()
-            .sortedWith(compareBy<Float> { it > requestedBottom }
-                .thenBy { kotlin.math.abs(it - requestedBottom) })
-            .map { SubtitleBox(left, it - secondaryHeight, right, it) }
-            .firstOrNull { candidate -> primary.none { intersects(candidate, it, gapPx) } }
+        return placePositionedSecondary(
+            primary, viewportWidth, viewportHeight,
+            SubtitleBox(left, desiredBottom - secondaryHeight, right, desiredBottom),
+            ALIGN_BOTTOM, gapPx, stepPx, lowerHalfTop,
+        )
     }
 
     fun intersects(a: SubtitleBox, b: SubtitleBox, gapPx: Float = 0f): Boolean =
