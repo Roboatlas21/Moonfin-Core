@@ -360,6 +360,7 @@ abstract class MediaStreamResolver {
     String baseUrl,
   ) {
     final subs = <ExternalSubtitle>[];
+    final base = baseUrl.endsWith('/') ? baseUrl : '$baseUrl/';
     for (final stream in mediaStreams) {
       if (stream['Type'] != 'Subtitle') continue;
       final deliveryUrl = stream['DeliveryUrl'] as String?;
@@ -370,8 +371,13 @@ abstract class MediaStreamResolver {
       final isExternal = stream['IsExternal'] == true;
       final supportsExternal = stream['SupportsExternalStream'] == true;
       if (!isExternal && !supportsExternal) continue;
+      final uri = Uri.tryParse(deliveryUrl);
+      final isAbsolute = uri?.scheme == 'http' || uri?.scheme == 'https';
+      final relative = deliveryUrl.startsWith('/')
+          ? deliveryUrl.substring(1)
+          : deliveryUrl;
       subs.add(ExternalSubtitle(
-        deliveryUrl: '$baseUrl$deliveryUrl',
+        deliveryUrl: isAbsolute ? deliveryUrl : '$base$relative',
         title: stream['DisplayTitle'] as String? ??
             stream['Title'] as String?,
         language: stream['Language'] as String?,
