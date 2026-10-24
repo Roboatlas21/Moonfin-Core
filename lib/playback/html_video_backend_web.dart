@@ -67,8 +67,7 @@ class HtmlVideoBackend extends PlayerBackend
   static const _stackedMiddleSnapToLines = 'moonfinStackedMiddleSnapToLines';
   static final _srtAlignmentTag = RegExp(r'^\s*\{\\an([1-9])\}');
 
-  /// The size the cue percentage is measured against, so the setting at its
-  /// default leaves the browser drawing cues at its own size.
+  /// Scale the browser's usual caption size by the user's text-size setting.
   static final double _referenceTextSize =
       UserPreferences.subtitlesTextSize.defaultValue;
 
@@ -79,6 +78,51 @@ class HtmlVideoBackend extends PlayerBackend
   double? _subtitleFontSize;
   int? _subtitleFontWeight;
   double _subtitleVerticalOffset = 0;
+  // Check a fresh cue: assigning an unsupported property merely creates a JS field.
+  static final _nativeLineAlignment = web.VTTCue(0, 1, '').has('lineAlign');
+  static final _nativePositionAlignment = web.VTTCue(0, 1, '').has('positionAlign');
+  final _cueHeights = <String, double>{};
+  (int, int)? _lastCueViewport;
+
+  double get _cueCanvasHeight => _videoElement.clientHeight > 0
+      ? _videoElement.clientHeight.toDouble()
+      : 720;
+
+  double _cueFontSize({bool secondary = false}) =>
+      _cueCanvasHeight *
+      0.05 *
+      ((secondary ? _secondaryFontSize : null) ??
+          _subtitleFontSize ??
+          _referenceTextSize) /
+      _referenceTextSize;
+
+  void _setCueLine(
+    web.VTTCue cue,
+    double edge,
+    String anchor, {
+    bool secondary = false,
+  }) {
+    cue.snapToLines = false;
+    if (_nativeLineAlignment) {
+      cue.lineAlign = anchor;
+      cue.line = (edge * 100).clamp(0.0, 100.0).toDouble().toJS;
+    } else {
+      // Older browsers place a percentage cue within the space left after its
+      // own height. Convert our top/bottom edge into that coordinate system.
+      final height = _primaryCueHeight(cue, secondary: secondary);
+      final top =
+          edge -
+          (anchor == 'end'
+              ? height
+              : anchor == 'center'
+              ? height / 2
+              : 0);
+      cue.line = (top / (1 - height).clamp(0.001, 1.0) * 100)
+          .clamp(0.0, 100.0)
+          .toDouble()
+          .toJS;
+    }
+  }
 
   web.HTMLTrackElement? _secondaryTrack;
   web.AbortController? _secondaryRequest;
@@ -175,6 +219,13 @@ class HtmlVideoBackend extends PlayerBackend
 
   void _pollState() {
     if (_disposed) return;
+    final viewport = (_videoElement.clientWidth, _videoElement.clientHeight);
+    if (_lastCueViewport != viewport) {
+      _lastCueViewport = viewport;
+      _applySubtitleAppearance();
+      _forEachTextTrack(_positionCues);
+      _positionSecondaryCues();
+    }
 
     final positionMs = (_videoElement.currentTime * 1000).round();
     final position = Duration(milliseconds: positionMs.clamp(0, 1 << 31));
@@ -795,6 +846,9 @@ class HtmlVideoBackend extends PlayerBackend
           _secondaryLoadFailed(generation);
         }).toJS,
       );
+      element.track.addEventListener('cuechange', ((web.Event _) {
+        if (!_disposed && generation == _secondaryGeneration) _positionSecondaryCues();
+      }).toJS);
       _videoElement.appendChild(element);
       // Load without briefly rendering at the primary track's position.
       element.track.mode = 'hidden';
@@ -912,12 +966,10 @@ class HtmlVideoBackend extends PlayerBackend
         if (original != null) {
           cue
             ..line = original
-            ..lineAlign = _cueAlignment(
-              cue, _stackedMiddleLineAlign, 'center',
-            )
             ..snapToLines = cue.getProperty<JSBoolean?>(
               _stackedMiddleSnapToLines.toJS,
             )?.toDart ?? false;
+          if (_nativeLineAlignment) cue.lineAlign = _cueAlignment(cue, _stackedMiddleLineAlign, 'center');
           _clearPrimaryMiddleCueState(cue);
         }
       }
@@ -960,25 +1012,31 @@ class HtmlVideoBackend extends PlayerBackend
     return row * 3 + column + 1;
   }
 
-  // Estimate the primary cue height, including explicit line breaks and wrapping. Use
-  // it to position the secondary edge nearest the primary, so extra secondary lines
-  // grow away from the gap.
-  double _primaryCueHeight(web.VTTCue cue) {
-    final fontHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) * 0.055;
-    final width = _videoElement.clientWidth;
-    final height = _videoElement.clientHeight;
-    final aspect = width > 0 && height > 0 ? width / height : 16 / 9;
-    final cueWidth = cue.size.isFinite
-        ? (cue.size / 100).clamp(0.1, 1.0)
-        : 0.9;
-    final charsPerLine = (aspect * cueWidth / (fontHeight * 0.52))
-        .floor().clamp(1, 10000);
-    final text = cue.text.replaceAll(RegExp(r'<[^>]*>'), '');
-    final rows = text.split('\n').fold<int>(
-      0,
-      (sum, line) => sum + (line.runes.length / charsPerLine).ceil().clamp(1, 10000),
-    );
-    return rows * fontHeight * 1.15;
+  // Measure the same font and cue width used by the native renderer. Keep a small
+  // cache so polling does not add DOM layout work for an unchanged subtitle.
+  double _primaryCueHeight(web.VTTCue cue, {bool secondary = false}) {
+    final width =
+        (_videoElement.clientWidth > 0 ? _videoElement.clientWidth : 1280) *
+        (cue.size / 100).clamp(0.01, 1.0);
+    final font = _cueFontSize(secondary: secondary);
+    final key = '${cue.text}|$width|$font|$_subtitleFontWeight';
+    final cached = _cueHeights[key];
+    if (cached != null) return cached;
+    final measure = web.HTMLDivElement()
+      ..style.cssText =
+          'position:fixed;visibility:hidden;left:-10000px;'
+          'white-space:pre-line;overflow-wrap:break-word;box-sizing:border-box;'
+          'width:${width}px;font-family:sans-serif;font-size:${font}px;'
+          'line-height:1.2;font-weight:${(_subtitleFontWeight ?? 400) >= 600 ? 700 : 400};';
+    measure.appendChild(cue.getCueAsHTML());
+    web.document.body?.appendChild(measure);
+    final height = (measure.getBoundingClientRect().height / _cueCanvasHeight)
+        .clamp(font * 1.2 / _cueCanvasHeight, 0.95)
+        .toDouble();
+    measure.remove();
+    if (_cueHeights.length >= 256) _cueHeights.clear();
+    _cueHeights[key] = height;
+    return height;
   }
 
   ({double top, double bottom, double centre}) _primaryCueBounds(
@@ -993,17 +1051,24 @@ class HtmlVideoBackend extends PlayerBackend
     final line = rawLine is num
         ? rawLine.toDouble()
         : (1 - _subtitleVerticalOffset) * 100;
-    final snapped = cue.getProperty<JSBoolean?>(
-      (authored ? _authoredSnapToLines : _stackedMiddleSnapToLines).toJS,
-    )?.toDart ?? cue.snapToLines;
-    final lineHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) *
-        0.055 * 1.15;
+    final snapped =
+        cue
+            .getProperty<JSBoolean?>(
+              (authored ? _authoredSnapToLines : _stackedMiddleSnapToLines)
+                  .toJS,
+            )
+            ?.toDart ??
+        cue.snapToLines;
+    final lineHeight = _cueFontSize() * 1.2 / _cueCanvasHeight;
     final top = snapped
         ? (line < 0 ? 1 + line * lineHeight : line * lineHeight)
+        : !_nativeLineAlignment
+        ? line / 100 * (1 - height)
         : switch (_cueAlignment(
-              cue, authored ? _authoredLineAlign : _stackedMiddleLineAlign,
-              _cueAlignment(cue, 'lineAlign', 'start'),
-            )) {
+            cue,
+            authored ? _authoredLineAlign : _stackedMiddleLineAlign,
+            _cueAlignment(cue, 'lineAlign', 'start'),
+          )) {
             'start' => line / 100,
             'center' => line / 100 - height / 2,
             _ => line / 100 - height,
@@ -1054,19 +1119,16 @@ class HtmlVideoBackend extends PlayerBackend
               _cueAlignment(primary, 'lineAlign', 'start').toJS,
             )
             ..setProperty(
-              _stackedMiddleSnapToLines.toJS, primary.snapToLines.toJS,
+              _stackedMiddleSnapToLines.toJS,
+              primary.snapToLines.toJS,
             );
         }
       }
-      primary
-        ..snapToLines = false
-        ..lineAlign = 'start'
-        ..line = (((placement?.centre ?? 0.5) + gap / 2) * 100)
-            .clamp(0.0, 100.0).toDouble().toJS;
+      _setCueLine(primary, (placement?.centre ?? 0.5) + gap / 2, 'start');
     }
 
     final secondaryLine = placement == null
-        ? 0.96 // Use the normal bottom position until a primary placement is available; keep the saved spacing.
+        ? 1 - _subtitleVerticalOffset
         : switch (row) {
             2 => placement.bottom + gap,
             1 => placement.centre - gap / 2,
@@ -1074,17 +1136,29 @@ class HtmlVideoBackend extends PlayerBackend
           };
     // Copy the primary cue's horizontal position and anchor so custom WebVTT
     // coordinates are preserved.
-    for (final original in _secondaryCues) {
+    final active = _secondaryCues
+        .where(
+          (item) =>
+              _videoElement.currentTime >= item.cue.startTime &&
+              _videoElement.currentTime < item.cue.endTime,
+        )
+        .toList();
+    for (final original in active.isEmpty ? _secondaryCues.take(1) : active) {
       original.cue
         ..region = null
         ..vertical = ''
-        ..snapToLines = false
-        ..lineAlign = row == 2 ? 'start' : 'end'
-        ..line = (secondaryLine * 100).clamp(0.0, 100.0).toDouble().toJS
         ..align = placement?.align ?? 'center'
-        ..positionAlign = placement?.positionAlign ?? 'center'
         ..position = placement?.position ?? 50.0.toJS
-        ..size = placement?.size ?? 90;
+        ..size = placement?.size ?? 100;
+      if (_nativePositionAlignment) {
+        original.cue.positionAlign = placement?.positionAlign ?? 'center';
+      }
+      _setCueLine(
+        original.cue,
+        secondaryLine,
+        row == 2 ? 'start' : 'end',
+        secondary: true,
+      );
     }
   }
 
@@ -1173,11 +1247,9 @@ class HtmlVideoBackend extends PlayerBackend
     rules.add(
       'background-color: ${_cssColor(_subtitleBackgroundColor) ?? 'transparent'}',
     );
-    final size = _subtitleFontSize;
-    if (size != null) {
-      final percent = size / _referenceTextSize * 100;
-      rules.add('font-size: ${percent.round()}%');
-    }
+    rules.add('font-family: sans-serif');
+    rules.add('font-size: ${_cueFontSize()}px');
+    rules.add('line-height: 1.2');
     final weight = _subtitleFontWeight;
     if (weight != null) {
       rules.add('font-weight: ${weight >= 600 ? 'bold' : 'normal'}');
@@ -1193,13 +1265,11 @@ class HtmlVideoBackend extends PlayerBackend
 
     final style = _subtitleStyleElement ??= _createSubtitleStyleElement();
     final secondaryColor = _cssColor(_secondaryTextColor);
-    final primarySize = _subtitleFontSize ?? _referenceTextSize;
-    final secondaryPercent =
-        (_secondaryFontSize ?? primarySize) / primarySize * 100;
+
     style.textContent =
         '#$_viewType::cue { ${rules.join('; ')} }\n'
         '#$_viewType::cue(.moonfin-secondary) { '
-        'font-size: $secondaryPercent%; '
+        'font-size: ${_cueFontSize(secondary: true)}px; '
         '${secondaryColor == null ? '' : 'color: $secondaryColor;'} }';
   }
 
@@ -1223,6 +1293,7 @@ class HtmlVideoBackend extends PlayerBackend
   /// offset from the original position, moving top cues down and bottom cues up while
   /// preserving middle placement. Automatically placed cues use a bottom anchor.
   void _positionCues(web.TextTrack track) {
+    _applySubtitleAppearance();
     final cues = track.activeCues;
     if (cues == null) return;
     final line = (1 - _subtitleVerticalOffset) * 100;
@@ -1242,29 +1313,26 @@ class HtmlVideoBackend extends PlayerBackend
         final column = (alignment - 1) % 3;
         final row = (alignment - 1) ~/ 3;
         vtt
-          ..snapToLines = false
-          ..lineAlign = row == 0 ? 'end' : row == 1 ? 'center' : 'start'
-          ..line = (row == 0
-                  ? line
-                  : row == 1
-                      ? 50
-                      : 5 + _subtitleVerticalOffset * 100)
-              .clamp(0.0, 100.0).toDouble().toJS
           ..align = column == 0 ? 'left' : column == 2 ? 'right' : 'center'
-          ..positionAlign =
-              column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center'
           ..position = (column == 0 ? 5 : column == 2 ? 95 : 50).toJS
-          ..size = 90;
+          // Older browsers also translate a percentage cue horizontally. A full
+          // width box keeps centred SRT captions centred without positionAlign.
+          ..size = !_nativePositionAlignment && column == 1 ? 100 : 90;
+        if (_nativePositionAlignment) {
+          vtt.positionAlign = column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center';
+        }
+        _clearPrimaryMiddleCueState(vtt);
+        _setCueLine(vtt, row == 0 ? line / 100 : row == 1 ? 0.5
+            : 0.05 + _subtitleVerticalOffset,
+            row == 0 ? 'end' : row == 1 ? 'center' : 'start');
         continue;
       }
       // Read the original position, never a value shifted by a previous
       // slider change or cuechange event.
       if (vtt.has(_autoPositionedCue) || vtt.line.dartify() == 'auto') {
         vtt.setProperty(_autoPositionedCue.toJS, true.toJS);
-        vtt.lineAlign = 'end';
-        if (vtt.lineAlign != 'end') continue;
-        vtt.snapToLines = false;
-        vtt.line = line.toJS;
+        _clearPrimaryMiddleCueState(vtt);
+        _setCueLine(vtt, line / 100, 'end');
         continue;
       }
       final saved = vtt.getProperty<JSNumber?>(_authoredLine.toJS);
@@ -1284,27 +1352,26 @@ class HtmlVideoBackend extends PlayerBackend
       final originalAlign = _cueAlignment(
         vtt, _authoredLineAlign, 'start',
       );
-      final lineHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) *
-          0.055 * 1.15;
+      final lineHeight = _cueFontSize() * 1.2 / _cueCanvasHeight;
       final authoredFraction = snap
           ? (authored < 0
               ? 1 + (authored + 1) * lineHeight
               : authored * lineHeight)
-          : authored / 100;
+          : _nativeLineAlignment ? authored / 100
+              : authored / 100 * (1 - _primaryCueHeight(vtt));
       final direction = authoredFraction < 1 / 3
           ? 1
           : authoredFraction > 2 / 3 ? -1 : 0;
+      _clearPrimaryMiddleCueState(vtt);
       if (_subtitleVerticalOffset == 0 || direction == 0) {
         vtt
           ..line = authored.toJS
-          ..snapToLines = snap
-          ..lineAlign = originalAlign;
+          ..snapToLines = snap;
+        if (_nativeLineAlignment) vtt.lineAlign = originalAlign;
       } else {
-        vtt
-          ..snapToLines = false
-          ..lineAlign = snap ? (authored < 0 ? 'end' : 'start') : originalAlign
-          ..line = ((authoredFraction + direction * _subtitleVerticalOffset)
-                  .clamp(0.0, 1.0) * 100).toDouble().toJS;
+        _setCueLine(vtt, authoredFraction + direction * _subtitleVerticalOffset,
+            snap ? (authored < 0 ? 'end' : 'start')
+                : _nativeLineAlignment ? originalAlign : 'start');
       }
     }
     _positionSecondaryCues();
