@@ -75,4 +75,27 @@ class SecondarySubtitleRenderingTest {
             assertEquals(position * 1280, edge.toFloat(), 12f)
         }
     }
+
+    @Test
+    fun increasedSpacingKeepsMultilineSecondaryVisibleWhenItFits() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context).apply {
+            setFractionalTextSize(0.06f)
+            setBottomPaddingFraction(0.04f)
+        }
+        val secondary = SubtitleView(context)
+        secondary.layout(0, 0, 1280, 720)
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0.04f)
+        overlay.select(true)
+        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary").build()))
+        overlay.updateCues(listOf(Cue.Builder().setText("One\nTwo\nThree").build()))
+        for (spacing in listOf(0f, 0.06f)) {
+            overlay.configureAppearance(36f, spacing)
+            assertEquals(View.VISIBLE, secondary.visibility)
+            val pixels = inkBounds(secondary)
+            assertTrue(pixels.top >= 360)
+            assertTrue(pixels.bottom < inkBounds(primary).top)
+        }
+    }
 }

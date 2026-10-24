@@ -281,6 +281,42 @@ void main() {
     }
   });
 
+  test('mpv keeps unmeasurable primaries distinct from Primary Off', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-pos': '100',
+      'secondary-sub-text': 'Other language',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    int position() => int.parse(other.platform.properties['secondary-sub-pos']!);
+    try {
+      other.discover();
+      await second.setSubtitleTrack(1, isBitmapSubtitle: true);
+      await second.setSecondarySubtitle(embeddedTrackId: 2);
+      final fallback = position();
+      expect(fallback, inExclusiveRange(0, 50));
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+      expect(position(), fallback);
+
+      // Text cues restore measured placement, retained through dialogue gaps.
+      other.platform.properties['sub-text/ass'] = 'Primary';
+      await second.setSubtitleTrack(1);
+      final measured = position();
+      expect(measured, greaterThan(50));
+      other.platform.properties['sub-text/ass'] = '';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+      expect(position(), measured);
+
+      // Reposition on selection even while paused, without a position-stream tick.
+      await second.setSubtitleTrack(1, isBitmapSubtitle: true);
+      expect(position(), fallback);
+      await second.disableSubtitleTrack();
+      expect(position(), 100);
+    } finally {
+      second.dispose();
+    }
+  });
+
   test('discovery selects the embedded ordinal once, excluding external and CC tracks', () async {
     await backend.setSubtitleTrack(2);
     player.discover();

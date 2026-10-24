@@ -49,8 +49,54 @@ final class RunnerTests: XCTestCase {
         // 400pt view on the 40–100 position scale.
         overlay.setSubtitlePosition(basePosition: 70)
         XCTAssertEqual(placed(2).maxY, bottom - 100, accuracy: 0.1)
+        XCTAssertEqual(placed(2, position: CGPoint(x: 0.5, y: 0.92)).maxY,
+                       authoredBottom - 100, accuracy: 0.1)
+        XCTAssertEqual(placed(7, position: CGPoint(x: 0.5, y: 0.08)).minY,
+                       authoredTop + 12, accuracy: 0.1)
         overlay.setSubtitlePosition(basePosition: 98)
         XCTAssertEqual(placed(2).maxY, bottom - 12, accuracy: 0.1)
+        XCTAssertEqual(placed(2, position: CGPoint(x: 0.5, y: 0.92)).maxY,
+                       authoredBottom - 12, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testPositionedPrimaryUsesScreenRegionForStacking() {
+        for (alignment, position) in [
+            (2, CGPoint(x: 0.5, y: 0.1)), // line:10%,end
+            (8, CGPoint(x: 0.5, y: 0.9)), // line:90%,start
+            (2, CGPoint(x: 0.5, y: 0.5)), // line:50%,end
+        ] {
+            let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+            let secondary = SubtitleOverlay(frame: primary.bounds)
+            primary.secondaryForStacking = secondary
+            secondary.primaryForStacking = primary
+            secondary.stackingEnabled = true
+            secondary.secondaryVerticalAdjustment = 0.06
+            primary.setEvents([SubtitleEvent(
+                startTime: 1, endTime: 3, text: "Primary",
+                bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                alignment: alignment, position: position)])
+            secondary.setEvents([cue("Secondary", end: 8)])
+            primary.update(currentTime: 2)
+            secondary.update(currentTime: 2)
+            let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
+            let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
+            if position.y < 1.0 / 3 {
+                XCTAssertGreaterThan(secondaryLabel.frame.minY, primaryLabel.frame.maxY)
+            } else {
+                XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
+            }
+            if position.y == 0.5 {
+                XCTAssertEqual((secondaryLabel.frame.maxY + primaryLabel.frame.minY) / 2,
+                               200, accuracy: 0.1)
+            }
+            let stacked = secondaryLabel.frame
+            primary.update(currentTime: 4)
+            secondary.update(currentTime: 4)
+            XCTAssertEqual(secondaryLabel.frame.minY, stacked.minY, accuracy: 0.1)
+            primary.clear()
+            XCTAssertEqual(secondaryLabel.frame.maxY, 400, accuracy: 0.1)
+        }
     }
 
     @MainActor
