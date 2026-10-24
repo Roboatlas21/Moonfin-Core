@@ -138,6 +138,7 @@ class HtmlVideoBackend extends PlayerBackend
   web.HTMLTrackElement? _secondaryTrack;
   web.AbortController? _secondaryRequest;
   String? _secondaryUrl;
+  String _secondaryLanguage = 'und';
   String? _secondaryObjectUrl;
   int _secondaryGeneration = 0;
   final _secondaryCues = <({web.VTTCue cue, double start, double end})>[];
@@ -515,6 +516,7 @@ class HtmlVideoBackend extends PlayerBackend
     await setSecondarySubtitle(
       url: payload['secondarySubtitleUrl'] as String?,
       codec: payload['secondarySubtitleCodec'] as String?,
+      language: payload['secondarySubtitleLanguage'] as String?,
     );
     if (!_isCurrentPlaybackRequest(generation)) return;
 
@@ -821,12 +823,21 @@ class HtmlVideoBackend extends PlayerBackend
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,
+    String? language,
     int? embeddedTrackId,
   }) async {
-    if (_disposed || (url != null && url == _secondaryUrl)) return;
+    if (_disposed) return;
+    final value = language?.trim();
+    final srclang = value == null || value.isEmpty ? 'und' : value;
+    if (url != null && url == _secondaryUrl) {
+      _secondaryLanguage = srclang;
+      _secondaryTrack?.srclang = srclang;
+      return;
+    }
     _clearSecondarySubtitle();
     if (url == null || url.isEmpty) return;
     _secondaryUrl = url;
+    _secondaryLanguage = srclang;
     // This backend cannot read subtitle tracks from the media container. Use the
     // server-provided subtitle URL, including for tracks embedded in MKV files.
     unawaited(_loadSecondarySubtitle(url, _secondaryGeneration));
@@ -858,6 +869,7 @@ class HtmlVideoBackend extends PlayerBackend
       final element = _secondaryTrack = web.HTMLTrackElement()
         ..kind = 'subtitles'
         ..label = 'Secondary'
+        ..srclang = _secondaryLanguage
         ..src = objectUrl;
       element.addEventListener(
         'load',

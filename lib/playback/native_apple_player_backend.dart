@@ -802,6 +802,7 @@ class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend,
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,
+    String? language,
     int? embeddedTrackId,
   }) async {
     await _invoke<void>('setSecondarySubtitle', {

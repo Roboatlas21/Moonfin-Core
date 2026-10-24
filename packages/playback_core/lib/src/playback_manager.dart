@@ -817,6 +817,7 @@ class PlaybackManager implements AudioOwnable {
     bool audioLike = false,
     String? secondarySubtitleUrl,
     String? secondarySubtitleCodec,
+    String? secondarySubtitleLanguage,
     int? secondarySubtitleTrackId,
   }) {
     // Music and audiobooks are audio whatever their streams say. Media3 only
@@ -959,6 +960,8 @@ class PlaybackManager implements AudioOwnable {
       if (secondarySubtitleUrl != null && secondarySubtitleCodec != null) ...{
         'secondarySubtitleUrl': secondarySubtitleUrl,
         'secondarySubtitleCodec': secondarySubtitleCodec,
+        if (secondarySubtitleLanguage != null)
+          'secondarySubtitleLanguage': secondarySubtitleLanguage,
       },
       if (selectedExternalSubtitleUrl != null)
         'selectedExternalSubtitleUrl': selectedExternalSubtitleUrl,
@@ -2879,6 +2882,9 @@ class PlaybackManager implements AudioOwnable {
         secondarySubtitleCodec: _secondarySubtitleStreamIndex != null
             ? _subtitleCodecForStream(_secondarySubtitleStreamIndex!)
             : null,
+        secondarySubtitleLanguage: _secondarySubtitleStreamIndex != null
+            ? _subtitleLanguageForStream(_secondarySubtitleStreamIndex!)
+            : null,
       );
       await _arbiter?.acquire(AudioProducer.mainPlayback);
       if (sessionToken != _playbackSessionToken) {
@@ -3635,6 +3641,12 @@ class PlaybackManager implements AudioOwnable {
     return false;
   }
 
+  String? _subtitleLanguageForStream(int streamIndex) => _extractLanguage(
+    _currentMediaStreams
+        .where((s) => s['Type'] == 'Subtitle' && s['Index'] == streamIndex)
+        .firstOrNull,
+  );
+
   String? _subtitleCodecForStream(int streamIndex) {
     final streams = _currentMediaStreams;
     if (streams.isNotEmpty) {
@@ -3859,6 +3871,7 @@ class PlaybackManager implements AudioOwnable {
     await _backend?.setSecondarySubtitle(
       url: _secondarySubtitleUrlForStream(index),
       codec: _subtitleCodecForStream(index),
+      language: _subtitleLanguageForStream(index),
       embeddedTrackId: _secondaryEmbeddedTrackId(index),
     );
     await _backend?.setSecondarySubtitleDelay(_secondarySubtitleDelaySeconds);
