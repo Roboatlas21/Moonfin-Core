@@ -143,16 +143,21 @@ with tempfile.TemporaryDirectory() as temp:
                     """
                 )
 
-            state = WebDriverWait(driver, 20).until(
-                lambda d: (lambda s: s if (
+            print("checking", name, json.dumps(details(driver)), flush=True)
+            try:
+                state = WebDriverWait(driver, 20).until(
+                    lambda d: (lambda s: s if (
                     s["readyState"] >= 2
-                    and s["primaryCues"] == 1
-                    and s["secondaryCues"] == 1
                     and s["time"] >= 1.0
-                    and (primary_mode != "showing" or s["primaryActive"] == 1)
-                    and (secondary_mode != "showing" or s["secondaryActive"] == 1)
-                ) else False)(details(d))
-            )
+                    and (primary_mode != "showing"
+                         or (s["primaryCues"] == 1 and s["primaryActive"] == 1))
+                    and (secondary_mode != "showing"
+                         or (s["secondaryCues"] == 1 and s["secondaryActive"] == 1))
+                    ) else False)(details(d))
+                )
+            except Exception:
+                print("timeout", name, json.dumps(details(driver)), flush=True)
+                raise
             png = driver.find_element(By.ID, "v").screenshot_as_png
             img = Image.open(io.BytesIO(png))
             img.save(ARTIFACTS / f"{name}.png")
