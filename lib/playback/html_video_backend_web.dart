@@ -36,6 +36,15 @@ class HtmlVideoBackend extends PlayerBackend
   HtmlVideoBackend(this._prefs)
     : _viewType = 'moonfin-html-video-${_nextViewId++}' {
     _videoElement = _createVideoElement();
+    _videoElement.addEventListener(
+      'seeked',
+      ((web.Event _) {
+        if (_disposed) return;
+        // A seek starts a new placement context, unlike a dialogue gap.
+        _primaryPlacement = null;
+        _positionSecondaryCues();
+      }).toJS,
+    );
     _registerViewFactory();
   }
 
