@@ -219,7 +219,7 @@ void main() {
   });
 
 
-  test('mpv bottom spacing stays fixed across primary offsets', () async {
+  test('mpv spacing uses native font units and the bottom margin', () async {
     final other = _Player();
     other.platform.properties.addAll({
       'secondary-sub-delay': '0',
@@ -231,25 +231,55 @@ void main() {
     try {
       other.discover();
       await second.setSecondarySubtitle(embeddedTrackId: 1);
+      double? baselineDistance;
       for (final spacing in [0.0, 0.02, 0.04]) {
-        final expectedPosition = 93 - (spacing * 100).round();
         for (final primaryOffset in [0.0, 0.04, 0.08]) {
-          await second.configureSubtitleStyle(verticalOffset: primaryOffset);
+          await second.configureSubtitleStyle(fontSize: 24, verticalOffset: primaryOffset);
           await second.configureSecondarySubtitleStyle(verticalOffset: spacing);
-          // sub-margin-y is shared by mpv's two text renderers. Secondary
-          // positioning must not subtract that same primary offset again.
-          expect(other.platform.properties['sub-margin-y'],
-              '${(primaryOffset * 720).round()}');
-          expect(other.platform.properties['secondary-sub-pos'],
-              '$expectedPosition');
+          final margin = double.parse(other.platform.properties['sub-margin-y']!) / 720;
+          final position = double.parse(other.platform.properties['secondary-sub-pos']!) / 100;
+          final distance = (1 - margin) * (1 - position);
+          baselineDistance ??= distance;
+          // The gap is measured on screen. mpv's percentage coordinate shrinks when
+          // its bottom margin grows, so the property itself cannot stay constant.
+          expect(distance - spacing, closeTo(baselineDistance, 0.01));
+          expect(distance, greaterThan(55 / 720));
         }
       }
-      expect(other.platform.properties['sub-pos'], isNot('89'));
+      expect(other.platform.properties['sub-pos'], isNull);
+      await second.disableSubtitleTrack();
+      expect(other.platform.properties['secondary-sub-pos'], '100');
     } finally {
       second.dispose();
     }
   });
 
+  test('mpv reserves more room for multiline text and narrow windows', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-pos': '100',
+      'sub-text/ass': 'Primary',
+      'secondary-sub-text': 'Second',
+      'osd-dimensions': '{"w":1280,"h":720}',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
+      await second.configureSubtitleStyle(fontSize: 24, verticalOffset: 0.04);
+      final oneLine = int.parse(other.platform.properties['secondary-sub-pos']!);
+      other.platform.properties['sub-text/ass'] = r'One\NTwo\NThree';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      final threeLines = int.parse(other.platform.properties['secondary-sub-pos']!);
+      expect(oneLine - threeLines, greaterThanOrEqualTo(15));
+      other.platform.properties['sub-text/ass'] = 'A long primary subtitle which must wrap';
+      other.platform.properties['osd-dimensions'] = '{"w":400,"h":720}';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(int.parse(other.platform.properties['secondary-sub-pos']!), lessThan(threeLines));
+    } finally {
+      second.dispose();
+    }
+  });
 
   test('discovery selects the embedded ordinal once, excluding external and CC tracks', () async {
     await backend.setSubtitleTrack(2);

@@ -203,30 +203,5 @@ class SubtitleLayoutPlannerTest {
         assertEquals(8f, shiftedPrimary.top - shifted.bottom)
     }
 
-    @Test
-    fun verticalOffsetMovesBothRowsWhilePreservingTheirGap() {
-        val primary = SubtitleBox(50f, 800f, 950f, 850f)
-        val normal = SubtitleLayoutPlanner.placeSecondary(
-            primary = listOf(primary),
-            viewportWidth = 1000,
-            viewportHeight = 1000,
-            secondaryHeight = 24f,
-            desiredBottom = 792f,
-            gapPx = 8f,
-            stepPx = 8f,
-        )!!
-        val shiftedPrimary = SubtitleBox(50f, 760f, 950f, 810f)
-        val shifted = SubtitleLayoutPlanner.placeSecondary(
-            primary = listOf(shiftedPrimary),
-            viewportWidth = 1000,
-            viewportHeight = 1000,
-            secondaryHeight = 24f,
-            desiredBottom = 752f,
-            gapPx = 8f,
-            stepPx = 8f,
-        )!!
 
-        assertEquals(-40f, shifted.bottom - normal.bottom)
-        assertEquals(8f, shiftedPrimary.top - shifted.bottom)
-    }
 }
