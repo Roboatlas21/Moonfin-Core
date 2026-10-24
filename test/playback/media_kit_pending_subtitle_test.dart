@@ -362,7 +362,9 @@ void main() {
       'secondary-sub-pos': '100',
       'sub-text/ass': 'Primary',
       'secondary-sub-text': 'Second',
-      'osd-dimensions': '{"w":1280,"h":720}',
+      'osd-dimensions': 'not a JSON string',
+      'osd-width': '1280',
+      'osd-height': '720',
     });
     final second = MediaKitPlayerBackend.forTesting(other, prefs);
     try {
@@ -375,9 +377,43 @@ void main() {
       final threeLines = int.parse(other.platform.properties['secondary-sub-pos']!);
       expect(oneLine - threeLines, greaterThanOrEqualTo(15));
       other.platform.properties['sub-text/ass'] = 'A long primary subtitle which must wrap';
-      other.platform.properties['osd-dimensions'] = '{"w":400,"h":720}';
+      other.platform.properties['osd-width'] = '400';
       await second.configureSecondarySubtitleStyle(verticalOffset: 0);
       expect(int.parse(other.platform.properties['secondary-sub-pos']!), lessThan(threeLines));
+    } finally {
+      second.dispose();
+    }
+  });
+
+  test('mpv OSD dimensions fall back for missing or invalid scalar values', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-pos': '100',
+      'sub-text/ass': 'A long primary subtitle that can wrap on narrow displays',
+      'secondary-sub-text': 'Translation',
+      'osd-dimensions': 'not JSON',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    int position() => int.parse(other.platform.properties['secondary-sub-pos']!);
+    try {
+      other.discover();
+      await second.setSecondarySubtitle(embeddedTrackId: 1);
+      await second.configureSubtitleStyle(fontSize: 24, verticalOffset: 0.04);
+      final fallbackPosition = position();
+
+      other.platform.properties['osd-width'] = 'invalid';
+      other.platform.properties['osd-height'] = '720';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(position(), fallbackPosition);
+
+      other.platform.properties['osd-width'] = '400';
+      other.platform.properties['osd-height'] = '0';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(position(), fallbackPosition);
+
+      other.platform.properties['osd-height'] = '720';
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(position(), lessThan(fallbackPosition));
     } finally {
       second.dispose();
     }
