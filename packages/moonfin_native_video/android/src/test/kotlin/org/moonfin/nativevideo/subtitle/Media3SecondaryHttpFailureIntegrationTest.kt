@@ -100,7 +100,7 @@ class Media3SecondaryHttpFailureIntegrationTest {
                 sidecar,
             ))
             player.prepare()
-            TestPlayerRunHelper.advance(player).withTimeoutMs(20000)
+            TestPlayerRunHelper.advance(player)
                 .untilState(Player.STATE_READY)
             val subtitleGroup = player.currentTracks.groups.first {
                 it.type == C.TRACK_TYPE_TEXT
@@ -108,9 +108,9 @@ class Media3SecondaryHttpFailureIntegrationTest {
             assertTrue(selector.setSecondaryTrack(TrackSelectionOverride(
                 subtitleGroup.mediaTrackGroup, listOf(0),
             )))
-            TestPlayerRunHelper.play(player).withTimeoutMs(30000)
+            TestPlayerRunHelper.play(player)
                 .untilPositionAtLeast(1_000L)
-            TestPlayerRunHelper.advance(player).withTimeoutMs(30000).runUntil {
+            TestPlayerRunHelper.advance(player).runUntil {
                 requestCount.get() > 0 && (subtitleErrors.isNotEmpty() || failures.isNotEmpty())
             }
             assertTrue("Injected subtitle request never happened", requestCount.get() > 0)
@@ -119,7 +119,7 @@ class Media3SecondaryHttpFailureIntegrationTest {
             assertEquals(Player.STATE_READY, player.playbackState)
             assertNull(player.playerError)
             val before = player.currentPosition
-            TestPlayerRunHelper.advance(player).withTimeoutMs(15000)
+            TestPlayerRunHelper.advance(player)
                 .untilPositionAtLeast(before + 500L)
             assertTrue("Playback should advance after subtitle request failed", player.currentPosition > before)
             assertTrue("Audio stream should still be rendered", audioRenderer.sampleBufferReadCount > 0)
