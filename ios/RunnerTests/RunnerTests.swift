@@ -193,15 +193,20 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(textAlignment(), .left)
 
         // A gap in primary dialogue preserves the secondary text alignment.
+        let previousTop = label.frame.minY
         primary.update(currentTime: 4)
         secondary.update(currentTime: 4)
         XCTAssertEqual(primary.activeText, "")
         XCTAssertEqual(secondary.activeText, "Secondary")
         XCTAssertEqual(textAlignment(), .left)
+        XCTAssertEqual(label.frame.minY, previousTop, accuracy: 0.1)
 
-        // Turning the primary track off resets secondary text alignment to centre.
+        // A real track change uses clear(), resetting the old placement, but
+        // not the secondary cue. An ordinary dialogue gap above did not.
         primary.clear()
         XCTAssertEqual(textAlignment(), .center)
+        XCTAssertGreaterThan(label.frame.minY, previousTop)
+        XCTAssertEqual(secondary.activeText, "Secondary")
 
         // A newly selected primary track can establish a different alignment.
         primary.setEvents([
@@ -554,5 +559,44 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(AetherPlayerWrapper.secondarySubtitleRoute(
             embeddedOrdinal: nil, availableEmbeddedTracks: 0, hasSidecar: false),
             .disabled)
+    }
+
+    @MainActor
+    func testPositionedCuesFollowPrimaryDelayWhenChangedWhilePaused() {
+        let overlay = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        func positioned(_ text: String, start: Double, end: Double, top: Bool) -> SubtitleEvent {
+            var event = cue(text, start: start, end: end)
+            event.alignment = top ? 8 : 2
+            event.position = CGPoint(x: 0.5, y: top ? 0.1 : 0.85)
+            return event
+        }
+        overlay.setEvents([
+            positioned("Early top", start: 8, end: 10, top: true),
+            positioned("Early bottom", start: 8, end: 10, top: false),
+            positioned("Late top", start: 10, end: 14, top: true),
+            positioned("Late bottom", start: 10, end: 14, top: false),
+        ])
+        func visibleText() -> Set<String> {
+            let nested = overlay.subviews.compactMap { $0 as? SubtitleOverlay }.first
+            return Set([
+                overlay.subviews.compactMap { $0 as? UILabel }.last?.text,
+                nested?.subviews.compactMap { $0 as? UILabel }.last?.text,
+            ].compactMap { $0 })
+        }
+
+        overlay.update(currentTime: 12)
+        XCTAssertEqual(visibleText(), Set(["Late top", "Late bottom"]))
+
+        // Simulate changing the delay while paused: the playhead remains at 12.
+        overlay.delaySeconds = 4
+        overlay.update(currentTime: 12)
+        XCTAssertEqual(visibleText(), Set(["Early top", "Early bottom"]))
+
+        let nested = overlay.subviews.compactMap { $0 as? SubtitleOverlay }.first!
+        overlay.delaySeconds = 3
+        overlay.update(currentTime: 12)
+        XCTAssertTrue(overlay.subviews.contains(nested))
+        XCTAssertEqual(nested.delaySeconds, 3, accuracy: 0.001)
+        XCTAssertEqual(visibleText(), Set(["Early top", "Early bottom"]))
     }
 }
