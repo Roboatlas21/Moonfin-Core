@@ -12,6 +12,8 @@ class _Native extends Fake implements NativePlayer {
   List<Map<String, dynamic>> tracks = [];
   final properties = <String, String>{'sid': 'no', 'secondary-sub-delay': '0'};
   Completer<String>? delayedTracks;
+  Completer<String>? delayedSecondaryText;
+  Completer<void>? secondaryTextReadStarted;
   Completer<void>? delayedSubtitleLoad;
   final commands = <List<String>>[];
   int rejectedSecondarySelections = 0;
@@ -39,6 +41,12 @@ class _Native extends Fake implements NativePlayer {
     String property, {
     bool waitForInitialization = true,
   }) async {
+    if (property == 'secondary-sub-text' && delayedSecondaryText != null) {
+      if (secondaryTextReadStarted?.isCompleted == false) {
+        secondaryTextReadStarted!.complete();
+      }
+      return delayedSecondaryText!.future;
+    }
     if (property == 'track-list') {
       return delayedTracks == null ? jsonEncode(tracks) : delayedTracks!.future;
     }
@@ -120,6 +128,24 @@ class _Player extends Fake implements Player {
   }
 }
 
+class _NonNativePlatform extends Fake implements PlatformPlayer {}
+
+class _NonNativePlayer extends Fake implements Player {
+  @override
+  final _NonNativePlatform platform = _NonNativePlatform();
+  @override
+  final _Streams stream = _Streams();
+  @override
+  PlayerState get state => const PlayerState();
+  final opened = <String>[];
+  @override
+  Future<void> open(Playable playable, {bool play = true}) async {
+    opened.add((playable as Media).uri);
+  }
+  @override
+  Future<void> dispose() => stream.changes.close();
+}
+
 Future<void> _flush() async {
   for (var n = 0; n < 5; n++) {
     await Future<void>.delayed(Duration.zero);
@@ -147,7 +173,24 @@ void main() {
   });
 
 
-  test('seeking clears cached primary placement, not ordinary dialogue gaps', () async {
+  test('audio startup does not require a native player', () async {
+    final other = _NonNativePlayer();
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      await second.play({
+        'url': 'https://server/song.mp3',
+        'mediaType': 'audio',
+        'autoPlay': false,
+      }, startPosition: const Duration(seconds: 30));
+      expect(other.opened, ['https://server/song.mp3']);
+      await second.setSubtitleDelay(1.25);
+      expect(second.subtitleDelaySeconds, 1.25);
+    } finally {
+      second.dispose();
+    }
+  });
+
+  test('seeks clear in-flight placement but dialogue gaps keep it', () async {
     final other = _Player();
     other.platform.properties.addAll({
       'secondary-sub-pos': '100',
@@ -168,6 +211,17 @@ void main() {
       expect(position(), bottomPosition);
 
       await second.seekTo(const Duration(seconds: 51));
+      expect(position(), lessThan(50));
+
+      other.platform.properties['sub-text/ass'] = r'{\an2}Bottom primary';
+      final delayed = other.platform.delayedSecondaryText = Completer<String>();
+      final started = other.platform.secondaryTextReadStarted = Completer<void>();
+      final update = second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      await started.future;
+      final seek = second.seekTo(const Duration(seconds: 60));
+      await _flush();
+      delayed.complete('Translation');
+      await Future.wait([update, seek]);
       expect(position(), lessThan(50));
     } finally {
       second.dispose();

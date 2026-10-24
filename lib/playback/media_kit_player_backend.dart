@@ -288,6 +288,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   double _secondaryVerticalOffset = 0;
   int? _lastSecondaryStackPosition;
   String? _lastPrimaryText;
+  int _primaryPlacementGeneration = 0;
   DateTime? _lastSecondaryPositionCheck;
   Completer<void>? _secondaryPositionUpdate;
   StreamSubscription<Duration>? _secondaryPositionSub;
@@ -315,6 +316,7 @@ class MediaKitPlayerBackend extends PlayerBackend
 
   // Keep the last cue across dialogue gaps, but not across tracks or seeks.
   void _resetPrimarySubtitlePlacement() {
+    _primaryPlacementGeneration++;
     _lastPrimaryText = null;
     _lastSecondaryStackPosition = null;
     _lastSecondaryPositionCheck = null;
@@ -3018,7 +3020,8 @@ class MediaKitPlayerBackend extends PlayerBackend
   @override
   Future<void> setSubtitleDelay(double seconds) async {
     subtitleDelaySeconds = seconds;
-    final native = _player.platform as NativePlayer;
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
     await _nativeSetProperty(native, 'sub-delay', seconds.toStringAsFixed(3));
     await setSecondarySubtitleDelay(_secondarySubtitleDelay);
   }
@@ -3208,15 +3211,17 @@ class MediaKitPlayerBackend extends PlayerBackend
     if (native is! NativePlayer) return;
     final update = _secondaryPositionUpdate = Completer<void>();
     final generation = _secondarySubtitleGeneration;
+    final placementGeneration = _primaryPlacementGeneration;
+    bool isCurrent() =>
+        _isCurrentSecondarySubtitle(generation) &&
+        placementGeneration == _primaryPlacementGeneration &&
+        _secondarySubtitleRequested;
     try {
       final primaryAss =
           await _tryNativeGetProperty(native, 'sub-text/ass') ?? '';
       final secondaryText =
           await _tryNativeGetProperty(native, 'secondary-sub-text') ?? '';
-      if (!_isCurrentSecondarySubtitle(generation) ||
-          !_secondarySubtitleRequested) {
-        return;
-      }
+      if (!isCurrent()) return;
       final fontSize =
           double.tryParse(
             await _tryNativeGetProperty(native, 'sub-font-size') ?? '',
@@ -3256,10 +3261,7 @@ class MediaKitPlayerBackend extends PlayerBackend
             await _tryNativeGetProperty(native, 'secondary-sub-scale') ?? '',
           ) ??
           1;
-      if (!_isCurrentSecondarySubtitle(generation) ||
-          !_secondarySubtitleRequested) {
-        return;
-      }
+      if (!isCurrent()) return;
       if (!_subtitlesDisabled &&
           !_primaryIsBitmapSubtitle &&
           primaryAss.isNotEmpty) {
@@ -3307,7 +3309,7 @@ class MediaKitPlayerBackend extends PlayerBackend
                 .clamp(0, 150);
       if (force || position != _lastSecondaryStackPosition) {
         await _nativeSetProperty(native, 'secondary-sub-pos', '$position');
-        if (_isCurrentSecondarySubtitle(generation)) {
+        if (isCurrent()) {
           _lastSecondaryStackPosition = position;
         }
       }
