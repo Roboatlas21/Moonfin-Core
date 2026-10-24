@@ -49,6 +49,7 @@ class HtmlVideoBackend extends PlayerBackend
   JSAny? _hlsController;
 
   WebSubtitleOverlay? _subtitleOverlay;
+  bool _primaryUsesOverlay = false;
   WebSubtitleOverlay get _overlay => _subtitleOverlay ??=
       WebSubtitleOverlay(_videoElement)..setDelay(subtitleDelaySeconds);
 
@@ -452,6 +453,7 @@ class HtmlVideoBackend extends PlayerBackend
   void _clearExternalTracks() {
     _clearSecondarySubtitle();
     _primaryPlacement = null;
+    _primaryUsesOverlay = false;
     for (final track in _externalTracks) {
       track.element.remove();
     }
@@ -655,10 +657,12 @@ class HtmlVideoBackend extends PlayerBackend
     _showTrackAt(index - 1);
   }
 
-  /// Shows the primary track at [position] in add order. An out-of-range position turns
-  /// the primary off; the secondary track stays enabled.
-  void _showTrackAt(int position) {
+  /// Shows the native primary track at [position] in add order. An out-of-range
+  /// position hides native primary tracks; [primaryUsesOverlay] distinguishes an
+  /// ASS/PGS primary from Off. The secondary track stays enabled.
+  void _showTrackAt(int position, {bool primaryUsesOverlay = false}) {
     _subtitleOverlay?.clear();
+    _primaryUsesOverlay = primaryUsesOverlay;
     _restorePrimaryMiddlePosition();
     _primaryPlacement = null;
 
@@ -1106,6 +1110,9 @@ class HtmlVideoBackend extends PlayerBackend
       );
     }
     final placement = _primaryPlacement;
+    // ASS/PGS overlays have no VTTCue bounds. Keep the second track at the top
+    // instead of treating an enabled overlay as Primary Off.
+    final fallbackToTop = placement == null && _primaryUsesOverlay;
     final row = ((placement?.alignment ?? 2) - 1) ~/ 3;
     final gap = middleSubtitleGap(0.015, _secondaryOffset);
 
@@ -1131,7 +1138,7 @@ class HtmlVideoBackend extends PlayerBackend
     }
 
     final secondaryLine = placement == null
-        ? 1 - _subtitleVerticalOffset
+        ? (fallbackToTop ? _subtitleVerticalOffset : 1 - _subtitleVerticalOffset)
         : switch (row) {
             2 => placement.bottom + gap,
             1 => placement.centre - gap / 2,
@@ -1159,7 +1166,7 @@ class HtmlVideoBackend extends PlayerBackend
       _setCueLine(
         original.cue,
         secondaryLine,
-        row == 2 ? 'start' : 'end',
+        row == 2 || fallbackToTop ? 'start' : 'end',
         secondary: true,
       );
     }
@@ -1183,7 +1190,7 @@ class HtmlVideoBackend extends PlayerBackend
 
   Future<void> _showExternalSubtitle(String url, {String? codec}) async {
     if (WebSubtitleOverlay.isOverlayCodec(codec)) {
-      _showTrackAt(-1);
+      _showTrackAt(-1, primaryUsesOverlay: true);
       await _overlay.show(url, codec);
       return;
     }
