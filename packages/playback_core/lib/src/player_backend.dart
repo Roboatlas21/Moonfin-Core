@@ -70,6 +70,13 @@ abstract interface class SubtitleLoadingBackend {
   Stream<bool> get subtitleLoadingStream;
 }
 
+/// Reports which secondary subtitle controls a backend supports.
+abstract interface class SecondarySubtitleBackend {
+  bool get supportsSecondarySubtitleDelay;
+  bool get supportsSecondarySubtitlePosition;
+  bool get supportsSecondarySubtitleStyle;
+}
+
 abstract class PlayerBackend {
   Future<void> play(
     dynamic mediaItem, {
