@@ -4150,12 +4150,7 @@ class Media3VideoView(
         )
     }
 
-    /**
-     * The one place the current source is handed to the player, for the first
-     * prepare and every re-prepare after it. Playback with no subtitle timing
-     * to shift keeps the player's own media item path, the rest gets a source
-     * tree the app builds.
-     */
+    /** Carry the current primary track across a source rebuild, unless the user chose Off or a new track. */
     private fun rememberPrimarySelectionForSourceRebuild() {
         if (!playerHasLoadedSource) return
         val restore = primaryTrackRestoreTarget(
@@ -4179,6 +4174,12 @@ class Media3VideoView(
         }
     }
 
+    /**
+     * The one place the current source is handed to the player, for the first
+     * prepare and every re-prepare after it. Playback with no subtitle timing
+     * to shift keeps the player's own media item path, the rest gets a source
+     * tree the app builds.
+     */
     private fun prepareCurrentSource(startPositionMs: Long, playWhenReady: Boolean) {
         val url = currentUrl ?: return
         // Rebuilding may change Media3 track-group IDs. Retry the existing
