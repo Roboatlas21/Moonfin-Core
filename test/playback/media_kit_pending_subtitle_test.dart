@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _Native extends Fake implements NativePlayer {
   List<Map<String, dynamic>> tracks = [];
-  final properties = <String, String>{'sid': 'no'};
+  final properties = <String, String>{'sid': 'no', 'secondary-sub-delay': '0'};
   Completer<String>? delayedTracks;
   Completer<void>? delayedSubtitleLoad;
   final commands = <List<String>>[];
@@ -138,6 +138,35 @@ void main() {
   tearDown(() {
     if (!disposed) backend.dispose();
     prefs.dispose();
+  });
+
+  test('delay survives source reloads but resets for the next session', () async {
+    Future<void> open(int? session, {int secondaryDelayMs = 0}) => backend.play({
+      'url': 'https://server/video-$session',
+      'subtitleDelaySessionId': session,
+      'secondarySubtitleDelayMs': secondaryDelayMs,
+    });
+    await open(1);
+    await backend.setSubtitleDelay(1.25);
+    await backend.setSecondarySubtitleDelay(0.5);
+    player.discover();
+    await backend.setSubtitleTrack(1);
+    await backend.setSubtitleTrack(2);
+    expect(player.platform.properties['sub-delay'], '1.250');
+    expect(player.platform.properties['secondary-sub-delay'], '1.750');
+
+    await backend.stop();
+    await open(1, secondaryDelayMs: 500);
+    expect(player.platform.properties['sub-delay'], '1.250');
+    expect(player.platform.properties['secondary-sub-delay'], '1.750');
+    expect(backend.subtitleDelaySeconds, 1.25);
+
+    await open(2);
+    expect(player.platform.properties['sub-delay'], '0.000');
+    expect(player.platform.properties['secondary-sub-delay'], '0.000');
+    await backend.setSubtitleDelay(-0.5);
+    await open(null);
+    expect(player.platform.properties['sub-delay'], '0.000');
   });
 
 
