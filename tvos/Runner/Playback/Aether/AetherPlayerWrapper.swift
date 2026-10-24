@@ -47,8 +47,11 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     var isPlaying: Bool { state == .playing }
 
-    /// True while the engine downloads and decodes the chosen external subtitle.
-    var isSubtitleLoading: Bool { Self._sharedEngine?.isLoadingSubtitles ?? false }
+    /// True while the primary or secondary subtitle file is loading.
+    var isSubtitleLoading: Bool {
+        guard let engine = Self._sharedEngine else { return false }
+        return engine.isLoadingSubtitles || engine.isLoadingSecondarySubtitles
+    }
 
     let nowPlaying = NowPlayingController()
 
@@ -90,6 +93,12 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     private let playerView = AetherPlayerView()
     let subtitleOverlay = SubtitleOverlay()
+    let secondarySubtitleOverlay = SubtitleOverlay()
+    private var pendingSecondarySubtitle: (embeddedTrackId: Int?, url: URL?)?
+    private var secondarySubtitlesReady = false
+    private(set) var secondaryDelayAdjustment: Double = 0
+    private var secondaryFontSize: Double?
+    private var secondaryTextColor: Int?
     private var cancellables = Set<AnyCancellable>()
     private var surfaceAttachedContinuations: [CheckedContinuation<Void, Never>] = []
     private var audioSessionActive = false
@@ -168,6 +177,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        secondarySubtitleOverlay.primaryForStacking = subtitleOverlay
+        subtitleOverlay.secondaryForStacking = secondarySubtitleOverlay
         #if os(iOS) || os(tvOS)
             // On iOS the handlers only ever land on a session, the video
             // player's or the engine's music one, never the shared center.
@@ -332,6 +343,23 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 // the current pair after delivery, including when a track switch
                 // has superseded a queued publication.
                 self?.applySubtitleCues(engine.subtitleCues)
+            }
+            .store(in: &cancellables)
+
+        engine.$secondarySubtitleCues
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak engine] _ in
+                guard let engine else { return }
+                self?.secondarySubtitleOverlay.setEvents(
+                    Self.subtitleEvents(from: engine.secondarySubtitleCues))
+            }
+            .store(in: &cancellables)
+
+        engine.$isSecondarySubtitleActive
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak engine] _ in
+                self?.secondarySubtitleOverlay.keepsVideoComposited =
+                    engine?.isSecondarySubtitleActive ?? false
             }
             .store(in: &cancellables)
 
@@ -600,20 +628,26 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         withExtendedLifetime(previous) {}
         playerView.frame = view.bounds
         subtitleOverlay.frame = view.bounds
+        secondarySubtitleOverlay.frame = view.bounds
         #if canImport(UIKit)
             playerView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             view.insertSubview(playerView, at: 0)
             subtitleOverlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             view.insertSubview(subtitleOverlay, aboveSubview: playerView)
+            secondarySubtitleOverlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.insertSubview(secondarySubtitleOverlay, aboveSubview: subtitleOverlay)
         #elseif canImport(AppKit)
             playerView.autoresizingMask = [.width, .height]
             view.addSubview(playerView, positioned: .below, relativeTo: nil)
             subtitleOverlay.autoresizingMask = [.width, .height]
             view.addSubview(subtitleOverlay, positioned: .above, relativeTo: playerView)
+            secondarySubtitleOverlay.autoresizingMask = [.width, .height]
+            view.addSubview(secondarySubtitleOverlay, positioned: .above, relativeTo: subtitleOverlay)
         #endif
         subtitleOverlay.videoRectProvider = { [weak self] in
             self?.currentVideoRect() ?? .zero
         }
+        secondarySubtitleOverlay.videoRectProvider = subtitleOverlay.videoRectProvider
         Self.sharedEngine()?.bind(view: playerView)
         if view.window != nil {
             resumeSurfaceWaiters()
@@ -661,6 +695,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         playerView.removeFromSuperview()
         subtitleOverlay.removeFromSuperview()
         subtitleOverlay.videoRectProvider = nil
+        secondarySubtitleOverlay.videoRectProvider = nil
+        secondarySubtitleOverlay.removeFromSuperview()
         videoView = nil
     }
 
@@ -713,6 +749,30 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         /// arriving after it, because the engine clears its external registry
         /// when a load begins and only re-seats what the load itself declared.
         var externalSubtitles: [ExternalSubtitleTrack] = []
+        var subtitleDelay: Double = 0
+        var secondarySubtitle = SecondarySubtitleConfiguration()
+    }
+
+    struct SecondarySubtitleConfiguration {
+        var embeddedTrackId: Int?
+        var url: URL?
+        var delay: Double = 0
+        var offset: Double = 0
+        var fontSize: Double?
+        var textColor: Int?
+    }
+
+    static func secondarySubtitleConfiguration(from args: [String: Any]) -> SecondarySubtitleConfiguration {
+        let url = (args["secondarySubtitleUrl"] as? String).flatMap {
+            $0.hasPrefix("/") ? URL(fileURLWithPath: $0) : URL(string: $0)
+        }
+        return SecondarySubtitleConfiguration(
+            embeddedTrackId: (args["secondarySubtitleTrackId"] as? NSNumber)?.intValue,
+            url: url,
+            delay: ((args["secondarySubtitleDelayMs"] as? NSNumber)?.doubleValue ?? 0) / 1000,
+            offset: (args["secondarySubtitleOffset"] as? NSNumber)?.doubleValue ?? 0,
+            fontSize: (args["secondarySubtitleFontSize"] as? NSNumber)?.doubleValue,
+            textColor: (args["secondarySubtitleTextColor"] as? NSNumber)?.intValue)
     }
 
     /// Reads the sidecars out of a `setSource` payload. Anything without a
@@ -805,6 +865,17 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         resetStallTracking()
         resetAssState()
         subtitleOverlay.clear()
+        secondarySubtitleOverlay.clear()
+        secondarySubtitlesReady = false
+        setSubtitleDelay(sourceConfiguration.subtitleDelay)
+        let secondary = sourceConfiguration.secondarySubtitle
+        pendingSecondarySubtitle = (secondary.embeddedTrackId, secondary.url)
+        secondarySubtitleOverlay.stackingEnabled =
+            secondary.embeddedTrackId != nil || secondary.url != nil
+        setSecondarySubtitleDelay(secondary.delay)
+        configureSecondarySubtitleStyle(
+            fontSize: secondary.fontSize, verticalOffset: secondary.offset,
+            textColor: secondary.textColor)
         externalSubIDsByURL.removeAll()
         declaredSubtitleURLs = Set(
             sourceConfiguration.externalSubtitles.map { $0.url.absoluteString })
@@ -820,6 +891,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             // otherwise start playback with nothing on screen to stop it.
             guard !isShutDown else { return }
         #endif
+        guard loadGeneration == generation else { return }
         activateAudioSession()
 
         let isRemotePlaylist = url.path.lowercased().hasSuffix(".m3u8")
@@ -892,6 +964,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             if forceSubtitlesDisabledOnStart {
                 engine.clearSubtitle()
             }
+            secondarySubtitlesReady = true
+            applyPendingSecondarySubtitle()
         } catch {
             guard loadGeneration == generation, !didEmitLoadError else { return }
             declaredSubtitleURLs.removeAll()
@@ -977,6 +1051,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     /// Dart-initiated stops go through here so back to back DV episodes don't bounce
     /// through SDR.
     func stop() {
+        loadGeneration &+= 1
+        resetSecondarySubtitle()
         #if os(iOS)
             // A stop from a wrapper that was shut down, or that another one has
             // taken the engine from, would land on whatever plays next.
@@ -995,6 +1071,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     /// Full teardown on dismiss: resets display criteria, releases the view
     /// binding and the audio session. The engine itself stays alive.
     func shutdown() {
+        loadGeneration &+= 1
+        resetSecondarySubtitle()
         stopObservingForegroundReturn()
         guard let engine = Self.sharedEngine() else { return }
         #if os(iOS)
@@ -1138,6 +1216,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             currentSubtitleTrackIndex = ordinal(
                 for: engine.activeSubtitleTrackIndex, in: subtitleTable)
         }
+        applyPendingSecondarySubtitle()
     }
 
     private func externalFilename(forTrackID id: Int) -> String? {
@@ -1161,6 +1240,15 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         selectSubtitleTrack(trackIndex, externalUrl: nil)
     }
 
+    /// A new primary track must not inherit the previous track's placement.
+    /// Ordinary dialogue gaps still keep that placement inside SubtitleOverlay.
+    private func selectResolvedSubtitleTrack(_ id: Int, engine: AetherEngine) {
+        if engine.activeSubtitleTrackIndex != id {
+            subtitleOverlay.clear()
+        }
+        engine.selectSubtitleTrack(index: id)
+    }
+
     func selectSubtitleTrack(_ trackIndex: Int32, externalUrl: String?) {
         guard let engine = Self.sharedEngine() else { return }
         if trackIndex < 0 {
@@ -1170,7 +1258,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         resetAssState()
         if let externalUrl, let id = externalSubIDsByURL[externalUrl] {
             logSubtitleSelection(requested: trackIndex, route: "urlMap", resolvedID: id)
-            engine.selectSubtitleTrack(index: id)
+            selectResolvedSubtitleTrack(id, engine: engine)
             return
         }
         if let externalUrl,
@@ -1181,7 +1269,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             })
         {
             logSubtitleSelection(requested: trackIndex, route: "filename", resolvedID: match.id)
-            engine.selectSubtitleTrack(index: match.id)
+            selectResolvedSubtitleTrack(match.id, engine: engine)
             return
         }
         let index = Int(trackIndex) - 1
@@ -1191,7 +1279,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         }
         logSubtitleSelection(
             requested: trackIndex, route: "ordinal", resolvedID: subtitleTable[index].id)
-        engine.selectSubtitleTrack(index: subtitleTable[index].id)
+        selectResolvedSubtitleTrack(subtitleTable[index].id, engine: engine)
     }
 
     private func hostLog(_ line: String) {
@@ -1222,7 +1310,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         let index = Int(id) - 1
         guard index >= 0, index < closedCaptionTable.count else { return }
         resetAssState()
-        engine.selectSubtitleTrack(index: closedCaptionTable[index].id)
+        selectResolvedSubtitleTrack(closedCaptionTable[index].id, engine: engine)
     }
 
     func disableSubtitles() {
@@ -1272,6 +1360,98 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 + "tableCount=\(subtitleTable.count)")
     }
 
+    // MARK: - Secondary subtitles
+
+    func setSecondarySubtitle(embeddedTrackId: Int?, url: URL?) {
+        Self.sharedEngine()?.clearSecondarySubtitle()
+        secondarySubtitleOverlay.clear()
+        secondarySubtitleOverlay.stackingEnabled =
+            embeddedTrackId != nil || url != nil
+        pendingSecondarySubtitle = (embeddedTrackId, url)
+        applyPendingSecondarySubtitle()
+    }
+
+    enum SecondarySubtitleRoute: Equatable {
+        case embedded(index: Int)
+        case sidecar
+        case pending
+        case disabled
+    }
+
+    /// A missing embedded ordinal may still arrive from the demuxer. Only
+    /// fall back to a supplied sidecar once the current load is ready.
+    static func secondarySubtitleRoute(
+        embeddedOrdinal: Int?, availableEmbeddedTracks: Int, hasSidecar: Bool
+    ) -> SecondarySubtitleRoute {
+        if let embeddedOrdinal, embeddedOrdinal > 0 {
+            if embeddedOrdinal <= availableEmbeddedTracks {
+                return .embedded(index: embeddedOrdinal - 1)
+            }
+            return hasSidecar ? .sidecar : .pending
+        }
+        return hasSidecar ? .sidecar : .disabled
+    }
+
+    private func applyPendingSecondarySubtitle() {
+        guard secondarySubtitlesReady, let pending = pendingSecondarySubtitle,
+            let engine = Self.sharedEngine()
+        else { return }
+
+        // The server's embedded ordinal is 1-based and excludes external
+        // subtitles and broadcast captions.
+        let tracks = engine.subtitleTracks.filter {
+            !$0.isExternal && !Self.isClosedCaptionCodec($0.codec)
+        }
+        switch Self.secondarySubtitleRoute(
+            embeddedOrdinal: pending.embeddedTrackId,
+            availableEmbeddedTracks: tracks.count,
+            hasSidecar: pending.url != nil
+        ) {
+        case .embedded(let index):
+            engine.selectSecondarySubtitleTrack(index: tracks[index].id)
+            hostLog("secondary subtitle ordinal=\(index + 1) stream=\(tracks[index].id)")
+        case .sidecar:
+            guard let url = pending.url else { return }
+            engine.selectSecondarySidecarSubtitle(url: url)
+            if let ordinal = pending.embeddedTrackId, ordinal > 0 {
+                hostLog("secondary subtitle ordinal=\(ordinal) unavailable; using sidecar")
+            } else {
+                hostLog("secondary subtitle sidecar selected")
+            }
+        case .pending:
+            return
+        case .disabled:
+            engine.clearSecondarySubtitle()
+        }
+        pendingSecondarySubtitle = nil
+    }
+
+    private func resetSecondarySubtitle() {
+        secondarySubtitlesReady = false
+        pendingSecondarySubtitle = nil
+        secondarySubtitleOverlay.clear()
+        secondarySubtitleOverlay.stackingEnabled = false
+        secondarySubtitleOverlay.keepsVideoComposited = false
+    }
+
+    func setSecondarySubtitleDelay(_ seconds: Double) {
+        secondaryDelayAdjustment = min(max(seconds, -5), 5)
+        secondarySubtitleOverlay.delaySeconds = subtitleOverlay.delaySeconds + secondaryDelayAdjustment
+        secondarySubtitleOverlay.update(currentTime: Self._sharedEngine?.sourceTime ?? 0)
+    }
+
+    func configureSecondarySubtitleStyle(
+        fontSize: Double?, verticalOffset: Double?, textColor: Int?
+    ) {
+        if let verticalOffset {
+            secondarySubtitleOverlay.secondaryVerticalAdjustment = verticalOffset
+        }
+        secondaryFontSize = fontSize
+        secondaryTextColor = textColor
+        secondarySubtitleOverlay.applySecondaryStyle(
+            from: subtitleOverlay, fontSize: fontSize, textColor: textColor)
+    }
+
     // MARK: - Subtitles (cues, ASS, style)
 
     private func applySubtitleCues(_ cues: [SubtitleCue]) {
@@ -1299,18 +1479,34 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         #endif
 
         resetAssState()
-        let events = cues.map { cue -> SubtitleEvent in
+        subtitleOverlay.setEvents(Self.subtitleEvents(from: cues))
+    }
+
+    private static func subtitleEvents(from cues: [SubtitleCue]) -> [SubtitleEvent] {
+        cues.map { cue -> SubtitleEvent in
             switch cue.body {
             case .text(let text):
                 return SubtitleEvent(
                     startTime: cue.startTime, endTime: cue.endTime,
                     text: plainTextFromAssMarkup(text),
-                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0)
+                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                    alignment: cue.placement?.alignment,
+                    position: cue.placement?.position)
             case .richText(let runs):
+                let styled = runs.map { run in
+                    SubtitleStyledRun(
+                        text: plainTextFromAssMarkup(run.text),
+                        isBold: run.isBold, isItalic: run.isItalic,
+                        isUnderlined: run.isUnderlined,
+                        isStruckThrough: run.isStruckThrough)
+                }
                 return SubtitleEvent(
                     startTime: cue.startTime, endTime: cue.endTime,
-                    text: plainTextFromAssMarkup(runs.map(\.text).joined()),
-                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0)
+                    text: styled.map(\.text).joined(),
+                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
+                    alignment: cue.placement?.alignment,
+                    position: cue.placement?.position,
+                    styledRuns: styled)
             case .image(let image):
                 return SubtitleEvent(
                     startTime: cue.startTime, endTime: cue.endTime, text: nil,
@@ -1320,11 +1516,11 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                     canvasSize: image.canvasSize == .zero ? nil : image.canvasSize)
             }
         }
-        subtitleOverlay.setEvents(events)
     }
 
     private func tickSubtitles(at sourceTime: Double) {
         subtitleOverlay.update(currentTime: sourceTime)
+        secondarySubtitleOverlay.update(currentTime: sourceTime)
         #if canImport(Libass)
             lastKnownSourceTime = sourceTime
             lastKnownSourceTimeHostTime = CACurrentMediaTime()
@@ -1414,8 +1610,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 break
             case .cleared:
                 subtitleOverlay.showAssImage(nil)
-            case .image(let image):
-                subtitleOverlay.showAssImage(image)
+            case .image(let image, let bounds):
+                subtitleOverlay.showAssImage(image, bounds: bounds)
             }
         }
     #endif
@@ -1439,6 +1635,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             textColor: textColor, backgroundColor: backgroundColor,
             strokeColor: strokeColor, fontSize: fontSize,
             fontWeight: fontWeight, verticalOffset: verticalOffset)
+        secondarySubtitleOverlay.applySecondaryStyle(
+            from: subtitleOverlay, fontSize: secondaryFontSize, textColor: secondaryTextColor)
         if let verticalOffset {
             baseSubtitlePosition = 100 - Int((verticalOffset * 60).rounded())
         }
@@ -1448,12 +1646,21 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     /// while transport controls are visible.
     func setSubtitlePosition(_ pos: Int) {
         subtitleOverlay.setSubtitlePosition(basePosition: pos)
+        secondarySubtitleOverlay.setSubtitlePosition(basePosition: pos)
     }
 
     var baseSubtitlePos: Int { baseSubtitlePosition }
 
     func setSubtitleDelay(_ interval: TimeInterval) {
         subtitleOverlay.delaySeconds = interval
+        let sourceTime = Self._sharedEngine?.sourceTime ?? 0
+        subtitleOverlay.update(currentTime: sourceTime)
+        setSecondarySubtitleDelay(secondaryDelayAdjustment)
+        #if canImport(Libass)
+        if assConfiguredForTrackID != nil {
+            renderAss(atSeconds: sourceTime - interval)
+        }
+        #endif
     }
 
     /// No audio-delay control exists on the AVFoundation path.
@@ -1469,6 +1676,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         case .zoomToFill: engine.videoGravity = .resizeAspectFill
         case .stretch: engine.videoGravity = .resize
         }
+        subtitleOverlay.refreshVideoGeometry()
+        secondarySubtitleOverlay.refreshVideoGeometry()
     }
 
     func cycleZoomMode() {
