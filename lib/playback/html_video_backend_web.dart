@@ -42,7 +42,7 @@ class HtmlVideoBackend extends PlayerBackend
       ((web.Event _) {
         if (_disposed) return;
         // A seek starts a new placement context, unlike a dialogue gap.
-        _primaryPlacement = null;
+        _primaryReferenceCues = const [];
         _positionSecondaryCues();
       }).toJS,
     );
@@ -151,17 +151,9 @@ class HtmlVideoBackend extends PlayerBackend
   final _secondaryCues = <({web.VTTCue cue, double start, double end})>[];
   double _secondaryDelay = 0;
   double _secondaryOffset = 0.0;
-  // Keep the primary subtitle's last position and alignment during gaps in dialogue.
-  ({
-    int alignment,
-    double centre,
-    double top,
-    double bottom,
-    JSAny position,
-    String align,
-    String positionAlign,
-    double size,
-  })? _primaryPlacement;
+  // Retain authored cues across dialogue gaps, not bounds measured at an old
+  // font size, offset or viewport. Their original coordinates are saved below.
+  List<web.VTTCue> _primaryReferenceCues = const [];
   double? _secondaryFontSize;
   int? _secondaryTextColor;
 
@@ -474,7 +466,7 @@ class HtmlVideoBackend extends PlayerBackend
 
   void _clearExternalTracks() {
     _clearSecondarySubtitle();
-    _primaryPlacement = null;
+    _primaryReferenceCues = const [];
     _primaryUsesOverlay = false;
     for (final track in _externalTracks) {
       track.element.remove();
@@ -700,7 +692,7 @@ class HtmlVideoBackend extends PlayerBackend
     _subtitleOverlay?.clear();
     _primaryUsesOverlay = primaryUsesOverlay;
     _restorePrimaryMiddlePosition();
-    _primaryPlacement = null;
+    _primaryReferenceCues = const [];
 
     try {
       final tracks = _videoElement.textTracks;
@@ -1044,7 +1036,8 @@ class HtmlVideoBackend extends PlayerBackend
     });
   }
 
-  web.VTTCue? _activePrimaryCue() {
+  List<web.VTTCue> _activePrimaryCues() {
+    final active = <web.VTTCue>[];
     final tracks = _videoElement.textTracks;
     for (var i = 0; i < tracks.length; i++) {
       final track = tracks[i];
@@ -1052,10 +1045,10 @@ class HtmlVideoBackend extends PlayerBackend
       final cues = track.activeCues;
       if (cues == null) continue;
       for (var j = 0; j < cues.length; j++) {
-        if (cues[j].isA<web.VTTCue>()) return cues[j] as web.VTTCue;
+        if (cues[j].isA<web.VTTCue>()) active.add(cues[j] as web.VTTCue);
       }
     }
-    return null;
+    return active;
   }
 
   int _primaryAlignment(web.VTTCue cue, double centre) {
@@ -1151,65 +1144,96 @@ class HtmlVideoBackend extends PlayerBackend
     );
   }
 
+  // Try the nearest free vertical interval, keeping separate authored regions
+  // separate so a top and bottom caption still leave the middle available.
+  double _fitSecondaryGroup(
+    double preferredTop,
+    double height,
+    List<({double top, double bottom})> occupied,
+    double gap,
+  ) {
+    final maxTop = (1 - height).clamp(0.0, 1.0).toDouble();
+    final preferred = preferredTop.clamp(0.0, maxTop).toDouble();
+    final candidates = <double>[
+      preferred,
+      0,
+      maxTop,
+      for (final bounds in occupied) ...[
+        bounds.top - gap - height,
+        bounds.bottom + gap,
+      ],
+    ];
+    double? best;
+    for (final top in candidates) {
+      if (top < 0 ||
+          top > maxTop ||
+          occupied.any(
+            (bounds) =>
+                top < bounds.bottom + gap - 0.000001 &&
+                top + height > bounds.top - gap + 0.000001,
+          )) {
+        continue;
+      }
+      if (best == null || (top - preferred).abs() < (best - preferred).abs()) {
+        best = top;
+      }
+    }
+    return best ?? preferred;
+  }
+
   void _positionSecondaryCues() {
     if (_secondaryCues.isEmpty) return;
-    final primary = _activePrimaryCue();
-    if (primary != null) {
-      var bounds = _primaryCueBounds(primary);
-      final alignment = _primaryAlignment(primary, bounds.centre);
-      if ((alignment - 1) ~/ 3 != 1 &&
-          primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS) != null) {
-        _clearPrimaryMiddleCueState(primary);
-        bounds = _primaryCueBounds(primary);
+    final activePrimary = _activePrimaryCues();
+    if (activePrimary.isNotEmpty) _primaryReferenceCues = activePrimary;
+    _positionPrimaryCues(_primaryReferenceCues);
+    final primary = _primaryReferenceCues.firstOrNull;
+    final bounds = primary == null ? null : _primaryCueBounds(primary);
+    final row = primary == null
+        ? 0
+        : (_primaryAlignment(primary, bounds!.centre) - 1) ~/ 3;
+    final gap = middleSubtitleGap(0.015, _secondaryOffset);
+    final occupied = [
+      for (final cue in _primaryReferenceCues)
+        (
+          top: _primaryCueBounds(cue).top,
+          bottom: _primaryCueBounds(cue).bottom,
+        ),
+    ];
+
+    // Keep the primary's current position for top and bottom captions. For a
+    // centred reference, preserve the existing split around its original centre.
+    if (primary != null && row == 1) {
+      final originalLine = primary.line.dartify();
+      if (originalLine is num) {
+        primary
+          ..setProperty(_stackedMiddleLine.toJS, originalLine.toJS)
+          ..setProperty(
+            _stackedMiddleLineAlign.toJS,
+            _cueAlignment(primary, 'lineAlign', 'start').toJS,
+          )
+          ..setProperty(
+            _stackedMiddleSnapToLines.toJS,
+            primary.snapToLines.toJS,
+          );
       }
-      _primaryPlacement = (
-        alignment: alignment,
-        centre: bounds.centre,
-        top: bounds.top,
-        bottom: bounds.bottom,
-        position: primary.position,
-        align: primary.align,
-        positionAlign: _cueAlignment(primary, 'positionAlign', 'auto'),
-        size: primary.size,
-      );
+      final top = bounds!.centre + gap / 2;
+      _setCueLine(primary, top, 'start');
+      occupied[0] = (top: top, bottom: top + _primaryCueHeight(primary));
     }
-    final placement = _primaryPlacement;
+
     // ASS/PGS overlays have no VTTCue bounds. Keep the second track at the top
     // instead of treating an enabled overlay as Primary Off.
-    final fallbackToTop = placement == null && _primaryUsesOverlay;
-    final row = ((placement?.alignment ?? 2) - 1) ~/ 3;
-    final gap = middleSubtitleGap(0.015, _secondaryOffset);
-
-    // Keep the primary's current position for top and bottom captions, including its
-    // user offset. For centred captions, place the gap around the original centre.
-    if (primary != null && row == 1) {
-      if (primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS) == null) {
-        final originalLine = primary.line.dartify();
-        if (originalLine is num) {
-          primary
-            ..setProperty(_stackedMiddleLine.toJS, originalLine.toJS)
-            ..setProperty(
-              _stackedMiddleLineAlign.toJS,
-              _cueAlignment(primary, 'lineAlign', 'start').toJS,
-            )
-            ..setProperty(
-              _stackedMiddleSnapToLines.toJS,
-              primary.snapToLines.toJS,
-            );
-        }
-      }
-      _setCueLine(primary, (placement?.centre ?? 0.5) + gap / 2, 'start');
-    }
-
-    final secondaryLine = placement == null
-        ? (fallbackToTop ? _subtitleVerticalOffset : 1 - _subtitleVerticalOffset)
+    final fallbackToTop = primary == null && _primaryUsesOverlay;
+    final below = row == 2 || fallbackToTop;
+    final secondaryEdge = bounds == null
+        ? (fallbackToTop
+              ? _subtitleVerticalOffset
+              : 1 - _subtitleVerticalOffset)
         : switch (row) {
-            2 => placement.bottom + gap,
-            1 => placement.centre - gap / 2,
-            _ => placement.top - gap,
+            2 => bounds.bottom + gap,
+            1 => bounds.centre - gap / 2,
+            _ => bounds.top - gap,
           };
-    // Copy the primary cue's horizontal position and anchor so custom WebVTT
-    // coordinates are preserved.
     final active = _secondaryCues
         .where(
           (item) =>
@@ -1217,22 +1241,42 @@ class HtmlVideoBackend extends PlayerBackend
               _videoElement.currentTime < item.cue.endTime,
         )
         .toList();
+    final secondary = <({web.VTTCue cue, double height})>[];
     for (final original in active.isEmpty ? _secondaryCues.take(1) : active) {
-      original.cue
+      final cue = original.cue;
+      // Copy the reference cue's horizontal position and anchor before measuring
+      // wrapping. All active secondary cues share one group, in source order.
+      cue
         ..region = null
         ..vertical = ''
-        ..align = placement?.align ?? 'center'
-        ..position = placement?.position ?? 50.0.toJS
-        ..size = placement?.size ?? 100;
+        ..align = primary?.align ?? 'center'
+        ..position = primary?.position ?? 50.0.toJS
+        ..size = primary?.size ?? 100;
       if (_nativePositionAlignment) {
-        original.cue.positionAlign = placement?.positionAlign ?? 'center';
+        cue.positionAlign = primary == null
+            ? 'center'
+            : _cueAlignment(primary, 'positionAlign', 'auto');
       }
+      secondary.add((
+        cue: cue,
+        height: _primaryCueHeight(cue, secondary: true),
+      ));
+    }
+    final height = secondary.fold(0.0, (sum, item) => sum + item.height);
+    var top = _fitSecondaryGroup(
+      secondaryEdge - (below ? 0 : height),
+      height,
+      occupied,
+      gap,
+    );
+    for (final item in secondary) {
       _setCueLine(
-        original.cue,
-        secondaryLine,
-        row == 2 || fallbackToTop ? 'start' : 'end',
+        item.cue,
+        below ? top : top + item.height,
+        below ? 'start' : 'end',
         secondary: true,
       );
+      top += item.height;
     }
   }
 
@@ -1308,6 +1352,7 @@ class HtmlVideoBackend extends PlayerBackend
     }
     _applySubtitleAppearance();
     _forEachTextTrack(_positionCues);
+    _positionSecondaryCues();
   }
 
   /// Appearance goes through a stylesheet, since `::cue` is the only hook the
@@ -1369,12 +1414,18 @@ class HtmlVideoBackend extends PlayerBackend
   void _positionCues(web.TextTrack track) {
     _applySubtitleAppearance();
     final cues = track.activeCues;
-    if (cues == null) return;
+    if (cues != null) {
+      _positionPrimaryCues([
+        for (var i = 0; i < cues.length; i++)
+          if (cues[i].isA<web.VTTCue>()) cues[i] as web.VTTCue,
+      ]);
+    }
+    _positionSecondaryCues();
+  }
+
+  void _positionPrimaryCues(Iterable<web.VTTCue> cues) {
     final line = (1 - _subtitleVerticalOffset) * 100;
-    for (var i = 0; i < cues.length; i++) {
-      final cue = cues[i];
-      if (!cue.isA<web.VTTCue>()) continue;
-      final vtt = cue as web.VTTCue;
+    for (final vtt in cues) {
       final tag = srtAlignmentTag.firstMatch(vtt.text);
       if (tag != null) {
         vtt.text = vtt.text.replaceFirst(srtAlignmentTag, '');
@@ -1448,7 +1499,6 @@ class HtmlVideoBackend extends PlayerBackend
                 : _nativeLineAlignment ? originalAlign : 'start');
       }
     }
-    _positionSecondaryCues();
   }
 
   /// A cue can only be placed once it exists, and the ones carried inside a
