@@ -75,6 +75,11 @@ class Media3SecondaryHttpFailureIntegrationTest {
             onSecondaryError = subtitleErrors::add,
         )
         val selector = DualSubtitleTrackSelector(context)
+        // The initial playback has no primary subtitles. This makes the
+        // secondary-only request explicit and gives us a clean baseline clock.
+        selector.setParameters(
+            selector.buildUponParameters().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+        )
         val audioRenderer = FakeRenderer(C.TRACK_TYPE_AUDIO)
         val output = object : TextOutput {
             override fun onCues(cueGroup: CueGroup) {}
@@ -102,17 +107,38 @@ class Media3SecondaryHttpFailureIntegrationTest {
             player.prepare()
             TestPlayerRunHelper.advance(player)
                 .untilState(Player.STATE_READY)
+            // First prove the synthetic media can play WITHOUT any subtitle;
+            // a failure here belongs to the test harness rather than Moonfin.
+            try {
+                TestPlayerRunHelper.play(player).untilPositionAtLeast(1_000L)
+            } catch (error: Exception) {
+                throw AssertionError(
+                    "Baseline synthetic playback failed BEFORE secondary selection: " +
+                        "state=${player.playbackState}, play=${player.isPlaying}, " +
+                        "position=${player.currentPosition}, error=${player.playerError}, " +
+                        "audioBuffers=${audioRenderer.sampleBufferReadCount}",
+                    error,
+                )
+            }
             val subtitleGroup = player.currentTracks.groups.first {
                 it.type == C.TRACK_TYPE_TEXT
             }
             assertTrue(selector.setSecondaryTrack(TrackSelectionOverride(
                 subtitleGroup.mediaTrackGroup, listOf(0),
             )))
-            TestPlayerRunHelper.play(player)
-                .untilPositionAtLeast(1_000L)
-            // Advance an independent playback clock long enough for the
-            // injected subtitle request to fail and Media3 to attempt recovery.
-            TestPlayerRunHelper.advance(player).untilPositionAtLeast(10_000L)
+            try {
+                // Advance after deliberately selecting the broken subtitle.
+                TestPlayerRunHelper.advance(player).untilPositionAtLeast(10_000L)
+            } catch (error: Exception) {
+                throw AssertionError(
+                    "Playback stopped after SECONDARY subtitle request: " +
+                        "state=${player.playbackState}, play=${player.isPlaying}, " +
+                        "position=${player.currentPosition}, error=${player.playerError}, " +
+                        "requests=${requestCount.get()}, subtitleErrors=${subtitleErrors.size}, " +
+                        "playerErrors=${failures.size}, audioBuffers=${audioRenderer.sampleBufferReadCount}",
+                    error,
+                )
+            }
             assertTrue("Injected subtitle request never happened", requestCount.get() > 0)
             assertTrue("Secondary stream error wasn't reported", subtitleErrors.isNotEmpty())
             assertTrue("Movie clock should remain active", player.isPlaying)
