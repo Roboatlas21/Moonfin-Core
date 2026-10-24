@@ -42,26 +42,6 @@ internal fun shiftsEmbeddedFormat(sampleMimeType: String?, codecs: String?): Boo
     return mime in SHIFTED_TEXT_MIMES
 }
 
-/** The primary track to reselect after a Media3 source rebuild. */
-internal data class PrimaryTrackRestoreTarget(
-    val subtitleIndex: Int? = null,
-    val closedCaptionId: Int? = null,
-)
-
-/** Never overwrite Primary Off or a track request that is still pending. */
-internal fun primaryTrackRestoreTarget(
-    primaryEnabled: Boolean,
-    selectionPending: Boolean,
-    subtitleSelected: List<Boolean>,
-    captionSelected: List<Boolean>,
-): PrimaryTrackRestoreTarget? {
-    if (!primaryEnabled || selectionPending) return null
-    val subtitleIndex = subtitleSelected.indexOfFirst { it }
-    if (subtitleIndex >= 0) return PrimaryTrackRestoreTarget(subtitleIndex = subtitleIndex + 1)
-    val captionIndex = captionSelected.indexOfFirst { it }
-    return if (captionIndex >= 0) PrimaryTrackRestoreTarget(closedCaptionId = captionIndex + 1) else null
-}
-
 internal enum class SourceTree {
     /** The player builds the source from the media item itself. */
     PLAYER_ITEM,

@@ -19,6 +19,15 @@ import androidx.media3.exoplayer.trackselection.TrackSelector
 import androidx.media3.exoplayer.trackselection.TrackSelectorResult
 import androidx.media3.exoplayer.upstream.BandwidthMeter
 
+/** Resolve an explicit override to its 1-based position before a source rebuild changes group IDs. */
+@UnstableApi
+internal fun overriddenTrackOrdinal(
+    entries: List<Pair<TrackGroup, Int>>,
+    overrides: Map<TrackGroup, TrackSelectionOverride>,
+): Int? = entries.indexOfFirst { (group, index) ->
+    overrides[group]?.trackIndices?.contains(index) == true
+}.takeIf { it >= 0 }?.plus(1)
+
 /**
  * Reserve the last renderer for secondary subtitles and use DefaultTrackSelector for
  * the others. Select the secondary track separately so it receives its own sample
