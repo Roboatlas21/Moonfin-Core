@@ -358,8 +358,12 @@ internal class SecondarySubtitleOverlay(
             .setLineAnchor(if (topAligned) Cue.ANCHOR_TYPE_START else Cue.ANCHOR_TYPE_END)
             .apply {
                 if (reference != null) {
-                    setPosition(placement.left / width)
-                    setPositionAnchor(Cue.ANCHOR_TYPE_START)
+                    // Media3 fits an unspecified cue width to the text. Keep the
+                    // primary anchor instead of anchoring that smaller box at the
+                    // left edge of the rectangle used for collision checks.
+                    setPosition(if (reference.position == Cue.DIMEN_UNSET) 0.5f else reference.position)
+                    setPositionAnchor(if (reference.position == Cue.DIMEN_UNSET)
+                        Cue.ANCHOR_TYPE_MIDDLE else reference.positionAnchor)
                     setTextAlignment(reference.textAlignment ?: Layout.Alignment.ALIGN_CENTER)
                 }
             }

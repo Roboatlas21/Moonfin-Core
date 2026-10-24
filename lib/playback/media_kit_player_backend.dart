@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -287,7 +288,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   int? _lastSecondaryStackPosition;
   ({int alignment, double height})? _lastPrimaryStack;
   DateTime? _lastSecondaryPositionCheck;
-  bool _checkingSecondaryPosition = false;
+  Completer<void>? _secondaryPositionUpdate;
   StreamSubscription<Duration>? _secondaryPositionSub;
   static final _mpvSrtAlignment = RegExp(r'\\an([1-9])');
 
@@ -3070,6 +3071,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     }
     _pendingSecondarySubtitle = null;
     await _nativeSetProperty(native, 'secondary-sub-visibility', 'yes');
+    await _refreshStackedSecondaryPosition(force: true);
     _subtitleDebug('secondary sid=$sid embedded=${ordinal != null}');
   }
 
@@ -3124,65 +3126,143 @@ class MediaKitPlayerBackend extends PlayerBackend
     await _refreshStackedSecondaryPosition(force: true);
   }
 
-  /// Estimates the number of rendered lines, including explicit line breaks and
-  /// approximate wrapping.
-  static int _subtitleLineCount(String text, double fontSize) {
+  // libass sizes plain text on a 720-line canvas. Measure wrapping at that
+  // scale too; a fixed character count misses wide glyphs and narrow windows.
+  double _subtitleHeight(String text, double fontSize, double width) {
     if (text.isEmpty) return 0;
     final plain = text
         .replaceAll(RegExp(r'\{[^}]*\}'), '')
         .replaceAll(r'\N', '\n');
-    final maxChars = (64 * 24 / fontSize).round().clamp(1, 10000);
-    return plain.split('\n').fold<int>(
-      0,
-      (count, line) => count + (line.runes.length / maxChars).ceil().clamp(1, 10000),
-    );
+    final painter = TextPainter(
+      text: TextSpan(
+        text: plain,
+        style: TextStyle(
+          fontFamily: _libassFontFamily,
+          fontSize: fontSize,
+          fontWeight: (_lastFontWeight ?? 400) >= 700
+              ? FontWeight.bold
+              : FontWeight.normal,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: width.clamp(1.0, 10000.0));
+    final lines = painter.computeLineMetrics().length;
+    final height =
+        painter.height.clamp(fontSize * lines, double.infinity) / 720;
+    painter.dispose();
+    return height;
   }
 
   Future<void> _refreshStackedSecondaryPosition({bool force = false}) async {
-    if (_isDisposed || !_secondarySubtitleRequested || !_secondaryPositionSupported ||
-        _checkingSecondaryPosition) return;
+    final pending = _secondaryPositionUpdate;
+    if (pending != null) {
+      if (!force) return;
+      await pending.future;
+      return _refreshStackedSecondaryPosition(force: true);
+    }
+    if (_isDisposed ||
+        !_secondarySubtitleRequested ||
+        !_secondaryPositionSupported) {
+      return;
+    }
     final now = DateTime.now();
-    if (!force && _lastSecondaryPositionCheck != null &&
-        now.difference(_lastSecondaryPositionCheck!) < const Duration(milliseconds: 350)) {
+    if (!force &&
+        _lastSecondaryPositionCheck != null &&
+        now.difference(_lastSecondaryPositionCheck!) <
+            const Duration(milliseconds: 350)) {
       return;
     }
     _lastSecondaryPositionCheck = now;
     final native = _player.platform;
     if (native is! NativePlayer) return;
-    _checkingSecondaryPosition = true;
+    final update = _secondaryPositionUpdate = Completer<void>();
     final generation = _secondarySubtitleGeneration;
     try {
-      final primaryAss = await _tryNativeGetProperty(native, 'sub-text/ass') ?? '';
-      final secondaryText = await _tryNativeGetProperty(native, 'secondary-sub-text') ?? '';
-      if (!_isCurrentSecondarySubtitle(generation) || !_secondarySubtitleRequested) return;
-      final fontSize = _lastFontSize ?? 24;
-      final lineHeight = fontSize / 24 * 0.055;
+      final primaryAss =
+          await _tryNativeGetProperty(native, 'sub-text/ass') ?? '';
+      final secondaryText =
+          await _tryNativeGetProperty(native, 'secondary-sub-text') ?? '';
+      if (!_isCurrentSecondarySubtitle(generation) ||
+          !_secondarySubtitleRequested) {
+        return;
+      }
+      final fontSize =
+          double.tryParse(
+            await _tryNativeGetProperty(native, 'sub-font-size') ?? '',
+          ) ??
+          (((_lastFontSize ?? 24) / 24) * 55).round().clamp(24, 120).toDouble();
+      final margin =
+          (double.tryParse(
+                await _tryNativeGetProperty(native, 'sub-margin-y') ?? '',
+              ) ??
+              (_lastVerticalOffset ?? 0.04) * 720) /
+          720;
+      final dimensions = await _tryNativeGetProperty(native, 'osd-dimensions');
+      final osd = dimensions == null ? null : jsonDecode(dimensions);
+      final width =
+          osd is Map && osd['w'] is num && osd['h'] is num && osd['h'] > 0
+          ? (osd['w'] as num) / (osd['h'] as num) * 720
+          : 1280.0;
+      final marginX =
+          double.tryParse(
+            await _tryNativeGetProperty(native, 'sub-margin-x') ?? '',
+          ) ??
+          25;
+      final primaryScale =
+          double.tryParse(
+            await _tryNativeGetProperty(native, 'sub-scale') ?? '',
+          ) ??
+          1;
+      final secondaryScale =
+          double.tryParse(
+            await _tryNativeGetProperty(native, 'secondary-sub-scale') ?? '',
+          ) ??
+          1;
+      if (!_isCurrentSecondarySubtitle(generation) ||
+          !_secondarySubtitleRequested) {
+        return;
+      }
       if (!_subtitlesDisabled && primaryAss.isNotEmpty) {
         _lastPrimaryStack = (
-          alignment: int.tryParse(_mpvSrtAlignment.firstMatch(primaryAss)?[1] ?? '') ?? 2,
-          height: _subtitleLineCount(primaryAss, fontSize) * lineHeight,
+          alignment:
+              int.tryParse(_mpvSrtAlignment.firstMatch(primaryAss)?[1] ?? '') ??
+              2,
+          height: _subtitleHeight(
+            primaryAss,
+            fontSize * primaryScale,
+            width - marginX * 2,
+          ),
         );
       }
       final alignment = _lastPrimaryStack?.alignment ?? 2;
       final primaryHeight = _lastPrimaryStack?.height ?? 0.0;
-      final secondaryHeight = _subtitleLineCount(secondaryText, fontSize) * lineHeight;
-      // mpv's sub-margin-y already moves both tracks, so don't apply the
-      // primary offset again to secondary-sub-pos.
-      final primaryAnchor = mpvPrimaryStackingAnchor(alignment);
+      final secondaryHeight = _subtitleHeight(
+        secondaryText,
+        fontSize * secondaryScale,
+        width - marginX * 2,
+      );
+      final primaryAnchor = mpvPrimaryStackingAnchor(alignment, margin: margin);
 
       // secondary-sub-pos sets the bottom edge. For top captions, add the secondary
       // height to keep the top edge fixed as lines are added. For middle and bottom
       // captions, keep the bottom edge fixed.
       final secondaryTop = stackedSecondaryTop(
-        primaryEnabled: !_subtitlesDisabled,
+        primaryEnabled: !_subtitlesDisabled && _lastPrimaryStack != null,
         alignment: alignment,
         primaryAnchor: primaryAnchor,
         primaryHeight: primaryHeight,
         secondaryHeight: secondaryHeight,
         offset: _secondaryVerticalOffset,
       );
-      final position = ((secondaryTop + secondaryHeight) * 100)
-          .round().clamp(0, 150);
+      // sub-pos is relative to the bottom margin, not the full screen height.
+      // Convert the screen edge back to mpv's scale after calculating the gap.
+      final position = _subtitlesDisabled || _lastPrimaryStack == null
+          ? 100
+          : ((secondaryTop + secondaryHeight) /
+                    (1 - margin).clamp(0.01, 1.0) *
+                    100)
+                .round()
+                .clamp(0, 150);
       if (force || position != _lastSecondaryStackPosition) {
         await _nativeSetProperty(native, 'secondary-sub-pos', '$position');
         if (_isCurrentSecondarySubtitle(generation)) {
@@ -3192,7 +3272,8 @@ class MediaKitPlayerBackend extends PlayerBackend
     } catch (_) {
       // If a position update fails, keep the current subtitle selection.
     } finally {
-      _checkingSecondaryPosition = false;
+      _secondaryPositionUpdate = null;
+      update.complete();
     }
   }
 
@@ -3324,6 +3405,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     // Last, because it decides whether the colors above reach an ASS subtitle
     // at all.
     await _applyAssOverrideMode();
+    await _refreshStackedSecondaryPosition(force: true);
   }
 
   Future<void> _writeSubtitleFontSize(NativePlayer native) async {
