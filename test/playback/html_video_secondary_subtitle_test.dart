@@ -64,6 +64,33 @@ void main() {
     return secondary();
   }
 
+  // Resolve or reject browser play() promises after a newer user action.
+  void deferVideoPlay() {
+    final script = web.HTMLScriptElement()..text = '''
+      window.moonfinDeferredPlayCount = 0;
+      window.moonfinDeferredPlays = [];
+      document.getElementById('${video.id}').play = function() {
+        window.moonfinDeferredPlayCount++;
+        return new Promise((resolve, reject) => {
+          window.moonfinDeferredPlays.push({resolve, reject});
+        });
+      };
+    ''';
+    web.document.head!.appendChild(script);
+    script.remove();
+  }
+
+  int pendingPlayCount() => web.window
+      .getProperty<JSNumber>('moonfinDeferredPlayCount'.toJS).toDartInt;
+
+  void finishPlay(int index, {bool reject = false}) {
+    final completion = reject ? 'reject(new Error("interrupted"))' : 'resolve()';
+    final script = web.HTMLScriptElement()
+      ..text = 'window.moonfinDeferredPlays[$index].$completion;';
+    web.document.head!.appendChild(script);
+    script.remove();
+  }
+
   setUp(() async {
     final registry = _ViewRegistry();
     ui_web.debugOverridePlatformViewRegistry(registry);
@@ -102,11 +129,83 @@ void main() {
   tearDown(() {
     ui_web.debugOverridePlatformViewRegistry(null);
     backend.dispose();
+    web.window.delete('moonfinDeferredPlayCount'.toJS);
+    web.window.delete('moonfinDeferredPlays'.toJS);
     video.remove();
     for (final url in urls) {
       web.URL.revokeObjectURL(url);
     }
     urls.clear();
+  });
+
+  test('Stop ignores a rejected old play request and does not restart polling', () async {
+    await backend.stop();
+    deferVideoPlay();
+    final errors = <Map<String, dynamic>>[];
+    var trackChanges = 0;
+    final errorSub = backend.errorStream.listen(errors.add);
+    final trackSub = backend.tracksChangedStream.listen((_) => trackChanges++);
+    try {
+      final oldPlay = backend.play({'url': mediaUrl});
+      await _until(() => pendingPlayCount() == 1);
+      await backend.stop();
+      finishPlay(0, reject: true);
+      await oldPlay;
+      final track = web.HTMLTrackElement()..kind = 'subtitles';
+      video.appendChild(track);
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      expect(errors, isEmpty);
+      expect(trackChanges, 0);
+      expect(backend.isPlaying, isFalse);
+      expect(backend.isBuffering, isFalse);
+      track.remove();
+    } finally {
+      await errorSub.cancel();
+      await trackSub.cancel();
+    }
+  });
+
+  test('a newer Play keeps control of buffering and playback state', () async {
+    await backend.stop();
+    deferVideoPlay();
+    final errors = <Map<String, dynamic>>[];
+    final sub = backend.errorStream.listen(errors.add);
+    try {
+      final first = backend.play({'url': mediaUrl});
+      await _until(() => pendingPlayCount() == 1);
+      final latest = backend.play({'url': mediaUrl});
+      await _until(() => pendingPlayCount() == 2);
+      finishPlay(0, reject: true);
+      await first;
+      expect(errors, isEmpty);
+      expect(backend.isBuffering, isTrue);
+      finishPlay(1);
+      await latest;
+      expect(backend.isPlaying, isTrue);
+      expect(backend.isBuffering, isFalse);
+    } finally {
+      await sub.cancel();
+    }
+  });
+
+  test('a newer source stops an earlier Play during subtitle setup', () async {
+    await backend.stop();
+    deferVideoPlay();
+    final oldPlay = backend.play({'url': mediaUrl});
+    final latest = backend.play({'url': mediaUrl, 'autoPlay': false});
+    await Future.wait([oldPlay, latest]);
+    expect(pendingPlayCount(), 0);
+  });
+
+  test('Pause ignores a late successful Resume', () async {
+    await backend.stop();
+    deferVideoPlay();
+    final pending = backend.resume();
+    await _until(() => pendingPlayCount() == 1);
+    await backend.pause();
+    finishPlay(0);
+    await pending;
+    expect(backend.isPlaying, isFalse);
   });
 
   test('primary delay applies to both tracks without accumulating', () async {
