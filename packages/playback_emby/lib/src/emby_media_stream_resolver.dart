@@ -193,7 +193,7 @@ class EmbyMediaStreamResolver implements MediaStreamResolver {
     if (token == null || token.isEmpty) {
       return url;
     }
-    if (!url.startsWith(_client.baseUrl)) {
+    if (!MediaStreamResolver.isServerUrl(url, _client.baseUrl)) {
       return url;
     }
     final lower = url.toLowerCase();
@@ -252,7 +252,7 @@ class EmbyMediaStreamResolver implements MediaStreamResolver {
     )) {
       final resolvedPath =
           MediaStreamResolver.rebaseLiveServerPath(remotePath!, _client.baseUrl);
-      if (!resolvedPath.startsWith(_client.baseUrl)) {
+      if (!MediaStreamResolver.isServerUrl(resolvedPath, _client.baseUrl)) {
         return (resolvedPath, StreamPlayMethod.directPlay);
       }
     }

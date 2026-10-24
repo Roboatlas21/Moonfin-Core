@@ -312,6 +312,27 @@ abstract class MediaStreamResolver {
     return uri.hasQuery ? '$base${uri.path}?${uri.query}' : '$base${uri.path}';
   }
 
+  /// Only URLs on the connected server and within its configured base path
+  /// should receive the server's playback credentials.
+  static bool isServerUrl(String url, String baseUrl) {
+    final requested = Uri.tryParse(url);
+    final server = Uri.tryParse(baseUrl);
+    if (requested == null || server == null ||
+        !requested.hasAuthority || !server.hasAuthority ||
+        (server.scheme != 'http' && server.scheme != 'https') ||
+        requested.scheme != server.scheme ||
+        requested.host != server.host ||
+        requested.port != server.port) {
+      return false;
+    }
+    final prefix = server.path.endsWith('/')
+        ? server.path.substring(0, server.path.length - 1)
+        : server.path;
+    return prefix.isEmpty ||
+        requested.path == prefix ||
+        requested.path.startsWith('$prefix/');
+  }
+
   static String applyStreamIndices(String url, int? audioStreamIndex, int? subtitleStreamIndex) {
     try {
       final uri = Uri.parse(url);

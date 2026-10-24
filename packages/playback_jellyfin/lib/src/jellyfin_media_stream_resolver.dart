@@ -302,7 +302,8 @@ class JellyfinMediaStreamResolver implements MediaStreamResolver {
     return directStream ?? transcode ?? sources.first;
   }
 
-  bool _isServerUrl(String url) => url.startsWith(_client.baseUrl);
+  bool _isServerUrl(String url) =>
+      MediaStreamResolver.isServerUrl(url, _client.baseUrl);
 
   String _appendAuth(String url) {
     final token = _client.accessToken;

@@ -4,6 +4,46 @@ import 'package:playback_core/playback_core.dart';
 Map<String, String> _params(String url) => Uri.parse(url).queryParameters;
 
 void main() {
+
+  group('MediaStreamResolver.isServerUrl', () {
+    const base = 'https://media.example.com/jellyfin';
+    test('accepts the configured server and reverse-proxy base path', () {
+      for (final url in [
+        base,
+        '$base/',
+        '$base/Videos/123/stream?ApiKey=old',
+        'https://MEDIA.example.com:443/jellyfin/Videos/123/stream',
+      ]) {
+        expect(MediaStreamResolver.isServerUrl(url, base), isTrue, reason: url);
+        expect(MediaStreamResolver.isServerUrl(url, '$base/'), isTrue,
+            reason: url);
+      }
+      expect(MediaStreamResolver.isServerUrl(
+        'https://media.example.com/Movies/123', 'https://media.example.com',
+      ), isTrue);
+      expect(MediaStreamResolver.isServerUrl(
+        'https://media.example.com:8920/emby/Videos/123',
+        'https://media.example.com:8920/emby',
+      ), isTrue);
+    });
+
+    test('rejects unrelated origins and paths', () {
+      for (final url in [
+        'https://media.example.com.attacker.net/jellyfin/Videos/123',
+        'https://media.example.com@attacker.net/jellyfin/Videos/123',
+        'https://other.example.com/jellyfin/Videos/123',
+        'http://media.example.com/jellyfin/Videos/123',
+        'https://media.example.com:8443/jellyfin/Videos/123',
+        'https://media.example.com/jellyfin-other/Videos/123',
+        'https://media.example.com/otherapp/Videos/123',
+        '//media.example.com/jellyfin/Videos/123',
+        '/jellyfin/Videos/123',
+      ]) {
+        expect(MediaStreamResolver.isServerUrl(url, base), isFalse, reason: url);
+      }
+    });
+  });
+
   group('MediaStreamResolver.applyStreamIndices', () {
     test('emits a single canonical AudioStreamIndex', () {
       final url = MediaStreamResolver.applyStreamIndices(
