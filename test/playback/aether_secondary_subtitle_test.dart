@@ -2,7 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/playback/aether_backend.dart';
-import 'package:moonfin/playback/appletv_backend.dart';
+import 'package:moonfin/playback/native_apple_player_backend.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,7 +11,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   for (final tv in [false, true]) {
     group(tv ? 'tvOS secondary subtitles' : 'Aether secondary subtitles', () {
-      final prefix = tv ? 'appletv_video' : 'ios_aether';
+      final prefix = tv ? 'native_apple_player' : 'ios_aether';
       final control = MethodChannel('moonfin/${prefix}_control');
       final events = MethodChannel('moonfin/${prefix}_events');
       late PlayerBackend backend;
@@ -30,7 +30,7 @@ void main() {
         });
         messenger.setMockMethodCallHandler(events, (_) async => null);
         backend = tv
-            ? AppleTvBackend(UserPreferences(store))
+            ? NativeApplePlayerBackend(UserPreferences(store))
             : AetherBackend(UserPreferences(store));
       });
 

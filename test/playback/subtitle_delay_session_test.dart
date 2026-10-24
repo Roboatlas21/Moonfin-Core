@@ -2,7 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/playback/aether_backend.dart';
-import 'package:moonfin/playback/appletv_backend.dart';
+import 'package:moonfin/playback/native_apple_player_backend.dart';
 import 'package:moonfin/playback/media3_player_backend.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:playback_core/playback_core.dart';
@@ -14,7 +14,7 @@ void main() {
       in <(String, PlayerBackend Function(UserPreferences))>[
         ('media3_video', Media3PlayerBackend.new),
         ('ios_aether', AetherBackend.new),
-        ('appletv_video', AppleTvBackend.new),
+        ('native_apple_player', NativeApplePlayerBackend.new),
       ]) {
     test('$name preserves delay until a new viewing session', () async {
       SharedPreferences.setMockInitialValues({});
