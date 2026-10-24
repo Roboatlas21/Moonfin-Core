@@ -98,4 +98,25 @@ class SecondarySubtitleRenderingTest {
             assertTrue(pixels.bottom < inkBounds(primary).top)
         }
     }
+    @Test
+    fun twentyPercentPrimaryOffsetKeepsMultilinePairVisible() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context).apply {
+            setFractionalTextSize(0.06f)
+            setBottomPaddingFraction(0.20f)
+        }
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0.20f)
+        overlay.select(true)
+        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("First line\nSecond line").build()))
+        overlay.updateCues(listOf(Cue.Builder().setText("Translation one\nTranslation two").build()))
+        overlay.configureAppearance(null, 0.06f)
+        assertEquals(View.VISIBLE, secondary.visibility)
+        val secondPixels = inkBounds(secondary)
+        val primaryPixels = inkBounds(primary)
+        assertTrue("Secondary should remain above primary at maximum spacing",
+            secondPixels.bottom < primaryPixels.top)
+    }
+
 }

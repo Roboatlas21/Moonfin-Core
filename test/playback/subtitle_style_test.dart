@@ -92,7 +92,17 @@ void main() {
     expect(style.strokeColor, 0xFF333333);
     expect(style.fontSize, 30.0);
     expect(style.fontWeight, 700);
-    expect(style.verticalOffset, 0.12);
+    expect(style.verticalOffset, 0.20);
+  });
+
+  test('saved offsets above 20% use the same SDR and HDR effective cap', () async {
+    final prefs = await _prefs();
+    await prefs.set(UserPreferences.subtitlesHdrSeparate, true);
+    await prefs.set(UserPreferences.subtitlesOffsetPosition, 0.50);
+    await prefs.set(UserPreferences.subtitlesHdrOffsetPosition, 0.30);
+    expect(SubtitleStyle.resolve(prefs, isHdr: false).verticalOffset, 0.20);
+    expect(SubtitleStyle.resolve(prefs, isHdr: true).verticalOffset, 0.20);
+    expect(prefs.get(UserPreferences.subtitlesOffsetPosition), 0.50);
   });
 
   test(
