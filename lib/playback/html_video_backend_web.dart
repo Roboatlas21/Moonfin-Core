@@ -12,6 +12,7 @@ import 'html_video_backend_profile.dart';
 import 'letterbox_croppers.dart';
 import 'secondary_subtitle_position.dart';
 import 'web_subtitle_overlay_web.dart';
+import 'web_secondary_subtitle_url.dart';
 
 extension type _MoonfinHlsBridge._(JSObject _) implements JSObject {
   external JSBoolean canUseHlsJs(
@@ -808,9 +809,17 @@ class HtmlVideoBackend extends PlayerBackend
   Future<void> _loadSecondarySubtitle(String url, int generation) async {
     final abort = _secondaryRequest = web.AbortController();
     try {
-      final response = await web.window
-          .fetch(url.toJS, web.RequestInit(signal: abort.signal))
+      // Request server-converted WebVTT when the URL is a Jellyfin/Emby
+      // subtitle endpoint; unrelated external SRT files still work locally.
+      final preferredUrl = preferServerWebVttSubtitleUrl(url);
+      var response = await web.window
+          .fetch(preferredUrl.toJS, web.RequestInit(signal: abort.signal))
           .toDart;
+      if (!response.ok && preferredUrl != url) {
+        response = await web.window
+            .fetch(url.toJS, web.RequestInit(signal: abort.signal))
+            .toDart;
+      }
       if (!response.ok) throw StateError('HTTP ${response.status}');
       final content = (await response.text().toDart).toDart;
       if (_disposed || generation != _secondaryGeneration) return;
