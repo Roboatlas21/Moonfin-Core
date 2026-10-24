@@ -17,9 +17,11 @@ import androidx.media3.exoplayer.source.chunk.MediaChunkIterator
 import androidx.media3.exoplayer.trackselection.ExoTrackSelection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.IOException
 
 class TimeOffsetMediaPeriodTest {
 
@@ -28,10 +30,13 @@ class TimeOffsetMediaPeriodTest {
         var nextTimeUs = 0L
         var endOfStream = false
         var skippedToUs = C.TIME_UNSET
+        var readFailure: IOException? = null
 
         override fun isReady(): Boolean = true
 
-        override fun maybeThrowError() {}
+        override fun maybeThrowError() {
+            readFailure?.let { throw it }
+        }
 
         override fun readData(formatHolder: FormatHolder, buffer: DecoderInputBuffer, readFlags: Int): Int {
             if (nextResult == C.RESULT_BUFFER_READ) {
@@ -58,13 +63,16 @@ class TimeOffsetMediaPeriodTest {
         var bufferedUs = 0L
         var nextLoadUs = 0L
         var loading = false
+        var prepareFailure: IOException? = null
 
         override fun prepare(callback: MediaPeriod.Callback, positionUs: Long) {
             this.callback = callback
             preparedAtUs = positionUs
         }
 
-        override fun maybeThrowPrepareError() {}
+        override fun maybeThrowPrepareError() {
+            prepareFailure?.let { throw it }
+        }
 
         override fun getTrackGroups(): TrackGroupArray = TrackGroupArray.EMPTY
 
@@ -241,6 +249,74 @@ class TimeOffsetMediaPeriodTest {
         loader.continueLoading(LoadingInfo.Builder().setPlaybackPositionUs(5_900_000L).build())
 
         assertTrue(video.asked)
+    }
+
+    @Test
+    fun `a failed secondary subtitle download does not prevent video from loading`() {
+        // Model an HTTP error surfacing from Media3's subtitle sample stream.
+        val httpFailure = IOException("Simulated Jellyfin subtitle HTTP 503")
+        val secondary = FakeStream().apply { readFailure = httpFailure }
+        val sidecar = FakePeriod(listOf(secondary)).apply {
+            nextLoadUs = 3_000_000L
+            bufferedUs = 3_000_000L
+        }
+        val reported = mutableListOf<IOException>()
+        val subtitlePeriod = TimeOffsetMediaPeriod(
+            sidecar, 0L, 0L, onSecondaryError = reported::add,
+        )
+        val secondaryStream = select(
+            subtitlePeriod, selection("application/x-subrip")
+        ).single()!!
+
+        // The network error must be nonfatal for the selected SECONDARY stream.
+        secondaryStream.maybeThrowError()
+        assertEquals(listOf(httpFailure), reported)
+        assertEquals(C.TIME_END_OF_SOURCE, subtitlePeriod.nextLoadPositionUs)
+        assertEquals(C.TIME_END_OF_SOURCE, subtitlePeriod.bufferedPositionUs)
+        assertTrue(secondaryStream.isReady)
+        assertTrue(readOnce(secondaryStream).isEndOfStream)
+
+        // The merged loader must still schedule video work after subtitles fail.
+        val video = object : SequenceableLoader {
+            var loadCalls = 0
+            override fun getBufferedPositionUs(): Long = 5_000_000L
+            override fun getNextLoadPositionUs(): Long = 5_000_000L
+            override fun continueLoading(loadingInfo: LoadingInfo): Boolean {
+                loadCalls++
+                return true
+            }
+            override fun isLoading(): Boolean = false
+            override fun reevaluateBuffer(positionUs: Long) {}
+        }
+        val merged = CompositeSequenceableLoader(
+            listOf(video, subtitlePeriod),
+            listOf(listOf(C.TRACK_TYPE_VIDEO), listOf(C.TRACK_TYPE_TEXT)),
+        )
+        merged.continueLoading(
+            LoadingInfo.Builder().setPlaybackPositionUs(5_900_000L).build(),
+        )
+        assertTrue("Video must continue loading after the secondary subtitle fails", video.loadCalls > 0)
+    }
+
+    @Test
+    fun `preparation stage secondary failure currently escapes the wrapper`() {
+        val httpFailure = IOException("Simulated Jellyfin subtitle preparation HTTP 503")
+        val sidecar = FakePeriod(emptyList()).apply { prepareFailure = httpFailure }
+        val reported = mutableListOf<IOException>()
+        val subtitlePeriod = TimeOffsetMediaPeriod(
+            sidecar, 0L, 0L, onSecondaryError = reported::add,
+        )
+
+        // This is a separate failure path: unlike SampleStream.maybeThrowError,
+        // the preparation error is still forwarded. This test characterizes the
+        // current behavior; it does not claim an ExoPlayer playback failure.
+        assertEquals(
+            httpFailure,
+            assertThrows(IOException::class.java) {
+                subtitlePeriod.maybeThrowPrepareError()
+            },
+        )
+        assertTrue(reported.isEmpty())
     }
 
     @Test
