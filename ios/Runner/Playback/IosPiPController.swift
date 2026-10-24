@@ -31,6 +31,8 @@ final class IosPiPController: NSObject {
     private var boundPlayer: AVPlayer?
     private var boundSoftwareSource: SoftwarePiPSource?
     private var reportedReady = false
+    private weak var nativeSubtitleWrapper: AetherPlayerWrapper?
+    private weak var nativeSubtitleController: AVPictureInPictureController?
 
     /// The provider answers with whichever wrapper is hosting the engine right
     /// now, since the Flutter player and the native player each have their own.
@@ -176,8 +178,38 @@ final class IosPiPController: NSObject {
     }
 
     private func teardownController() {
+        if let pip = pipController {
+            // didStop may already be queued when a rebind removes the old
+            // delegate. Clear its recorded state before identity guards reject
+            // that obsolete callback.
+            if pip.isPictureInPictureActive || AetherPlayerWrapper.sharedEngine()?.pictureInPictureActive == true {
+                AetherPlayerWrapper.sharedEngine()?.pictureInPictureActive = false
+                channel.invokeMethod("onPiPChanged", arguments: false)
+            }
+            restoreInlineSubtitles(after: pip)
+        }
         pipController?.delegate = nil
         pipController = nil
+    }
+
+    private func prepareNativeSubtitles(for pip: AVPictureInPictureController) {
+        guard pipController === pip else { return }
+        if let previous = nativeSubtitleController { restoreInlineSubtitles(after: previous) }
+        // A newly presented native controller can be published before its load
+        // takes ownership from the Flutter player. Suspend the actual decoder
+        // owner's overlay, then retain that identity through PiP callbacks.
+        let wrapper = AetherPlayerWrapper.activePlaybackOwner ?? wrapperProvider()
+        nativeSubtitleWrapper = wrapper
+        nativeSubtitleController = pip
+        wrapper?.setNativeSubtitlePresentationRequired(true)
+    }
+
+    private func restoreInlineSubtitles(after pip: AVPictureInPictureController) {
+        guard nativeSubtitleController === pip else { return }
+        let wrapper = nativeSubtitleWrapper
+        nativeSubtitleWrapper = nil
+        nativeSubtitleController = nil
+        wrapper?.setNativeSubtitlePresentationRequired(false)
     }
 
     private func findPlayerLayer(for player: AVPlayer) -> AVPlayerLayer? {
@@ -211,10 +243,19 @@ final class IosPiPController: NSObject {
 }
 
 extension IosPiPController: AVPictureInPictureControllerDelegate {
+    nonisolated func pictureInPictureControllerWillStartPictureInPicture(
+        _ pictureInPictureController: AVPictureInPictureController
+    ) {
+        Task { @MainActor in
+            prepareNativeSubtitles(for: pictureInPictureController)
+        }
+    }
+
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(
         _ pictureInPictureController: AVPictureInPictureController
     ) {
         Task { @MainActor in
+            guard pipController === pictureInPictureController else { return }
             AetherPlayerWrapper.sharedEngine()?.pictureInPictureActive = true
             channel.invokeMethod("onPiPChanged", arguments: true)
         }
@@ -224,9 +265,21 @@ extension IosPiPController: AVPictureInPictureControllerDelegate {
         _ pictureInPictureController: AVPictureInPictureController
     ) {
         Task { @MainActor in
+            guard pipController === pictureInPictureController else { return }
             AetherPlayerWrapper.sharedEngine()?.pictureInPictureActive = false
+            restoreInlineSubtitles(after: pictureInPictureController)
             wrapperProvider()?.nowPlaying.reclaim()
             channel.invokeMethod("onPiPChanged", arguments: false)
+        }
+    }
+
+    nonisolated func pictureInPictureController(
+        _ pictureInPictureController: AVPictureInPictureController,
+        failedToStartPictureInPictureWithError error: Error
+    ) {
+        Task { @MainActor in
+            guard pipController === pictureInPictureController else { return }
+            restoreInlineSubtitles(after: pictureInPictureController)
         }
     }
 
