@@ -313,6 +313,13 @@ class MediaKitPlayerBackend extends PlayerBackend
   static const _externalSubtitleRetries = 5;
   static const _externalSubtitleRetryDelay = Duration(seconds: 10);
 
+  // Keep the last cue across dialogue gaps, but not across tracks or seeks.
+  void _resetPrimarySubtitlePlacement() {
+    _lastPrimaryStack = null;
+    _lastSecondaryStackPosition = null;
+    _lastSecondaryPositionCheck = null;
+  }
+
   void _resetSubtitleState() {
     _subtitleSelectionGeneration++;
     _pendingEmbeddedSubtitle = null;
@@ -320,10 +327,9 @@ class MediaKitPlayerBackend extends PlayerBackend
     _pendingSecondarySubtitle = null;
     _secondarySubtitleDelay = 0;
     _secondarySubtitleRequested = false;
-    _lastSecondaryStackPosition = null;
-    _lastPrimaryStack = null;
+    _subtitlesDisabled = false;
     _primaryIsBitmapSubtitle = false;
-    _lastSecondaryPositionCheck = null;
+    _resetPrimarySubtitlePlacement();
     _externalSubtitleLoads.clear();
     _pendingSubtitleChoice.nextSource();
   }
@@ -2386,7 +2392,11 @@ class MediaKitPlayerBackend extends PlayerBackend
 
   @override
   Future<void> seekTo(Duration position) async {
+    final generation = _playbackGeneration;
     await _player.seek(position);
+    if (!_ownsPlayback(generation)) return;
+    _resetPrimarySubtitlePlacement();
+    await _refreshStackedSecondaryPosition(force: true);
   }
 
   @override
@@ -2645,8 +2655,9 @@ class MediaKitPlayerBackend extends PlayerBackend
       isExternalSubtitle ? externalSubtitleUrl : null,
     );
     _subtitlesDisabled = false;
+    final wasBitmap = _primaryIsBitmapSubtitle;
     _primaryIsBitmapSubtitle = isBitmapSubtitle;
-    if (isBitmapSubtitle) _lastPrimaryStack = null;
+    if (wasBitmap != isBitmapSubtitle) _resetPrimarySubtitlePlacement();
     try {
       final native = _player.platform as NativePlayer;
       final trackListBefore = await _tryNativeGetProperty(native, 'track-list');
@@ -2677,6 +2688,7 @@ class MediaKitPlayerBackend extends PlayerBackend
       // A track that isn't there stays off. Falling back to a list position
       // can land on another language.
       if (sidToApply == null) {
+        _resetPrimarySubtitlePlacement();
         if (!isExternalSubtitle) {
           _pendingEmbeddedSubtitle = (
             ordinal: mpvTrackId,
@@ -2724,6 +2736,10 @@ class MediaKitPlayerBackend extends PlayerBackend
         }
         return;
       }
+
+      final previousSid = await _tryNativeGetProperty(native, 'sid');
+      if (!isCurrentSelection()) return;
+      if (previousSid != sidToApply) _resetPrimarySubtitlePlacement();
 
       // media_kit's own track list can lag behind mpv's, so a track it
       // doesn't know yet is selected by the sid mpv reported.
@@ -2903,6 +2919,9 @@ class MediaKitPlayerBackend extends PlayerBackend
     final platform = _player.platform;
     if (platform is! NativePlayer) return;
     final sid = _ccTrackSids[id - 1].toString();
+    final previousSid = await _tryNativeGetProperty(platform, 'sid');
+    if (!_isLatestSubtitleSelection(generation)) return;
+    if (previousSid != sid) _resetPrimarySubtitlePlacement();
     await _nativeSetProperty(platform, 'sid', sid);
     if (!_isLatestSubtitleSelection(generation)) return;
     await _nativeSetProperty(platform, 'sub-visibility', 'yes');
@@ -2921,10 +2940,8 @@ class MediaKitPlayerBackend extends PlayerBackend
     final generation = ++_subtitleSelectionGeneration;
     _pendingEmbeddedSubtitle = null;
     _subtitlesDisabled = true;
-    // Turning the primary track off clears its saved layout. Gaps in dialogue keep it.
-    _lastPrimaryStack = null;
-    _lastSecondaryStackPosition = null;
-    _lastSecondaryPositionCheck = null;
+    // Turning primary Off clears saved placement; ordinary dialogue gaps do not.
+    _resetPrimarySubtitlePlacement();
     await _player.setSubtitleTrack(SubtitleTrack.no());
     if (!_isLatestSubtitleSelection(generation)) return;
     try {

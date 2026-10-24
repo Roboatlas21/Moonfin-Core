@@ -82,6 +82,12 @@ class _Player extends Fake implements Player {
   final selections = <String>[];
   final opened = <String>[];
   String? automaticSubtitleSid;
+
+  @override
+  Future<void> seek(Duration position) async {
+    // mpv clears the old active subtitle when a seek lands.
+    platform.properties.remove('sub-text/ass');
+  }
   @override
   Future<void> setSubtitleTrack(SubtitleTrack track) async {
     selections.add(track.id);
@@ -138,6 +144,102 @@ void main() {
   tearDown(() {
     if (!disposed) backend.dispose();
     prefs.dispose();
+  });
+
+
+  test('seeking clears cached primary placement, not ordinary dialogue gaps', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-pos': '100',
+      'sub-text/ass': r'{\an2}Bottom primary',
+      'secondary-sub-text': 'Translation',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    int position() => int.parse(other.platform.properties['secondary-sub-pos']!);
+    try {
+      other.discover();
+      await second.setSubtitleTrack(1);
+      await second.setSecondarySubtitle(embeddedTrackId: 2);
+      final bottomPosition = position();
+      expect(bottomPosition, greaterThan(50));
+
+      other.platform.properties.remove('sub-text/ass');
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(position(), bottomPosition);
+
+      await second.seekTo(const Duration(seconds: 51));
+      expect(position(), lessThan(50));
+    } finally {
+      second.dispose();
+    }
+  });
+
+  test('changing primary text or caption tracks clears the old position', () async {
+    final other = _Player();
+    other.platform.properties.addAll({
+      'secondary-sub-pos': '100',
+      'sub-text/ass': r'{\an2}Bottom primary',
+      'secondary-sub-text': 'Translation',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    int position() => int.parse(other.platform.properties['secondary-sub-pos']!);
+    try {
+      other.discover();
+      other.platform.tracks.add({'type': 'sub', 'id': 23, 'codec': 'subrip'});
+      await _flush(); // Caption discovery reports the CC1 track.
+      await second.setSubtitleTrack(1);
+      await second.setSecondarySubtitle(embeddedTrackId: 3);
+      final bottomPosition = position();
+      expect(bottomPosition, greaterThan(50));
+
+      other.platform.properties.remove('sub-text/ass');
+      await second.setSubtitleTrack(1);
+      expect(position(), bottomPosition); // Same track preserves dialogue-gap placement.
+
+      await second.setSubtitleTrack(2);
+      expect(other.platform.properties['sid'], '17');
+      expect(position(), lessThan(50));
+
+      other.platform.properties['sub-text/ass'] = 'Primary again';
+      await second.setSubtitleTrack(1);
+      expect(position(), greaterThan(50));
+      other.platform.properties.remove('sub-text/ass');
+      await second.setEmbeddedCaptionTrack(1);
+      expect(other.platform.properties['sid'], '3');
+      expect(position(), lessThan(50));
+    } finally {
+      second.dispose();
+    }
+  });
+
+  test('Primary Off does not persist into a new source with automatic subtitles', () async {
+    final other = _Player()..automaticSubtitleSid = '11';
+    other.platform.properties.addAll({
+      'secondary-sub-pos': '100',
+      'sub-text/ass': 'Primary',
+      'secondary-sub-text': 'Translation',
+    });
+    final second = MediaKitPlayerBackend.forTesting(other, prefs);
+    try {
+      other.discover();
+      await second.disableSubtitleTrack();
+      expect(other.platform.properties['sid'], 'no');
+
+      await second.play({
+        'url': 'https://server/next.mkv',
+        'autoPlay': false,
+      });
+      expect(other.platform.properties['sid'], '11');
+      await second.setSecondarySubtitle(embeddedTrackId: 2);
+      final activePosition =
+          int.parse(other.platform.properties['secondary-sub-pos']!);
+      expect(activePosition, inInclusiveRange(50, 99));
+
+      await second.disableSubtitleTrack();
+      expect(other.platform.properties['secondary-sub-pos'], '100');
+    } finally {
+      second.dispose();
+    }
   });
 
   test('delay survives source reloads but resets for the next session', () async {
