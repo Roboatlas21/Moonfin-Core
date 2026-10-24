@@ -347,7 +347,7 @@ void main() {
       await second.setSecondarySubtitle(embeddedTrackId: 1);
       final before = int.parse(other.platform.properties['secondary-sub-pos']!);
       // No position-stream tick occurs while this fake player is paused.
-      other.platform.properties['sub-text/ass'] = r'One\\NTwo\\NThree';
+      other.platform.properties['sub-text/ass'] = r'One\NTwo\NThree';
       await second.setSubtitleDelay(1.0);
       final after = int.parse(other.platform.properties['secondary-sub-pos']!);
       expect(after, lessThan(before));
@@ -375,7 +375,8 @@ void main() {
       other.platform.properties['osd-width'] = '400';
       second.didChangeMetrics();
       await tester.pump(const Duration(milliseconds: 150));
-      await _flush();
+      await tester.pump();
+      await tester.pump();
       expect(int.parse(other.platform.properties['secondary-sub-pos']!), lessThan(before));
     } finally {
       second.dispose();
