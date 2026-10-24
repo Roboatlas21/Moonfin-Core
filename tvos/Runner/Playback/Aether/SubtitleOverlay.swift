@@ -333,6 +333,11 @@ final class SubtitleOverlay: PlatformView {
         updateSecondaryPlacement()
     }
 
+    /// Relayout existing captions after Fit/Fill changes the picture rectangle.
+    func refreshVideoGeometry() {
+        requestLayout()
+    }
+
     private func requestLayout() {
         #if canImport(UIKit)
         setNeedsLayout()

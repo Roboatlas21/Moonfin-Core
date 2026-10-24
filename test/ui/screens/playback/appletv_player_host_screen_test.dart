@@ -166,6 +166,66 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+
+  testWidgets('tvOS refreshes subtitle metadata only for appearance changes', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PreferenceStore();
+    await store.init();
+    final prefs = UserPreferences(store);
+    addTearDown(prefs.dispose);
+    GetIt.instance.registerSingleton<UserPreferences>(prefs);
+    final backend = AppleTvBackend(prefs);
+    addTearDown(backend.dispose);
+    GetIt.instance.registerSingleton<AppleTvBackend>(backend);
+    when(() => manager.isOfflinePlayback).thenReturn(false);
+    when(() => manager.isTranscodeForced).thenReturn(false);
+    when(() => manager.playbackDeferredToExternalPlayer).thenReturn(false);
+    when(
+      () => manager.configureSecondarySubtitleStyle(
+        fontSize: any(named: 'fontSize'),
+        verticalOffset: any(named: 'verticalOffset'),
+        textColor: any(named: 'textColor'),
+      ),
+    ).thenAnswer((_) async {});
+
+    final calls = <MethodCall>[];
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(_control, (call) async {
+      calls.add(call);
+      return null;
+    });
+    messenger.setMockMethodCallHandler(_events, (_) async => null);
+    addTearDown(() {
+      messenger.setMockMethodCallHandler(_control, null);
+      messenger.setMockMethodCallHandler(_events, null);
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: const [Locale('en')],
+        home: const AppleTvPlayerHostScreen(),
+      ),
+    );
+    await tester.pump();
+    calls.clear();
+
+    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 10.0);
+    await tester.pump();
+    final updates = calls.where((call) => call.method == 'setUiMetadata').toList();
+    expect(updates, hasLength(1));
+    final metadata = updates.single.arguments as Map;
+    expect((metadata['subtitleControls'] as Map)['sizeAdjustment'], 10.0);
+
+    calls.clear();
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    await tester.pump();
+    expect(calls.where((call) => call.method == 'setUiMetadata'), isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('uses a white native spinner throughout tvOS bring-up', (
     tester,
   ) async {
