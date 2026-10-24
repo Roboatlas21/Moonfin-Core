@@ -65,6 +65,10 @@ internal class SecondarySubtitleOverlay(
     private var primaryBottomPaddingFraction = 0.04f
     private var unmodifiedPrimaryCues: List<Cue> = emptyList()
     private var lastPrimaryCue: Cue? = null
+    // Preserve the whole primary group so a later dialogue gap can resolve
+    // placement against the same neighbouring cues after a resize or style change.
+    private var lastPrimaryCueGroup: List<Cue> = emptyList()
+    private var resolvedPrimaryReference: Cue? = null
     private var primaryEnabled = true
 
     init {
@@ -86,6 +90,8 @@ internal class SecondarySubtitleOverlay(
             // disabled. Keep it when switching secondary tracks so gaps in dialogue do
             // not reset the layout.
             lastPrimaryCue = null
+            lastPrimaryCueGroup = emptyList()
+            resolvedPrimaryReference = null
         }
         renderCues()
     }
@@ -137,6 +143,8 @@ internal class SecondarySubtitleOverlay(
     fun resetPrimaryCues(clearSecondary: Boolean = false) {
         unmodifiedPrimaryCues = emptyList()
         lastPrimaryCue = null
+        lastPrimaryCueGroup = emptyList()
+        resolvedPrimaryReference = null
         if (clearSecondary && secondaryCues != null) secondaryCues = emptyList()
         renderCues()
     }
@@ -189,6 +197,35 @@ internal class SecondarySubtitleOverlay(
             .build()
     }
 
+    /** Move a centred primary only if it will not cover another primary cue. */
+    private fun resolvePrimaryCues(cues: List<Cue>, width: Int, height: Int, fontPx: Float): List<Cue> {
+        val originals = cues.map {
+            offsetPrimaryCue(it, primaryBottomPaddingFraction, (baseFontSize / 24f) * 0.06f * 1.25f)
+        }
+        if (secondaryCues == null || width <= 0 || height <= 0) return originals
+
+        val originalBoxes = originals.map { estimatePrimaryBox(it, width, height, fontPx) }
+        val resolved = ArrayList<Cue>(originals.size)
+        val resolvedBoxes = ArrayList<SubtitleBox>(originals.size)
+        for ((index, cue) in originals.withIndex()) {
+            val candidate = if (isCentredCue(cue)) positionPrimaryCue(cues[index], height) else cue
+            val candidateBox = if (candidate === cue) originalBoxes[index]
+                else estimatePrimaryBox(candidate, width, height, fontPx)
+            // Compare against every other authored primary, even one we may
+            // move later. Also protect earlier accepted positions.
+            val overlapsOtherPrimary = candidate !== cue && originalBoxes.indices.any {
+                it != index && SubtitleLayoutPlanner.intersects(candidateBox, originalBoxes[it])
+            }
+            val overlapsAccepted = resolvedBoxes.any {
+                SubtitleLayoutPlanner.intersects(candidateBox, it)
+            }
+            val selected = if (overlapsOtherPrimary || overlapsAccepted) cue else candidate
+            resolved += selected
+            resolvedBoxes += if (selected === cue) originalBoxes[index] else candidateBox
+        }
+        return resolved
+    }
+
     private fun renderCues() {
         val active = secondaryCues.orEmpty()
         if (!primaryEnabled) {
@@ -208,11 +245,17 @@ internal class SecondarySubtitleOverlay(
         val width = view.width
         val height = view.height
         val gapPx = MIN_GAP_DP * view.resources.displayMetrics.density
+        val primaryFontPx = (baseFontSize / 24f) * 0.06f * height
+        val primaryCues = resolvePrimaryCues(unmodifiedPrimaryCues, width, height, primaryFontPx)
         unmodifiedPrimaryCues.firstOrNull { it.text != null }?.let {
-            // Retain authored placement so appearance changes also apply during gaps.
+            // Keep the whole authored group so future placements use the same
+            // collision result during dialogue gaps and after appearance changes.
             lastPrimaryCue = it
+            lastPrimaryCueGroup = unmodifiedPrimaryCues
         }
-        val primaryCues = unmodifiedPrimaryCues.map { positionPrimaryCue(it, height) }
+        resolvedPrimaryReference = (if (unmodifiedPrimaryCues.any { it.text != null }) primaryCues
+            else resolvePrimaryCues(lastPrimaryCueGroup, width, height, primaryFontPx))
+            .firstOrNull { it.text != null }
         primaryView.setCues(primaryCues)
         if (active.isEmpty()) {
             view.visibility = View.VISIBLE
@@ -224,7 +267,6 @@ internal class SecondarySubtitleOverlay(
             view.setCues(active.map(::buildCue))
             return
         }
-        val primaryFontPx = (baseFontSize / 24f) * 0.06f * height
         val secondaryFontPx = ((fontSizeOverride ?: baseFontSize) / 24f) * 0.06f * height
         val primaryBoxes = primaryCues.map { estimatePrimaryBox(it, width, height, primaryFontPx) }
         // Position secondary cues relative to the primary's current or last known
@@ -321,7 +363,9 @@ internal class SecondarySubtitleOverlay(
     ): Cue? {
         val cueWidth = if (cue.size == Cue.DIMEN_UNSET) width * 0.9f else cue.size * width
         val textHeight = estimateTextHeight(text, cueWidth, fontPx.coerceAtLeast(1f))
-        val reference = lastPrimaryCue?.let { positionPrimaryCue(it, height) }
+        // Use the position the primary actually received; a proposed centred
+        // shift may have been rejected to avoid covering another primary cue.
+        val reference = resolvedPrimaryReference
         val refBox = reference?.let {
             estimatePrimaryBox(it, width, height, (baseFontSize / 24f) * 0.06f * height)
         }
@@ -462,6 +506,8 @@ internal class SecondarySubtitleOverlay(
     fun clear() {
         unmodifiedPrimaryCues = emptyList()
         lastPrimaryCue = null
+        lastPrimaryCueGroup = emptyList()
+        resolvedPrimaryReference = null
         primaryView.setCues(emptyList())
         select(false)
     }

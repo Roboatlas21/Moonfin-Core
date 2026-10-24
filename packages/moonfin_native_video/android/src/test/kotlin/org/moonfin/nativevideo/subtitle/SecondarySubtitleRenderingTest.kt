@@ -271,6 +271,38 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
+    fun centredPrimaryAvoidsOtherPrimaryCuesAndKeepsResolvedGapPlacement() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0f)
+        overlay.select(true)
+        val centred = Cue.Builder().setText("Centre primary")
+            .setLine(0.40f, Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE).build()
+        val below = Cue.Builder().setText("Separate lower primary")
+            .setLine(0.46f, Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()
+
+        // Moving the centred line down would overlap the next authored cue,
+        // so preserve the centred line and place the secondary around it.
+        overlay.updatePrimaryCues(listOf(centred, below))
+        val displayed = displayedCues(primary)
+        assertEquals(Cue.ANCHOR_TYPE_MIDDLE, displayed[0].lineAnchor)
+        assertEquals(0.40f, displayed[0].line, 0.0001f)
+        assertEquals(0.46f, displayed[1].line, 0.0001f)
+
+        overlay.updateCues(listOf(Cue.Builder().setText("Translation").build()))
+        val secondaryLine = displayedCues(secondary).single().line
+        overlay.updatePrimaryCues(emptyList())
+        assertEquals(secondaryLine, displayedCues(secondary).single().line, 0.0001f)
+        overlay.updatePrimaryCues(listOf(centred, below))
+        assertEquals(Cue.ANCHOR_TYPE_MIDDLE, displayedCues(primary)[0].lineAnchor)
+        assertEquals(secondaryLine, displayedCues(secondary).single().line, 0.0001f)
+    }
+
+    @Test
     fun appearanceChangesUpdateCachedPrimaryPlacementDuringDialogueGaps() {
         val context = RuntimeEnvironment.getApplication()
         for ((line, anchor, expectedShift) in listOf(
