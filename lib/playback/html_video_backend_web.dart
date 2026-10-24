@@ -500,6 +500,8 @@ class HtmlVideoBackend extends PlayerBackend
 
     await _applySource(url, container: container, startPosition: startPosition);
     if (!_isCurrentPlaybackRequest(generation)) return;
+    // Style the first cue even if it arrives before the initial viewport poll.
+    _applySubtitleAppearance();
     await setSubtitleDelay(subtitleDelaySeconds);
     if (!_isCurrentPlaybackRequest(generation)) return;
     await setSecondarySubtitleDelay(
@@ -1231,13 +1233,10 @@ class HtmlVideoBackend extends PlayerBackend
         ? 0
         : (_primaryAlignment(primary, bounds!.centre) - 1) ~/ 3;
     final gap = middleSubtitleGap(0.015, _secondaryOffset);
-    final occupied = [
-      for (final cue in _primaryReferenceCues)
-        (
-          top: _primaryCueBounds(cue).top,
-          bottom: _primaryCueBounds(cue).bottom,
-        ),
-    ];
+    final occupied = _primaryReferenceCues.map((cue) {
+      final measured = _primaryCueBounds(cue);
+      return (top: measured.top, bottom: measured.bottom);
+    }).toList();
 
     // Split a centred reference only when it stays clear of the other primary
     // cues. Otherwise preserve their authored placement and fit the secondary
@@ -1460,7 +1459,6 @@ class HtmlVideoBackend extends PlayerBackend
   /// offset from the original position, moving top cues down and bottom cues up while
   /// preserving middle placement. Automatically placed cues use a bottom anchor.
   void _positionCues(web.TextTrack track) {
-    _applySubtitleAppearance();
     final cues = track.activeCues;
     if (cues != null) {
       _positionPrimaryCues([

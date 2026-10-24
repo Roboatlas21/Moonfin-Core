@@ -3145,12 +3145,9 @@ class MediaKitPlayerBackend extends PlayerBackend
     await _secondaryControlsReady;
     if (_isDisposed || !supportsSecondarySubtitleDelay) return;
     final native = _player.platform as NativePlayer;
-    final primary = double.tryParse(
-          await _tryNativeGetProperty(native, 'sub-delay') ?? '',
-        ) ?? 0;
     await _nativeSetProperty(
       native, 'secondary-sub-delay',
-      (primary + _secondarySubtitleDelay).toStringAsFixed(3),
+      (subtitleDelaySeconds + _secondarySubtitleDelay).toStringAsFixed(3),
     );
   }
 
