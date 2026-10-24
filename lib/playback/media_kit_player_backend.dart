@@ -927,7 +927,14 @@ class MediaKitPlayerBackend extends PlayerBackend
       _enableNativeSubtitleRendering();
     }
     await _maybeEngageNativeHdr();
-    await setSubtitleDelay(subtitleDelaySeconds);
+    final native = _player.platform;
+    if (native is NativePlayer) {
+      await _nativeSetProperty(
+        native,
+        'sub-delay',
+        subtitleDelaySeconds.toStringAsFixed(3),
+      );
+    }
     if (!_ownsPlayback(generation)) return;
     await setSecondarySubtitleDelay(
       ((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000,
