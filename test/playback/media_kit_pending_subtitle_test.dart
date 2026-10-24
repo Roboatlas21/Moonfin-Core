@@ -345,6 +345,7 @@ void main() {
     try {
       other.discover();
       await second.setSecondarySubtitle(embeddedTrackId: 1);
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
       final before = int.parse(other.platform.properties['secondary-sub-pos']!);
       // No position-stream tick occurs while this fake player is paused.
       other.platform.properties['sub-text/ass'] = r'One\NTwo\NThree';
@@ -358,6 +359,7 @@ void main() {
   });
 
   testWidgets('window resize refreshes secondary placement without playback ticks', (tester) async {
+    addTearDown(tester.view.resetPhysicalSize);
     final other = _Player();
     other.platform.properties.addAll({
       'secondary-sub-delay': '0',
@@ -371,9 +373,11 @@ void main() {
     try {
       other.discover();
       await second.setSecondarySubtitle(embeddedTrackId: 1);
+      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
       final before = int.parse(other.platform.properties['secondary-sub-pos']!);
       other.platform.properties['osd-width'] = '400';
-      second.didChangeMetrics();
+      // Exercise Flutter's real metrics observer, not the callback directly.
+      tester.view.physicalSize = tester.view.physicalSize * 0.9;
       await tester.pump(const Duration(milliseconds: 150));
       await tester.pump();
       await tester.pump();
