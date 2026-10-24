@@ -164,7 +164,11 @@ class HtmlVideoBackend extends PlayerBackend
   double _playbackSpeed = 1.0;
   double _volume = 100.0;
   bool _disposed = false;
+  int _playbackGeneration = 0;
   bool _tracksKnown = false;
+
+  bool _isCurrentPlaybackRequest(int generation) =>
+      !_disposed && generation == _playbackGeneration;
 
   Timer? _statePollTimer;
   Completer<void>? _tracksReadyCompleter;
@@ -476,6 +480,7 @@ class HtmlVideoBackend extends PlayerBackend
         : payload['url']?.toString() ?? '';
     final container = payload['container']?.toString();
     if (url.isEmpty) return;
+    final generation = ++_playbackGeneration;
     updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
 
     _tracksKnown = false;
@@ -485,61 +490,72 @@ class HtmlVideoBackend extends PlayerBackend
     _completedStream.add(false);
 
     await _applySource(url, container: container, startPosition: startPosition);
+    if (!_isCurrentPlaybackRequest(generation)) return;
     await setSubtitleDelay(subtitleDelaySeconds);
+    if (!_isCurrentPlaybackRequest(generation)) return;
     await setSecondarySubtitleDelay(
       ((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000,
     );
+    if (!_isCurrentPlaybackRequest(generation)) return;
     await configureSecondarySubtitleStyle(
       fontSize: (payload['secondarySubtitleFontSize'] as num?)?.toDouble(),
       verticalOffset: (payload['secondarySubtitleOffset'] as num?)?.toDouble(),
       textColor: (payload['secondarySubtitleTextColor'] as num?)?.toInt(),
     );
+    if (!_isCurrentPlaybackRequest(generation)) return;
     await setSecondarySubtitle(
       url: payload['secondarySubtitleUrl'] as String?,
       codec: payload['secondarySubtitleCodec'] as String?,
     );
+    if (!_isCurrentPlaybackRequest(generation)) return;
 
     if (autoPlay) {
       _setBuffering(true);
       try {
         await _videoElement.play().toDart;
+        if (!_isCurrentPlaybackRequest(generation)) return;
         _setPlaying(true);
       } catch (error) {
+        if (!_isCurrentPlaybackRequest(generation)) return;
         _setPlaying(false);
         _errorStream.add(<String, dynamic>{
           'event': 'playerError',
           'message': error.toString(),
         });
       } finally {
-        _setBuffering(false);
+        if (_isCurrentPlaybackRequest(generation)) _setBuffering(false);
       }
     } else {
       _setPlaying(false);
       _setBuffering(false);
     }
 
-    _startStatePolling();
+    if (_isCurrentPlaybackRequest(generation)) _startStatePolling();
   }
 
   @override
   Future<void> resume() async {
     if (_disposed) return;
+    final generation = ++_playbackGeneration;
     try {
       await _videoElement.play().toDart;
+      if (!_isCurrentPlaybackRequest(generation)) return;
       _setPlaying(true);
     } catch (error) {
+      if (!_isCurrentPlaybackRequest(generation)) return;
       _errorStream.add(<String, dynamic>{
         'event': 'playerError',
         'message': error.toString(),
       });
       _setPlaying(false);
     }
-    _startStatePolling();
+    if (_isCurrentPlaybackRequest(generation)) _startStatePolling();
   }
 
   @override
   Future<void> pause() async {
     if (_disposed) return;
+    ++_playbackGeneration;
     _videoElement.pause();
     _setPlaying(false);
     _setBuffering(false);
@@ -548,6 +564,7 @@ class HtmlVideoBackend extends PlayerBackend
   @override
   Future<void> stop() async {
     if (_disposed) return;
+    ++_playbackGeneration;
     _videoElement.pause();
     _detachHlsJsSource();
     _videoElement.removeAttribute('src');
