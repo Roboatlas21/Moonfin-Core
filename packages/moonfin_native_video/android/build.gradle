@@ -78,6 +78,9 @@ android {
 dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
+    // Test-only simulated ExoPlayer with a deliberately failing secondary source.
+    testImplementation("androidx.media3:media3-test-utils:1.10.1")
+    testImplementation("androidx.media3:media3-test-utils-robolectric:1.10.1")
 
     def composeBom = platform("androidx.compose:compose-bom:2025.12.00")
 

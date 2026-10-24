@@ -33,4 +33,4 @@ jobs:
           printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_ROOT" "$ANDROID_HOME" > android/local.properties
       - name: Simulate a failing secondary subtitle with an independent video loader
         run: |
-          gradle -p android :moonfin_native_video:testDebugUnitTest --tests 'org.moonfin.nativevideo.subtitle.TimeOffsetMediaPeriodTest' --no-daemon --console=plain
+          gradle -p android :moonfin_native_video:testDebugUnitTest --tests 'org.moonfin.nativevideo.subtitle.TimeOffsetMediaPeriodTest' --tests 'org.moonfin.nativevideo.subtitle.Media3SecondaryHttpFailureIntegrationTest' --no-daemon --console=plain
