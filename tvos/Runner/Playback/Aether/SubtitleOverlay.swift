@@ -6,6 +6,7 @@ private typealias PlatformFont = UIFont
 private typealias PlatformFontWeight = UIFont.Weight
 private typealias PlatformImage = UIImage
 private typealias PlatformImageView = UIImageView
+private typealias PlatformLabel = UILabel
 private typealias PlatformEdgeInsets = UIEdgeInsets
 #elseif canImport(AppKit)
 import AppKit
@@ -15,6 +16,7 @@ private typealias PlatformFont = NSFont
 private typealias PlatformFontWeight = NSFont.Weight
 private typealias PlatformImage = NSImage
 private typealias PlatformImageView = NSImageView
+private typealias PlatformLabel = NSTextField
 private typealias PlatformEdgeInsets = NSEdgeInsets
 #endif
 
@@ -25,11 +27,13 @@ final class SubtitleOverlay: PlatformView {
     #if canImport(UIKit)
     private let outlineLabel = UILabel()
     private let textLabel = UILabel()
+    private let referenceTextLabel = UILabel()
     private let bitmapView = UIImageView()
     private let assImageView = UIImageView()
     #else
     private let outlineLabel = NSTextField(labelWithString: "")
     private let textLabel = NSTextField(labelWithString: "")
+    private let referenceTextLabel = NSTextField(labelWithString: "")
     private let bitmapView = NSImageView()
     private let assImageView = NSImageView()
     #endif
@@ -59,11 +63,15 @@ final class SubtitleOverlay: PlatformView {
             requestLayout()
         }
     }
-    // Store each occupied region in relative coordinates, preserving free gaps
-    // between positioned cues when primary dialogue disappears or the view resizes.
-    private var lastPrimaryFrames: [CGRect] = []
+    // Keep source placement inputs through dialogue gaps. Final screen rectangles
+    // go stale when the font, controls lift, spacing or picture geometry changes.
+    private enum PrimaryPlacement {
+        case text([SubtitleEvent], isMain: Bool)
+        case bitmap(SubtitleEvent)
+        case ass(CGRect)
+    }
+    private var lastPrimaryPlacement: [PrimaryPlacement] = []
     private var assVisibleRegions: [CGRect] = []
-    private var lastPrimaryAlignment = 2
     var secondaryVerticalAdjustment: Double = 0 {
         didSet {
             primaryForStacking?.requestLayout()
@@ -84,32 +92,60 @@ final class SubtitleOverlay: PlatformView {
             regions.append(view.frame)
         }
         if !assImageView.isHidden {
-            let canvas = assCanvas
-            regions.append(contentsOf: assVisibleRegions.map { rect in
-                CGRect(x: canvas.minX + rect.minX * canvas.width,
-                       y: canvas.minY + rect.minY * canvas.height,
-                       width: rect.width * canvas.width, height: rect.height * canvas.height)
-            })
+            regions.append(contentsOf: assVisibleRegions.map { assRegion($0) })
         }
         return regions.filter { !$0.isEmpty && !$0.isNull }
     }
 
-    private var visibleFrame: CGRect? {
-        let regions = visibleRegions
-        return regions.isEmpty ? nil : regions.reduce(CGRect.null) { $0.union($1) }
+    private func assRegion(_ rect: CGRect) -> CGRect {
+        let canvas = assCanvas
+        return CGRect(x: canvas.minX + rect.minX * canvas.width,
+                      y: canvas.minY + rect.minY * canvas.height,
+                      width: rect.width * canvas.width, height: rect.height * canvas.height)
     }
 
     private var stackingRegions: [CGRect] {
         let regions = visibleRegions
         if !regions.isEmpty { return regions }
-        return lastPrimaryFrames.map {
-            CGRect(x: $0.minX * bounds.width, y: $0.minY * bounds.height,
-                   width: $0.width * bounds.width, height: $0.height * bounds.height)
-        }
+        return lastPrimaryPlacement.compactMap { reference -> CGRect? in
+            switch reference {
+            case .text(let events, let isMain):
+                let placement = Self.textPlacement(events)
+                let alignment = Self.effectiveAlignment(placement)
+                let text = applyInlineEmphasis(
+                    to: fillText(events.compactMap(\.text).joined(separator: "\n"), alignment: alignment),
+                    events: events)
+                #if canImport(UIKit)
+                referenceTextLabel.attributedText = text
+                #else
+                referenceTextLabel.attributedStringValue = text
+                #endif
+                return textLayout(
+                    for: referenceTextLabel, placement: placement, alignment: alignment,
+                    centeredPair: isMain && (Self.stackingAlignment(placement) - 1) / 3 == 1).frame
+            case .bitmap(let event):
+                return bitmapFrame(for: event)
+            case .ass(let rect):
+                return assRegion(rect)
+            }
+        }.filter { !$0.isEmpty && !$0.isNull }
     }
 
     private var activeTextPlacement: SubtitleEvent? {
-        baseTextEvents.first { $0.alignment != nil || $0.position != nil }
+        Self.textPlacement(baseTextEvents)
+    }
+
+    private static func textPlacement(_ events: [SubtitleEvent]) -> SubtitleEvent? {
+        events.first { $0.alignment != nil || $0.position != nil }
+    }
+
+    private static func stackingAlignment(_ placement: SubtitleEvent?) -> Int {
+        let alignment = effectiveAlignment(placement)
+        guard let position = placement?.position else { return alignment }
+        // A WebVTT line anchor is not a screen region: line:10%,end still
+        // needs the secondary below the primary.
+        let row = position.y < 1.0 / 3 ? 2 : position.y > 2.0 / 3 ? 0 : 1
+        return row * 3 + (alignment - 1) % 3 + 1
     }
 
     private var currentAlignment: Int {
@@ -117,32 +153,29 @@ final class SubtitleOverlay: PlatformView {
             return primary.currentAlignment
         }
         if !activeTextEvents.isEmpty {
-            let placement = activeTextPlacement
-            let alignment = Self.effectiveAlignment(placement)
-            guard let position = placement?.position else { return alignment }
-            // WebVTT's line alignment is an anchor, not a screen region: a bottom
-            // anchor at line:10%,end still needs the secondary below the primary.
-            let row = position.y < 1.0 / 3 ? 2 : position.y > 2.0 / 3 ? 0 : 1
-            return row * 3 + (alignment - 1) % 3 + 1
+            return Self.stackingAlignment(activeTextPlacement)
         }
-        if let frame = visibleFrame {
-            let row = frame.midY < bounds.height / 3 ? 2
-                : frame.midY > bounds.height * 2 / 3 ? 0 : 1
-            return row * 3 + 2
+        if visibleRegions.isEmpty,
+           case .text(let events, _)? = lastPrimaryPlacement.first {
+            return Self.stackingAlignment(Self.textPlacement(events))
         }
-        return lastPrimaryAlignment
+        let regions = stackingRegions
+        guard !regions.isEmpty else { return 2 }
+        let frame = regions.reduce(CGRect.null) { $0.union($1) }
+        let row = frame.midY < bounds.height / 3 ? 2
+            : frame.midY > bounds.height * 2 / 3 ? 0 : 1
+        return row * 3 + 2
     }
 
     func rememberPrimaryPlacement() {
         guard secondaryForStacking != nil,
               bounds.width > 0, bounds.height > 0 else { return }
-        let regions = visibleRegions
-        guard !regions.isEmpty else { return }
-        lastPrimaryFrames = regions.map { frame in
-            CGRect(x: frame.minX / bounds.width, y: frame.minY / bounds.height,
-                   width: frame.width / bounds.width, height: frame.height / bounds.height)
+        guard !visibleRegions.isEmpty else { return }
+        lastPrimaryPlacement = Self.textGroups(activeTextEvents).enumerated().map {
+            PrimaryPlacement.text($0.element, isMain: $0.offset == 0)
         }
-        lastPrimaryAlignment = currentAlignment
+        lastPrimaryPlacement += activeBitmapEvents.map { .bitmap($0) }
+        lastPrimaryPlacement += assVisibleRegions.map { .ass($0) }
     }
 
     private func updateSecondaryPlacement() {
@@ -267,7 +300,7 @@ final class SubtitleOverlay: PlatformView {
         isUserInteractionEnabled = false
         backgroundColor = .clear
 
-        for label in [outlineLabel, textLabel] {
+        for label in [outlineLabel, textLabel, referenceTextLabel] {
             label.numberOfLines = 0
             label.textAlignment = .center
         }
@@ -276,7 +309,7 @@ final class SubtitleOverlay: PlatformView {
         #else
         wantsLayer = true
 
-        for label in [outlineLabel, textLabel] {
+        for label in [outlineLabel, textLabel, referenceTextLabel] {
             label.maximumNumberOfLines = 0
             label.alignment = .center
             label.isBezeled = false
@@ -458,8 +491,7 @@ final class SubtitleOverlay: PlatformView {
     /// Text and bitmap cues redraw on the next update; libass updates its image separately.
     func resetPlacement() {
         hideAll()
-        lastPrimaryFrames = []
-        lastPrimaryAlignment = 2
+        lastPrimaryPlacement = []
         // Track changes and seeks reset alignment. Ordinary dialogue gaps preserve it.
         if let secondary = secondaryForStacking,
            secondary.stackingEnabled, !secondary.activeTextEvents.isEmpty {
@@ -497,6 +529,8 @@ final class SubtitleOverlay: PlatformView {
         }
         if !activeTextEvents.isEmpty {
             showText(activeTextEvents)
+        } else {
+            updateSecondaryPlacement()
         }
     }
 
@@ -780,6 +814,22 @@ final class SubtitleOverlay: PlatformView {
         guard !textLabel.isHidden else { return }
         let placement = primaryForStacking != nil && stackingEnabled ? nil
             : activeTextPlacement
+        let alignment = primaryForStacking != nil && stackingEnabled
+            ? currentAlignment : Self.effectiveAlignment(placement)
+        let layout = textLayout(
+            for: textLabel, placement: placement, alignment: alignment,
+            centeredPair: (currentAlignment - 1) / 3 == 1)
+        textLabel.frame = layout.frame
+        outlineLabel.frame = layout.frame
+        applyOverflowClip(layout.clip, left: layout.left, right: layout.right)
+        rememberPrimaryPlacement()
+    }
+
+    /// Visible text and retained primary groups use the same measurement,
+    /// safe-area bounds and placement rules.
+    private func textLayout(
+        for label: PlatformLabel, placement: SubtitleEvent?, alignment: Int, centeredPair: Bool
+    ) -> (frame: CGRect, clip: ClosedRange<CGFloat>?, left: CGFloat, right: CGFloat) {
         // An alignment-only cue still uses the screen edges; an explicit
         // authored coordinate is the case that may deliberately enter a cutout.
         let usesSafeArea = placement?.position == nil
@@ -787,12 +837,8 @@ final class SubtitleOverlay: PlatformView {
         let safeWidth = usesSafeArea
             ? bounds.width - safeInsets.left - safeInsets.right : bounds.width
         let maxWidth = max(1, safeWidth * 0.9)
-        let size = textLabel.sizeThatFits(
+        let size = label.sizeThatFits(
             CGSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude))
-        let authoredAlignment = (1...9).contains(placement?.alignment ?? 2)
-            ? (placement?.alignment ?? 2) : 2
-        let alignment = primaryForStacking != nil && stackingEnabled
-            ? currentAlignment : authoredAlignment
         let column = (alignment - 1) % 3
         let row = (alignment - 1) / 3
         let picture = videoBox
@@ -820,8 +866,9 @@ final class SubtitleOverlay: PlatformView {
         let maximumY: CGFloat = usesSafeArea
             ? bounds.height - safeInsets.bottom : bounds.height
         var overflowClip: ClosedRange<CGFloat>?
-        if let primary = primaryForStacking, stackingEnabled,
-           let parentFrame = primary.stackingRegions.first {
+        let primary = stackingEnabled ? primaryForStacking : nil
+        let occupied = primary?.stackingRegions ?? []
+        if let primary, let parentFrame = occupied.first {
             let parentAlignment = primary.currentAlignment
             let parentColumn = (parentAlignment - 1) % 3
             let parentRow = (parentAlignment - 1) / 3
@@ -832,13 +879,13 @@ final class SubtitleOverlay: PlatformView {
             let pairGap = max(2 * canvasScale, gap +
                 CGFloat(secondaryVerticalAdjustment) * bounds.height)
             let resolved = Self.stackedSecondaryTop(
-                occupied: primary.stackingRegions, anchor: parentFrame,
+                occupied: occupied, anchor: parentFrame,
                 x: x, width: size.width, height: size.height, gap: pairGap,
                 preferBelow: parentRow == 2,
                 minimumY: minimumY, maximumY: maximumY)
             y = resolved.top
             overflowClip = resolved.clip
-        } else if (currentAlignment - 1) / 3 == 1, let secondary = secondaryForStacking,
+        } else if centeredPair, let secondary = secondaryForStacking,
                   secondary.stackingEnabled {
             // Keep the midpoint of a centred pair fixed.
             let pairGap = max(2 * canvasScale, gap +
@@ -849,53 +896,55 @@ final class SubtitleOverlay: PlatformView {
         if overflowClip == nil {
             y = min(max(y, minimumY), max(minimumY, maximumY - size.height))
         }
-        let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
-        textLabel.frame = frame
-        outlineLabel.frame = frame
-        applyOverflowClip(overflowClip, left: minimumX, right: maximumX)
-        rememberPrimaryPlacement()
+        return (CGRect(x: x, y: y, width: size.width, height: size.height),
+                overflowClip, minimumX, maximumX)
     }
 
     private func layoutBitmapViews() {
-        let box = videoBox
         for (index, event) in activeBitmapEvents.enumerated() {
             let view = index == 0 ? bitmapView : extraBitmapViews[index - 1]
-            if let rect = event.normalizedRect, let canvas = event.canvasSize,
-                canvas.width > 0, canvas.height > 0
-            {
-                // Authored image regions share one composition canvas.
-                let scale = box.width / canvas.width
-                let canvasHeight = canvas.height * scale
-                let yOrigin = box.midY - canvasHeight / 2
-                view.frame = CGRect(
-                    x: box.minX + rect.origin.x * box.width,
-                    y: yOrigin + rect.origin.y * canvasHeight,
-                    width: rect.size.width * box.width,
-                    height: rect.size.height * canvasHeight
-                )
-            } else if event.bitmapWidth > 0 {
-                let scale = min(bounds.width / CGFloat(event.bitmapWidth), 1.0)
-                let w = CGFloat(event.bitmapWidth) * scale
-                let h = CGFloat(event.bitmapHeight) * scale
-                view.frame = CGRect(
-                    x: (bounds.width - w) / 2,
-                    y: bounds.height - h - bitmapBottomOffset,
-                    width: w, height: h
-                )
-            }
+            if let frame = bitmapFrame(for: event) { view.frame = frame }
         }
     }
 
+    private func bitmapFrame(for event: SubtitleEvent) -> CGRect? {
+        let box = videoBox
+        if let rect = event.normalizedRect, let canvas = event.canvasSize,
+            canvas.width > 0, canvas.height > 0
+        {
+            // Authored image regions share one composition canvas.
+            let scale = box.width / canvas.width
+            let canvasHeight = canvas.height * scale
+            let yOrigin = box.midY - canvasHeight / 2
+            return CGRect(
+                x: box.minX + rect.origin.x * box.width,
+                y: yOrigin + rect.origin.y * canvasHeight,
+                width: rect.size.width * box.width,
+                height: rect.size.height * canvasHeight
+            )
+        } else if event.bitmapWidth > 0 {
+            let scale = min(bounds.width / CGFloat(event.bitmapWidth), 1.0)
+            let w = CGFloat(event.bitmapWidth) * scale
+            let h = CGFloat(event.bitmapHeight) * scale
+            return CGRect(
+                x: (bounds.width - w) / 2,
+                y: bounds.height - h - bitmapBottomOffset,
+                width: w, height: h
+            )
+        }
+        return nil
+    }
+
     private func labelFont() -> PlatformFont {
-        PlatformFont.systemFont(ofSize: appliedFontSize, weight: subtitleFontWeight)
+        PlatformFont.systemFont(ofSize: subtitleFontSize, weight: subtitleFontWeight)
     }
 
     /// Set paragraph alignment on the attributed string from the cue alignment. Use the
     /// glyph height for line spacing so background fills do not leave gaps between
     /// lines.
-    private func paragraphStyle(for font: PlatformFont) -> NSParagraphStyle {
+    private func paragraphStyle(for font: PlatformFont, alignment: Int? = nil) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        let column = (currentAlignment - 1) % 3
+        let column = ((alignment ?? currentAlignment) - 1) % 3
         style.alignment = column == 0 ? .left : (column == 2 ? .right : .center)
         let glyphBox = font.ascender - font.descender
         style.minimumLineHeight = glyphBox
@@ -905,22 +954,25 @@ final class SubtitleOverlay: PlatformView {
 
     private func styledFont(for run: SubtitleStyledRun) -> PlatformFont {
         let font = PlatformFont.systemFont(
-            ofSize: appliedFontSize, weight: run.isBold ? .bold : subtitleFontWeight)
+            ofSize: subtitleFontSize, weight: run.isBold ? .bold : subtitleFontWeight)
         guard run.isItalic else { return font }
         #if canImport(UIKit)
         let traits = font.fontDescriptor.symbolicTraits.union(.traitItalic)
         guard let descriptor = font.fontDescriptor.withSymbolicTraits(traits) else { return font }
-        return PlatformFont(descriptor: descriptor, size: appliedFontSize)
+        return PlatformFont(descriptor: descriptor, size: subtitleFontSize)
         #else
         return NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
         #endif
     }
 
-    private func applyInlineEmphasis(to text: NSAttributedString) -> NSAttributedString {
-        guard baseTextEvents.contains(where: { $0.styledRuns != nil }) else { return text }
+    private func applyInlineEmphasis(
+        to text: NSAttributedString, events: [SubtitleEvent]? = nil
+    ) -> NSAttributedString {
+        let events = events ?? baseTextEvents
+        guard events.contains(where: { $0.styledRuns != nil }) else { return text }
         let result = NSMutableAttributedString(attributedString: text)
         var location = 0
-        for (index, event) in baseTextEvents.enumerated() {
+        for (index, event) in events.enumerated() {
             if index > 0 { location += 1 }  // Joined cues have one newline between them.
             let length = event.text?.utf16.count ?? 0
             if let runs = event.styledRuns,
@@ -950,14 +1002,14 @@ final class SubtitleOverlay: PlatformView {
         return result
     }
 
-    private func fillText(_ text: String) -> NSAttributedString {
+    private func fillText(_ text: String, alignment: Int? = nil) -> NSAttributedString {
         let font = labelFont()
         return NSAttributedString(
             string: text,
             attributes: [
                 .font: font,
                 .foregroundColor: subtitleTextColor,
-                .paragraphStyle: paragraphStyle(for: font),
+                .paragraphStyle: paragraphStyle(for: font, alignment: alignment),
             ])
     }
 

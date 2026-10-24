@@ -212,6 +212,41 @@ void main() {
     }
   });
 
+  test('primary gaps use the current font and viewport for stacking', () async {
+    const primary = 'A primary subtitle which wraps in a narrow window';
+    final properties = player.platform.properties;
+    properties.addAll({
+      'secondary-sub-pos': '100',
+      'secondary-sub-text': 'Translation',
+      'osd-height': '720',
+    });
+    player.discover();
+    await backend.setSubtitleTrack(1);
+    await backend.setSecondarySubtitle(embeddedTrackId: 2);
+    int position() => int.parse(properties['secondary-sub-pos']!);
+
+    for (final (fontSize, width) in [(48.0, '1280'), (24.0, '400')]) {
+      properties['sub-text/ass'] = primary;
+      properties['osd-width'] = '1280';
+      await backend.configureSubtitleStyle(fontSize: 24, verticalOffset: 0.04);
+      final before = position();
+
+      properties.remove('sub-text/ass');
+      properties['osd-width'] = width;
+      await backend.configureSubtitleStyle(fontSize: fontSize);
+      final duringGap = position();
+      expect(duringGap, lessThan(before));
+
+      properties['sub-text/ass'] = primary;
+      await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+      expect(
+        position(),
+        duringGap,
+        reason: 'The same primary cue must not move the secondary when it returns',
+      );
+    }
+  });
+
   test('Primary Off does not persist into a new source with automatic subtitles', () async {
     final other = _Player()..automaticSubtitleSid = '11';
     other.platform.properties.addAll({

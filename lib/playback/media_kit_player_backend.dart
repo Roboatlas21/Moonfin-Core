@@ -287,7 +287,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   bool _secondarySubtitleRequested = false;
   double _secondaryVerticalOffset = 0;
   int? _lastSecondaryStackPosition;
-  ({int alignment, double height})? _lastPrimaryStack;
+  String? _lastPrimaryText;
   DateTime? _lastSecondaryPositionCheck;
   Completer<void>? _secondaryPositionUpdate;
   StreamSubscription<Duration>? _secondaryPositionSub;
@@ -315,7 +315,7 @@ class MediaKitPlayerBackend extends PlayerBackend
 
   // Keep the last cue across dialogue gaps, but not across tracks or seeks.
   void _resetPrimarySubtitlePlacement() {
-    _lastPrimaryStack = null;
+    _lastPrimaryText = null;
     _lastSecondaryStackPosition = null;
     _lastSecondaryPositionCheck = null;
   }
@@ -3042,7 +3042,7 @@ class MediaKitPlayerBackend extends PlayerBackend
         : (ordinal: ordinal, url: externalUrl, generation: generation);
     final native = _player.platform;
     if (native is! NativePlayer) return;
-    if (!_secondarySubtitleRequested) _lastPrimaryStack = null;
+    if (!_secondarySubtitleRequested) _lastPrimaryText = null;
     await _nativeSetProperty(native, 'secondary-sid', 'no');
     if (!_isCurrentSecondarySubtitle(generation)) return;
     await _applyPendingSecondarySubtitle();
@@ -3263,19 +3263,18 @@ class MediaKitPlayerBackend extends PlayerBackend
       if (!_subtitlesDisabled &&
           !_primaryIsBitmapSubtitle &&
           primaryAss.isNotEmpty) {
-        _lastPrimaryStack = (
-          alignment:
-              int.tryParse(_mpvSrtAlignment.firstMatch(primaryAss)?[1] ?? '') ??
-              2,
-          height: _subtitleHeight(
-            primaryAss,
-            fontSize * primaryScale,
-            width - marginX * 2,
-          ),
-        );
+        _lastPrimaryText = primaryAss;
       }
-      final alignment = _lastPrimaryStack?.alignment ?? 2;
-      final primaryHeight = _lastPrimaryStack?.height ?? 0.0;
+      // Retain the cue through dialogue gaps, but measure it with the current
+      // font and viewport so appearance changes do not leave an old height.
+      final primaryText = _lastPrimaryText ?? '';
+      final alignment =
+          int.tryParse(_mpvSrtAlignment.firstMatch(primaryText)?[1] ?? '') ?? 2;
+      final primaryHeight = _subtitleHeight(
+        primaryText,
+        fontSize * primaryScale,
+        width - marginX * 2,
+      );
       final secondaryHeight = _subtitleHeight(
         secondaryText,
         fontSize * secondaryScale,
@@ -3288,7 +3287,7 @@ class MediaKitPlayerBackend extends PlayerBackend
       // captions, keep the bottom edge fixed.
       // Bitmap primaries have no text bounds. Reserve the top until a text cue
       // supplies measurable placement; only explicit Primary Off uses the bottom.
-      final secondaryTop = _lastPrimaryStack == null
+      final secondaryTop = _lastPrimaryText == null
           ? margin.clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0))
           : stackedSecondaryTop(
               alignment: alignment,
