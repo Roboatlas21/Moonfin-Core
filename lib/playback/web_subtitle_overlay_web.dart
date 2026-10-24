@@ -60,6 +60,7 @@ class WebSubtitleOverlay {
   _PgsRenderer? _pgsRenderer;
   double _delaySeconds = 0;
   bool _disposed = false;
+  int _rendererGeneration = 0;
 
   static Future<void>? _jassubLoad;
   static Future<void>? _libpgsLoad;
@@ -88,8 +89,9 @@ class WebSubtitleOverlay {
 
   Future<void> _showAss(String url) async {
     clear();
+    final generation = _rendererGeneration;
     await _ensureJassub();
-    if (_disposed) return;
+    if (_disposed || generation != _rendererGeneration) return;
     final options = JSObject()
       ..setProperty('video'.toJS, _video)
       ..setProperty('timeOffset'.toJS, (-_delaySeconds).toJS)
@@ -138,8 +140,9 @@ class WebSubtitleOverlay {
 
   Future<void> _showPgs(String url) async {
     clear();
+    final generation = _rendererGeneration;
     await _ensureLibpgs();
-    if (_disposed) return;
+    if (_disposed || generation != _rendererGeneration) return;
     final options = JSObject()
       ..setProperty('video'.toJS, _video)
       ..setProperty('timeOffset'.toJS, (-_delaySeconds).toJS)
@@ -167,6 +170,8 @@ class WebSubtitleOverlay {
   }
 
   void clear() {
+    // A cleared or replaced selection must not finish loading afterward.
+    _rendererGeneration++;
     final ass = _assRenderer;
     _assRenderer = null;
     if (ass != null) {
