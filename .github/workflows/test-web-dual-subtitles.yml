@@ -21,8 +21,8 @@ jobs:
           flutter-version: '3.47.2'
       - name: Resolve Flutter dependencies
         run: flutter pub get
-      - name: Test subtitle delivery URL resolution
-        run: flutter test --reporter expanded test/playback/media_stream_resolver_indices_test.dart
+      - name: Test subtitle delivery URL resolution and startup metadata
+        run: flutter test --reporter expanded test/playback/media_stream_resolver_indices_test.dart test/playback/backend_payload_external_subtitles_test.dart
       - name: Test Web secondary subtitle rendering in Chrome
         run: flutter test --platform chrome --reporter expanded test/playback/html_video_secondary_subtitle_test.dart test/playback/web_overlay_loader_retry_test.dart
       - name: Build WebAssembly release

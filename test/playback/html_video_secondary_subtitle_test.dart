@@ -208,6 +208,35 @@ void main() {
     expect(backend.isPlaying, isFalse);
   });
 
+
+  test('secondary track uses its language and falls back to und', () async {
+    final url = subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nSecond\n');
+    await backend.setSecondarySubtitle(url: url, codec: 'vtt', language: 'jpn');
+    final track = await loadedSecondary();
+    expect(track.srclang, 'jpn');
+
+    await backend.setSecondarySubtitle(url: url, codec: 'vtt', language: 'fr-CA');
+    expect(track.srclang, 'fr-CA');
+
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nOther\n'),
+      codec: 'vtt',
+    );
+    expect((await loadedSecondary()).srclang, 'und');
+  });
+
+  test('startup payload passes secondary language to the HTML track', () async {
+    await backend.play({
+      'url': mediaUrl,
+      'autoPlay': false,
+      'secondarySubtitleUrl':
+          subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nSecond\n'),
+      'secondarySubtitleCodec': 'vtt',
+      'secondarySubtitleLanguage': 'deu',
+    });
+    expect((await loadedSecondary()).srclang, 'deu');
+  });
+
   test('primary delay applies to both tracks without accumulating', () async {
     await backend.setSubtitleDelay(2);
     await backend.setSubtitleTrack(
