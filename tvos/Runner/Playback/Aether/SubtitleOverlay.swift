@@ -6,6 +6,7 @@ private typealias PlatformFont = UIFont
 private typealias PlatformFontWeight = UIFont.Weight
 private typealias PlatformImage = UIImage
 private typealias PlatformImageView = UIImageView
+private typealias PlatformEdgeInsets = UIEdgeInsets
 #elseif canImport(AppKit)
 import AppKit
 
@@ -14,6 +15,7 @@ private typealias PlatformFont = NSFont
 private typealias PlatformFontWeight = NSFont.Weight
 private typealias PlatformImage = NSImage
 private typealias PlatformImageView = NSImageView
+private typealias PlatformEdgeInsets = NSEdgeInsets
 #endif
 
 import QuartzCore
@@ -503,6 +505,9 @@ final class SubtitleOverlay: PlatformView {
     /// min(base, 70).
     func setSubtitlePosition(basePosition: Int) {
         subtitlePositionBase = min(max(basePosition, 40), 100)
+        for overlay in extraTextOverlays {
+            overlay.setSubtitlePosition(basePosition: subtitlePositionBase)
+        }
         requestLayout()
     }
 
@@ -719,6 +724,42 @@ final class SubtitleOverlay: PlatformView {
         }
     }
 
+    /// Local safe-area insets can be zero inside Flutter's platform view. Convert
+    /// the window/root safe regions into this overlay's coordinates, so a video
+    /// surface already inset around the camera housing is not inset again.
+    private var effectiveTextSafeAreaInsets: PlatformEdgeInsets {
+        #if os(iOS)
+        guard let window else { return safeAreaInsets }
+        var inherited = [
+            convert(window.bounds.inset(by: window.safeAreaInsets), from: window)
+        ]
+        if let root = window.rootViewController?.view {
+            inherited.append(convert(root.bounds.inset(by: root.safeAreaInsets), from: root))
+        }
+        return Self.resolvedSafeAreaInsets(
+            bounds: bounds, local: safeAreaInsets, inheritedRects: inherited)
+        #else
+        return safeAreaInsets
+        #endif
+    }
+
+    #if os(iOS)
+    static func resolvedSafeAreaInsets(
+        bounds: CGRect, local: UIEdgeInsets, inheritedRects: [CGRect]
+    ) -> UIEdgeInsets {
+        var result = local
+        for rect in inheritedRects {
+            let safe = bounds.intersection(rect)
+            guard safe.width > 0, safe.height > 0 else { continue }
+            result.top = max(result.top, safe.minY - bounds.minY)
+            result.left = max(result.left, safe.minX - bounds.minX)
+            result.bottom = max(result.bottom, bounds.maxY - safe.maxY)
+            result.right = max(result.right, bounds.maxX - safe.maxX)
+        }
+        return result
+    }
+    #endif
+
     private func layoutTextLabel() {
         guard !textLabel.isHidden else { return }
         let placement = primaryForStacking != nil && stackingEnabled ? nil
@@ -726,8 +767,9 @@ final class SubtitleOverlay: PlatformView {
         // An alignment-only cue still uses the screen edges; an explicit
         // authored coordinate is the case that may deliberately enter a cutout.
         let usesSafeArea = placement?.position == nil
+        let safeInsets = effectiveTextSafeAreaInsets
         let safeWidth = usesSafeArea
-            ? bounds.width - safeAreaInsets.left - safeAreaInsets.right : bounds.width
+            ? bounds.width - safeInsets.left - safeInsets.right : bounds.width
         let maxWidth = max(1, safeWidth * 0.9)
         let size = textLabel.sizeThatFits(
             CGSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude))
@@ -755,12 +797,12 @@ final class SubtitleOverlay: PlatformView {
         var x = xAnchor - size.width * CGFloat(column) / 2
         var y = yAnchor - size.height * CGFloat(2 - row) / 2
         let gap = 8 * canvasScale
-        let minimumX: CGFloat = usesSafeArea ? safeAreaInsets.left : 0
+        let minimumX: CGFloat = usesSafeArea ? safeInsets.left : 0
         let maximumX: CGFloat = usesSafeArea
-            ? bounds.width - safeAreaInsets.right : bounds.width
-        let minimumY: CGFloat = usesSafeArea ? safeAreaInsets.top : 0
+            ? bounds.width - safeInsets.right : bounds.width
+        let minimumY: CGFloat = usesSafeArea ? safeInsets.top : 0
         let maximumY: CGFloat = usesSafeArea
-            ? bounds.height - safeAreaInsets.bottom : bounds.height
+            ? bounds.height - safeInsets.bottom : bounds.height
         var overflowClip: ClosedRange<CGFloat>?
         if let primary = primaryForStacking, stackingEnabled,
            let parentFrame = primary.stackingRegions.first {
