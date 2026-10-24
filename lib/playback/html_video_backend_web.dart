@@ -10,6 +10,7 @@ import 'package:web/web.dart' as web;
 import '../preference/user_preferences.dart';
 import 'html_video_backend_profile.dart';
 import 'letterbox_croppers.dart';
+import 'secondary_subtitle_position.dart';
 import 'web_subtitle_overlay_web.dart';
 
 extension type _MoonfinHlsBridge._(JSObject _) implements JSObject {
@@ -28,7 +29,8 @@ extension type _MoonfinHlsBridge._(JSObject _) implements JSObject {
   external void destroy(JSAny? controller);
 }
 
-class HtmlVideoBackend extends PlayerBackend {
+class HtmlVideoBackend extends PlayerBackend
+    implements SecondarySubtitleBackend {
   HtmlVideoBackend(this._prefs)
     : _viewType = 'moonfin-html-video-${_nextViewId++}' {
     _videoElement = _createVideoElement();
@@ -52,6 +54,15 @@ class HtmlVideoBackend extends PlayerBackend {
   /// Marks a track whose cues are already being placed, so a track seen twice
   /// does not collect a second listener.
   static const _cueHookProperty = 'moonfinCuePlacement';
+  static const _authoredSrtAlignment = 'moonfinAuthoredSrtAlignment';
+  static const _autoPositionedCue = 'moonfinAutoPositionedCue';
+  static const _authoredLine = 'moonfinAuthoredLine';
+  static const _authoredSnapToLines = 'moonfinAuthoredSnapToLines';
+  static const _authoredLineAlign = 'moonfinAuthoredLineAlign';
+  static const _stackedMiddleLine = 'moonfinStackedMiddleLine';
+  static const _stackedMiddleLineAlign = 'moonfinStackedMiddleLineAlign';
+  static const _stackedMiddleSnapToLines = 'moonfinStackedMiddleSnapToLines';
+  static final _srtAlignmentTag = RegExp(r'^\s*\{\\an([1-9])\}');
 
   /// The size the cue percentage is measured against, so the setting at its
   /// default leaves the browser drawing cues at its own size.
@@ -65,6 +76,35 @@ class HtmlVideoBackend extends PlayerBackend {
   double? _subtitleFontSize;
   int? _subtitleFontWeight;
   double _subtitleVerticalOffset = 0;
+
+  web.HTMLTrackElement? _secondaryTrack;
+  web.AbortController? _secondaryRequest;
+  String? _secondaryUrl;
+  String? _secondaryObjectUrl;
+  int _secondaryGeneration = 0;
+  final _secondaryCues = <({web.VTTCue cue, double start, double end})>[];
+  double _secondaryDelay = 0;
+  double _secondaryOffset = 0.0;
+  // Keep the primary subtitle's last position and alignment during gaps in dialogue.
+  ({
+    int alignment,
+    double centre,
+    double top,
+    double bottom,
+    JSAny position,
+    String align,
+    String positionAlign,
+    double size,
+  })? _primaryPlacement;
+  double? _secondaryFontSize;
+  int? _secondaryTextColor;
+
+  @override
+  bool get supportsSecondarySubtitleDelay => true;
+  @override
+  bool get supportsSecondarySubtitlePosition => true;
+  @override
+  bool get supportsSecondarySubtitleStyle => true;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -354,6 +394,8 @@ class HtmlVideoBackend extends PlayerBackend {
   }
 
   void _clearExternalTracks() {
+    _clearSecondarySubtitle();
+    _primaryPlacement = null;
     for (final track in _externalTracks) {
       track.element.remove();
     }
@@ -383,6 +425,18 @@ class HtmlVideoBackend extends PlayerBackend {
     _completedStream.add(false);
 
     await _applySource(url, container: container, startPosition: startPosition);
+    await setSecondarySubtitleDelay(
+      ((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000,
+    );
+    await configureSecondarySubtitleStyle(
+      fontSize: (payload['secondarySubtitleFontSize'] as num?)?.toDouble(),
+      verticalOffset: (payload['secondarySubtitleOffset'] as num?)?.toDouble(),
+      textColor: (payload['secondarySubtitleTextColor'] as num?)?.toInt(),
+    );
+    await setSecondarySubtitle(
+      url: payload['secondarySubtitleUrl'] as String?,
+      codec: payload['secondarySubtitleCodec'] as String?,
+    );
 
     if (autoPlay) {
       _setBuffering(true);
@@ -539,20 +593,21 @@ class HtmlVideoBackend extends PlayerBackend {
       return;
     }
 
-    // Track ordinals count from one over the tracks the player was handed, and
-    // the only ones a browser is ever handed are the ones added here, so the
-    // ordinal is a position in that list.
+    // Primary subtitle IDs are 1-based positions in _externalTracks.
     _showTrackAt(index - 1);
   }
 
-  /// Shows the track at [position] in add order and hides everything else. A
-  /// position outside the list just clears the screen.
+  /// Shows the primary track at [position] in add order. An out-of-range position turns
+  /// the primary off; the secondary track stays enabled.
   void _showTrackAt(int position) {
     _subtitleOverlay?.clear();
+    _restorePrimaryMiddlePosition();
+    _primaryPlacement = null;
 
     try {
       final tracks = _videoElement.textTracks;
       for (var i = 0; i < tracks.length; i++) {
+        if (tracks[i] == _secondaryTrack?.track) continue;
         tracks[i].mode = 'disabled';
       }
 
@@ -568,15 +623,14 @@ class HtmlVideoBackend extends PlayerBackend {
           element.track.mode = 'showing';
         } else {
           element.removeAttribute('default');
-          // Chromium turns on any subtitle track the page has never set a
-          // mode on once another one is showing, and setting a track that is
-          // already disabled to disabled does not count. Only the picked track
-          // stays on the element, so the browser has nothing to add under it
-          // and nothing to bring back after Off.
+          // Remove unselected primary track elements to stop Chromium enabling them
+          // automatically. Keep the selected primary and the separate secondary track
+          // attached.
           element.remove();
         }
       }
     } catch (_) {}
+    _positionSecondaryCues();
   }
 
   @override
@@ -640,6 +694,361 @@ class HtmlVideoBackend extends PlayerBackend {
 
   @override
   Future<void> setSubtitleDelay(double seconds) async {}
+
+  @override
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    int? embeddedTrackId,
+  }) async {
+    if (_disposed || (url != null && url == _secondaryUrl)) return;
+    _clearSecondarySubtitle();
+    if (url == null || url.isEmpty) return;
+    _secondaryUrl = url;
+    // This backend cannot read subtitle tracks from the media container. Use the
+    // server-provided subtitle URL, including for tracks embedded in MKV files.
+    unawaited(_loadSecondarySubtitle(url, _secondaryGeneration));
+  }
+
+  Future<void> _loadSecondarySubtitle(String url, int generation) async {
+    final abort = _secondaryRequest = web.AbortController();
+    try {
+      final response = await web.window
+          .fetch(url.toJS, web.RequestInit(signal: abort.signal))
+          .toDart;
+      if (!response.ok) throw StateError('HTTP ${response.status}');
+      final content = (await response.text().toDart).toDart;
+      if (_disposed || generation != _secondaryGeneration) return;
+      // The HTML track element expects WebVTT. Convert SRT responses before attaching
+      // the secondary track.
+      final vtt = _asWebVtt(content);
+      final objectUrl = _secondaryObjectUrl = web.URL.createObjectURL(
+        web.Blob([vtt.toJS].toJS, web.BlobPropertyBag(type: 'text/vtt')),
+      );
+      final element = _secondaryTrack = web.HTMLTrackElement()
+        ..kind = 'subtitles'
+        ..label = 'Secondary'
+        ..src = objectUrl;
+      element.addEventListener(
+        'load',
+        ((web.Event _) {
+          if (_disposed || generation != _secondaryGeneration) return;
+          final cues = element.track.cues;
+          _secondaryCues.clear();
+          if (cues != null) {
+            for (var i = 0; i < cues.length; i++) {
+              final cue = cues[i] as web.VTTCue;
+              _secondaryCues.add((
+                cue: cue,
+                start: cue.startTime,
+                end: cue.endTime,
+              ));
+              cue.text = '<c.moonfin-secondary>${cue.text}</c>';
+            }
+          }
+          _retimeSecondaryCues();
+          _positionSecondaryCues();
+          element.setAttribute('default', '');
+          element.track.mode = 'showing';
+        }).toJS,
+      );
+      element.addEventListener(
+        'error',
+        ((web.Event _) {
+          _secondaryLoadFailed(generation);
+        }).toJS,
+      );
+      _videoElement.appendChild(element);
+      // Load without briefly rendering at the primary track's position.
+      element.track.mode = 'hidden';
+    } catch (_) {
+      _secondaryLoadFailed(generation);
+    }
+  }
+
+  static String _asWebVtt(String content) {
+    final text = content
+        .replaceFirst(RegExp(r'^\uFEFF'), '')
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .trim();
+    if (text.startsWith('WEBVTT')) return '$text\n\n';
+    // Only replace decimal commas on timing lines, leaving dialogue intact.
+    final timing = RegExp(
+      r'^(\d{2,}:\d{2}:\d{2}),(\d{3})(\s+-->\s+\d{2,}:\d{2}:\d{2}),(\d{3})',
+      multiLine: true,
+    );
+    return 'WEBVTT\n\n${text.replaceAllMapped(timing, (m) => '${m[1]}.${m[2]}${m[3]}.${m[4]}')}\n\n';
+  }
+
+  void _secondaryLoadFailed(int generation) {
+    if (_disposed || generation != _secondaryGeneration) return;
+    _clearSecondarySubtitle();
+    _errorStream.add({
+      'event': 'subtitleError',
+      'message': 'Could not load secondary subtitle file',
+    });
+  }
+
+  void _clearSecondarySubtitle() {
+    _secondaryGeneration++;
+    _secondaryRequest?.abort();
+    _secondaryRequest = null;
+    _secondaryTrack?.track.mode = 'disabled';
+    _secondaryTrack?.remove();
+    _secondaryTrack = null;
+    _secondaryCues.clear();
+    _restorePrimaryMiddlePosition();
+    _secondaryUrl = null;
+    final objectUrl = _secondaryObjectUrl;
+    _secondaryObjectUrl = null;
+    if (objectUrl != null) web.URL.revokeObjectURL(objectUrl);
+  }
+
+  @override
+  Future<void> setSecondarySubtitleDelay(double seconds) async {
+    if (_disposed) return;
+    final delay = seconds.clamp(-5.0, 5.0);
+    if (_secondaryDelay == delay) return;
+    _secondaryDelay = delay;
+    _retimeSecondaryCues();
+  }
+
+  @override
+  Future<void> configureSecondarySubtitleStyle({
+    double? fontSize,
+    double? verticalOffset,
+    int? textColor,
+  }) async {
+    if (_disposed) return;
+    final size = fontSize?.clamp(6.0, 72.0);
+    final sizeChanged = _secondaryFontSize != size;
+    final styleChanged = sizeChanged ||
+        _secondaryTextColor != textColor ||
+        _subtitleStyleElement == null;
+    if (styleChanged) {
+      _secondaryFontSize = size;
+      _secondaryTextColor = textColor;
+      _applySubtitleAppearance();
+    }
+    final offset = (verticalOffset ?? 0.0).clamp(-0.4, 0.4);
+    if (_secondaryOffset == offset && !sizeChanged) return;
+    _secondaryOffset = offset;
+    _positionSecondaryCues();
+  }
+
+  void _retimeSecondaryCues() {
+    for (final original in _secondaryCues) {
+      original.cue
+        ..startTime = original.start + _secondaryDelay
+        ..endTime = original.end + _secondaryDelay;
+    }
+  }
+
+  // Use the fallback if the browser does not expose the requested cue alignment
+  // property or its getter fails.
+  String _cueAlignment(web.VTTCue cue, String property, String fallback) {
+    try {
+      final value = cue.getProperty<JSAny?>(property.toJS)?.dartify();
+      if (value is String) return value;
+    } catch (_) {}
+    return fallback;
+  }
+
+  // Remove the saved coordinates used to split a centred subtitle pair.
+  void _clearPrimaryMiddleCueState(web.VTTCue cue) {
+    cue
+      ..delete(_stackedMiddleLine.toJS)
+      ..delete(_stackedMiddleLineAlign.toJS)
+      ..delete(_stackedMiddleSnapToLines.toJS);
+  }
+
+  void _restorePrimaryMiddlePosition() {
+    _forEachTextTrack((track) {
+      final cues = track.cues;
+      if (cues == null) return;
+      for (var i = 0; i < cues.length; i++) {
+        if (!cues[i].isA<web.VTTCue>()) continue;
+        final cue = cues[i] as web.VTTCue;
+        final original = cue.getProperty<JSNumber?>(_stackedMiddleLine.toJS);
+        if (original != null) {
+          cue
+            ..line = original
+            ..lineAlign = _cueAlignment(
+              cue, _stackedMiddleLineAlign, 'center',
+            )
+            ..snapToLines = cue.getProperty<JSBoolean?>(
+              _stackedMiddleSnapToLines.toJS,
+            )?.toDart ?? false;
+          _clearPrimaryMiddleCueState(cue);
+        }
+      }
+    });
+  }
+
+  web.VTTCue? _activePrimaryCue() {
+    final tracks = _videoElement.textTracks;
+    for (var i = 0; i < tracks.length; i++) {
+      final track = tracks[i];
+      if (track == _secondaryTrack?.track || track.mode != 'showing') continue;
+      final cues = track.activeCues;
+      if (cues == null) continue;
+      for (var j = 0; j < cues.length; j++) {
+        if (cues[j].isA<web.VTTCue>()) return cues[j] as web.VTTCue;
+      }
+    }
+    return null;
+  }
+
+  int _primaryAlignment(web.VTTCue cue, double centre) {
+    final authored = int.tryParse(
+      cue.getProperty<JSString?>(_authoredSrtAlignment.toJS)?.toDart ?? '',
+    );
+    if (authored != null) return authored;
+    // lineAlign identifies the cue edge attached to the line coordinate. Determine top,
+    // middle or bottom placement from the original cue position, before applying the
+    // user offset.
+    final authoredCentre = cue.has(_autoPositionedCue)
+        ? 1.0
+        : cue.getProperty<JSNumber?>(_authoredLine.toJS) != null
+        ? _primaryCueBounds(cue, authored: true).centre
+        : centre;
+    final row = authoredCentre < 1 / 3 ? 2 : authoredCentre > 2 / 3 ? 0 : 1;
+    final column = switch (cue.align) {
+      'left' || 'start' => 0,
+      'right' || 'end' => 2,
+      _ => 1,
+    };
+    return row * 3 + column + 1;
+  }
+
+  // Estimate the primary cue height, including explicit line breaks and wrapping. Use
+  // it to position the secondary edge nearest the primary, so extra secondary lines
+  // grow away from the gap.
+  double _primaryCueHeight(web.VTTCue cue) {
+    final fontHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) * 0.055;
+    final width = _videoElement.clientWidth;
+    final height = _videoElement.clientHeight;
+    final aspect = width > 0 && height > 0 ? width / height : 16 / 9;
+    final cueWidth = cue.size.isFinite
+        ? (cue.size / 100).clamp(0.1, 1.0)
+        : 0.9;
+    final charsPerLine = (aspect * cueWidth / (fontHeight * 0.52))
+        .floor().clamp(1, 10000);
+    final text = cue.text.replaceAll(RegExp(r'<[^>]*>'), '');
+    final rows = text.split('\n').fold<int>(
+      0,
+      (sum, line) => sum + (line.runes.length / charsPerLine).ceil().clamp(1, 10000),
+    );
+    return rows * fontHeight * 1.15;
+  }
+
+  ({double top, double bottom, double centre}) _primaryCueBounds(
+    web.VTTCue cue, {
+    bool authored = false,
+  }) {
+    final height = _primaryCueHeight(cue);
+    final originalLine = cue.getProperty<JSNumber?>(
+      (authored ? _authoredLine : _stackedMiddleLine).toJS,
+    );
+    final rawLine = originalLine?.toDartDouble ?? cue.line.dartify();
+    final line = rawLine is num
+        ? rawLine.toDouble()
+        : (1 - _subtitleVerticalOffset) * 100;
+    final snapped = cue.getProperty<JSBoolean?>(
+      (authored ? _authoredSnapToLines : _stackedMiddleSnapToLines).toJS,
+    )?.toDart ?? cue.snapToLines;
+    final lineHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) *
+        0.055 * 1.15;
+    final top = snapped
+        ? (line < 0 ? 1 + line * lineHeight : line * lineHeight)
+        : switch (_cueAlignment(
+              cue, authored ? _authoredLineAlign : _stackedMiddleLineAlign,
+              _cueAlignment(cue, 'lineAlign', 'start'),
+            )) {
+            'start' => line / 100,
+            'center' => line / 100 - height / 2,
+            _ => line / 100 - height,
+          };
+    return (
+      top: top.clamp(0.0, 1.0).toDouble(),
+      bottom: (top + height).clamp(0.0, 1.0).toDouble(),
+      centre: (top + height / 2).clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
+  void _positionSecondaryCues() {
+    if (_secondaryCues.isEmpty) return;
+    final primary = _activePrimaryCue();
+    if (primary != null) {
+      var bounds = _primaryCueBounds(primary);
+      final alignment = _primaryAlignment(primary, bounds.centre);
+      if ((alignment - 1) ~/ 3 != 1 &&
+          primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS) != null) {
+        _clearPrimaryMiddleCueState(primary);
+        bounds = _primaryCueBounds(primary);
+      }
+      _primaryPlacement = (
+        alignment: alignment,
+        centre: bounds.centre,
+        top: bounds.top,
+        bottom: bounds.bottom,
+        position: primary.position,
+        align: primary.align,
+        positionAlign: _cueAlignment(primary, 'positionAlign', 'auto'),
+        size: primary.size,
+      );
+    }
+    final placement = _primaryPlacement;
+    final row = ((placement?.alignment ?? 2) - 1) ~/ 3;
+    final gap = middleSubtitleGap(0.015, _secondaryOffset);
+
+    // Keep the primary's current position for top and bottom captions, including its
+    // user offset. For centred captions, place the gap around the original centre.
+    if (primary != null && row == 1) {
+      if (primary.getProperty<JSNumber?>(_stackedMiddleLine.toJS) == null) {
+        final originalLine = primary.line.dartify();
+        if (originalLine is num) {
+          primary
+            ..setProperty(_stackedMiddleLine.toJS, originalLine.toJS)
+            ..setProperty(
+              _stackedMiddleLineAlign.toJS,
+              _cueAlignment(primary, 'lineAlign', 'start').toJS,
+            )
+            ..setProperty(
+              _stackedMiddleSnapToLines.toJS, primary.snapToLines.toJS,
+            );
+        }
+      }
+      primary
+        ..snapToLines = false
+        ..lineAlign = 'start'
+        ..line = (((placement?.centre ?? 0.5) + gap / 2) * 100)
+            .clamp(0.0, 100.0).toDouble().toJS;
+    }
+
+    final secondaryLine = placement == null
+        ? 0.96 // Use the normal bottom position until a primary placement is available; keep the saved spacing.
+        : switch (row) {
+            2 => placement.bottom + gap,
+            1 => placement.centre - gap / 2,
+            _ => placement.top - gap,
+          };
+    // Copy the primary cue's horizontal position and anchor so custom WebVTT
+    // coordinates are preserved.
+    for (final original in _secondaryCues) {
+      original.cue
+        ..region = null
+        ..vertical = ''
+        ..snapToLines = false
+        ..lineAlign = row == 2 ? 'start' : 'end'
+        ..line = (secondaryLine * 100).clamp(0.0, 100.0).toDouble().toJS
+        ..align = placement?.align ?? 'center'
+        ..positionAlign = placement?.positionAlign ?? 'center'
+        ..position = placement?.position ?? 50.0.toJS
+        ..size = placement?.size ?? 90;
+    }
+  }
 
   /// Adds the subtitle without showing it, so tracks loaded at startup stay
   /// off until one is picked.
@@ -741,7 +1150,15 @@ class HtmlVideoBackend extends PlayerBackend {
     );
 
     final style = _subtitleStyleElement ??= _createSubtitleStyleElement();
-    style.textContent = '#$_viewType::cue { ${rules.join('; ')} }';
+    final secondaryColor = _cssColor(_secondaryTextColor);
+    final primarySize = _subtitleFontSize ?? _referenceTextSize;
+    final secondaryPercent =
+        (_secondaryFontSize ?? primarySize) / primarySize * 100;
+    style.textContent =
+        '#$_viewType::cue { ${rules.join('; ')} }\n'
+        '#$_viewType::cue(.moonfin-secondary) { '
+        'font-size: $secondaryPercent%; '
+        '${secondaryColor == null ? '' : 'color: $secondaryColor;'} }';
   }
 
   web.HTMLStyleElement _createSubtitleStyleElement() {
@@ -754,14 +1171,15 @@ class HtmlVideoBackend extends PlayerBackend {
     try {
       final tracks = _videoElement.textTracks;
       for (var i = 0; i < tracks.length; i++) {
+        if (tracks[i] == _secondaryTrack?.track) continue;
         action(tracks[i]);
       }
     } catch (_) {}
   }
 
-  /// `::cue` cannot move a cue, so the position comes from the cue's own line,
-  /// read as a percentage of the video box with the cue's bottom edge on it.
-  /// A zero offset therefore puts the line on the bottom edge itself.
+  /// Positions primary cues by updating their WebVTT line coordinates. Apply the user
+  /// offset from the original position, moving top cues down and bottom cues up while
+  /// preserving middle placement. Automatically placed cues use a bottom anchor.
   void _positionCues(web.TextTrack track) {
     final cues = track.activeCues;
     if (cues == null) return;
@@ -770,15 +1188,84 @@ class HtmlVideoBackend extends PlayerBackend {
       final cue = cues[i];
       if (!cue.isA<web.VTTCue>()) continue;
       final vtt = cue as web.VTTCue;
-      // The alignment is what makes the line measure the cue's bottom edge.
-      // An engine that drops it would measure the top instead and push the
-      // lowest positions off the picture, so a cue that will not take it stays
-      // where the browser put it.
-      vtt.lineAlign = 'end';
-      if (vtt.lineAlign != 'end') continue;
-      vtt.snapToLines = false;
-      vtt.line = line.toJS;
+      final tag = _srtAlignmentTag.firstMatch(vtt.text);
+      if (tag != null) {
+        vtt.text = vtt.text.replaceFirst(_srtAlignmentTag, '');
+        vtt.setProperty(_authoredSrtAlignment.toJS, tag[1]!.toJS);
+      }
+      final alignment = int.tryParse(
+        vtt.getProperty<JSString?>(_authoredSrtAlignment.toJS)?.toDart ?? '',
+      );
+      if (alignment != null) {
+        final column = (alignment - 1) % 3;
+        final row = (alignment - 1) ~/ 3;
+        vtt
+          ..snapToLines = false
+          ..lineAlign = row == 0 ? 'end' : row == 1 ? 'center' : 'start'
+          ..line = (row == 0
+                  ? line
+                  : row == 1
+                      ? 50
+                      : 5 + _subtitleVerticalOffset * 100)
+              .clamp(0.0, 100.0).toDouble().toJS
+          ..align = column == 0 ? 'left' : column == 2 ? 'right' : 'center'
+          ..positionAlign =
+              column == 0 ? 'line-left' : column == 2 ? 'line-right' : 'center'
+          ..position = (column == 0 ? 5 : column == 2 ? 95 : 50).toJS
+          ..size = 90;
+        continue;
+      }
+      // Read the original position, never a value shifted by a previous
+      // slider change or cuechange event.
+      if (vtt.has(_autoPositionedCue) || vtt.line.dartify() == 'auto') {
+        vtt.setProperty(_autoPositionedCue.toJS, true.toJS);
+        vtt.lineAlign = 'end';
+        if (vtt.lineAlign != 'end') continue;
+        vtt.snapToLines = false;
+        vtt.line = line.toJS;
+        continue;
+      }
+      final saved = vtt.getProperty<JSNumber?>(_authoredLine.toJS);
+      final authored = saved?.toDartDouble ??
+          vtt.getProperty<JSNumber?>(_stackedMiddleLine.toJS)?.toDartDouble ??
+          (vtt.line.dartify() as num).toDouble();
+      if (saved == null) {
+        vtt
+          ..setProperty(_authoredLine.toJS, authored.toJS)
+          ..setProperty(_authoredSnapToLines.toJS, vtt.snapToLines.toJS)
+          ..setProperty(_authoredLineAlign.toJS,
+              _cueAlignment(vtt, 'lineAlign', 'start').toJS);
+      }
+      final snap = vtt.getProperty<JSBoolean?>(
+        _authoredSnapToLines.toJS,
+      )?.toDart ?? false;
+      final originalAlign = _cueAlignment(
+        vtt, _authoredLineAlign, 'start',
+      );
+      final lineHeight = ((_subtitleFontSize ?? _referenceTextSize) / 24) *
+          0.055 * 1.15;
+      final authoredFraction = snap
+          ? (authored < 0
+              ? 1 + (authored + 1) * lineHeight
+              : authored * lineHeight)
+          : authored / 100;
+      final direction = authoredFraction < 1 / 3
+          ? 1
+          : authoredFraction > 2 / 3 ? -1 : 0;
+      if (_subtitleVerticalOffset == 0 || direction == 0) {
+        vtt
+          ..line = authored.toJS
+          ..snapToLines = snap
+          ..lineAlign = originalAlign;
+      } else {
+        vtt
+          ..snapToLines = false
+          ..lineAlign = snap ? (authored < 0 ? 'end' : 'start') : originalAlign
+          ..line = ((authoredFraction + direction * _subtitleVerticalOffset)
+                  .clamp(0.0, 1.0) * 100).toDouble().toJS;
+      }
     }
+    _positionSecondaryCues();
   }
 
   /// A cue can only be placed once it exists, and the ones carried inside a
