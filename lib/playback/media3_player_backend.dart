@@ -17,6 +17,7 @@ import 'media3_letterbox_crop.dart';
 import 'server_transcode_capabilities.dart';
 
 class Media3PlayerBackend extends PlayerBackend
+    with SubtitleDelayState
     implements SubtitleLoadingBackend, SecondarySubtitleBackend {
   @override
   bool get supportsSecondarySubtitleDelay => true;
@@ -130,8 +131,6 @@ class Media3PlayerBackend extends PlayerBackend
   Duration? _liveEdge;
   double _volume = 100.0;
   double _audioDelaySeconds = 0.0;
-  double _subtitleDelaySeconds = 0.0;
-  int? _subtitleDelaySessionId;
   int _volumeBoostLevel = 0;
   bool _skipSilenceEnabled = false;
   RepeatMode _repeatMode = RepeatMode.none;
@@ -210,8 +209,6 @@ class Media3PlayerBackend extends PlayerBackend
 
   @override
   bool? get playWhenReady => _playWhenReady;
-
-  double get subtitleDelaySeconds => _subtitleDelaySeconds;
 
   Future<T?> _invoke<T>(String method, [dynamic arguments]) async {
     if (_disposed) return null;
@@ -410,7 +407,7 @@ class Media3PlayerBackend extends PlayerBackend
         _completedStream.add(false);
       case 'syncDelays':
         _audioDelaySeconds = _toInt(map['audioDelayMs']) / 1000.0;
-        _subtitleDelaySeconds = _toInt(map['subtitleDelayMs']) / 1000.0;
+        subtitleDelaySeconds = _toInt(map['subtitleDelayMs']) / 1000.0;
       case 'volumeBoost':
         _volumeBoostLevel = (_toInt(map['level']).clamp(0, 10)).toInt();
       case 'repeatModeChanged':
@@ -1157,14 +1154,7 @@ class Media3PlayerBackend extends PlayerBackend
     _lastFrameRateLine = null;
     _liveEdge = null;
     _sourceIsLive = payload['isLive'] == true;
-    // Reset for a new viewing session, but keep the adjustment when the
-    // same session changes quality or restores playback after backgrounding.
-    final subtitleDelaySessionId = payload['subtitleDelaySessionId'] as int?;
-    if (subtitleDelaySessionId == null ||
-        subtitleDelaySessionId != _subtitleDelaySessionId) {
-      _subtitleDelaySeconds = 0.0;
-    }
-    _subtitleDelaySessionId = subtitleDelaySessionId;
+    updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
     await _invoke<void>('setSource', {
       'url': url,
       'headers': headers,
@@ -1203,7 +1193,7 @@ class Media3PlayerBackend extends PlayerBackend
       'forceSubtitlesDisabledOnStart':
           _prefs.get(UserPreferences.subtitleMode) == SubtitleMode.none,
       'audioDelayMs': (_audioDelaySeconds * 1000).round(),
-      'subtitleDelayMs': (_subtitleDelaySeconds * 1000).round(),
+      'subtitleDelayMs': (subtitleDelaySeconds * 1000).round(),
       'volumeBoostLevel': _volumeBoostLevel,
       'preview': isPreview,
     });
@@ -1584,7 +1574,7 @@ class Media3PlayerBackend extends PlayerBackend
 
   @override
   Future<void> setSubtitleDelay(double seconds) async {
-    _subtitleDelaySeconds = seconds;
+    subtitleDelaySeconds = seconds;
     await _invoke<void>('setSubtitleDelay', {
       'seconds': seconds,
       'delayMs': (seconds * 1000).round(),

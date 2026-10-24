@@ -11,7 +11,6 @@ import '../../../data/models/aggregated_item.dart';
 import '../../../data/services/log_service.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../playback/delay_limits.dart';
-import '../../../playback/media3_player_backend.dart';
 import '../../../playback/subtitle_style.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../util/remote_subtitle_labels.dart';
@@ -32,15 +31,13 @@ typedef PlayerMutation = Future<bool> Function(
 /// Opens audio and subtitle track pickers with delay controls, subtitle appearance
 /// controls and subtitle downloads. Shared by the full player and mini player.
 abstract final class TrackPicker {
-  /// The delays applied to this playback. Held here rather than by a screen,
+  /// The audio delay applied to this playback. Held here rather than by a screen,
   /// so the full player and the mini player show the same values while the
   /// video moves between them.
   static double audioDelay = 0;
-  static double subtitleDelay = 0;
 
   static void resetDelays() {
     audioDelay = 0;
-    subtitleDelay = 0;
   }
 
   static bool canDownloadRemoteSubtitles(AggregatedItem item) {
@@ -160,9 +157,7 @@ abstract final class TrackPicker {
         ? manager.secondarySubtitleDelaySeconds
         : audio
         ? audioDelay
-        : backend is Media3PlayerBackend
-        ? backend.subtitleDelaySeconds
-        : subtitleDelay;
+        : backend?.subtitleDelaySeconds ?? 0;
     final delayLabel = audio ? l10n.audioDelay : l10n.subtitleDelay;
     String formatDelay(double seconds) => seconds == 0
         ? l10n.none
@@ -418,7 +413,6 @@ abstract final class TrackPicker {
       audioDelay = delay;
       manager.backend?.setAudioDelay(delay);
     } else {
-      subtitleDelay = delay;
       manager.backend?.setSubtitleDelay(delay);
     }
   }
