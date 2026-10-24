@@ -17,16 +17,12 @@ double mpvPrimaryStackingAnchor(int alignment, {double margin = 0.04}) =>
 /// caller adds secondaryHeight to get the bottom edge required by mpv.
 double stackedSecondaryTop({
   required int alignment,
-  bool primaryEnabled = true,
   required double primaryAnchor,
   required double primaryHeight,
   required double secondaryHeight,
   required double offset,
   double gap = 0.015,
 }) {
-  // When the primary is off, place the secondary at the normal bottom position and
-  // ignore the extra gap.
-  if (!primaryEnabled) return (1 - secondaryHeight).clamp(0.0, 1.0).toDouble();
   final row = (alignment - 1) ~/ 3;
   final top = switch (row) {
     2 => primaryAnchor + primaryHeight + gap + offset,

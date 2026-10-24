@@ -301,14 +301,22 @@ final class RunnerTests: XCTestCase {
         primary.clear()
         XCTAssertEqual(label.frame.maxY, 400, accuracy: 0.1)
 
-        // A seek within an unchanged ASS cue must keep its image. Once libass
-        // clears it at the destination, the old placement must not come back.
+        // A seek within an unchanged ASS cue keeps its image and remembers its
+        // placement for the next dialogue gap, even without another image callback.
         primary.showAssImage(image, bounds: CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1))
         primary.resetPlacement()
+        primary.rememberPrimaryPlacement()
         XCTAssertTrue(primary.subviews.compactMap { $0 as? UIImageView }
             .contains { !$0.isHidden && $0.image != nil })
         XCTAssertEqual(label.frame.minY, assTop, accuracy: 0.1)
         primary.showAssImage(nil)
+        XCTAssertEqual(label.frame.minY, assTop, accuracy: 0.1)
+
+        // A seek into a gap clears the image before remembering placement.
+        primary.showAssImage(image, bounds: CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1))
+        primary.resetPlacement()
+        primary.showAssImage(nil)
+        primary.rememberPrimaryPlacement()
         XCTAssertEqual(label.frame.maxY, 400, accuracy: 0.1)
     }
 

@@ -13,6 +13,7 @@ import 'letterbox_croppers.dart';
 import 'secondary_subtitle_position.dart';
 import 'web_subtitle_overlay_web.dart';
 import 'web_secondary_subtitle_url.dart';
+import 'web_subtitle_text.dart';
 
 extension type _MoonfinHlsBridge._(JSObject _) implements JSObject {
   external JSBoolean canUseHlsJs(
@@ -83,7 +84,6 @@ class HtmlVideoBackend extends PlayerBackend
   static const _stackedMiddleLine = 'moonfinStackedMiddleLine';
   static const _stackedMiddleLineAlign = 'moonfinStackedMiddleLineAlign';
   static const _stackedMiddleSnapToLines = 'moonfinStackedMiddleSnapToLines';
-  static final _srtAlignmentTag = RegExp(r'^\s*\{\\an([1-9])\}');
 
   /// Scale the browser's usual caption size by the user's text-size setting.
   static final double _referenceTextSize =
@@ -900,7 +900,7 @@ class HtmlVideoBackend extends PlayerBackend
                 start: cue.startTime,
                 end: cue.endTime,
               ));
-              cue.text = '<c.moonfin-secondary>${cue.text}</c>';
+              cue.text = secondaryWebVttCueText(cue.text);
             }
           }
           _retimeSecondaryCues();
@@ -1372,9 +1372,9 @@ class HtmlVideoBackend extends PlayerBackend
       final cue = cues[i];
       if (!cue.isA<web.VTTCue>()) continue;
       final vtt = cue as web.VTTCue;
-      final tag = _srtAlignmentTag.firstMatch(vtt.text);
+      final tag = srtAlignmentTag.firstMatch(vtt.text);
       if (tag != null) {
-        vtt.text = vtt.text.replaceFirst(_srtAlignmentTag, '');
+        vtt.text = vtt.text.replaceFirst(srtAlignmentTag, '');
         vtt.setProperty(_authoredSrtAlignment.toJS, tag[1]!.toJS);
       }
       final alignment = int.tryParse(

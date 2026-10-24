@@ -48,23 +48,16 @@ class _Backend extends Fake implements MediaKitPlayerBackend {
 }
 
 class _Manager extends PlaybackManager {
-  _Manager(
-    this._backend, {
-    this.resolution,
-    this.primaryIndex,
-    this.secondaryIndex,
-  });
+  _Manager(this._backend, {this.resolution});
 
   final PlayerBackend _backend;
   final StreamResolutionResult? resolution;
-  final int? primaryIndex;
-  final int? secondaryIndex;
 
   @override
-  int? get subtitleStreamIndex => primaryIndex;
+  int? get subtitleStreamIndex => null;
 
   @override
-  int? get secondarySubtitleStreamIndex => secondaryIndex;
+  int? get secondarySubtitleStreamIndex => null;
 
   @override
   StreamResolutionResult? get currentResolution => resolution;

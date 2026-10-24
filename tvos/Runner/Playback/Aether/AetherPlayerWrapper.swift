@@ -314,6 +314,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 guard case .landed = event.outcome, let self, let engine else { return }
                 self.subtitleOverlay.resetPlacement()
                 self.tickSubtitles(at: engine.sourceTime)
+                // libass may keep the same image without publishing it again.
+                self.subtitleOverlay.rememberPrimaryPlacement()
             }
             .store(in: &cancellables)
 

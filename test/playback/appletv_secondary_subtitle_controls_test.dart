@@ -3,7 +3,6 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations_en.dart';
 import 'package:moonfin/playback/native_apple_player_backend.dart';
 import 'package:moonfin/playback/appletv_subtitles.dart';
-import 'package:moonfin/playback/subtitle_style.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';

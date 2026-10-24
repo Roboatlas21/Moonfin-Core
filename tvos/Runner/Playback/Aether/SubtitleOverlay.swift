@@ -132,7 +132,7 @@ final class SubtitleOverlay: PlatformView {
         return lastPrimaryAlignment
     }
 
-    private func rememberPrimaryPlacement() {
+    func rememberPrimaryPlacement() {
         guard secondaryForStacking != nil,
               bounds.width > 0, bounds.height > 0 else { return }
         let regions = visibleRegions
