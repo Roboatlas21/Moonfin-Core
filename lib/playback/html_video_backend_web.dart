@@ -1128,8 +1128,11 @@ class HtmlVideoBackend extends PlayerBackend
             ?.toDart ??
         cue.snapToLines;
     final lineHeight = _cueFontSize() * 1.2 / _cueCanvasHeight;
+    // Negative snapped lines anchor the bottom of the entire cue box.
     final top = snapped
-        ? (line < 0 ? 1 + line * lineHeight : line * lineHeight)
+        ? (line < 0
+              ? 1 + (line + 1) * lineHeight - height
+              : line * lineHeight)
         : !_nativeLineAlignment
         ? line / 100 * (1 - height)
         : switch (_cueAlignment(

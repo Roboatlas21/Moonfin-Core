@@ -1623,8 +1623,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 break
             case .cleared:
                 subtitleOverlay.showAssImage(nil)
-            case .image(let image, let bounds):
-                subtitleOverlay.showAssImage(image, bounds: bounds)
+            case .image(let image, let regions):
+                subtitleOverlay.showAssImage(image, regions: regions)
             }
         }
     #endif

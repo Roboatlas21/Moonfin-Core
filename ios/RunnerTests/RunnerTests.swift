@@ -292,7 +292,7 @@ final class RunnerTests: XCTestCase {
 
         // An ASS image fills the canvas, but only its visible glyphs reserve space.
         primary.clear()
-        primary.showAssImage(image, bounds: CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1))
+        primary.showAssImage(image, regions: [CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1)])
         XCTAssertGreaterThan(label.frame.minY, 110)
         XCTAssertEqual(label.frame.midX, 320, accuracy: 0.1)
         let assTop = label.frame.minY
@@ -303,7 +303,7 @@ final class RunnerTests: XCTestCase {
 
         // A seek within an unchanged ASS cue keeps its image and remembers its
         // placement for the next dialogue gap, even without another image callback.
-        primary.showAssImage(image, bounds: CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1))
+        primary.showAssImage(image, regions: [CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1)])
         primary.resetPlacement()
         primary.rememberPrimaryPlacement()
         XCTAssertTrue(primary.subviews.compactMap { $0 as? UIImageView }
@@ -313,11 +313,48 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(label.frame.minY, assTop, accuracy: 0.1)
 
         // A seek into a gap clears the image before remembering placement.
-        primary.showAssImage(image, bounds: CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1))
+        primary.showAssImage(image, regions: [CGRect(x: 0.2, y: 0.1, width: 0.4, height: 0.1)])
         primary.resetPlacement()
         primary.showAssImage(nil)
         primary.rememberPrimaryPlacement()
         XCTAssertEqual(label.frame.maxY, 400, accuracy: 0.1)
+    }
+
+    @MainActor
+    func testSecondaryFitsBetweenAssRegionsAndKeepsPlacementDuringGap() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        secondary.setEvents([cue("Secondary")])
+        secondary.update(currentTime: 2)
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1))
+            .image { context in
+                UIColor.white.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+            }
+            .cgImage!
+        let regions = AssRenderer.groupedRegions([
+            CGRect(x: 0.2, y: 0.875, width: 0.4, height: 0.1),
+            CGRect(x: 0.2, y: 0.025, width: 0.1, height: 0.1),
+            CGRect(x: 0.3, y: 0.04, width: 0.3, height: 0.06),
+        ])
+        XCTAssertEqual(regions.count, 2)
+        primary.showAssImage(image, regions: regions)
+        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        XCTAssertGreaterThan(label.frame.minY, 50)
+        XCTAssertLessThan(label.frame.maxY, 350)
+        XCTAssertEqual(label.frame.midX, 320, accuracy: 0.1)
+        XCTAssertNil(label.layer.mask)
+        let frame = label.frame
+
+        // Seeking within the unchanged image must retain both free space and anchor.
+        primary.resetPlacement()
+        primary.rememberPrimaryPlacement()
+        primary.showAssImage(nil)
+        XCTAssertEqual(label.frame, frame)
+        XCTAssertNil(label.layer.mask)
     }
 
     @MainActor

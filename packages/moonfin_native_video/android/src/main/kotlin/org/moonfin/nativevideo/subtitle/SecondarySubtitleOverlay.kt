@@ -63,10 +63,8 @@ internal class SecondarySubtitleOverlay(
     private var textColorOverride: Int? = null
     private var offsetDelta = 0f
     private var primaryBottomPaddingFraction = 0.04f
-    private var primaryCues: List<Cue> = emptyList()
     private var unmodifiedPrimaryCues: List<Cue> = emptyList()
-    private var lastPrimaryForStacking: Cue? = null
-    private var lastPrimaryWasCentred = false
+    private var lastPrimaryCue: Cue? = null
     private var primaryEnabled = true
 
     init {
@@ -87,8 +85,7 @@ internal class SecondarySubtitleOverlay(
             // Clear the saved primary placement when secondary subtitles are enabled or
             // disabled. Keep it when switching secondary tracks so gaps in dialogue do
             // not reset the layout.
-            lastPrimaryForStacking = null
-            lastPrimaryWasCentred = false
+            lastPrimaryCue = null
         }
         renderCues()
     }
@@ -139,9 +136,7 @@ internal class SecondarySubtitleOverlay(
      */
     fun resetPrimaryCues(clearSecondary: Boolean = false) {
         unmodifiedPrimaryCues = emptyList()
-        primaryCues = emptyList()
-        lastPrimaryForStacking = null
-        lastPrimaryWasCentred = false
+        lastPrimaryCue = null
         if (clearSecondary && secondaryCues != null) secondaryCues = emptyList()
         renderCues()
     }
@@ -172,6 +167,28 @@ internal class SecondarySubtitleOverlay(
         renderCues()
     }
 
+    private fun isCentredCue(cue: Cue): Boolean =
+        cue.lineType == Cue.LINE_TYPE_FRACTION &&
+            cue.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE &&
+            cue.line in 0.35f..0.65f
+
+    private fun positionPrimaryCue(cue: Cue, height: Int): Cue {
+        val positioned = offsetPrimaryCue(
+            cue, primaryBottomPaddingFraction,
+            (baseFontSize / 24f) * 0.06f * 1.25f,
+        )
+        if (secondaryCues == null || height <= 0 || !isCentredCue(positioned)) return positioned
+        // Keep the gap centred on the original cue position while secondary subtitles
+        // are enabled, even when no secondary cue is visible.
+        val density = view.resources.displayMetrics.density
+        val middleGapPx = SubtitleLayoutPlanner.middleGap(
+            MIN_GAP_DP * density, offsetDelta, height, 2f * density)
+        return positioned.buildUpon()
+            .setLine((positioned.line + middleGapPx / (2f * height)).coerceAtMost(1f), Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_START)
+            .build()
+    }
+
     private fun renderCues() {
         val active = secondaryCues.orEmpty()
         if (!primaryEnabled) {
@@ -190,37 +207,12 @@ internal class SecondarySubtitleOverlay(
         }
         val width = view.width
         val height = view.height
-        // Keep the gap centred on the original cue position while secondary subtitles
-        // are enabled, even when no secondary cue is visible. Added lines grow away
-        // from the gap instead of moving the primary.
         val gapPx = MIN_GAP_DP * view.resources.displayMetrics.density
-        val minimumGapPx = 2f * view.resources.displayMetrics.density
-        val middleGapPx = SubtitleLayoutPlanner.middleGap(
-            gapPx, offsetDelta, height, minimumGapPx)
-        primaryCues = unmodifiedPrimaryCues.map { cue ->
-            val positioned = offsetPrimaryCue(
-                cue, primaryBottomPaddingFraction,
-                (baseFontSize / 24f) * 0.06f * 1.25f,
-            )
-            if (secondaryCues != null && height > 0 &&
-                positioned.lineType == Cue.LINE_TYPE_FRACTION &&
-                positioned.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE &&
-                positioned.line in 0.35f..0.65f
-            ) positioned.buildUpon()
-                .setLine((positioned.line + middleGapPx / (2f * height)).coerceAtMost(1f), Cue.LINE_TYPE_FRACTION)
-                .setLineAnchor(Cue.ANCHOR_TYPE_START)
-                .build()
-            else positioned
+        unmodifiedPrimaryCues.firstOrNull { it.text != null }?.let {
+            // Retain authored placement so appearance changes also apply during gaps.
+            lastPrimaryCue = it
         }
-        val currentPrimary = primaryCues.firstOrNull { it.text != null }
-        if (currentPrimary != null) {
-            lastPrimaryForStacking = currentPrimary
-            val authored = unmodifiedPrimaryCues.firstOrNull { it.text != null }
-            lastPrimaryWasCentred = authored != null &&
-                authored.lineType == Cue.LINE_TYPE_FRACTION &&
-                authored.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE &&
-                authored.line in 0.35f..0.65f
-        }
+        val primaryCues = unmodifiedPrimaryCues.map { positionPrimaryCue(it, height) }
         primaryView.setCues(primaryCues)
         if (active.isEmpty()) {
             view.visibility = View.VISIBLE
@@ -235,11 +227,10 @@ internal class SecondarySubtitleOverlay(
         val primaryFontPx = (baseFontSize / 24f) * 0.06f * height
         val secondaryFontPx = ((fontSizeOverride ?: baseFontSize) / 24f) * 0.06f * height
         val primaryBoxes = primaryCues.map { estimatePrimaryBox(it, width, height, primaryFontPx) }
-        val reference = currentPrimary ?: lastPrimaryForStacking
         // Position secondary cues relative to the primary's current or last known
         // placement.
-        val fixed = if (reference == null) active.filter { it.line != Cue.DIMEN_UNSET } else emptyList()
-        val automatic = if (reference == null) active.filter { it.line == Cue.DIMEN_UNSET } else active
+        val fixed = if (lastPrimaryCue == null) active.filter { it.line != Cue.DIMEN_UNSET } else emptyList()
+        val automatic = if (lastPrimaryCue == null) active.filter { it.line == Cue.DIMEN_UNSET } else active
         val rendered = ArrayList<Cue>()
         val occupied = ArrayList<SubtitleBox>(primaryBoxes)
         val topFallback = ArrayList<Pair<String, Cue>>()
@@ -330,12 +321,12 @@ internal class SecondarySubtitleOverlay(
     ): Cue? {
         val cueWidth = if (cue.size == Cue.DIMEN_UNSET) width * 0.9f else cue.size * width
         val textHeight = estimateTextHeight(text, cueWidth, fontPx.coerceAtLeast(1f))
-        val reference = primaryCues.firstOrNull { it.text != null } ?: lastPrimaryForStacking
+        val reference = lastPrimaryCue?.let { positionPrimaryCue(it, height) }
         val refBox = reference?.let {
             estimatePrimaryBox(it, width, height, (baseFontSize / 24f) * 0.06f * height)
         }
         val primaryBottom = height * (1f - primaryBottomPaddingFraction)
-        val centred = reference != null && lastPrimaryWasCentred
+        val centred = lastPrimaryCue?.let(::isCentredCue) == true
         val minimumGapPx = 2f * view.resources.displayMetrics.density
         val desiredBottom = when {
             refBox == null -> primaryBottom - gapPx - offsetDelta * height
@@ -470,9 +461,7 @@ internal class SecondarySubtitleOverlay(
 
     fun clear() {
         unmodifiedPrimaryCues = emptyList()
-        primaryCues = emptyList()
-        lastPrimaryForStacking = null
-        lastPrimaryWasCentred = false
+        lastPrimaryCue = null
         primaryView.setCues(emptyList())
         select(false)
     }

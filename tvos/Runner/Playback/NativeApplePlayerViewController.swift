@@ -2961,11 +2961,11 @@ final class NativeApplePlayerViewController: UIViewController {
         }
         if current != 0 {
             sheet.addAction(
-                self.makePlayerAction(title: secondary ? subtitleText("reset") : "Reset", style: .default) {
+                self.makePlayerAction(title: subtitleText("reset"), style: .default) {
                     [weak self] _ in self?.applySubtitleDelay(0, secondary: secondary)
                 })
         }
-        sheet.addAction(self.makePlayerAction(title: secondary ? subtitleText("done") : "Done", style: .cancel))
+        sheet.addAction(self.makePlayerAction(title: subtitleText("done"), style: .cancel))
         presentSheet(sheet, from: .subtitles)
     }
 

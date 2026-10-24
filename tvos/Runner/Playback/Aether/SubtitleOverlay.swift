@@ -62,7 +62,7 @@ final class SubtitleOverlay: PlatformView {
     // Store each occupied region in relative coordinates, preserving free gaps
     // between positioned cues when primary dialogue disappears or the view resizes.
     private var lastPrimaryFrames: [CGRect] = []
-    private var assVisibleBounds: CGRect?
+    private var assVisibleRegions: [CGRect] = []
     private var lastPrimaryAlignment = 2
     var secondaryVerticalAdjustment: Double = 0 {
         didSet {
@@ -83,12 +83,13 @@ final class SubtitleOverlay: PlatformView {
         for view in extraBitmapViews where !view.isHidden {
             regions.append(view.frame)
         }
-        if !assImageView.isHidden, let rect = assVisibleBounds {
+        if !assImageView.isHidden {
             let canvas = assCanvas
-            regions.append(CGRect(
-                x: canvas.minX + rect.minX * canvas.width,
-                y: canvas.minY + rect.minY * canvas.height,
-                width: rect.width * canvas.width, height: rect.height * canvas.height))
+            regions.append(contentsOf: assVisibleRegions.map { rect in
+                CGRect(x: canvas.minX + rect.minX * canvas.width,
+                       y: canvas.minY + rect.minY * canvas.height,
+                       width: rect.width * canvas.width, height: rect.height * canvas.height)
+            })
         }
         return regions.filter { !$0.isEmpty && !$0.isNull }
     }
@@ -368,8 +369,8 @@ final class SubtitleOverlay: PlatformView {
         #endif
     }
 
-    func showAssImage(_ image: CGImage?, bounds: CGRect? = nil) {
-        assVisibleBounds = image == nil ? nil : bounds
+    func showAssImage(_ image: CGImage?, regions: [CGRect] = []) {
+        assVisibleRegions = image == nil ? [] : regions
         if let image {
             // A zoom change moves the picture without a layout pass, so the frame
             // follows each render instead of waiting for one.
@@ -449,7 +450,7 @@ final class SubtitleOverlay: PlatformView {
         lastUpdateTime = 0
         assImageView.image = nil
         assImageView.isHidden = true
-        assVisibleBounds = nil
+        assVisibleRegions = []
         resetPlacement()
     }
 

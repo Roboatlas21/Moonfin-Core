@@ -269,4 +269,41 @@ class SecondarySubtitleRenderingTest {
         assertEquals("Translation", displayed.text.toString())
         assertTrue(displayed.line > previousLine + 0.2f)
     }
+
+    @Test
+    fun appearanceChangesUpdateCachedPrimaryPlacementDuringDialogueGaps() {
+        val context = RuntimeEnvironment.getApplication()
+        for ((line, anchor, expectedShift) in listOf(
+            Triple(0.08f, Cue.ANCHOR_TYPE_START, 0.16f),
+            Triple(0.92f, Cue.ANCHOR_TYPE_END, -0.16f),
+            Triple(0.5f, Cue.ANCHOR_TYPE_MIDDLE, -0.03f),
+        )) {
+            val primary = SubtitleView(context)
+            val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+            val overlay = SecondarySubtitleOverlay(secondary, primary)
+            fun setPrimaryOffset(offset: Float) = overlay.configureBaseStyle(
+                Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, offset)
+            val authored = Cue.Builder().setText("Primary")
+                .setLine(line, Cue.LINE_TYPE_FRACTION).setLineAnchor(anchor).build()
+            setPrimaryOffset(0.04f)
+            overlay.select(true)
+            overlay.updatePrimaryCues(listOf(authored))
+            overlay.updatePrimaryCues(emptyList())
+            overlay.updateCues(listOf(Cue.Builder().setText("Translation during gap").build()))
+            val previousLine = displayedCues(secondary).single().line
+
+            setPrimaryOffset(0.20f)
+            if (anchor == Cue.ANCHOR_TYPE_MIDDLE) {
+                // A 6% gap increase moves each centred row outward by 3%.
+                overlay.configureAppearance(null, 0.06f)
+            }
+
+            assertTrue(displayedCues(primary).isEmpty())
+            val duringGap = displayedCues(secondary).single()
+            assertEquals("Translation during gap", duringGap.text.toString())
+            assertEquals(previousLine + expectedShift, duringGap.line, 0.0001f)
+            overlay.updatePrimaryCues(listOf(authored))
+            assertEquals(duringGap.line, displayedCues(secondary).single().line, 0.0001f)
+        }
+    }
 }
