@@ -303,6 +303,41 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
+    fun upperPrimaryObstacleKeepsSecondaryStableDuringDialogueGap() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0f)
+        overlay.select(true)
+        val centred = Cue.Builder().setText("Centre primary")
+            .setLine(0.50f, Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE).build()
+        val upper = Cue.Builder().setText("Upper primary")
+            .setLine(0.37f, Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()
+        val translation = Cue.Builder().setText("Translation continues during gap").build()
+
+        overlay.updatePrimaryCues(listOf(centred, upper))
+        overlay.updateCues(listOf(translation))
+        val before = displayedCues(secondary).single()
+        assertTrue(displayedCues(primary).size == 2)
+
+        // Both primary lines end; only the secondary is still on screen.
+        // Keep the upper obstacle from the remembered primary group.
+        overlay.updatePrimaryCues(emptyList())
+        assertTrue(displayedCues(primary).isEmpty())
+        val duringGap = displayedCues(secondary).single()
+        assertEquals(before.line, duringGap.line, 0.0001f)
+        assertEquals(before.lineAnchor, duringGap.lineAnchor)
+
+        overlay.updatePrimaryCues(listOf(centred, upper))
+        val resumed = displayedCues(secondary).single()
+        assertEquals(before.line, resumed.line, 0.0001f)
+        assertEquals(before.lineAnchor, resumed.lineAnchor)
+    }
+
+    @Test
     fun appearanceChangesUpdateCachedPrimaryPlacementDuringDialogueGaps() {
         val context = RuntimeEnvironment.getApplication()
         for ((line, anchor, expectedShift) in listOf(
