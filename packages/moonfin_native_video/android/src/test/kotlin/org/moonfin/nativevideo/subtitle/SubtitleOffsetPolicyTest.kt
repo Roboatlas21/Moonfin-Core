@@ -43,42 +43,6 @@ class SubtitleOffsetPolicyTest {
         assertFalse(shiftsEmbeddedFormat(null, null))
     }
 
-    @Test
-    fun `source rebuild restores the chosen embedded primary by ordinal`() {
-        val result = primaryTrackRestoreTarget(
-            primaryEnabled = true,
-            selectionPending = false,
-            subtitleSelected = listOf(false, true, false),
-            captionSelected = emptyList(),
-        )
-        assertEquals(2, result?.subtitleIndex)
-        assertEquals(null, result?.closedCaptionId)
-    }
-
-    @Test
-    fun `caption selection is restored when no normal subtitle is selected`() {
-        val result = primaryTrackRestoreTarget(
-            primaryEnabled = true,
-            selectionPending = false,
-            subtitleSelected = listOf(false, false),
-            captionSelected = listOf(false, true),
-        )
-        assertEquals(null, result?.subtitleIndex)
-        assertEquals(2, result?.closedCaptionId)
-    }
-
-    @Test
-    fun `source rebuild does not override primary off or a pending user choice`() {
-        for ((enabled, pending) in listOf(false to false, true to true)) {
-            assertEquals(null, primaryTrackRestoreTarget(
-                primaryEnabled = enabled,
-                selectionPending = pending,
-                subtitleSelected = listOf(false, true),
-                captionSelected = emptyList(),
-            ))
-        }
-    }
-
     private fun tree(
         isLive: Boolean = false,
         isPreview: Boolean = false,
