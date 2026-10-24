@@ -90,7 +90,11 @@ class WebSubtitleOverlay {
   Future<void> _showAss(String url) async {
     clear();
     final generation = _rendererGeneration;
-    await _ensureJassub();
+    try {
+      await _ensureJassub();
+    } catch (_) {
+      return;
+    }
     if (_disposed || generation != _rendererGeneration) return;
     final options = JSObject()
       ..setProperty('video'.toJS, _video)
@@ -141,7 +145,11 @@ class WebSubtitleOverlay {
   Future<void> _showPgs(String url) async {
     clear();
     final generation = _rendererGeneration;
-    await _ensureLibpgs();
+    try {
+      await _ensureLibpgs();
+    } catch (_) {
+      return;
+    }
     if (_disposed || generation != _rendererGeneration) return;
     final options = JSObject()
       ..setProperty('video'.toJS, _video)
@@ -197,10 +205,14 @@ class WebSubtitleOverlay {
     final existing = _jassubLoad;
     if (existing != null) return existing;
     final completer = Completer<void>();
-    _jassubLoad = completer.future;
+    final load = completer.future.catchError((Object error, StackTrace stack) {
+      _jassubLoad = null;
+      Error.throwWithStackTrace(error, stack);
+    });
+    _jassubLoad = load;
     if (web.window.has('JASSUB')) {
       completer.complete();
-      return completer.future;
+      return load;
     }
     final script = web.HTMLScriptElement()
       ..type = 'module'
@@ -208,22 +220,26 @@ class WebSubtitleOverlay {
           "import JASSUB from '$_jassubBase/jassub.es.js'; window.JASSUB = JASSUB;";
     (web.document.head ?? web.document.documentElement)?.appendChild(script);
     _pollFor('JASSUB', completer);
-    return completer.future;
+    return load;
   }
 
   static Future<void> _ensureLibpgs() {
     final existing = _libpgsLoad;
     if (existing != null) return existing;
     final completer = Completer<void>();
-    _libpgsLoad = completer.future;
+    final load = completer.future.catchError((Object error, StackTrace stack) {
+      _libpgsLoad = null;
+      Error.throwWithStackTrace(error, stack);
+    });
+    _libpgsLoad = load;
     if (web.window.has('libpgs')) {
       completer.complete();
-      return completer.future;
+      return load;
     }
     final script = web.HTMLScriptElement()..src = '$_libpgsBase/libpgs.js';
     (web.document.head ?? web.document.documentElement)?.appendChild(script);
     _pollFor('libpgs', completer);
-    return completer.future;
+    return load;
   }
 
   static void _pollFor(String global, Completer<void> completer) {
