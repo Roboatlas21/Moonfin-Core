@@ -44,7 +44,11 @@ void main() {
   test('ASS and PGS initialization can retry after timeout', () async {
     web.window.delete('JASSUB'.toJS);
     web.window.delete('libpgs'.toJS);
-    final overlay = WebSubtitleOverlay(web.HTMLVideoElement());
+    final errors = <String>[];
+    final overlay = WebSubtitleOverlay(
+      web.HTMLVideoElement(),
+      onError: errors.add,
+    );
     try {
       await _simulateLoadTimeout(
         () => overlay.show('https://example.org/old.ass', 'ass'),
@@ -52,6 +56,9 @@ void main() {
       await _simulateLoadTimeout(
         () => overlay.show('https://example.org/old.pgs', 'pgs'),
       );
+      expect(errors, hasLength(2));
+      expect(errors[0], contains('ASS subtitle renderer failed'));
+      expect(errors[1], contains('PGS subtitle renderer failed'));
 
       final script = web.HTMLScriptElement()..text = '''
         window.moonfinOverlayRetries = 0;
@@ -74,6 +81,31 @@ void main() {
         web.window.getProperty<JSNumber>('moonfinOverlayRetries'.toJS).toDartInt,
         2,
       );
+      expect(errors, hasLength(2));
+
+      final failures = web.HTMLScriptElement()..text = '''
+        window.JASSUB = class {
+          constructor() { throw new Error('ASS constructor failed'); }
+        };
+        window.libpgs = { PgsRenderer: class {
+          constructor() { throw new Error('PGS constructor failed'); }
+        } };
+      ''';
+      web.document.head!.appendChild(failures);
+      failures.remove();
+      await overlay.show('https://example.org/fail.ass', 'ass');
+      await overlay.show('https://example.org/fail.pgs', 'pgs');
+      expect(errors, hasLength(4));
+      expect(errors[2], contains('ASS subtitle renderer failed'));
+      expect(errors[3], contains('PGS subtitle renderer failed'));
+
+      final missingCtor = web.HTMLScriptElement()
+        ..text = 'window.libpgs = {};';
+      web.document.head!.appendChild(missingCtor);
+      missingCtor.remove();
+      await overlay.show('https://example.org/missing.pgs', 'pgs');
+      expect(errors.last, contains('PGS subtitle renderer failed'));
+      expect(errors, hasLength(5));
     } finally {
       overlay.dispose();
       web.window.delete('JASSUB'.toJS);

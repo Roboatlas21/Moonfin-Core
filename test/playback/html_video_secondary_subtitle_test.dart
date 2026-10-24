@@ -616,6 +616,84 @@ void main() {
   });
 
 
+
+  test('retries SRT when the preferred WebVTT fetch rejects', () async {
+    const originalUrl =
+        'https://example.org/Videos/movie/source/Subtitles/3/0/Stream.srt';
+    final script = web.HTMLScriptElement()..text = r'''
+      window.moonfinOriginalFetch = window.fetch;
+      window.moonfinVttRequests = 0;
+      window.moonfinSrtRequests = 0;
+      window.fetch = function(input, init) {
+        const url = String(input);
+        if (url.endsWith('/Stream.vtt')) {
+          window.moonfinVttRequests++;
+          return Promise.reject(new TypeError('VTT network error'));
+        }
+        if (url.endsWith('/Stream.srt')) {
+          window.moonfinSrtRequests++;
+          return Promise.resolve(new Response(
+            '1\n00:00:01,000 --> 00:00:03,000\nFallback SRT\n',
+            {status: 200}
+          ));
+        }
+        return window.moonfinOriginalFetch.apply(this, arguments);
+      };
+    ''';
+    web.document.head!.appendChild(script);
+    script.remove();
+    try {
+      await backend.setSecondarySubtitle(url: originalUrl, codec: 'srt');
+      final track = await loadedSecondary();
+      expect(track.track.cues, hasLength(1));
+      expect((track.track.cues![0] as web.VTTCue).getCueAsHTML().textContent,
+          'Fallback SRT');
+      expect(
+        web.window.getProperty<JSNumber>('moonfinVttRequests'.toJS).toDartInt,
+        1,
+      );
+      expect(
+        web.window.getProperty<JSNumber>('moonfinSrtRequests'.toJS).toDartInt,
+        1,
+      );
+    } finally {
+      final restore = web.HTMLScriptElement()..text = '''
+        window.fetch = window.moonfinOriginalFetch;
+        delete window.moonfinOriginalFetch;
+        delete window.moonfinVttRequests;
+        delete window.moonfinSrtRequests;
+      ''';
+      web.document.head!.appendChild(restore);
+      restore.remove();
+    }
+  });
+
+  test('overlay initialization failure is a nonfatal subtitle error', () async {
+    final errors = <Map<String, dynamic>>[];
+    final subscription = backend.errorStream.listen(errors.add);
+    final script = web.HTMLScriptElement()..text = '''
+      window.JASSUB = class {
+        constructor() { throw new Error('ASS renderer could not start'); }
+      };
+    ''';
+    web.document.head!.appendChild(script);
+    script.remove();
+    try {
+      await backend.setSubtitleTrack(
+        1,
+        isExternalSubtitle: true,
+        externalSubtitleUrl: 'https://example.org/broken.ass',
+        subtitleCodec: 'ass',
+      );
+      await _until(() => errors.isNotEmpty);
+      expect(errors.single['event'], 'subtitleError');
+      expect(errors.single['message'], contains('ASS subtitle renderer failed'));
+    } finally {
+      await subscription.cancel();
+      web.window.delete('JASSUB'.toJS);
+    }
+  });
+
   test('secondary WebVTT retains italic, bold and underline markup', () async {
     await backend.setSecondarySubtitle(
       url: subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\n'
