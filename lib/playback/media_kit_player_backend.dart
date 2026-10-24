@@ -3227,11 +3227,18 @@ class MediaKitPlayerBackend extends PlayerBackend
               ) ??
               (_lastVerticalOffset ?? 0.04) * 720) /
           720;
-      final dimensions = await _tryNativeGetProperty(native, 'osd-dimensions');
-      final osd = dimensions == null ? null : jsonDecode(dimensions);
-      final width =
-          osd is Map && osd['w'] is num && osd['h'] is num && osd['h'] > 0
-          ? (osd['w'] as num) / (osd['h'] as num) * 720
+      // mpv exposes OSD dimensions as scalar subproperties, not JSON strings.
+      final osdWidth = double.tryParse(
+            await _tryNativeGetProperty(native, 'osd-width') ?? '',
+          ) ?? 0;
+      final osdHeight = double.tryParse(
+            await _tryNativeGetProperty(native, 'osd-height') ?? '',
+          ) ?? 0;
+      final width = osdWidth.isFinite &&
+              osdHeight.isFinite &&
+              osdWidth > 0 &&
+              osdHeight > 0
+          ? osdWidth / osdHeight * 720
           : 1280.0;
       final marginX =
           double.tryParse(
