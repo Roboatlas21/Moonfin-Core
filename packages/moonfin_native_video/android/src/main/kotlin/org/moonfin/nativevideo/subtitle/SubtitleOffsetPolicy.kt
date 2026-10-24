@@ -42,6 +42,13 @@ internal fun shiftsEmbeddedFormat(sampleMimeType: String?, codecs: String?): Boo
     return mime in SHIFTED_TEXT_MIMES
 }
 
+/** SRT and WebVTT, including MP4 WebVTT, can use the secondary text renderer. */
+internal fun supportsSecondarySubtitleFormat(sampleMimeType: String?, codecs: String?): Boolean =
+    when (if (sampleMimeType == MIME_MEDIA3_CUES) codecs else sampleMimeType) {
+        "application/x-subrip", "text/vtt", "application/x-mp4-vtt" -> true
+        else -> false
+    }
+
 internal enum class SourceTree {
     /** The player builds the source from the media item itself. */
     PLAYER_ITEM,

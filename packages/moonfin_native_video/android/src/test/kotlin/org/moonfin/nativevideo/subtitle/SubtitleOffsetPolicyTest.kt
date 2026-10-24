@@ -43,6 +43,19 @@ class SubtitleOffsetPolicyTest {
         assertFalse(shiftsEmbeddedFormat(null, null))
     }
 
+    @Test
+    fun `secondary accepts raw and parsed SRT and WebVTT including MP4`() {
+        for (mime in listOf("application/x-subrip", "text/vtt", "application/x-mp4-vtt")) {
+            assertTrue(mime, supportsSecondarySubtitleFormat(mime, null))
+            assertTrue(mime, supportsSecondarySubtitleFormat("application/x-media3-cues", mime))
+        }
+        for (mime in listOf(null, "text/x-ssa", "application/pgs", "application/vobsub",
+                "application/dvbsubs", "application/ttml+xml", "application/cea-608", "video/avc")) {
+            assertFalse(mime, supportsSecondarySubtitleFormat(mime, null))
+            assertFalse(mime, supportsSecondarySubtitleFormat("application/x-media3-cues", mime))
+        }
+    }
+
     private fun tree(
         isLive: Boolean = false,
         isPreview: Boolean = false,

@@ -121,6 +121,7 @@ import org.moonfin.nativevideo.subtitle.externalFormatIdMatches
 import org.moonfin.nativevideo.subtitle.joinStackedCues
 import org.moonfin.nativevideo.subtitle.overriddenTrackOrdinal
 import org.moonfin.nativevideo.subtitle.sourceTreeFor
+import org.moonfin.nativevideo.subtitle.supportsSecondarySubtitleFormat
 import org.moonfin.nativevideo.subtitle.syncDelaysPayload
 import org.moonfin.nativevideo.ts.withHdmvTsSupport
 
@@ -3432,10 +3433,7 @@ class Media3VideoView(
             secondarySubtitleUrl?.let(::findExternalSubtitle)
         } ?: return // Keep the selection pending until the track appears in the source.
         val format = entry.group.getFormat(entry.trackIndex)
-        val mime = if (format.sampleMimeType == MimeTypes.APPLICATION_MEDIA3_CUES) {
-            format.codecs
-        } else format.sampleMimeType
-        if (!entry.supported || mime !in setOf(MimeTypes.APPLICATION_SUBRIP, MimeTypes.TEXT_VTT)) {
+        if (!entry.supported || !supportsSecondarySubtitleFormat(format.sampleMimeType, format.codecs)) {
             if (id != null) {
                 // An unsupported embedded track may still have a server SRT/VTT URL.
                 secondarySubtitleTrackId = null
