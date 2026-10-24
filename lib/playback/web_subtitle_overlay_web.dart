@@ -58,6 +58,7 @@ class WebSubtitleOverlay {
 
   _Jassub? _assRenderer;
   _PgsRenderer? _pgsRenderer;
+  double _delaySeconds = 0;
   bool _disposed = false;
 
   static Future<void>? _jassubLoad;
@@ -91,6 +92,7 @@ class WebSubtitleOverlay {
     if (_disposed) return;
     final options = JSObject()
       ..setProperty('video'.toJS, _video)
+      ..setProperty('timeOffset'.toJS, (-_delaySeconds).toJS)
       ..setProperty('subUrl'.toJS, url.toJS)
       ..setProperty('workerUrl'.toJS, '$_jassubBase/jassub-worker.js'.toJS)
       ..setProperty('wasmUrl'.toJS, '$_jassubBase/jassub-worker.wasm'.toJS)
@@ -140,6 +142,7 @@ class WebSubtitleOverlay {
     if (_disposed) return;
     final options = JSObject()
       ..setProperty('video'.toJS, _video)
+      ..setProperty('timeOffset'.toJS, (-_delaySeconds).toJS)
       ..setProperty('subUrl'.toJS, url.toJS)
       ..setProperty('workerUrl'.toJS, '$_libpgsBase/libpgs.worker.js'.toJS);
     try {
@@ -150,6 +153,17 @@ class WebSubtitleOverlay {
     } catch (_) {
       _pgsRenderer = null;
     }
+  }
+
+  void setDelay(double seconds) {
+    _delaySeconds = seconds;
+    // These renderers offset their clock, so a positive delay moves it back.
+    final ass = _assRenderer;
+    if (ass != null) {
+      ass.timeOffset = -seconds;
+      ass.setCurrentTime(_video.paused, _video.currentTime - seconds);
+    }
+    _pgsRenderer?.timeOffset = -seconds;
   }
 
   void clear() {
@@ -236,9 +250,12 @@ class WebSubtitleOverlay {
 @JS('JASSUB')
 extension type _Jassub._(JSObject _) implements JSObject {
   external factory _Jassub(JSObject options);
+  external set timeOffset(double seconds);
+  external void setCurrentTime(bool paused, double seconds);
   external void destroy();
 }
 
 extension type _PgsRenderer._(JSObject _) implements JSObject {
+  external set timeOffset(double seconds);
   external void dispose();
 }

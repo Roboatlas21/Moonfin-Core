@@ -178,6 +178,7 @@ class _MediaKitDeviceProfileCapabilities {
 }
 
 class MediaKitPlayerBackend extends PlayerBackend
+    with SubtitleDelayState
     implements SubtitleLoadingBackend, SecondarySubtitleBackend {
   static const Duration _linuxHwdecFirstFrameTimeout = Duration(
     milliseconds: 1500,
@@ -823,6 +824,7 @@ class MediaKitPlayerBackend extends PlayerBackend
         ? mediaItem
         : payload['url']?.toString() ?? '';
     if (url.isEmpty) return;
+    updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
 
     final generation = ++_playbackGeneration;
     _liveStartupGate = null;
@@ -914,6 +916,8 @@ class MediaKitPlayerBackend extends PlayerBackend
       _enableNativeSubtitleRendering();
     }
     await _maybeEngageNativeHdr();
+    await setSubtitleDelay(subtitleDelaySeconds);
+    if (!_ownsPlayback(generation)) return;
     await setSecondarySubtitleDelay(
       ((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000,
     );
@@ -2982,6 +2986,7 @@ class MediaKitPlayerBackend extends PlayerBackend
 
   @override
   Future<void> setSubtitleDelay(double seconds) async {
+    subtitleDelaySeconds = seconds;
     final native = _player.platform as NativePlayer;
     await _nativeSetProperty(native, 'sub-delay', seconds.toStringAsFixed(3));
     await setSecondarySubtitleDelay(_secondarySubtitleDelay);

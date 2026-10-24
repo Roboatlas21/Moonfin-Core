@@ -747,6 +747,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         /// arriving after it, because the engine clears its external registry
         /// when a load begins and only re-seats what the load itself declared.
         var externalSubtitles: [ExternalSubtitleTrack] = []
+        var subtitleDelay: Double = 0
         var secondarySubtitle = SecondarySubtitleConfiguration()
     }
 
@@ -864,6 +865,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         subtitleOverlay.clear()
         secondarySubtitleOverlay.clear()
         secondarySubtitlesReady = false
+        setSubtitleDelay(sourceConfiguration.subtitleDelay)
         let secondary = sourceConfiguration.secondarySubtitle
         pendingSecondarySubtitle = (secondary.embeddedTrackId, secondary.url)
         secondarySubtitleOverlay.stackingEnabled =

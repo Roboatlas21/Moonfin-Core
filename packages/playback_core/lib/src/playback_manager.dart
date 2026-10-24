@@ -4450,6 +4450,11 @@ class PlaybackManager implements AudioOwnable {
     }
   }
 
+  void _resetSubtitleDelaySession() {
+    _subtitleDelaySessionId++;
+    _secondarySubtitleDelaySeconds = 0;
+  }
+
   Future<bool> _stopAndReportCurrent({
     bool skipQueueChange = false,
     dynamic expectedItem,
@@ -4459,7 +4464,7 @@ class PlaybackManager implements AudioOwnable {
     final existingStop = _stopInFlight;
     if (existingStop != null) {
       await existingStop;
-      if (!preserveSubtitleDelay) _subtitleDelaySessionId++;
+      if (!preserveSubtitleDelay) _resetSubtitleDelaySession();
       return false;
     }
 
@@ -4476,7 +4481,7 @@ class PlaybackManager implements AudioOwnable {
         'releaseServerResources=$releaseServerResources '
         'position=${_lastKnownPosition.inMilliseconds}ms',
       );
-      if (!preserveSubtitleDelay) _subtitleDelaySessionId++;
+      if (!preserveSubtitleDelay) _resetSubtitleDelaySession();
       _deferredStartPosition = Duration.zero;
       _deferPlaybackToExternalPlayer = false;
       _endLiveStallWatch();

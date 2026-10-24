@@ -19,7 +19,7 @@ import 'letterbox_croppers.dart';
 import 'lossless_audio_bridge.dart';
 import 'server_transcode_capabilities.dart';
 
-class NativeApplePlayerBackend implements PlayerBackend, SecondarySubtitleBackend {
+class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend, SecondarySubtitleBackend {
   NativeApplePlayerBackend(this._prefs) {
     _eventSub = _events.receiveBroadcastStream().listen(
       _handleEvent,
@@ -44,7 +44,6 @@ class NativeApplePlayerBackend implements PlayerBackend, SecondarySubtitleBacken
   double _playbackSpeed = 1.0;
   double _volume = 100.0;
   double _audioDelaySeconds = 0.0;
-  double _subtitleDelaySeconds = 0.0;
   bool _completed = false;
   SubtitleRendererMode _requestedSubtitleRendererMode =
       SubtitleRendererMode.native;
@@ -211,7 +210,7 @@ class NativeApplePlayerBackend implements PlayerBackend, SecondarySubtitleBacken
         _completedStream.add(_completed);
       case 'syncDelays':
         _audioDelaySeconds = _toInt(map['audioDelayMs']) / 1000.0;
-        _subtitleDelaySeconds = _toInt(map['subtitleDelayMs']) / 1000.0;
+        subtitleDelaySeconds = _toInt(map['subtitleDelayMs']) / 1000.0;
       case 'engineLog':
         _logEngineLine(map['line']);
       case 'playerError':
@@ -301,6 +300,7 @@ class NativeApplePlayerBackend implements PlayerBackend, SecondarySubtitleBacken
         ? mediaItem
         : payload['url']?.toString() ?? '';
     if (_disposed || url.isEmpty) return;
+    updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
 
     final autoPlay = payload['autoPlay'] != false;
 
@@ -382,7 +382,7 @@ class NativeApplePlayerBackend implements PlayerBackend, SecondarySubtitleBacken
       'speed': _playbackSpeed,
       'volume': _volume,
       'audioDelayMs': (_audioDelaySeconds * 1000).round(),
-      'subtitleDelayMs': (_subtitleDelaySeconds * 1000).round(),
+      'subtitleDelayMs': (subtitleDelaySeconds * 1000).round(),
       'subtitleRendererMode': _modeToWire(_requestedSubtitleRendererMode),
       'forceSubtitlesDisabledOnStart':
           !audioOnly && _prefs.get(UserPreferences.subtitleMode) == SubtitleMode.none,
@@ -896,7 +896,7 @@ class NativeApplePlayerBackend implements PlayerBackend, SecondarySubtitleBacken
 
   @override
   Future<void> setSubtitleDelay(double seconds) async {
-    _subtitleDelaySeconds = seconds;
+    subtitleDelaySeconds = seconds;
     await _invoke<void>('setSubtitleDelay', {
       'delayMs': (seconds * 1000).round(),
     });
