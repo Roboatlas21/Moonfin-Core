@@ -278,4 +278,59 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(label.frame.maxY, 364, accuracy: 0.1)
     }
 
+
+    @MainActor
+    func testApplePrimaryAndSecondaryPreserveInlineEmphasis() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = true
+        secondary.applySecondaryStyle(from: primary, fontSize: 18, textColor: 0xFFFFFF00)
+
+        let runs = [
+            SubtitleStyledRun(text: "Normal ", isBold: false, isItalic: false,
+                              isUnderlined: false, isStruckThrough: false),
+            SubtitleStyledRun(text: "bold italic", isBold: true, isItalic: true,
+                              isUnderlined: false, isStruckThrough: false),
+            SubtitleStyledRun(text: " and ", isBold: false, isItalic: false,
+                              isUnderlined: false, isStruckThrough: false),
+            SubtitleStyledRun(text: "underlined", isBold: false, isItalic: false,
+                              isUnderlined: true, isStruckThrough: false),
+        ]
+        var event = cue(runs.map(\.text).joined())
+        event.styledRuns = runs
+        primary.setEvents([event])
+        secondary.setEvents([event])
+        primary.update(currentTime: 2)
+        secondary.update(currentTime: 2)
+
+        for overlay in [primary, secondary] {
+            let label = overlay.subviews.compactMap { $0 as? UILabel }.last!
+            let text = label.attributedText!
+            let styleRange = (text.string as NSString).range(of: "bold italic")
+            let font = text.attribute(.font, at: styleRange.location,
+                                      effectiveRange: nil) as! UIFont
+            XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains(.traitBold))
+            XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains(.traitItalic))
+            let underline = (text.string as NSString).range(of: "underlined")
+            XCTAssertEqual(text.attribute(.underlineStyle, at: underline.location,
+                                          effectiveRange: nil) as? Int,
+                           NSUnderlineStyle.single.rawValue)
+            XCTAssertNil(text.attribute(.underlineStyle, at: 0, effectiveRange: nil))
+        }
+
+        let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        XCTAssertEqual(secondaryLabel.attributedText?.attribute(
+            .foregroundColor, at: 0, effectiveRange: nil) as? UIColor, .yellow)
+
+        // The same cue text and timing can still be restyled during playback.
+        event.styledRuns = nil
+        primary.setEvents([event])
+        let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
+        let reset = primaryLabel.attributedText!.attribute(
+            .font, at: 7, effectiveRange: nil) as! UIFont
+        XCTAssertFalse(reset.fontDescriptor.symbolicTraits.contains(.traitItalic))
+    }
+
 }
