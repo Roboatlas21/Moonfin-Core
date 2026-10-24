@@ -677,6 +677,9 @@ class HtmlVideoBackend extends PlayerBackend
           if (element.parentNode == null) {
             _videoElement.appendChild(element);
           }
+          // Detached tracks keep their cues, including any earlier delay.
+          element.track.mode = 'hidden';
+          _retimePrimaryCues(element.track);
           element.setAttribute('default', '');
           element.track.mode = 'showing';
         } else {
