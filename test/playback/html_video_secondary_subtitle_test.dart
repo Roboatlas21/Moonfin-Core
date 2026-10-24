@@ -108,6 +108,57 @@ void main() {
     urls.clear();
   });
 
+  test('primary delay applies to both tracks without accumulating', () async {
+    await backend.setSubtitleDelay(2);
+    await backend.setSubtitleTrack(
+      1, isExternalSubtitle: true,
+      externalSubtitleUrl: subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nPrimary\n'),
+    );
+    final primary = video.querySelector('track')! as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1);
+    final cue = primary.track.cues![0];
+    await _until(() => cue.startTime == 3);
+    await backend.setSecondarySubtitleDelay(0.5);
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nSecond\n'),
+    );
+    final second = (await loadedSecondary()).track.cues![0];
+    expect(second.startTime, 3.5);
+
+    await backend.setSubtitleDelay(-0.5);
+    expect(cue.startTime, 0.5);
+    expect(second.startTime, 1);
+    await backend.disableSubtitleTrack();
+    await backend.setSubtitleTrack(1);
+    await backend.setSubtitleDelay(0);
+    expect(cue.startTime, 1);
+    expect(cue.endTime, 3);
+    expect(second.startTime, 1.5);
+  });
+
+  test('web delay survives a same-session reload and resets for new playback', () async {
+    Future<void> open(int? session, {int secondaryDelayMs = 0}) => backend.play({
+      'url': mediaUrl,
+      'autoPlay': false,
+      'subtitleDelaySessionId': session,
+      'secondarySubtitleDelayMs': secondaryDelayMs,
+      'secondarySubtitleUrl': subtitle('WEBVTT\n\n00:01.000 --> 00:03.000\nSecond\n'),
+    });
+    await open(1);
+    await backend.setSubtitleDelay(1.25);
+    await backend.setSecondarySubtitleDelay(0.5);
+    await backend.stop();
+    await open(1, secondaryDelayMs: 500);
+    expect(backend.subtitleDelaySeconds, 1.25);
+    expect((await loadedSecondary()).track.cues![0].startTime, 2.75);
+    await open(2);
+    expect(backend.subtitleDelaySeconds, 0);
+    expect((await loadedSecondary()).track.cues![0].startTime, 1);
+    await backend.setSubtitleDelay(-0.5);
+    await open(null);
+    expect(backend.subtitleDelaySeconds, 0);
+  });
+
 
   test('secondary follows authored top and fixed middle anchors', () async {
     await backend.setSubtitleTrack(
