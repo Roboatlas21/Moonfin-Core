@@ -328,6 +328,67 @@ void main() {
     }
   });
 
+  test('clearing or replacing a pending overlay prevents stale renderers', () async {
+    final script = web.HTMLScriptElement()..text = '''
+      window.moonfinOverlayCreated = 0;
+      window.moonfinOverlayUrl = '';
+      window.JASSUB = class {
+        constructor(options) {
+          window.moonfinOverlayCreated++;
+          window.moonfinOverlayUrl = options.subUrl;
+        }
+        destroy() {}
+        setCurrentTime() {}
+      };
+      window.libpgs = { PgsRenderer: class {
+        constructor(options) {
+          window.moonfinOverlayCreated++;
+          window.moonfinOverlayUrl = options.subUrl;
+        }
+        dispose() {}
+      } };
+    ''';
+    web.document.head!.appendChild(script);
+    script.remove();
+    int created() => web.window
+        .getProperty<JSNumber>('moonfinOverlayCreated'.toJS).toDartInt;
+    try {
+      for (final codec in ['ass', 'pgs']) {
+        final pending = backend.setSubtitleTrack(
+          1, isExternalSubtitle: true,
+          externalSubtitleUrl: 'https://example.com/old.$codec',
+          subtitleCodec: codec,
+        );
+        await backend.disableSubtitleTrack();
+        await pending;
+      }
+      expect(created(), 0);
+
+      final stale = backend.setSubtitleTrack(
+        1, isExternalSubtitle: true,
+        externalSubtitleUrl: 'https://example.com/stale.ass',
+        subtitleCodec: 'ass',
+      );
+      final current = backend.setSubtitleTrack(
+        1, isExternalSubtitle: true,
+        externalSubtitleUrl: 'https://example.com/current.pgs',
+        subtitleCodec: 'pgs',
+      );
+      await Future.wait([stale, current]);
+      expect(created(), 1);
+      expect(
+        web.window.getProperty<JSString>('moonfinOverlayUrl'.toJS).toDart,
+        'https://example.com/current.pgs',
+      );
+    } finally {
+      await backend.disableSubtitleTrack();
+      web.window.delete('JASSUB'.toJS);
+      web.window.delete('libpgs'.toJS);
+      web.window.delete('moonfinOverlayCreated'.toJS);
+      web.window.delete('moonfinOverlayUrl'.toJS);
+    }
+  });
+
   test('multiline cues and larger secondary text grow away from the gap', () async {
     await backend.configureSubtitleStyle(verticalOffset: 0.04);
     await backend.setSubtitleTrack(
