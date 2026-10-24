@@ -32,7 +32,6 @@ final class IosPiPController: NSObject {
     private var boundSoftwareSource: SoftwarePiPSource?
     private var reportedReady = false
     private weak var nativeSubtitleWrapper: AetherPlayerWrapper?
-    private weak var nativeSubtitleController: AVPictureInPictureController?
 
     /// The provider answers with whichever wrapper is hosting the engine right
     /// now, since the Flutter player and the native player each have their own.
@@ -186,7 +185,7 @@ final class IosPiPController: NSObject {
                 AetherPlayerWrapper.sharedEngine()?.pictureInPictureActive = false
                 channel.invokeMethod("onPiPChanged", arguments: false)
             }
-            restoreInlineSubtitles(after: pip)
+            restoreInlineSubtitles()
         }
         pipController?.delegate = nil
         pipController = nil
@@ -194,21 +193,18 @@ final class IosPiPController: NSObject {
 
     private func prepareNativeSubtitles(for pip: AVPictureInPictureController) {
         guard pipController === pip else { return }
-        if let previous = nativeSubtitleController { restoreInlineSubtitles(after: previous) }
+        restoreInlineSubtitles()
         // A newly presented native controller can be published before its load
         // takes ownership from the Flutter player. Suspend the actual decoder
         // owner's overlay, then retain that identity through PiP callbacks.
         let wrapper = AetherPlayerWrapper.activePlaybackOwner ?? wrapperProvider()
         nativeSubtitleWrapper = wrapper
-        nativeSubtitleController = pip
         wrapper?.setNativeSubtitlePresentationRequired(true)
     }
 
-    private func restoreInlineSubtitles(after pip: AVPictureInPictureController) {
-        guard nativeSubtitleController === pip else { return }
+    private func restoreInlineSubtitles() {
         let wrapper = nativeSubtitleWrapper
         nativeSubtitleWrapper = nil
-        nativeSubtitleController = nil
         wrapper?.setNativeSubtitlePresentationRequired(false)
     }
 
@@ -267,7 +263,7 @@ extension IosPiPController: AVPictureInPictureControllerDelegate {
         Task { @MainActor in
             guard pipController === pictureInPictureController else { return }
             AetherPlayerWrapper.sharedEngine()?.pictureInPictureActive = false
-            restoreInlineSubtitles(after: pictureInPictureController)
+            restoreInlineSubtitles()
             wrapperProvider()?.nowPlaying.reclaim()
             channel.invokeMethod("onPiPChanged", arguments: false)
         }
@@ -279,7 +275,7 @@ extension IosPiPController: AVPictureInPictureControllerDelegate {
     ) {
         Task { @MainActor in
             guard pipController === pictureInPictureController else { return }
-            restoreInlineSubtitles(after: pictureInPictureController)
+            restoreInlineSubtitles()
         }
     }
 

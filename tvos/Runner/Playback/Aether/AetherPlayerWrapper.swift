@@ -105,7 +105,6 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     // and keep its registered identity for the picker and native restoration.
     private var primarySidecarTrackID: Int?
     private var nativePrimaryBridge: NativePrimarySubtitleBridge?
-    private var nativePrimaryBridgeTask: Task<Void, Never>?
     private var nativePrimaryBridgeFailure: (item: AVPlayerItem, trackID: Int, hideSecondary: Bool)?
     private var nativeSubtitleItem: AVPlayerItem?
     private var nativeSubtitleSelectionObserver: NSObjectProtocol?
@@ -368,13 +367,12 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             .store(in: &cancellables)
 
         engine.$subtitleCues
-            .combineLatest(engine.$sidecarASSHeader)
+            .combineLatest(engine.$sidecarASSHeader, engine.$isLoadingSubtitles)
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak engine] _ in
                 guard let engine else { return }
-                // Sidecar decoding publishes cues before their ASS header. Read
-                // the current pair after delivery, including when a track switch
-                // has superseded a queued publication.
+                // Read the complete decode result after delivery. Loading also
+                // publishes a failure, which has no new cues or ASS header.
                 self?.applySubtitleCues(engine.subtitleCues)
             }
             .store(in: &cancellables)
@@ -394,11 +392,6 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 self?.secondarySubtitleOverlay.keepsVideoComposited =
                     engine?.isSecondarySubtitleActive ?? false
             }
-            .store(in: &cancellables)
-
-        engine.$isLoadingSubtitles
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.prepareNativePrimaryBridgeIfDecoded() }
             .store(in: &cancellables)
 
         engine.$currentAVPlayerItem
@@ -1531,7 +1524,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             // Re-establish its native feed before switching the decoder back.
             engine.selectSubtitleTrack(index: id)
         }
-        nativePrimaryBridgeTask = Task { @MainActor [weak self, weak bridge] in
+        bridge.groupTask = Task { @MainActor [weak self, weak bridge] in
             let group = try? await item.asset.loadMediaSelectionGroup(for: .legible)
             guard let self, let bridge, self.isCurrentNativePrimaryBridge(bridge),
                   !Task.isCancelled else { return }
@@ -1543,7 +1536,6 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 return
             }
             bridge.group = group
-            bridge.phase = .waitingForSelection
             self.nativeSubtitleSelectionDidChange()
         }
     }
@@ -1634,20 +1626,18 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     private func endNativePrimaryBridge(restoreNative: Bool, retainTrackID: Bool = false) {
         let id = primarySidecarTrackID
         let bridge = nativePrimaryBridge
-        nativePrimaryBridgeTask?.cancel()
-        nativePrimaryBridgeTask = nil
+        bridge?.groupTask?.cancel()
         nativePrimaryBridge = nil
         if let bridge {
+            let ownsItem = ownsEngine && Self._sharedEngine?.currentAVPlayerItem === bridge.item
             // Off and a new primary must also clear AVMediaSelection: the
             // engine's one-shot sidecar has no active registered ID to clear.
-            if id != nil, !restoreNative, !retainTrackID, ownsEngine,
-               Self._sharedEngine?.currentAVPlayerItem === bridge.item,
+            if id != nil, !restoreNative, !retainTrackID, ownsItem,
                let group = bridge.group {
                 bridge.item.select(nil, in: group)
             }
             if let output = bridge.output { bridge.item.remove(output) }
-            if restoreNative, id != nil, ownsEngine,
-               Self._sharedEngine?.currentAVPlayerItem === bridge.item,
+            if restoreNative, id != nil, ownsItem,
                let group = bridge.group, let option = bridge.option {
                 // Restore the actual item immediately for PiP; the engine call
                 // below synchronizes the registered identity asynchronously.
@@ -1768,7 +1758,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         guard let engine = Self.sharedEngine() else { return }
         if let bridge = nativePrimaryBridge, bridge.phase != .overlay {
             if !cues.isEmpty, engine.activeSubtitleTrackIndex != nil,
-               bridge.phase == .loadingGroup || bridge.phase == .waitingForSelection {
+               bridge.phase == .waitingForSelection {
                 // The bypass proxy can decline injection and leave the registered
                 // track on Aether's usual overlay path. Keep those complete cues.
                 endNativePrimaryBridge(restoreNative: false)
@@ -2077,12 +2067,13 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 /// observer and async group load before they can alter a newer selection.
 @MainActor
 private final class NativePrimarySubtitleBridge {
-    enum Phase { case loadingGroup, waitingForSelection, decoding, waitingForClear, overlay }
+    enum Phase { case waitingForSelection, decoding, waitingForClear, overlay }
     let item: AVPlayerItem
     let trackID: Int
     let sidecar: ExternalSubtitleTrack
     let generation: UInt64
-    var phase = Phase.loadingGroup
+    var phase = Phase.waitingForSelection
+    var groupTask: Task<Void, Never>?
     var group: AVMediaSelectionGroup?
     var option: AVMediaSelectionOption?
     var output: AVPlayerItemLegibleOutput?
