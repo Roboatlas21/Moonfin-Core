@@ -16,6 +16,8 @@ private typealias PlatformImage = NSImage
 private typealias PlatformImageView = NSImageView
 #endif
 
+import QuartzCore
+
 final class SubtitleOverlay: PlatformView {
 
     #if canImport(UIKit)
@@ -37,6 +39,8 @@ final class SubtitleOverlay: PlatformView {
     private var extraTextOverlays: [SubtitleOverlay] = []
     private var activeBitmapEvents: [SubtitleEvent] = []
     private var extraBitmapViews: [PlatformImageView] = []
+    private let textOverflowMask = CAShapeLayer()
+    private let outlineOverflowMask = CAShapeLayer()
     private var lastUpdateTime: TimeInterval = 0
     var delaySeconds: TimeInterval = 0
     /// The secondary text follows the primary frame, using its last frame during gaps
@@ -49,8 +53,9 @@ final class SubtitleOverlay: PlatformView {
             requestLayout()
         }
     }
-    // Store the last frame in relative coordinates so dialogue gaps survive a resize.
-    private var lastPrimaryFrame: CGRect?
+    // Store each occupied region in relative coordinates, preserving free gaps
+    // between positioned cues when primary dialogue disappears or the view resizes.
+    private var lastPrimaryFrames: [CGRect] = []
     private var assVisibleBounds: CGRect?
     private var lastPrimaryAlignment = 2
     var secondaryVerticalAdjustment: Double = 0 {
@@ -60,29 +65,37 @@ final class SubtitleOverlay: PlatformView {
         }
     }
 
-    private var visibleFrame: CGRect? {
-        var frame = CGRect.null
-        if !textLabel.isHidden { frame = frame.union(textLabel.frame) }
+    /// Keep the actual rendered rectangles separate: a cue at the top and
+    /// another at the bottom must not block the entire space between them.
+    private var visibleRegions: [CGRect] {
+        var regions: [CGRect] = []
+        if !textLabel.isHidden { regions.append(textLabel.frame) }
         for overlay in extraTextOverlays {
-            if let region = overlay.visibleFrame { frame = frame.union(region) }
+            regions.append(contentsOf: overlay.visibleRegions)
         }
-        if !bitmapView.isHidden { frame = frame.union(bitmapView.frame) }
+        if !bitmapView.isHidden { regions.append(bitmapView.frame) }
         for view in extraBitmapViews where !view.isHidden {
-            frame = frame.union(view.frame)
+            regions.append(view.frame)
         }
         if !assImageView.isHidden, let rect = assVisibleBounds {
             let canvas = assCanvas
-            frame = frame.union(CGRect(
+            regions.append(CGRect(
                 x: canvas.minX + rect.minX * canvas.width,
                 y: canvas.minY + rect.minY * canvas.height,
                 width: rect.width * canvas.width, height: rect.height * canvas.height))
         }
-        return frame.isNull || frame.isEmpty ? nil : frame
+        return regions.filter { !$0.isEmpty && !$0.isNull }
     }
 
-    private var stackingFrame: CGRect? {
-        if let frame = visibleFrame { return frame }
-        return lastPrimaryFrame.map {
+    private var visibleFrame: CGRect? {
+        let regions = visibleRegions
+        return regions.isEmpty ? nil : regions.reduce(CGRect.null) { $0.union($1) }
+    }
+
+    private var stackingRegions: [CGRect] {
+        let regions = visibleRegions
+        if !regions.isEmpty { return regions }
+        return lastPrimaryFrames.map {
             CGRect(x: $0.minX * bounds.width, y: $0.minY * bounds.height,
                    width: $0.width * bounds.width, height: $0.height * bounds.height)
         }
@@ -98,8 +111,7 @@ final class SubtitleOverlay: PlatformView {
         }
         if !activeTextEvents.isEmpty {
             let placement = activeTextPlacement
-            let authored = placement?.alignment ?? 2
-            let alignment = (1...9).contains(authored) ? authored : 2
+            let alignment = Self.effectiveAlignment(placement)
             guard let position = placement?.position else { return alignment }
             // WebVTT's line alignment is an anchor, not a screen region: a bottom
             // anchor at line:10%,end still needs the secondary below the primary.
@@ -115,11 +127,14 @@ final class SubtitleOverlay: PlatformView {
     }
 
     private func rememberPrimaryPlacement() {
-        guard secondaryForStacking != nil, let frame = visibleFrame,
+        guard secondaryForStacking != nil,
               bounds.width > 0, bounds.height > 0 else { return }
-        lastPrimaryFrame = CGRect(
-            x: frame.minX / bounds.width, y: frame.minY / bounds.height,
-            width: frame.width / bounds.width, height: frame.height / bounds.height)
+        let regions = visibleRegions
+        guard !regions.isEmpty else { return }
+        lastPrimaryFrames = regions.map { frame in
+            CGRect(x: frame.minX / bounds.width, y: frame.minY / bounds.height,
+                   width: frame.width / bounds.width, height: frame.height / bounds.height)
+        }
         lastPrimaryAlignment = currentAlignment
     }
 
@@ -425,7 +440,7 @@ final class SubtitleOverlay: PlatformView {
         assImageView.isHidden = true
         assVisibleBounds = nil
         hideAll()
-        lastPrimaryFrame = nil
+        lastPrimaryFrames = []
         lastPrimaryAlignment = 2
         // Clearing the primary track resets the secondary text alignment. A gap in
         // dialogue calls showText([]) and preserves it.
@@ -493,13 +508,19 @@ final class SubtitleOverlay: PlatformView {
 
     // MARK: - Display
 
-    /// A separate authored position needs a separate label. Ordinary dialogue at
-    /// the same position still joins into one multiline caption.
+    private static func effectiveAlignment(_ cue: SubtitleEvent?) -> Int {
+        let value = cue?.alignment ?? 2
+        return (1...9).contains(value) ? value : 2
+    }
+
+    /// An omitted alignment and an explicit bottom-centre alignment mean the same
+    /// place. Group by where a cue draws, not by whether it set that default.
     private static func textGroups(_ events: [SubtitleEvent]) -> [[SubtitleEvent]] {
         var groups: [[SubtitleEvent]] = []
         for event in events {
             if let index = groups.firstIndex(where: {
-                $0[0].alignment == event.alignment && $0[0].position == event.position
+                Self.effectiveAlignment($0[0]) == Self.effectiveAlignment(event)
+                    && $0[0].position == event.position
             }) {
                 groups[index].append(event)
             } else {
@@ -507,7 +528,7 @@ final class SubtitleOverlay: PlatformView {
             }
         }
         if let normal = groups.firstIndex(where: {
-            $0[0].alignment == nil && $0[0].position == nil
+            Self.effectiveAlignment($0[0]) == 2 && $0[0].position == nil
         }) {
             groups.swapAt(0, normal)
         }
@@ -610,35 +631,102 @@ final class SubtitleOverlay: PlatformView {
     private func setTextHidden(_ hidden: Bool) {
         textLabel.isHidden = hidden
         outlineLabel.isHidden = hidden
+        if hidden { applyOverflowClip(nil, left: 0, right: bounds.width) }
     }
 
-    /// Return a non-overlapping position for the secondary's full measured height.
+    /// Find room next to the primary without treating gaps between other cues
+    /// as occupied. The optional range limits visible text if no gap fits.
     static func stackedSecondaryTop(
-        primary: CGRect, height: CGFloat, gap: CGFloat, preferBelow: Bool,
+        occupied: [CGRect], anchor: CGRect, x: CGFloat, width: CGFloat,
+        height: CGFloat, gap: CGFloat, preferBelow: Bool,
         minimumY: CGFloat, maximumY: CGFloat
-    ) -> (top: CGFloat, fits: Bool) {
-        let above = primary.minY - gap - height
-        let below = primary.maxY + gap
-        let aboveFits = above >= minimumY
-        let belowFits = below + height <= maximumY
-        if preferBelow {
-            if belowFits { return (below, true) }
-            if aboveFits { return (above, true) }
-        } else {
-            if aboveFits { return (above, true) }
-            if belowFits { return (below, true) }
+    ) -> (top: CGFloat, clip: ClosedRange<CGFloat>?) {
+        let desired = preferBelow ? anchor.maxY + gap : anchor.minY - gap - height
+        let blocked = occupied
+            .filter { $0.maxX > x && $0.minX < x + width }
+            .map { (max(minimumY, $0.minY - gap), min(maximumY, $0.maxY + gap)) }
+            .filter { $0.0 < $0.1 }
+            .sorted { $0.0 < $1.0 }
+        var free: [ClosedRange<CGFloat>] = []
+        var cursor = minimumY
+        for (start, end) in blocked {
+            if start > cursor { free.append(cursor...start) }
+            cursor = max(cursor, end)
         }
-        // If both blocks cannot fit, clip the roomier edge rather than overlap.
-        let aboveRoom = max(0, primary.minY - gap - minimumY)
-        let belowRoom = max(0, maximumY - primary.maxY - gap)
-        return aboveRoom >= belowRoom ? (above, false) : (below, false)
+        if cursor < maximumY { free.append(cursor...maximumY) }
+
+        var best: CGFloat?
+        var bestDistance = CGFloat.infinity
+        for interval in free where interval.upperBound - interval.lowerBound >= height {
+            let top = min(max(desired, interval.lowerBound), interval.upperBound - height)
+            let distance = abs(top - desired)
+            if distance < bestDistance {
+                best = top
+                bestDistance = distance
+            }
+        }
+        if let best { return (best, nil) }
+
+        // Not enough room for the full text. Show the largest free portion,
+        // masking the rest so it cannot cover another subtitle or a cutout.
+        guard var largest = free.first else {
+            return (minimumY, minimumY...minimumY)
+        }
+        for interval in free.dropFirst() {
+            let space = interval.upperBound - interval.lowerBound
+            let largestSpace = largest.upperBound - largest.lowerBound
+            if space > largestSpace ||
+                (space == largestSpace &&
+                 abs(interval.lowerBound - desired) < abs(largest.lowerBound - desired)) {
+                largest = interval
+            }
+        }
+        return (largest.lowerBound, largest)
+    }
+
+    /// Mask only the secondary text, not the overlay's video-compositing backing.
+    /// In crowded layouts it must not bleed into another cue or a screen cutout.
+    private func applyOverflowClip(
+        _ visibleY: ClosedRange<CGFloat>?, left: CGFloat, right: CGFloat
+    ) {
+        guard let visibleY else {
+            #if canImport(UIKit)
+            textLabel.layer.mask = nil
+            outlineLabel.layer.mask = nil
+            #else
+            textLabel.layer?.mask = nil
+            outlineLabel.layer?.mask = nil
+            #endif
+            return
+        }
+        let visible = CGRect(
+            x: left, y: visibleY.lowerBound,
+            width: max(0, right - left),
+            height: max(0, visibleY.upperBound - visibleY.lowerBound))
+        for (label, mask) in [
+            (textLabel, textOverflowMask), (outlineLabel, outlineOverflowMask)
+        ] {
+            let local = visible.offsetBy(
+                dx: -label.frame.minX, dy: -label.frame.minY).intersection(label.bounds)
+            mask.frame = label.bounds
+            mask.path = CGPath(rect: local.isNull ? .zero : local, transform: nil)
+            #if canImport(UIKit)
+            label.layer.mask = mask
+            #else
+            label.wantsLayer = true
+            label.layer?.mask = mask
+            #endif
+        }
     }
 
     private func layoutTextLabel() {
         guard !textLabel.isHidden else { return }
         let placement = primaryForStacking != nil && stackingEnabled ? nil
             : activeTextPlacement
-        let safeWidth = placement == nil
+        // An alignment-only cue still uses the screen edges; an explicit
+        // authored coordinate is the case that may deliberately enter a cutout.
+        let usesSafeArea = placement?.position == nil
+        let safeWidth = usesSafeArea
             ? bounds.width - safeAreaInsets.left - safeAreaInsets.right : bounds.width
         let maxWidth = max(1, safeWidth * 0.9)
         let size = textLabel.sizeThatFits(
@@ -667,30 +755,31 @@ final class SubtitleOverlay: PlatformView {
         var x = xAnchor - size.width * CGFloat(column) / 2
         var y = yAnchor - size.height * CGFloat(2 - row) / 2
         let gap = 8 * canvasScale
-        let minimumX: CGFloat = placement == nil ? safeAreaInsets.left : 0
-        let maximumX: CGFloat = placement == nil
+        let minimumX: CGFloat = usesSafeArea ? safeAreaInsets.left : 0
+        let maximumX: CGFloat = usesSafeArea
             ? bounds.width - safeAreaInsets.right : bounds.width
-        let minimumY: CGFloat = placement == nil ? safeAreaInsets.top : 0
-        let maximumY: CGFloat = placement == nil
+        let minimumY: CGFloat = usesSafeArea ? safeAreaInsets.top : 0
+        let maximumY: CGFloat = usesSafeArea
             ? bounds.height - safeAreaInsets.bottom : bounds.height
-        var requiresEdgeClipping = false
+        var overflowClip: ClosedRange<CGFloat>?
         if let primary = primaryForStacking, stackingEnabled,
-           let parentFrame = primary.stackingFrame {
-            // Align with the primary, but use final measured rectangles to avoid overlap.
+           let parentFrame = primary.stackingRegions.first {
             let parentAlignment = primary.currentAlignment
             let parentColumn = (parentAlignment - 1) % 3
             let parentRow = (parentAlignment - 1) / 3
             x = parentColumn == 0 ? parentFrame.minX
                 : parentColumn == 2 ? parentFrame.maxX - size.width
                 : parentFrame.midX - size.width / 2
+            x = min(max(x, minimumX), max(minimumX, maximumX - size.width))
             let pairGap = max(2 * canvasScale, gap +
                 CGFloat(secondaryVerticalAdjustment) * bounds.height)
             let resolved = Self.stackedSecondaryTop(
-                primary: parentFrame, height: size.height, gap: pairGap,
+                occupied: primary.stackingRegions, anchor: parentFrame,
+                x: x, width: size.width, height: size.height, gap: pairGap,
                 preferBelow: parentRow == 2,
                 minimumY: minimumY, maximumY: maximumY)
             y = resolved.top
-            requiresEdgeClipping = !resolved.fits
+            overflowClip = resolved.clip
         } else if (currentAlignment - 1) / 3 == 1, let secondary = secondaryForStacking,
                   secondary.stackingEnabled {
             // Keep the midpoint of a centred pair fixed.
@@ -699,12 +788,13 @@ final class SubtitleOverlay: PlatformView {
             y = yAnchor + pairGap / 2
         }
         x = min(max(x, minimumX), max(minimumX, maximumX - size.width))
-        if !requiresEdgeClipping {
+        if overflowClip == nil {
             y = min(max(y, minimumY), max(minimumY, maximumY - size.height))
         }
         let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
         textLabel.frame = frame
         outlineLabel.frame = frame
+        applyOverflowClip(overflowClip, left: minimumX, right: maximumX)
         rememberPrimaryPlacement()
     }
 
