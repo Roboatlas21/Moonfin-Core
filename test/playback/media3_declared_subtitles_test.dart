@@ -76,4 +76,18 @@ void main() {
 
     expect(sourceArguments()['externalSubtitles'], isEmpty);
   });
+  test('secondary native ordinal reaches startup and live track selection', () async {
+    await backend.play(<String, dynamic>{
+      'url': 'http://server/video.mkv',
+      'mediaType': 'video',
+      'secondarySubtitleTrackId': 3,
+      'secondarySubtitleCodec': 'subrip',
+    });
+    expect(sourceArguments()['secondarySubtitleTrackId'], 3);
+    await backend.setSecondarySubtitle(codec: 'subrip', embeddedTrackId: 4);
+    expect(calls.last.arguments['embeddedTrackId'], 4);
+    await backend.setSecondarySubtitle();
+    expect(calls.last.arguments['embeddedTrackId'], isNull);
+  });
+
 }
