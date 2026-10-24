@@ -1788,6 +1788,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                                 (max(0, cue.endTime - cue.startTime) * 1000).rounded()))
                     }
                 }
+                // A sidecar can finish decoding while paused, with no display tick.
+                renderAss(atSeconds: engine.sourceTime - subtitleOverlay.delaySeconds)
                 return
             }
         #endif
