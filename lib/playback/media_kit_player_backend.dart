@@ -3024,6 +3024,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,
+    String? language,
     int? embeddedTrackId,
   }) async {
     final generation = ++_secondarySubtitleGeneration;

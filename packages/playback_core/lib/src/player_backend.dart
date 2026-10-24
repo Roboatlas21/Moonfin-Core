@@ -143,6 +143,7 @@ abstract class PlayerBackend {
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,
+    String? language,
     int? embeddedTrackId,
   }) async {}
   /// Additional delay, in seconds, on top of the primary subtitle delay.

@@ -23,6 +23,7 @@ class _CapturingBackend extends Fake
   _CapturingBackend({this.demuxesEmbeddedSubtitles = true});
 
   Map<String, dynamic>? payload;
+  String? selectedSecondaryLanguage;
 
   @override
   Duration get position => Duration.zero;
@@ -92,6 +93,23 @@ class _CapturingBackend extends Fake
   Future<void> waitForEmbeddedSubtitleCount(int count) async {}
   @override
   Future<void> setAudioTrack(int trackId) async {}
+  @override
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    String? language,
+    int? embeddedTrackId,
+  }) async {
+    selectedSecondaryLanguage = language;
+  }
+  @override
+  Future<void> setSecondarySubtitleDelay(double seconds) async {}
+  @override
+  Future<void> configureSecondarySubtitleStyle({
+    double? fontSize,
+    double? verticalOffset,
+    int? textColor,
+  }) async {}
   @override
   Future<void> addExternalSubtitle(
     String url, {
@@ -383,6 +401,56 @@ void main() {
     );
 
     expect(payload.containsKey('selectedExternalSubtitleUrl'), isFalse);
+  });
+
+
+  test('passes secondary language in the startup payload', () async {
+    final payload = await _payloadFor(
+      mediaStreams: const [
+        {'Type': 'Video', 'Index': 0},
+        {'Type': 'Subtitle', 'Index': 2, 'Codec': 'srt',
+         'Language': 'jpn', 'IsExternal': true},
+      ],
+      externalSubtitles: const [
+        ExternalSubtitle(
+          deliveryUrl: 'https://server/sub.srt',
+          codec: 'srt',
+          streamIndex: 2,
+        ),
+      ],
+      subtitleStreamIndex: -1,
+      secondarySubtitleStreamIndex: 2,
+    );
+    expect(payload['secondarySubtitleLanguage'], 'jpn');
+  });
+
+  test('passes secondary language when switching tracks', () async {
+    final backend = _CapturingBackend();
+    final manager = PlaybackManager()
+      ..setBackend(backend)
+      ..setResolver(_StubResolver(
+        mediaStreams: const [
+          {'Type': 'Video', 'Index': 0},
+          {'Type': 'Subtitle', 'Index': 2, 'Codec': 'vtt',
+           'Language': 'fr-CA', 'IsExternal': true},
+        ],
+        externalSubtitles: const [
+          ExternalSubtitle(
+            deliveryUrl: 'https://server/sub.vtt',
+            codec: 'vtt',
+            streamIndex: 2,
+          ),
+        ],
+      ));
+    try {
+      await manager.playItems(<dynamic>[
+        <String, dynamic>{'Id': 'movie', 'Type': 'Movie'},
+      ], subtitleStreamIndex: -1);
+      await manager.changeSecondarySubtitleTrack(2);
+      expect(backend.selectedSecondaryLanguage, 'fr-CA');
+    } finally {
+      manager.dispose();
+    }
   });
 
 }

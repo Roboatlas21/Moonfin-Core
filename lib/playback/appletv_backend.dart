@@ -795,6 +795,7 @@ class AppleTvBackend with SubtitleDelayState implements PlayerBackend, Secondary
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,
+    String? language,
     int? embeddedTrackId,
   }) async {
     await _invoke<void>('setSecondarySubtitle', {

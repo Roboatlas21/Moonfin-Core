@@ -1492,6 +1492,7 @@ class Media3PlayerBackend extends PlayerBackend
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,
+    String? language,
     int? embeddedTrackId,
   }) async {
     await _invoke<void>('setSecondarySubtitle', {
