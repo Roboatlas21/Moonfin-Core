@@ -119,6 +119,7 @@ import org.moonfin.nativevideo.subtitle.declaredSubtitleFrom
 import org.moonfin.nativevideo.subtitle.declaredSubtitlesFrom
 import org.moonfin.nativevideo.subtitle.externalFormatIdMatches
 import org.moonfin.nativevideo.subtitle.joinStackedCues
+import org.moonfin.nativevideo.subtitle.primaryTrackRestoreTarget
 import org.moonfin.nativevideo.subtitle.sourceTreeFor
 import org.moonfin.nativevideo.subtitle.syncDelaysPayload
 import org.moonfin.nativevideo.ts.withHdmvTsSupport
@@ -1030,9 +1031,13 @@ class Media3VideoView(
 
     private val externalSubtitleConfigurations = mutableListOf<MediaItem.SubtitleConfiguration>()
 
-    /** So a stale cue never lingers after the position has jumped. */
+    /** Clear drawn cues and cached placement after seeks or subtitle timing changes. */
     private fun clearSubtitleCues() {
-        subtitleView.setCues(emptyList())
+        if (::secondarySubtitleOverlay.isInitialized) {
+            secondarySubtitleOverlay.resetPrimaryCues(clearSecondary = true)
+        } else {
+            subtitleView.setCues(emptyList())
+        }
     }
 
     /**
@@ -1342,7 +1347,7 @@ class Media3VideoView(
             if (reason == Player.DISCONTINUITY_REASON_SEEK ||
                 reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
             ) {
-                secondarySubtitleOverlay.resetPrimaryCues(clearSecondary = true)
+                clearSubtitleCues()
                 scheduleAudioRekickAfterSeek()
                 // Otherwise Dart only learns the seek landed from the next
                 // 250ms ticker tick, which can still report the pre-seek
@@ -4151,8 +4156,34 @@ class Media3VideoView(
      * to shift keeps the player's own media item path, the rest gets a source
      * tree the app builds.
      */
+    private fun rememberPrimarySelectionForSourceRebuild() {
+        if (!playerHasLoadedSource) return
+        val restore = primaryTrackRestoreTarget(
+            primaryEnabled = subtitleTrackEnabled,
+            selectionPending = pendingSubtitleIndex != null || pendingClosedCaptionId != null,
+            subtitleSelected = collectTracks(C.TRACK_TYPE_TEXT).map {
+                trackSelector.isPrimaryTrackSelected(it.group, it.trackIndex)
+            },
+            captionSelected = collectClosedCaptionTracks().map {
+                trackSelector.isPrimaryTrackSelected(it.group, it.trackIndex)
+            },
+        ) ?: return
+        if (restore.subtitleIndex != null) {
+            pendingSubtitleIndex = restore.subtitleIndex
+            pendingSubtitleCodec = selectedSubtitleCodec
+            pendingSubtitleIsExternal = selectedSubtitleIsExternal
+            pendingSubtitleIsBitmap = selectedSubtitleIsBitmap
+            pendingExternalSubtitleUrl = selectedExternalSubtitleUrl
+        } else {
+            pendingClosedCaptionId = restore.closedCaptionId
+        }
+    }
+
     private fun prepareCurrentSource(startPositionMs: Long, playWhenReady: Boolean) {
         val url = currentUrl ?: return
+        // Rebuilding may change Media3 track-group IDs. Retry the existing
+        // primary choice when the replacement tracks become available.
+        rememberPrimarySelectionForSourceRebuild()
         cancelPendingRetime()
 
         val mediaItemBuilder = MediaItem.Builder()

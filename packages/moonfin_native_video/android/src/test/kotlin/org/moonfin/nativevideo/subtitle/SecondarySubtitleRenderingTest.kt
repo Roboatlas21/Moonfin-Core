@@ -174,6 +174,29 @@ class SecondarySubtitleRenderingTest {
     }
 
 
+    @Test
+    fun subtitleDelayClearsCachedPositionAndKeepsSecondarySelectable() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        overlay.select(true)
+        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Old primary")
+            .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()))
+        overlay.updateCues(listOf(Cue.Builder().setText("Old secondary").build()))
+        val previousLine = displayedCues(secondary).single().line
+        overlay.updatePrimaryCues(emptyList())
+
+        overlay.resetPrimaryCues(clearSecondary = true)
+
+        assertTrue(displayedCues(primary).isEmpty())
+        assertTrue(displayedCues(secondary).isEmpty())
+        overlay.updateCues(listOf(Cue.Builder().setText("New secondary").build()))
+        assertEquals("New secondary", displayedCues(secondary).single().text.toString())
+        assertTrue(displayedCues(secondary).single().line > previousLine + 0.2f)
+    }
+
     private fun displayedCues(view: SubtitleView): List<Cue> =
         (SubtitleView::class.java.getDeclaredField("cues").apply { isAccessible = true }
             .get(view) as List<*>).filterIsInstance<Cue>()
