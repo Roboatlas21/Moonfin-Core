@@ -93,6 +93,13 @@ internal class SecondarySubtitleOverlay(
         renderCues()
     }
 
+    /** Remove an old secondary cue before retiming without disturbing primary placement. */
+    fun clearSecondaryCues() {
+        if (secondaryCues == null) return
+        secondaryCues = emptyList()
+        renderCues()
+    }
+
     fun updateCues(cues: List<Cue>) {
         if (secondaryCues == null || disposed) return
         secondaryCues = cues.filter { it.text != null }.map { cue ->

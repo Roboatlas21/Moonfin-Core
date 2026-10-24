@@ -175,6 +175,33 @@ class SecondarySubtitleRenderingTest {
 
 
     @Test
+    fun secondaryDelayClearKeepsPrimaryCuesAndTheirPlacement() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        overlay.select(true)
+        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary")
+            .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()))
+        overlay.updateCues(listOf(Cue.Builder().setText("Old secondary").build()))
+        val originalPrimary = displayedCues(primary).single()
+        assertTrue(displayedCues(secondary).isNotEmpty())
+
+        overlay.clearSecondaryCues()
+
+        assertTrue(displayedCues(secondary).isEmpty())
+        assertEquals("Primary", displayedCues(primary).single().text.toString())
+        assertEquals(originalPrimary.line, displayedCues(primary).single().line, 0.0001f)
+
+        // A dialogue gap must still use the same primary position when new secondary cues arrive.
+        overlay.updatePrimaryCues(emptyList())
+        overlay.updateCues(listOf(Cue.Builder().setText("New secondary").build()))
+        assertEquals("New secondary", displayedCues(secondary).single().text.toString())
+        assertTrue(displayedCues(secondary).single().line < 0.5f)
+    }
+
+    @Test
     fun subtitleDelayClearsCachedPositionAndKeepsSecondarySelectable() {
         val context = RuntimeEnvironment.getApplication()
         val primary = SubtitleView(context)
