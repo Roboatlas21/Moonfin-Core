@@ -5,6 +5,7 @@ import 'package:get_it/get_it.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 
+import '../../../playback/subtitle_style.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../util/idiom/app_ui_idiom.dart';
@@ -215,8 +216,8 @@ class _SubtitleCustomizationScreenState
                 }
               },
               min: 0.0,
-              max: 0.5,
-              divisions: 50,
+              max: primarySubtitleMaxOffset,
+              divisions: 20,
               step: 0.01,
               labelBuilder: (v) => l10n.percentValue((v * 100).round()),
             ),
@@ -286,8 +287,8 @@ class _SubtitleCustomizationScreenState
                             }
                           },
                           min: 0.0,
-                          max: 0.5,
-                          divisions: 50,
+                          max: primarySubtitleMaxOffset,
+                          divisions: 20,
                           step: 0.01,
                           swallowDown: true,
                           labelBuilder: (v) =>
@@ -382,7 +383,7 @@ class _SubtitleCustomizationScreenState
                         min: min,
                         max: max,
                         divisions: divisions,
-                        label: labelBuilder(value),
+                        label: labelBuilder(value.clamp(min, max).toDouble()),
                         onChanged: (v) => binding.value = v,
                       ),
               ),

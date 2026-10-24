@@ -5,7 +5,7 @@ import '../preference/user_preferences.dart';
 import 'aether_backend.dart';
 import 'appletv_backend.dart';
 
-const double primarySubtitleMaxOffset = 0.12;
+const double primarySubtitleMaxOffset = 0.20;
 const double secondarySubtitleMaxOffset = 0.06;
 
 /// Saves the primary subtitle size for the active SDR or HDR settings and reapplies
