@@ -1,0 +1,34 @@
+name: URL Validation Checks
+
+on:
+  push:
+    branches:
+      - test/playback-url-validation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Verify URL handling
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Analyze changed resolver files
+        run: |
+          for file in \
+            packages/playback_core/lib/src/media_stream_resolver.dart \
+            packages/playback_jellyfin/lib/src/jellyfin_media_stream_resolver.dart \
+            packages/playback_emby/lib/src/emby_media_stream_resolver.dart \
+            test/playback/media_stream_resolver_indices_test.dart; do
+            dart analyze "$file"
+          done
+      - name: Run URL handling regression tests
+        run: flutter test --reporter expanded test/playback/media_stream_resolver_indices_test.dart
