@@ -1076,21 +1076,60 @@ class HtmlVideoBackend extends PlayerBackend
   // Measure the same font and cue width used by the native renderer. Keep a small
   // cache so polling does not add DOM layout work for an unchanged subtitle.
   double _primaryCueHeight(web.VTTCue cue, {bool secondary = false}) {
-    final width =
-        (_videoElement.clientWidth > 0 ? _videoElement.clientWidth : 1280) *
-        (cue.size / 100).clamp(0.01, 1.0);
+    final canvasWidth = _videoElement.clientWidth > 0
+        ? _videoElement.clientWidth
+        : 1280;
+    final rawPosition = cue.position.dartify();
+    final positionAlign = _nativePositionAlignment
+        ? _cueAlignment(cue, 'positionAlign', 'auto')
+        : 'auto';
     final font = _cueFontSize(secondary: secondary);
-    final key = '${cue.text}|$width|$font|$_subtitleFontWeight';
+    final key =
+        '${cue.text}|$canvasWidth|$_cueCanvasHeight|${cue.size}|'
+        '$rawPosition|${cue.align}|$positionAlign|$font|$_subtitleFontWeight';
     final cached = _cueHeights[key];
     if (cached != null) return cached;
     final measure = web.HTMLDivElement()
+      ..dir = 'auto'
       ..style.cssText =
           'position:fixed;visibility:hidden;left:-10000px;'
           'white-space:pre-line;overflow-wrap:break-word;box-sizing:border-box;'
-          'width:${width}px;font-family:sans-serif;font-size:${font}px;'
+          'font-family:sans-serif;font-size:${font}px;'
           'line-height:1.2;font-weight:${(_subtitleFontWeight ?? 400) >= 600 ? 700 : 400};';
     measure.appendChild(cue.getCueAsHTML());
     web.document.body?.appendChild(measure);
+    // WebVTT constrains size to the space on either side of its position anchor.
+    // Older engines derive both the anchor and an auto position from text align.
+    final position = rawPosition is num
+        ? rawPosition.toDouble()
+        : switch (cue.align) {
+            'left' => 0.0,
+            'right' => 100.0,
+            'start' when !_nativePositionAlignment => 0.0,
+            'end' when !_nativePositionAlignment => 100.0,
+            _ => 50.0,
+          };
+    final rtl =
+        _nativePositionAlignment &&
+        positionAlign == 'auto' &&
+        (cue.align == 'start' || cue.align == 'end') &&
+        web.window.getComputedStyle(measure).direction == 'rtl';
+    final anchor = positionAlign != 'auto'
+        ? positionAlign
+        : switch (cue.align) {
+            'left' => 'line-left',
+            'right' => 'line-right',
+            'start' => rtl ? 'line-right' : 'line-left',
+            'end' => rtl ? 'line-left' : 'line-right',
+            _ => 'center',
+          };
+    final maximumSize = switch (anchor) {
+      'line-left' => 100 - position,
+      'line-right' => position,
+      _ => 2 * (position <= 50 ? position : 100 - position),
+    };
+    final size = cue.size.clamp(0.0, maximumSize.clamp(0.0, 100.0));
+    measure.style.width = '${canvasWidth * size / 100}px';
     final height = (measure.getBoundingClientRect().height / _cueCanvasHeight)
         .clamp(font * 1.2 / _cueCanvasHeight, 0.95)
         .toDouble();
@@ -1200,25 +1239,34 @@ class HtmlVideoBackend extends PlayerBackend
         ),
     ];
 
-    // Keep the primary's current position for top and bottom captions. For a
-    // centred reference, preserve the existing split around its original centre.
+    // Split a centred reference only when it stays clear of the other primary
+    // cues. Otherwise preserve their authored placement and fit the secondary
+    // around all of them below.
     if (primary != null && row == 1) {
-      final originalLine = primary.line.dartify();
-      if (originalLine is num) {
-        primary
-          ..setProperty(_stackedMiddleLine.toJS, originalLine.toJS)
-          ..setProperty(
-            _stackedMiddleLineAlign.toJS,
-            _cueAlignment(primary, 'lineAlign', 'start').toJS,
-          )
-          ..setProperty(
-            _stackedMiddleSnapToLines.toJS,
-            primary.snapToLines.toJS,
-          );
-      }
       final top = bounds!.centre + gap / 2;
-      _setCueLine(primary, top, 'start');
-      occupied[0] = (top: top, bottom: top + _primaryCueHeight(primary));
+      final bottom = top + _primaryCueHeight(primary);
+      final canSplit =
+          bottom <= 1 &&
+          !occupied.skip(1).any(
+            (other) => top < other.bottom && bottom > other.top,
+          );
+      if (canSplit) {
+        final originalLine = primary.line.dartify();
+        if (originalLine is num) {
+          primary
+            ..setProperty(_stackedMiddleLine.toJS, originalLine.toJS)
+            ..setProperty(
+              _stackedMiddleLineAlign.toJS,
+              _cueAlignment(primary, 'lineAlign', 'start').toJS,
+            )
+            ..setProperty(
+              _stackedMiddleSnapToLines.toJS,
+              primary.snapToLines.toJS,
+            );
+        }
+        _setCueLine(primary, top, 'start');
+        occupied[0] = (top: top, bottom: bottom);
+      }
     }
 
     // ASS/PGS overlays have no VTTCue bounds. Keep the second track at the top
