@@ -326,7 +326,6 @@ class AetherBackend with SubtitleDelayState
       'externalSubtitles': payload['externalSubtitles'] ?? const [],
       'secondarySubtitleTrackId': payload['secondarySubtitleTrackId'],
       'secondarySubtitleUrl': payload['secondarySubtitleUrl'],
-      'secondarySubtitleCodec': payload['secondarySubtitleCodec'],
       'subtitleDelayMs': (subtitleDelaySeconds * 1000).round(),
       'secondarySubtitleDelayMs': payload['secondarySubtitleDelayMs'] ?? 0,
       'secondarySubtitleOffset': payload['secondarySubtitleOffset'] ?? 0.0,
@@ -616,7 +615,6 @@ class AetherBackend with SubtitleDelayState
     await _invoke<void>('setSecondarySubtitle', {
       'embeddedTrackId': embeddedTrackId,
       'url': url,
-      'codec': codec,
     });
   }
 

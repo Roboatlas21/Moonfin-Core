@@ -1132,16 +1132,6 @@ class Media3VideoView(
     }
 
     private val listener = object : Player.Listener {
-        @Suppress("DEPRECATION")
-        override fun onCues(cues: List<Cue>) {
-            val stacked = joinStackedCues(cues)
-            if (::secondarySubtitleOverlay.isInitialized) {
-                secondarySubtitleOverlay.updatePrimaryCues(stacked)
-            } else {
-                subtitleView.setCues(stacked)
-            }
-        }
-
         override fun onCues(cueGroup: CueGroup) {
             val stacked = joinStackedCues(cueGroup.cues)
             if (::secondarySubtitleOverlay.isInitialized) {

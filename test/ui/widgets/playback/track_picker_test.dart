@@ -48,16 +48,18 @@ class _Backend extends Fake implements MediaKitPlayerBackend {
 }
 
 class _Manager extends PlaybackManager {
-  _Manager(this._backend, {this.resolution});
+  _Manager(this._backend, {this.resolution, this.primaryIndex, this.secondaryIndex});
 
   final PlayerBackend _backend;
   final StreamResolutionResult? resolution;
+  final int? primaryIndex;
+  final int? secondaryIndex;
 
   @override
-  int? get subtitleStreamIndex => null;
+  int? get subtitleStreamIndex => primaryIndex;
 
   @override
-  int? get secondarySubtitleStreamIndex => null;
+  int? get secondarySubtitleStreamIndex => secondaryIndex;
 
   @override
   StreamResolutionResult? get currentResolution => resolution;
@@ -218,6 +220,30 @@ void main() {
     },
   );
 
+
+  testWidgets('selected subtitle slots with no metadata are not shown as Off', (
+    tester,
+  ) async {
+    final manager = _Manager(
+      _Backend(secondaryStyle: true),
+      primaryIndex: 2,
+      secondaryIndex: 3,
+      resolution: StreamResolutionResult(
+        streamUrl: 'https://host/stream',
+        mediaSourceId: 'source',
+        playMethod: StreamPlayMethod.directPlay,
+        mediaStreams: [
+          {'Type': 'Subtitle', 'Index': 2, 'Codec': 'subrip'},
+          {'Type': 'Subtitle', 'Index': 3, 'Codec': 'subrip'},
+        ],
+      ),
+    );
+    addTearDown(manager.dispose);
+    await openPicker(tester, manager, audio: false);
+    expect(find.text(l10n.streamTypeFallback('Subtitle', 1)), findsOneWidget);
+    expect(find.text(l10n.streamTypeFallback('Subtitle', 2)), findsOneWidget);
+    expect(find.text(l10n.off), findsNothing);
+  });
 
   testWidgets('the secondary subtitle delay opens in the same bar', (
     tester,

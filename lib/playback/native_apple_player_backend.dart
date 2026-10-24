@@ -349,7 +349,6 @@ class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend,
       'externalSubtitles': payload['externalSubtitles'] ?? const [],
       'secondarySubtitleTrackId': payload['secondarySubtitleTrackId'],
       'secondarySubtitleUrl': payload['secondarySubtitleUrl'],
-      'secondarySubtitleCodec': payload['secondarySubtitleCodec'],
       'secondarySubtitleDelayMs': payload['secondarySubtitleDelayMs'] ?? 0,
       'secondarySubtitleOffset': payload['secondarySubtitleOffset'] ?? 0.0,
       'secondarySubtitleFontSize': payload['secondarySubtitleFontSize'],
@@ -808,7 +807,6 @@ class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend,
     await _invoke<void>('setSecondarySubtitle', {
       'embeddedTrackId': embeddedTrackId,
       'url': url,
-      'codec': codec,
     });
   }
 

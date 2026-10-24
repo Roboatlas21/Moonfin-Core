@@ -107,14 +107,15 @@ abstract final class TrackPicker {
             }));
     final showControls = audio || secondary || chooseSubtitleSlot;
     String trackLabel(int? index) {
-      final stream = streams
-          .where((entry) => entry['Index'] == index)
-          .firstOrNull;
+      if (index == null || index < 0) return l10n.off;
+      final trackNumber = streams.indexWhere((entry) => entry['Index'] == index);
+      if (trackNumber < 0) return l10n.streamTypeFallback('Subtitle', index + 1);
+      final stream = streams[trackNumber];
       for (final key in ['DisplayTitle', 'Title', 'Language']) {
-        final title = (stream?[key] as String?)?.trim();
+        final title = (stream[key] as String?)?.trim();
         if (title != null && title.isNotEmpty) return title;
       }
-      return l10n.off;
+      return l10n.streamTypeFallback('Subtitle', trackNumber + 1);
     }
 
     final options = <TrackOption>[
