@@ -34,11 +34,6 @@ final class SubtitleOverlay: PlatformView {
     private var activeBitmapEvent: SubtitleEvent?
     private var lastUpdateTime: TimeInterval = 0
     var delaySeconds: TimeInterval = 0
-    /// Fallback vertical anchor as a fraction of view height, measured from the top.
-    /// Nil uses the cue's normal position and alignment.
-    var topOffset: Double? {
-        didSet { requestLayout() }
-    }
     /// The secondary text follows the primary frame, using its last frame during gaps
     /// in dialogue.
     weak var primaryForStacking: SubtitleOverlay?
@@ -82,13 +77,23 @@ final class SubtitleOverlay: PlatformView {
         }
     }
 
+    private var activeTextPlacement: SubtitleEvent? {
+        activeTextEvents.first { $0.alignment != nil || $0.position != nil }
+    }
+
     private var currentAlignment: Int {
         if let primary = primaryForStacking, stackingEnabled {
             return primary.currentAlignment
         }
         if !activeTextEvents.isEmpty {
-            let authored = activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2
-            return (1...9).contains(authored) ? authored : 2
+            let placement = activeTextPlacement
+            let authored = placement?.alignment ?? 2
+            let alignment = (1...9).contains(authored) ? authored : 2
+            guard let position = placement?.position else { return alignment }
+            // WebVTT's line alignment is an anchor, not a screen region: a bottom
+            // anchor at line:10%,end still needs the secondary below the primary.
+            let row = position.y < 1.0 / 3 ? 2 : position.y > 2.0 / 3 ? 0 : 1
+            return row * 3 + (alignment - 1) % 3 + 1
         }
         if let frame = visibleFrame {
             let row = frame.midY < bounds.height / 3 ? 2
@@ -522,7 +527,7 @@ final class SubtitleOverlay: PlatformView {
         let maxWidth = bounds.width * 0.9
         let size = textLabel.sizeThatFits(CGSize(width: maxWidth, height: bounds.height * 0.4))
         let placement = primaryForStacking != nil && stackingEnabled ? nil
-            : activeTextEvents.first { $0.alignment != nil || $0.position != nil }
+            : activeTextPlacement
         let authoredAlignment = (1...9).contains(placement?.alignment ?? 2)
             ? (placement?.alignment ?? 2) : 2
         let alignment = primaryForStacking != nil && stackingEnabled
@@ -535,12 +540,15 @@ final class SubtitleOverlay: PlatformView {
         let yAnchor = placement?.position.map { position -> CGFloat in
             let direction: CGFloat = position.y < 1.0 / 3 ? 1
                 : position.y > 2.0 / 3 ? -1 : 0
-            let adjusted = min(max(position.y + direction * authoredVerticalOffset, 0), 1)
-            return picture.minY + adjusted * picture.height
-        } ?? (topOffset.map { bounds.height * CGFloat(max($0, 0)) }
-                ?? (row == 0 ? bounds.height - textBottomOffset
-                    : row == 1 ? bounds.height / 2
-                        : bounds.height * 0.05 + textBottomOffset))
+            // Bottom cues keep their authored baseline while using the same
+            // temporary controls lift as unpositioned text.
+            let offset = direction < 0 ? textBottomOffset
+                : picture.height * authoredVerticalOffset
+            let y = position.y * picture.height + direction * offset
+            return picture.minY + min(max(y, 0), picture.height)
+        } ?? (row == 0 ? bounds.height - textBottomOffset
+                : row == 1 ? bounds.height / 2
+                    : bounds.height * 0.05 + textBottomOffset)
         var x = xAnchor - size.width * CGFloat(column) / 2
         var y = yAnchor - size.height * CGFloat(2 - row) / 2
         let gap = 8 * canvasScale
@@ -564,7 +572,7 @@ final class SubtitleOverlay: PlatformView {
                 y += (parentRow == 2 ? 1 : -1) *
                     CGFloat(secondaryVerticalAdjustment) * bounds.height
             }
-        } else if row == 1, let secondary = secondaryForStacking,
+        } else if (currentAlignment - 1) / 3 == 1, let secondary = secondaryForStacking,
                   secondary.stackingEnabled {
             // Keep the gap centred on the original cue position so adding or removing
             // secondary lines does not move the primary.
