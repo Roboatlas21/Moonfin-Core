@@ -1,14 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations_en.dart';
-import 'package:moonfin/playback/appletv_backend.dart';
+import 'package:moonfin/playback/native_apple_player_backend.dart';
 import 'package:moonfin/playback/appletv_subtitles.dart';
 import 'package:moonfin/playback/subtitle_style.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class _AppleTvBackend extends Fake implements AppleTvBackend {
+class _NativeApplePlayerBackend extends Fake implements NativeApplePlayerBackend {
   @override
   Future<void> configureSubtitleStyle({
     int? textColor,
@@ -21,7 +21,7 @@ class _AppleTvBackend extends Fake implements AppleTvBackend {
 }
 
 class _TrackManager extends PlaybackManager {
-  final _backend = _AppleTvBackend();
+  final _backend = _NativeApplePlayerBackend();
   final selections = <int?>[];
   @override
   PlayerBackend get backend => _backend;

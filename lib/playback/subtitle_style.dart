@@ -3,7 +3,7 @@ import 'package:playback_core/playback_core.dart';
 
 import '../preference/user_preferences.dart';
 import 'aether_backend.dart';
-import 'appletv_backend.dart';
+import 'native_apple_player_backend.dart';
 
 const double primarySubtitleMaxOffset = 0.20;
 const double secondarySubtitleMaxOffset = 0.06;
@@ -74,7 +74,7 @@ Future<void> syncSecondarySubtitleStyle(
       .clamp(-50.0, 50.0);
   final adjustedSize = primarySize * (1 + adjustment / 100);
   final isApple =
-      manager.backend is AetherBackend || manager.backend is AppleTvBackend;
+      manager.backend is AetherBackend || manager.backend is NativeApplePlayerBackend;
   return manager.configureSecondarySubtitleStyle(
     fontSize: adjustment == 0
         ? null
