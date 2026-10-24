@@ -34,6 +34,43 @@ final class SubtitleOverlay: PlatformView {
     private var activeBitmapEvent: SubtitleEvent?
     private var lastUpdateTime: TimeInterval = 0
     var delaySeconds: TimeInterval = 0
+    /// Fallback vertical anchor as a fraction of view height, measured from the top.
+    /// Nil uses the cue's normal position and alignment.
+    var topOffset: Double? {
+        didSet { requestLayout() }
+    }
+    /// The secondary text follows the primary frame, using its last frame during gaps
+    /// in dialogue.
+    weak var primaryForStacking: SubtitleOverlay?
+    weak var secondaryForStacking: SubtitleOverlay?
+    var stackingEnabled = false {
+        didSet {
+            primaryForStacking?.requestLayout()
+            requestLayout()
+        }
+    }
+    private var lastPrimaryTextFrame: CGRect?
+    private var lastPrimaryAlignment = 2
+    var secondaryVerticalAdjustment: Double = 0 {
+        didSet {
+            primaryForStacking?.requestLayout()
+            requestLayout()
+        }
+    }
+
+    private var visibleTextFrame: CGRect? {
+        textLabel.isHidden ? nil : textLabel.frame
+    }
+
+    private var currentAlignment: Int {
+        let authored = activeTextEvents.first { $0.alignment != nil }?.alignment ?? 2
+        let requested = primaryForStacking != nil && stackingEnabled
+            ? (primaryForStacking?.activeTextEvents.isEmpty == false
+                ? primaryForStacking?.currentAlignment
+                : primaryForStacking?.lastPrimaryAlignment) ?? authored
+            : authored
+        return (1...9).contains(requested) ? requested : 2
+    }
 
     /// On while a subtitle track is selected. iPadOS 27 can drop these views
     /// from frames when a fullscreen video is the only other thing on screen,
@@ -71,13 +108,14 @@ final class SubtitleOverlay: PlatformView {
         return canvas.isEmpty ? bounds : canvas
     }
 
-    /// The user facing size on the 24 based scale, and the 40 to 100 position.
-    /// Both stay raw and become points at layout time, as a fraction of the
-    /// view height, so a phone in landscape and a 1080pt TV canvas end up
-    /// looking the same. Deriving them late also means a style applied before
-    /// the view has bounds doesn't get baked in at the fallback size.
+    /// Keep the user font size and native 40–100 position value until layout, when the
+    /// view size is known. Font size scales with view height; the user text offset is
+    /// handled separately using picture height.
     private var subtitleUserFontSize: CGFloat = 24
     private var subtitlePositionBase = 100
+    // The authored cue's vertical position remains the baseline; this offset
+    // moves top cues down and bottom cues up, never middle cues.
+    private var authoredVerticalOffset: CGFloat = 0
     private var subtitleFontWeight: PlatformFontWeight = .semibold
     private var subtitleTextColor: PlatformColor = .white
     private var subtitleBgColor: PlatformColor = .clear
@@ -108,11 +146,18 @@ final class SubtitleOverlay: PlatformView {
         subtitleStrokeEnabled ? max(2 * canvasScale, 1) : 0
     }
 
-    /// The lowest position puts the text on the bottom edge itself, which is
-    /// what the setting reads as zero and what a wide film needs to keep its
-    /// lines inside the black bar under the picture.
-    private var textBottomOffset: CGFloat {
+    /// Keep the 40–100 position scale for the temporary lift above playback controls
+    /// and for bitmap fallback. The user's text offset uses a fraction of the picture
+    /// height.
+    private var positionScaleBottomOffset: CGFloat {
         canvasHeight * 0.5 * CGFloat(100 - subtitlePositionBase) / 60.0
+    }
+
+    private var textBottomOffset: CGFloat {
+        let normalPosition = 100 - Int((Double(authoredVerticalOffset) * 60).rounded())
+        return subtitlePositionBase < normalPosition
+            ? positionScaleBottomOffset
+            : videoBox.height * authoredVerticalOffset
     }
 
     /// A bitmap cue that arrives without a canvas rect has nothing tying it to
@@ -120,7 +165,7 @@ final class SubtitleOverlay: PlatformView {
     /// The margin stays absolute rather than scaling with height, since those
     /// cues already sit correctly on a phone.
     private var bitmapBottomOffset: CGFloat {
-        40 + textBottomOffset
+        40 + positionScaleBottomOffset
     }
 
     override init(frame: CGRect) {
@@ -192,7 +237,11 @@ final class SubtitleOverlay: PlatformView {
         if subtitleFontSize != appliedFontSize, !activeTextEvents.isEmpty {
             setLabelText(activeText)
         }
+        // Lay out the primary first: changing the gap in a centred pair moves both
+        // tracks.
+        primaryForStacking?.layoutTextLabel()
         layoutTextLabel()
+        secondaryForStacking?.layoutTextLabel()
         layoutBitmapView()
         assImageView.frame = assCanvas
     }
@@ -278,7 +327,9 @@ final class SubtitleOverlay: PlatformView {
     private static func drawsTheSame(_ lhs: [SubtitleEvent], _ rhs: [SubtitleEvent]) -> Bool {
         lhs.count == rhs.count
             && zip(lhs, rhs).allSatisfy {
-                $0.startTime == $1.startTime && $0.endTime == $1.endTime && $0.text == $1.text
+                $0.startTime == $1.startTime && $0.endTime == $1.endTime
+                    && $0.text == $1.text && $0.alignment == $1.alignment
+                    && $0.position == $1.position
             }
     }
 
@@ -301,15 +352,23 @@ final class SubtitleOverlay: PlatformView {
     func clear() {
         eventQueue.removeAll()
         lastUpdateTime = 0
+        lastPrimaryTextFrame = nil
+        lastPrimaryAlignment = 2
         hideAll()
+        // Clearing the primary track resets the secondary text alignment. A gap in
+        // dialogue calls showText([]) and preserves it.
+        if let secondary = secondaryForStacking,
+           secondary.stackingEnabled, !secondary.activeTextEvents.isEmpty {
+            secondary.setLabelText(secondary.activeText)
+            secondary.layoutTextLabel()
+        }
         assImageView.image = nil
         assImageView.isHidden = true
     }
 
-    /// Moonfin's typed subtitle-style contract, mirroring the Dart
-    /// `configureSubtitleStyle` call. Colors are ARGB ints, `fontSize` is the
-    /// user-facing size on the 24-based scale, and `verticalOffset` from 0 to
-    /// 1 maps to a bottom margin.
+    /// Applies the Dart subtitle style. Colours are ARGB integers and fontSize uses the
+    /// 24-based scale. verticalOffset is a fraction of picture height: it moves top
+    /// text down and bottom text up, leaving middle text unchanged.
     func applyStyle(
         textColor: Int?,
         backgroundColor: Int?,
@@ -331,6 +390,7 @@ final class SubtitleOverlay: PlatformView {
             subtitleFontWeight = fontWeight >= 600 ? .bold : .semibold
         }
         if let verticalOffset {
+            authoredVerticalOffset = CGFloat(min(max(verticalOffset, 0), 1))
             setSubtitlePosition(basePosition: 100 - Int((verticalOffset * 60).rounded()))
         }
         if !activeTextEvents.isEmpty {
@@ -338,9 +398,22 @@ final class SubtitleOverlay: PlatformView {
         }
     }
 
-    /// Subtitle position on a 40 to 100 scale, where 100 is the bottom edge.
-    /// It becomes a bottom offset in points at layout time. The OSD raise path
-    /// calls this with min(base, 70) while controls are up.
+    /// Use the primary size and colour when the secondary override is nil. Leave
+    /// position and delay unchanged.
+    func applySecondaryStyle(from primary: SubtitleOverlay, fontSize: Double?, textColor: Int?) {
+        subtitleUserFontSize = fontSize.map { CGFloat(min(max($0, 6), 72)) }
+            ?? primary.subtitleUserFontSize
+        subtitleTextColor = textColor.map { Self.colorFromARGB($0) } ?? primary.subtitleTextColor
+        subtitleFontWeight = primary.subtitleFontWeight
+        subtitleBgColor = primary.subtitleBgColor
+        subtitleStrokeColor = primary.subtitleStrokeColor
+        subtitleStrokeEnabled = primary.subtitleStrokeEnabled
+        if !activeTextEvents.isEmpty { showText(activeTextEvents) }
+    }
+
+    /// Sets the native 40–100 position scale used for the temporary controls lift and
+    /// bitmap fallback. A value of 100 adds no bottom offset; visible controls use
+    /// min(base, 70).
     func setSubtitlePosition(basePosition: Int) {
         subtitlePositionBase = min(max(basePosition, 40), 100)
         requestLayout()
@@ -348,19 +421,30 @@ final class SubtitleOverlay: PlatformView {
 
     // MARK: - Display
 
-    /// Draws the cues covering the playhead as one block, joined in start order,
-    /// so the label keeps a single centred frame and the styling stays exactly
-    /// as it was for the common one-cue case.
+    /// Draws active text cues as one block, joined in start order, using the selected
+    /// cue alignment.
     private func showText(_ events: [SubtitleEvent]) {
         activeTextEvents = events
         guard !events.isEmpty else {
             setTextHidden(true)
             setLabelText(nil)
+            primaryForStacking?.layoutTextLabel()
+            secondaryForStacking?.layoutTextLabel()
             return
         }
         setLabelText(activeText)
         setTextHidden(false)
         layoutTextLabel()
+        if let primary = primaryForStacking {
+            primary.layoutTextLabel()
+            layoutTextLabel()
+        } else if let secondary = secondaryForStacking {
+            // A new primary alignment also changes secondary paragraph alignment.
+            if !secondary.activeTextEvents.isEmpty {
+                secondary.setLabelText(secondary.activeText)
+            }
+            secondary.layoutTextLabel()
+        }
     }
 
     private func showBitmap(_ event: SubtitleEvent?) {
@@ -389,14 +473,66 @@ final class SubtitleOverlay: PlatformView {
         guard !textLabel.isHidden else { return }
         let maxWidth = bounds.width * 0.9
         let size = textLabel.sizeThatFits(CGSize(width: maxWidth, height: bounds.height * 0.4))
-        let frame = CGRect(
-            x: (bounds.width - size.width) / 2,
-            y: bounds.height - size.height - textBottomOffset,
-            width: size.width,
-            height: size.height
-        )
+        let placement = activeTextEvents.first { $0.alignment != nil || $0.position != nil }
+        let authoredAlignment = (1...9).contains(placement?.alignment ?? 2)
+            ? (placement?.alignment ?? 2) : 2
+        let alignment = primaryForStacking != nil && stackingEnabled
+            ? currentAlignment : authoredAlignment
+        let column = (alignment - 1) % 3
+        let row = (alignment - 1) / 3
+        let picture = videoBox
+        let xAnchor = placement?.position.map { picture.minX + $0.x * picture.width }
+            ?? bounds.width * ([0.05, 0.5, 0.95][column])
+        let yAnchor = placement?.position.map { position -> CGFloat in
+            let direction: CGFloat = position.y < 1.0 / 3 ? 1
+                : position.y > 2.0 / 3 ? -1 : 0
+            let adjusted = min(max(position.y + direction * authoredVerticalOffset, 0), 1)
+            return picture.minY + adjusted * picture.height
+        } ?? (topOffset.map { bounds.height * CGFloat(max($0, 0)) }
+                ?? (row == 0 ? bounds.height - textBottomOffset
+                    : row == 1 ? bounds.height / 2
+                        : bounds.height * 0.05 + textBottomOffset))
+        var x = xAnchor - size.width * CGFloat(column) / 2
+        var y = yAnchor - size.height * CGFloat(2 - row) / 2
+        let gap = 8 * canvasScale
+        if let primary = primaryForStacking, stackingEnabled,
+           let parentFrame = primary.visibleTextFrame ?? primary.lastPrimaryTextFrame {
+            // Use the primary's top, middle or bottom alignment and match its
+            // horizontal anchor.
+            let parentAlignment = primary.activeTextEvents.isEmpty
+                ? primary.lastPrimaryAlignment : primary.currentAlignment
+            let parentColumn = (parentAlignment - 1) % 3
+            let parentRow = (parentAlignment - 1) / 3
+            x = parentColumn == 0 ? parentFrame.minX
+                : parentColumn == 2 ? parentFrame.maxX - size.width
+                : parentFrame.midX - size.width / 2
+            if parentRow == 1 {
+                let pairGap = max(2 * canvasScale, gap +
+                    CGFloat(secondaryVerticalAdjustment) * bounds.height)
+                y = parentFrame.minY - size.height - pairGap
+            } else {
+                y = parentRow == 2 ? parentFrame.maxY + gap
+                    : parentFrame.minY - size.height - gap
+                y += (parentRow == 2 ? 1 : -1) *
+                    CGFloat(secondaryVerticalAdjustment) * bounds.height
+            }
+        } else if row == 1, let secondary = secondaryForStacking,
+                  secondary.stackingEnabled {
+            // Keep the gap centred on the original cue position so adding or removing
+            // secondary lines does not move the primary.
+            let pairGap = max(2 * canvasScale, gap +
+                CGFloat(secondary.secondaryVerticalAdjustment) * bounds.height)
+            y = yAnchor + pairGap / 2
+        }
+        x = min(max(x, 0), max(0, bounds.width - size.width))
+        y = min(max(y, 0), max(0, bounds.height - size.height))
+        let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
         textLabel.frame = frame
         outlineLabel.frame = frame
+        if secondaryForStacking != nil {
+            lastPrimaryTextFrame = frame
+            lastPrimaryAlignment = alignment
+        }
     }
 
     private func layoutBitmapView() {
@@ -436,13 +572,13 @@ final class SubtitleOverlay: PlatformView {
         PlatformFont.systemFont(ofSize: appliedFontSize, weight: subtitleFontWeight)
     }
 
-    /// A label's own alignment is ignored once it holds an attributed string,
-    /// so the centring lives here. Line height is pinned to the glyph box
-    /// because the background only fills ascent and descent, leaving the
-    /// font's leading as a gap between stacked lines.
+    /// Set paragraph alignment on the attributed string from the cue alignment. Use the
+    /// glyph height for line spacing so background fills do not leave gaps between
+    /// lines.
     private func paragraphStyle(for font: PlatformFont) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        style.alignment = .center
+        let column = (currentAlignment - 1) % 3
+        style.alignment = column == 0 ? .left : (column == 2 ? .right : .center)
         let glyphBox = font.ascender - font.descender
         style.minimumLineHeight = glyphBox
         style.maximumLineHeight = glyphBox
