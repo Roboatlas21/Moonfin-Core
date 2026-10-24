@@ -327,6 +327,52 @@ void main() {
     return (top: top, bottom: top + height);
   }
 
+  test('Safari exposes both cues with duplicate default flags', () async {
+    await backend.setSubtitleTrack(
+      1,
+      isExternalSubtitle: true,
+      externalSubtitleUrl:
+          subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nPrimary\n'),
+      subtitleCodec: 'vtt',
+    );
+    await backend.setSecondarySubtitle(
+      url: subtitle('WEBVTT\n\n00:01.000 --> 00:08.000\nSecondary\n'),
+      codec: 'vtt',
+      language: 'jpn',
+    );
+    final second = await loadedSecondary();
+    final primary =
+        video.querySelector('track[label="External Subtitle"]')!
+            as web.HTMLTrackElement;
+    await _until(() => primary.track.cues?.length == 1 &&
+        second.track.cues?.length == 1);
+
+    // This deliberately tests the two "default" flags currently present in
+    // Moonfin, without changing either production track selection path.
+    expect(primary.hasAttribute('default'), isTrue);
+    expect(second.hasAttribute('default'), isTrue);
+    expect(primary.track.mode, 'showing');
+    expect(second.track.mode, 'showing');
+    expect(second.srclang, 'jpn');
+
+    await backend.seekTo(const Duration(seconds: 2));
+    await _until(() => primary.track.activeCues?.length == 1 &&
+        second.track.activeCues?.length == 1);
+    expect((primary.track.activeCues![0] as web.VTTCue).text, 'Primary');
+    expect(
+      (second.track.activeCues![0] as web.VTTCue).getCueAsHTML().textContent,
+      'Secondary',
+    );
+
+    // Compare with the standards-compliant single-default arrangement.
+    second.removeAttribute('default');
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(primary.track.mode, 'showing');
+    expect(second.track.mode, 'showing');
+    expect(primary.track.activeCues?.length, 1);
+    expect(second.track.activeCues?.length, 1);
+  });
+
   test('native browser lines leave a gap around top and middle captions', () async {
     await backend.setSubtitleTrack(
       1, isExternalSubtitle: true,

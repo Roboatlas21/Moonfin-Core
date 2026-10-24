@@ -1,0 +1,34 @@
+name: Safari Dual Subtitle Browser Probe
+
+on:
+  push:
+    branches:
+      - test/safari-dual-subtitles
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  safari:
+    name: Safari subtitle compatibility
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+      - name: Enable Safari remote automation
+        run: |
+          sudo /usr/bin/safaridriver --enable
+          /usr/bin/safaridriver --version
+          defaults read /Applications/Safari.app/Contents/Info CFBundleShortVersionString || true
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+      - name: Verify both subtitle tracks in Safari
+        timeout-minutes: 10
+        run: >
+          flutter test --platform safari --reporter expanded
+          --plain-name 'Safari exposes both cues with duplicate default flags'
+          test/playback/html_video_secondary_subtitle_test.dart
