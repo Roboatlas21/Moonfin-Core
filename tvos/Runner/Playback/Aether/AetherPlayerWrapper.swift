@@ -1362,25 +1362,56 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         applyPendingSecondarySubtitle()
     }
 
+    enum SecondarySubtitleRoute: Equatable {
+        case embedded(index: Int)
+        case sidecar
+        case pending
+        case disabled
+    }
+
+    /// A missing embedded ordinal may still arrive from the demuxer. Only
+    /// fall back to a supplied sidecar once the current load is ready.
+    static func secondarySubtitleRoute(
+        embeddedOrdinal: Int?, availableEmbeddedTracks: Int, hasSidecar: Bool
+    ) -> SecondarySubtitleRoute {
+        if let embeddedOrdinal, embeddedOrdinal > 0 {
+            if embeddedOrdinal <= availableEmbeddedTracks {
+                return .embedded(index: embeddedOrdinal - 1)
+            }
+            return hasSidecar ? .sidecar : .pending
+        }
+        return hasSidecar ? .sidecar : .disabled
+    }
+
     private func applyPendingSecondarySubtitle() {
         guard secondarySubtitlesReady, let pending = pendingSecondarySubtitle,
             let engine = Self.sharedEngine()
         else { return }
 
-        if let ordinal = pending.embeddedTrackId, ordinal > 0 {
-            // embeddedTrackId counts from 1 among subtitles stored inside the video.
-            // External subtitle files are selected by URL below.
-            // Closed captions are handled separately.
-            let tracks = engine.subtitleTracks.filter {
-                !$0.isExternal && !Self.isClosedCaptionCodec($0.codec)
-            }
-            guard ordinal <= tracks.count else { return }
-            engine.selectSecondarySubtitleTrack(index: tracks[ordinal - 1].id)
-            hostLog("secondary subtitle ordinal=\(ordinal) stream=\(tracks[ordinal - 1].id)")
-        } else if let url = pending.url {
+        // The server's embedded ordinal is 1-based and excludes external
+        // subtitles and broadcast captions.
+        let tracks = engine.subtitleTracks.filter {
+            !$0.isExternal && !Self.isClosedCaptionCodec($0.codec)
+        }
+        switch Self.secondarySubtitleRoute(
+            embeddedOrdinal: pending.embeddedTrackId,
+            availableEmbeddedTracks: tracks.count,
+            hasSidecar: pending.url != nil
+        ) {
+        case .embedded(let index):
+            engine.selectSecondarySubtitleTrack(index: tracks[index].id)
+            hostLog("secondary subtitle ordinal=\(index + 1) stream=\(tracks[index].id)")
+        case .sidecar:
+            guard let url = pending.url else { return }
             engine.selectSecondarySidecarSubtitle(url: url)
-            hostLog("secondary subtitle sidecar selected")
-        } else {
+            if let ordinal = pending.embeddedTrackId, ordinal > 0 {
+                hostLog("secondary subtitle ordinal=\(ordinal) unavailable; using sidecar")
+            } else {
+                hostLog("secondary subtitle sidecar selected")
+            }
+        case .pending:
+            return
+        case .disabled:
             engine.clearSecondarySubtitle()
         }
         pendingSecondarySubtitle = nil
