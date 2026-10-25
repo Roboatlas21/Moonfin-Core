@@ -3,6 +3,8 @@ import 'package:playback_core/playback_core.dart';
 
 import '../preference/user_preferences.dart';
 
+const double primarySubtitleMaxOffset = 0.20;
+
 /// Whether what reaches the screen is HDR. A transcode lands as SDR even when
 /// the source was HDR, so the subtitles have to follow the output rather than
 /// the file.
@@ -76,7 +78,7 @@ class SubtitleStyle {
       verticalOffset: pick(
         UserPreferences.subtitlesOffsetPosition,
         UserPreferences.subtitlesHdrOffsetPosition,
-      ),
+      ).clamp(0.0, primarySubtitleMaxOffset).toDouble(),
     );
   }
 
