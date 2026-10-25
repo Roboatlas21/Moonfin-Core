@@ -315,18 +315,18 @@ internal class SecondarySubtitleOverlay(
         val topFallback = ArrayList<Cue>()
         for (sourceCue in fixed) {
             var cue = buildCue(sourceCue)
-            val originalBox = estimateSecondaryBox(
-                cue,
-                width,
-                height,
-                measureTextHeight(cue, width, height, secondaryFontPx),
-            )
+            val measured = measureTextHeights(cue, width, height, secondaryFontPx)
+            val anchoredBox = estimateSecondaryBox(cue, width, height, measured.anchor)
+            val originalBox = anchoredBox.copy(bottom = anchoredBox.top + measured.drawn)
             val inward = if (SubtitleLayoutPlanner.verticalAlignmentFor(originalBox, height) ==
                 SubtitleLayoutPlanner.ALIGN_TOP) offsetDelta else -offsetDelta
             val shift = (inward * height)
                 .coerceAtLeast(-originalBox.top).coerceAtMost(height - originalBox.bottom)
             val box = originalBox.copy(top = originalBox.top + shift, bottom = originalBox.bottom + shift)
-            cue = cue.buildUpon().setLine(box.bottom / height, Cue.LINE_TYPE_FRACTION)
+            // Media3 anchors the first layout, then draws a possibly taller
+            // layout after clipping horizontally. Account for that extra height.
+            val drawnExtra = measured.drawn - measured.anchor
+            cue = cue.buildUpon().setLine((box.bottom - drawnExtra) / height, Cue.LINE_TYPE_FRACTION)
                 .setLineAnchor(Cue.ANCHOR_TYPE_END).build()
             if (occupied.none { SubtitleLayoutPlanner.intersects(box, it, gapPx) }) {
                 rendered += cue
@@ -346,7 +346,8 @@ internal class SecondarySubtitleOverlay(
             )
             if (placed != null) {
                 cue = cue.buildUpon()
-                    .setLine(placed.bottom / height, Cue.LINE_TYPE_FRACTION)
+                    .setLine((placed.bottom - (measured.drawn - measured.anchor)) / height,
+                        Cue.LINE_TYPE_FRACTION)
                     .build()
                 rendered += cue
                 occupied += placed
@@ -411,7 +412,8 @@ internal class SecondarySubtitleOverlay(
             .setSize(cueSize)
             .setTextAlignment(reference.textAlignment ?: Layout.Alignment.ALIGN_CENTER)
             .build()
-        val textHeight = measureTextHeight(alignedCue, width, height, fontPx)
+        val measured = measureTextHeights(alignedCue, width, height, fontPx)
+        val textHeight = measured.drawn
         val refBox = reference?.let {
             estimatePrimaryBox(it, width, height, (baseFontSize / 24f) * 0.06f * height)
         }
@@ -463,7 +465,8 @@ internal class SecondarySubtitleOverlay(
             SubtitleLayoutPlanner.verticalAlignmentFor(refBox!!, height) == SubtitleLayoutPlanner.ALIGN_TOP
         val placedCue = alignedCue.buildUpon()
             .setLine(
-                ((if (topAligned) placement.top else placement.bottom) / height).coerceIn(0f, 1f),
+                ((if (topAligned) placement.top else
+                    placement.bottom - (measured.drawn - measured.anchor)) / height).coerceIn(0f, 1f),
                 Cue.LINE_TYPE_FRACTION,
             )
             .setLineAnchor(if (topAligned) Cue.ANCHOR_TYPE_START else Cue.ANCHOR_TYPE_END)
@@ -475,11 +478,10 @@ internal class SecondarySubtitleOverlay(
     private fun estimatePrimaryBox(cue: Cue, width: Int, height: Int, fontPx: Float): SubtitleBox {
         val bitmap = cue.bitmap
         val nominalWidth = if (cue.size != Cue.DIMEN_UNSET) cue.size * width else width * 0.9f
-        val boxHeight = if (bitmap != null) {
-            (cue.bitmapHeight * height).coerceAtLeast(1f)
-        } else {
-            measureTextHeight(cue, width, height, fontPx, primary = true)
-        }
+        val measured = if (bitmap == null)
+            measureTextHeights(cue, width, height, fontPx, primary = true) else null
+        val anchorHeight = measured?.anchor ?: (cue.bitmapHeight * height).coerceAtLeast(1f)
+        val boxHeight = measured?.drawn ?: anchorHeight
         val cueWidth = if (bitmap != null) {
             (boxHeight * bitmap.width / bitmap.height).coerceAtMost(width.toFloat())
         } else {
@@ -487,13 +489,13 @@ internal class SecondarySubtitleOverlay(
         }
         val left = cueLeft(cue, width, cueWidth)
         val top = when {
-            cue.line == Cue.DIMEN_UNSET -> height * (1f - primaryBottomPaddingFraction) - boxHeight
+            cue.line == Cue.DIMEN_UNSET -> height * (1f - primaryBottomPaddingFraction) - anchorHeight
             cue.lineType == Cue.LINE_TYPE_FRACTION -> when (cue.lineAnchor) {
-                Cue.ANCHOR_TYPE_END -> cue.line * height - boxHeight
-                Cue.ANCHOR_TYPE_MIDDLE -> cue.line * height - boxHeight / 2f
+                Cue.ANCHOR_TYPE_END -> cue.line * height - anchorHeight
+                Cue.ANCHOR_TYPE_MIDDLE -> cue.line * height - anchorHeight / 2f
                 else -> cue.line * height
             }
-            cue.line < 0f -> height * (1f - primaryBottomPaddingFraction) + cue.line * fontPx - boxHeight
+            cue.line < 0f -> height * (1f - primaryBottomPaddingFraction) + cue.line * fontPx - anchorHeight
             else -> cue.line * fontPx
         }
         return SubtitleBox(left, top, left + cueWidth, top + boxHeight)
@@ -530,10 +532,12 @@ internal class SecondarySubtitleOverlay(
         }
     }
 
-    /** Match SubtitlePainter's text layout so wrapped lines reserve their actual height. */
+    private data class TextLayoutHeights(val anchor: Float, val drawn: Float)
+
+    /** Media3 anchors the first layout but draws a second one after horizontal clipping. */
     @Suppress("DEPRECATION") // Use the same StaticLayout constructor as Media3.
-    private fun measureTextHeight(cue: Cue, width: Int, height: Int, fontPx: Float,
-                                  primary: Boolean = false): Float {
+    private fun measureTextHeights(cue: Cue, width: Int, height: Int, fontPx: Float,
+                                   primary: Boolean = false): TextLayoutHeights {
         val text = SpannableStringBuilder(cue.text ?: "")
         val useEmbeddedSizes = primary && embeddedStylesEnabled && embeddedFontSizesEnabled
         for (span in text.getSpans(0, text.length, Any::class.java)) {
@@ -559,9 +563,30 @@ internal class SecondarySubtitleOverlay(
         val padding = (measurementPaint.textSize * 0.125f + 0.5f).toInt()
         val availableWidth = ((width - padding * 2) *
             if (cue.size == Cue.DIMEN_UNSET) 1f else cue.size).toInt().coerceAtLeast(1)
-        return StaticLayout(text, measurementPaint, availableWidth,
-            cue.textAlignment ?: Layout.Alignment.ALIGN_CENTER,
-            lineSpacingMultiplier, lineSpacingExtra, true).height.toFloat()
+        val alignment = cue.textAlignment ?: Layout.Alignment.ALIGN_CENTER
+        val initial = StaticLayout(text, measurementPaint, availableWidth, alignment,
+            lineSpacingMultiplier, lineSpacingExtra, true)
+        var drawnWidth = 0
+        for (line in 0 until initial.lineCount) {
+            drawnWidth = maxOf(drawnWidth,
+                kotlin.math.ceil(initial.getLineWidth(line).toDouble()).toInt())
+        }
+        if (cue.size != Cue.DIMEN_UNSET) drawnWidth = maxOf(drawnWidth, availableWidth)
+        drawnWidth += padding * 2
+        if (cue.position != Cue.DIMEN_UNSET) {
+            // SubtitlePainter clamps positioned text to the view before drawing.
+            // The smaller width can add lines without changing its anchor height.
+            val anchorX = kotlin.math.round(width * cue.position).toInt()
+            val left = when (cue.positionAnchor) {
+                Cue.ANCHOR_TYPE_END -> anchorX - drawnWidth
+                Cue.ANCHOR_TYPE_MIDDLE -> (anchorX * 2 - drawnWidth) / 2
+                else -> anchorX
+            }.coerceAtLeast(0)
+            drawnWidth = (left + drawnWidth).coerceAtMost(width) - left
+        }
+        val drawn = if (drawnWidth <= 0) 0f else StaticLayout(text, measurementPaint,
+            drawnWidth, alignment, lineSpacingMultiplier, lineSpacingExtra, true).height.toFloat()
+        return TextLayoutHeights(initial.height.toFloat(), drawn)
     }
 
     fun clear() {

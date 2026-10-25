@@ -203,6 +203,30 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
+    fun clippedTopLeftSrtLeavesRoomForAllRenderedLines() {
+        // Media3 first lays out the full cue, then clips its right edge and
+        // lays it out again. That second layout can wrap to an extra line.
+        val text = "我们今天要讨论中文字幕在较窄的绘制区域换行后如何避开第二行字幕。".repeat(2).take(55)
+        val source = "1\n00:00:00,000 --> 00:00:05,000\n{\\an7}$text\n"
+        val parsed = mutableListOf<Cue>()
+        val bytes = source.toByteArray()
+        SubripParser().parse(bytes, 0, bytes.size, SubtitleParser.OutputOptions.allCues()) {
+            parsed.addAll(it.cues)
+        }
+        val f = Scene()
+        f.primary.setFractionalTextSize(0.06f)
+        f.primary.setBottomPaddingFraction(0.04f)
+        f.style(0.04f)
+        val format = Format.Builder().setSampleMimeType(MimeTypes.APPLICATION_SUBRIP).build()
+        f.show(listOf(primaryCueWithoutDefaultMargin(parsed.single(), format)))
+        val primary = inkBounds(f.primary)
+        val secondary = inkBounds(f.secondary)
+        assertTrue("Primary must wrap to multiple lines", primary.height() > 120)
+        assertTrue("Secondary must follow the final drawn primary lines: $primary / $secondary",
+            secondary.top > primary.bottom)
+    }
+
+    @Test
     fun measuredHeightFollowsEmbeddedStyleAndFontSizePreferences() {
         val text = SpannableStringBuilder("我们今天要一起讨论如何让中文字幕和英文翻译同时清晰地显示在屏幕上。")
         text.setSpan(RelativeSizeSpan(1.5f), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
