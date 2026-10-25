@@ -1041,6 +1041,9 @@ class Media3VideoView(
     private fun clearSubtitleCues() {
         if (::secondarySubtitleOverlay.isInitialized) {
             secondarySubtitleOverlay.resetPrimaryCues(clearSecondary = true)
+            // libass can return an unchanged image after a seek. Keep its
+            // still-visible bounds as collision obstacles until the next frame.
+            updateAssPrimaryBounds()
         } else {
             subtitleView.setCues(emptyList())
         }
