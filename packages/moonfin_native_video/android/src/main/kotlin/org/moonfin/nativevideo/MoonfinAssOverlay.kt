@@ -152,28 +152,28 @@ class MoonfinAssOverlayView(
 
     private val renderTask = Runnable {
         var generation = -1
-        var hasActiveTrack = false
         try {
             val timeUs = pendingTimeUs
-            val frame = try {
-                synchronized(assHandler) {
-                    // Track activation, ownership, and rendering share one lock
-                    // so the first frame for a new track cannot be misidentified.
-                    val track = assHandler.track
-                    syncNativeAssTrack(track)
-                    generation = primaryTrackGeneration
-                    hasActiveTrack = track != null
+            synchronized(assHandler) {
+                // Render and publish under the same lock as track activation.
+                // Otherwise Off -> same-track can discard the new image and
+                // libass's unchanged-frame retry cannot reconstruct it.
+                val track = assHandler.track
+                syncNativeAssTrack(track)
+                generation = primaryTrackGeneration
+                val hasActiveTrack = track != null
+                val frame = try {
                     if (released || !hasActiveTrack) {
                         null
                     } else {
                         assHandler.render?.renderFrame(timeUs / 1000, AssTexType.BITMAP_ALPHA)
                     }
+                } catch (error: Throwable) {
+                    // A dropped frame beats taking the process down.
+                    null
                 }
-            } catch (error: Throwable) {
-                // A dropped frame beats taking the process down.
-                null
+                publishFrame(frame, generation, hasActiveTrack)
             }
-            if (generation >= 0) publishFrame(frame, generation, hasActiveTrack)
         } finally {
             renderScheduled.set(false)
             // A genuine A frame can finish before B takes over. Retry B if
@@ -280,10 +280,6 @@ class MoonfinAssOverlayView(
         if (frame == null && currentFrame == null) return
         frame?.images?.forEach { it.bitmap?.prepareToDraw() }
         currentFrame = frame
-        if (generation != primaryTrackGeneration) {
-            currentFrame = null
-            return
-        }
         postInvalidate()
         post { if (!released) onFrameChanged?.invoke() }
     }
