@@ -107,28 +107,38 @@ final class SubtitleOverlay: PlatformView {
     private var stackingRegions: [CGRect] {
         let regions = visibleRegions
         if !regions.isEmpty { return regions }
-        return lastPrimaryPlacement.compactMap { reference -> CGRect? in
-            switch reference {
-            case .text(let events, let isMain):
-                let placement = Self.textPlacement(events)
-                let alignment = Self.effectiveAlignment(placement)
-                let text = applyInlineEmphasis(
-                    to: fillText(events.compactMap(\.text).joined(separator: "\n"), alignment: alignment),
-                    events: events)
-                #if canImport(UIKit)
-                referenceTextLabel.attributedText = text
-                #else
-                referenceTextLabel.attributedStringValue = text
-                #endif
-                return textLayout(
-                    for: referenceTextLabel, placement: placement, alignment: alignment,
-                    centeredPair: isMain && (Self.stackingAlignment(placement) - 1) / 3 == 1).frame
-            case .bitmap(let event):
-                return bitmapFrame(for: event)
-            case .ass(let rect):
-                return assRegion(rect)
-            }
-        }.filter { !$0.isEmpty && !$0.isNull }
+        return lastPrimaryPlacement.compactMap { primaryPlacementFrame($0) }
+            .filter { !$0.isEmpty && !$0.isNull }
+    }
+
+    private func primaryPlacementFrame(_ reference: PrimaryPlacement) -> CGRect? {
+        switch reference {
+        case .text(let events, let isMain):
+            let placement = Self.textPlacement(events)
+            let alignment = Self.effectiveAlignment(placement)
+            let text = applyInlineEmphasis(
+                to: fillText(events.compactMap(\.text).joined(separator: "\n"), alignment: alignment),
+                events: events)
+            #if canImport(UIKit)
+            referenceTextLabel.attributedText = text
+            #else
+            referenceTextLabel.attributedStringValue = text
+            #endif
+            return textLayout(
+                for: referenceTextLabel, placement: placement, alignment: alignment,
+                centeredPair: isMain && (Self.stackingAlignment(placement) - 1) / 3 == 1).frame
+        case .bitmap(let event):
+            return bitmapFrame(for: event)
+        case .ass(let rect):
+            return assRegion(rect)
+        }
+    }
+
+    private var currentPrimaryPlacement: [PrimaryPlacement] {
+        Self.textGroups(activeTextEvents).enumerated().map {
+            PrimaryPlacement.text($0.element, isMain: $0.offset == 0)
+        } + activeBitmapEvents.map { .bitmap($0) }
+            + assVisibleRegions.map { .ass($0) }
     }
 
     private var activeTextPlacement: SubtitleEvent? {
@@ -171,11 +181,7 @@ final class SubtitleOverlay: PlatformView {
         guard secondaryForStacking != nil,
               bounds.width > 0, bounds.height > 0 else { return }
         guard !visibleRegions.isEmpty else { return }
-        lastPrimaryPlacement = Self.textGroups(activeTextEvents).enumerated().map {
-            PrimaryPlacement.text($0.element, isMain: $0.offset == 0)
-        }
-        lastPrimaryPlacement += activeBitmapEvents.map { .bitmap($0) }
-        lastPrimaryPlacement += assVisibleRegions.map { .ass($0) }
+        lastPrimaryPlacement = currentPrimaryPlacement
     }
 
     private func updateSecondaryPlacement() {
@@ -865,6 +871,7 @@ final class SubtitleOverlay: PlatformView {
         let minimumY: CGFloat = usesSafeArea ? safeInsets.top : 0
         let maximumY: CGFloat = usesSafeArea
             ? bounds.height - safeInsets.bottom : bounds.height
+        x = min(max(x, minimumX), max(minimumX, maximumX - size.width))
         var overflowClip: ClosedRange<CGFloat>?
         let primary = stackingEnabled ? primaryForStacking : nil
         let occupied = primary?.stackingRegions ?? []
@@ -887,12 +894,20 @@ final class SubtitleOverlay: PlatformView {
             overflowClip = resolved.clip
         } else if centeredPair, let secondary = secondaryForStacking,
                   secondary.stackingEnabled {
-            // Keep the midpoint of a centred pair fixed.
             let pairGap = max(2 * canvasScale, gap +
                 CGFloat(secondary.secondaryVerticalAdjustment) * bounds.height)
-            y = yAnchor + pairGap / 2
+            let candidateY = min(max(yAnchor + pairGap / 2, minimumY),
+                                 max(minimumY, maximumY - size.height))
+            let candidate = CGRect(x: x, y: candidateY, width: size.width, height: size.height)
+            // A centred pair must not move the primary into another primary cue.
+            // Remeasure source placements so dialogue gaps and resizes agree.
+            let references = activeTextEvents.isEmpty ? lastPrimaryPlacement : currentPrimaryPlacement
+            let overlapsPrimary = references.contains { reference in
+                if case .text(_, isMain: true) = reference { return false }
+                return primaryPlacementFrame(reference)?.intersects(candidate) == true
+            }
+            if !overlapsPrimary { y = candidateY }
         }
-        x = min(max(x, minimumX), max(minimumX, maximumX - size.width))
         if overflowClip == nil {
             y = min(max(y, minimumY), max(minimumY, maximumY - size.height))
         }

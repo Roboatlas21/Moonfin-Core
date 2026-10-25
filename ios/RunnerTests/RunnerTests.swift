@@ -707,6 +707,61 @@ final class RunnerTests: XCTestCase {
     }
 
     @MainActor
+    func testCenteredPrimaryDoesNotMoveIntoAnotherPrimaryCue() {
+        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+        let secondary = SubtitleOverlay(frame: primary.bounds)
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.secondaryVerticalAdjustment = 0.06
+        // WebVTT line:50%,center and line:56%,start, both position:50%.
+        var centered = cue("First speaker")
+        centered.alignment = 5
+        centered.position = CGPoint(x: 0.5, y: 0.5)
+        var lower = cue("Second speaker", start: 1.1)
+        lower.alignment = 8
+        lower.position = CGPoint(x: 0.5, y: 0.56)
+        primary.setEvents([centered, lower])
+        primary.update(currentTime: 2)
+        let mainLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
+        func lowerLabel() -> UILabel {
+            primary.subviews.compactMap { $0 as? SubtitleOverlay }.first!
+                .subviews.compactMap { $0 as? UILabel }.last!
+        }
+        let mainFrame = mainLabel.frame
+        let lowerFrame = lowerLabel().frame
+        XCTAssertLessThan(mainFrame.maxY, lowerFrame.minY)
+
+        secondary.stackingEnabled = true
+        secondary.setEvents([cue("Secondary", end: 8)])
+        secondary.update(currentTime: 2)
+        primary.layoutIfNeeded()
+        secondary.layoutIfNeeded()
+        let caption = secondary.subviews.compactMap { $0 as? UILabel }.last!
+        XCTAssertEqual(mainLabel.frame, mainFrame)
+        XCTAssertEqual(lowerLabel().frame, lowerFrame)
+        XCTAssertFalse(mainLabel.frame.intersects(lowerLabel().frame))
+        XCTAssertFalse(caption.frame.intersects(mainFrame))
+        XCTAssertFalse(caption.frame.intersects(lowerFrame))
+        let activeFrame = caption.frame
+
+        primary.update(currentTime: 4)
+        secondary.update(currentTime: 4)
+        XCTAssertEqual(primary.activeText, "")
+        XCTAssertEqual(caption.frame, activeFrame)
+        secondary.secondaryVerticalAdjustment = 0.04
+        primary.layoutIfNeeded()
+        secondary.layoutIfNeeded()
+        let gapFrame = caption.frame
+        XCTAssertNotEqual(gapFrame, activeFrame)
+        primary.update(currentTime: 2)
+        secondary.update(currentTime: 2)
+        XCTAssertEqual(mainLabel.frame, mainFrame)
+        XCTAssertEqual(lowerLabel().frame, lowerFrame)
+        XCTAssertEqual(caption.frame, gapFrame)
+        XCTAssertLessThan(caption.frame.maxY, mainLabel.frame.minY)
+    }
+
+    @MainActor
     func testOversizedSecondaryIsMaskedAndRecoversOnPrimaryOff() {
         let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
         let secondary = SubtitleOverlay(frame: primary.bounds)
