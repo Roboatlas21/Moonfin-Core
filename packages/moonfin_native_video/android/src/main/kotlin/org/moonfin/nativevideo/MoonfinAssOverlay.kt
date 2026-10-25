@@ -6,6 +6,7 @@ import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
+import android.os.Looper
 import android.view.View
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
@@ -85,7 +86,8 @@ class MoonfinAssOverlayView(
 
     @Volatile
     private var primaryTrackGeneration = 0
-    private var primaryTrackIndex: Int? = null
+    @Volatile
+    private var primaryNativeTrack: Any? = null
 
     @Volatile
     private var lastPresentationTimeUs: Long? = null
@@ -101,21 +103,26 @@ class MoonfinAssOverlayView(
         onFrameChanged?.invoke()
     }
 
-    // Called after Media3 has activated its new primary selection. Primary Off
-    // only hides the view and deliberately leaves this identity unchanged.
-    fun selectPrimaryAssTrack(index: Int?) {
-        if (primaryTrackIndex == index) {
-            if (index != null && currentFrame == null) {
-                lastPresentationTimeUs?.let(::requestRender)
-            }
-            return
-        }
-        primaryTrackIndex = index
+    // Called while holding the assHandler lock, both from its track listener
+    // and before rendering. Off keeps the last native track identity so
+    // reselecting it while paused can reuse an unchanged libass image.
+    fun syncNativeAssTrack(track: Any?): Boolean {
+        if (track == null || primaryNativeTrack === track) return false
+        primaryNativeTrack = track
         primaryTrackGeneration++
         currentFrame = null
-        invalidate()
-        onFrameChanged?.invoke()
-        if (index != null) lastPresentationTimeUs?.let(::requestRender)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            invalidate()
+            onFrameChanged?.invoke()
+        } else {
+            postInvalidate()
+            post { if (!released) onFrameChanged?.invoke() }
+        }
+        return true
+    }
+
+    fun redrawCurrentAssFrame() {
+        lastPresentationTimeUs?.let(::requestRender)
     }
 
     /** Called on the UI thread when ASS's visible image rectangles change. */
@@ -131,11 +138,16 @@ class MoonfinAssOverlayView(
         }.orEmpty()
 
     private val renderTask = Runnable {
-        val generation = primaryTrackGeneration
+        var generation = -1
         try {
             val timeUs = pendingTimeUs
             val frame = try {
                 synchronized(assHandler) {
+                    // The native track and its generation must be sampled under
+                    // the same lock as renderFrame. Otherwise B's first bitmap
+                    // can be stamped as A and discarded permanently.
+                    syncNativeAssTrack(assHandler.track)
+                    generation = primaryTrackGeneration
                     if (released) {
                         null
                     } else {
@@ -146,13 +158,15 @@ class MoonfinAssOverlayView(
                 // A dropped frame beats taking the process down.
                 null
             }
-            publishFrame(frame, generation)
+            if (generation >= 0) publishFrame(frame, generation)
         } finally {
             renderScheduled.set(false)
-            // A render for track A may have been in flight when B was picked.
-            // It must not paint A, and B still needs a render while paused.
-            if (!released && generation != primaryTrackGeneration && primaryTrackIndex != null) {
-                lastPresentationTimeUs?.let(::requestRender)
+            // A genuine A frame can finish before B takes over. Retry B if
+            // that switch occurred while the first render was still active.
+            if (!released && generation >= 0 &&
+                generation != primaryTrackGeneration && primaryNativeTrack != null
+            ) {
+                redrawCurrentAssFrame()
             }
         }
     }
@@ -348,14 +362,23 @@ private class MoonfinAssParser(
  * thread, so they take the same lock the render itself takes.
  */
 @UnstableApi
-class MoonfinAssPlayerListener(private val assHandler: AssHandler) : Player.Listener {
+class MoonfinAssPlayerListener(
+    private val assHandler: AssHandler,
+    private val overlay: MoonfinAssOverlayView,
+) : Player.Listener {
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         synchronized(assHandler) { assHandler.onMediaItemTransition(mediaItem, reason) }
     }
 
     override fun onTracksChanged(tracks: Tracks) {
-        synchronized(assHandler) { assHandler.onTracksChanged(tracks) }
+        val changed = synchronized(assHandler) {
+            assHandler.onTracksChanged(tracks)
+            // Publish ownership before the render executor can read the new
+            // libass track. An unchanged-frame retry has no bitmap to recover.
+            overlay.syncNativeAssTrack(assHandler.track)
+        }
+        if (changed) overlay.redrawCurrentAssFrame()
     }
 
     override fun onSurfaceSizeChanged(width: Int, height: Int) {

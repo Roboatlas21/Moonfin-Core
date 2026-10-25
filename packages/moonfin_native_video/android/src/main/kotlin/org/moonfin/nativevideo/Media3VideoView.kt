@@ -1301,16 +1301,6 @@ class Media3VideoView(
                 }
             }
             applySecondarySubtitle()
-            if (subtitleTrackEnabled) {
-                val primary = collectTracks(C.TRACK_TYPE_TEXT).indexOfFirst {
-                    trackSelector.isPrimaryTrackSelected(it.group, it.trackIndex)
-                }
-                if (primary >= 0) {
-                    assOverlayView?.selectPrimaryAssTrack(
-                        if (selectedSubtitleIsAss) primary + 1 else null,
-                    )
-                }
-            }
             assOverlayView?.setPrimaryVisible(subtitleTrackEnabled && selectedSubtitleIsAss)
             emitTracksChanged()
             reportUnsupportedVideoIfNeeded()
@@ -2053,7 +2043,7 @@ class Media3VideoView(
                 // forwarder takes that seat instead.
                 assHandler.init(it)
                 it.removeListener(assHandler)
-                it.addListener(MoonfinAssPlayerListener(assHandler))
+                it.addListener(MoonfinAssPlayerListener(assHandler, requireNotNull(assOverlayView)))
                 if (currentMediaType != "audio") {
                     if (useSurfaceView) {
                         it.setVideoSurfaceView(videoView as SurfaceView)
