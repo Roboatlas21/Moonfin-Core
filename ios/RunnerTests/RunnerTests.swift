@@ -300,7 +300,7 @@ final class RunnerTests: XCTestCase {
             bottom.styledRuns = [SubtitleStyledRun(text: "Italic", isBold: false, isItalic: true,
                                                  isUnderlined: false, isStruckThrough: false)]
             f.primary.show([top, bottom])
-            let extra = f.primary.groups.first!
+            var extra = f.primary.groups.first!
             let topFrame = f.primary.caption.frame
             let bottomFrame = extra.caption.frame
             let font = extra.caption.attributedText!.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
@@ -308,11 +308,14 @@ final class RunnerTests: XCTestCase {
             XCTAssertLessThan(topFrame.maxY, bottomFrame.minY)
             if !centered {
                 f.primary.style(offset: 0.04) // Four percent of the picture height is 12pt.
+                // Applying style rebuilds the positioned text groups.
+                extra = f.primary.groups.first!
+                let restyledFont = extra.caption.attributedText!.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
+                XCTAssertTrue(restyledFont.fontDescriptor.symbolicTraits.contains(.traitItalic))
                 for (position, lift) in [(70, 100.0), (98, 12.0)] {
                     f.primary.setSubtitlePosition(basePosition: position)
                     f.layout()
                     XCTAssertEqual(f.primary.caption.frame.minY, topFrame.minY + 12, accuracy: 0.1)
-                    XCTAssertTrue(f.primary.groups.contains(extra))
                     XCTAssertEqual(extra.caption.frame.maxY, bottomFrame.maxY - lift, accuracy: 0.1)
                 }
             }
