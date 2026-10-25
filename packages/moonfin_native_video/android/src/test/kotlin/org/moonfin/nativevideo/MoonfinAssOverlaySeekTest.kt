@@ -78,6 +78,38 @@ class MoonfinAssOverlaySeekTest {
         assertTrue(scheduled.get())
     }
 
+    @Test
+    fun lateDialogueRedrawsPausedSeekButNotAfterResumeOrPrimaryOff() {
+        val overlay = MoonfinAssOverlayView(
+            RuntimeEnvironment.getApplication(),
+            AssHandler(AssRenderType.OVERLAY_CANVAS),
+        )
+        overlay.syncNativeAssTrack(Any())
+        overlay.timeOffsetUs = 100_000L
+        overlay.renderAtPlaybackPosition(12_000L, waitForDialogue = true)
+
+        val pending = overlay.javaClass.getDeclaredField("pendingTimeUs")
+            .apply { isAccessible = true }
+        // Model an initial blank render before the destination's ASS dialogue
+        // is extracted. A late chunk must request that same delayed timestamp.
+        pending.setLong(overlay, -1L)
+        overlay.onAssDialogueLoaded()
+        assertEquals(11_900_000L, pending.getLong(overlay))
+
+        // The loader may continue reading once normal playback resumes.
+        overlay.stopAwaitingPausedSeekDialogue()
+        pending.setLong(overlay, -1L)
+        overlay.onAssDialogueLoaded()
+        assertEquals(-1L, pending.getLong(overlay))
+
+        // A hidden primary must not wake the renderer for late dialogue.
+        overlay.renderAtPlaybackPosition(13_000L, waitForDialogue = true)
+        overlay.setPrimaryVisible(false)
+        pending.setLong(overlay, -1L)
+        overlay.onAssDialogueLoaded()
+        assertEquals(-1L, pending.getLong(overlay))
+    }
+
     private class RecordingExecutor : AbstractExecutorService() {
         val requests = mutableListOf<Runnable>()
 

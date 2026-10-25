@@ -104,6 +104,7 @@ import io.github.peerless2012.ass.media.type.AssRenderType
 import java.io.File
 import java.nio.ByteBuffer
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.roundToInt
 import org.moonfin.nativevideo.iec.Iec61937AudioOutputProvider
 import org.moonfin.nativevideo.subtitle.DeclaredSubtitle
@@ -630,6 +631,22 @@ private fun emitFfmpegDecoderDiagnosticsOnce() {
         ),
     )
 }
+
+// A seek to the same item, period and playback position must not discard
+// subtitles: Media3 can report the seek without emitting another cue group.
+@UnstableApi
+internal fun subtitlePositionChanged(
+    old: Player.PositionInfo,
+    next: Player.PositionInfo,
+): Boolean = old.mediaItemIndex != next.mediaItemIndex ||
+    old.mediaItem != next.mediaItem ||
+    old.periodIndex != next.periodIndex ||
+    old.windowUid != next.windowUid ||
+    old.periodUid != next.periodUid ||
+    old.positionMs != next.positionMs ||
+    old.contentPositionMs != next.contentPositionMs ||
+    old.adGroupIndex != next.adGroupIndex ||
+    old.adIndexInAdGroup != next.adIndexInAdGroup
 
 @UnstableApi
 class Media3VideoView(
@@ -1189,6 +1206,7 @@ class Media3VideoView(
         }
 
         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            if (playWhenReady) assOverlayView?.stopAwaitingPausedSeekDialogue()
             // The HDMI switch drops the audio route and the player pauses
             // itself. A pause the user asked for has to survive the switch, so
             // only the system's own is worth undoing.
@@ -1352,9 +1370,14 @@ class Media3VideoView(
             if (reason == Player.DISCONTINUITY_REASON_SEEK ||
                 reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
             ) {
-                clearSubtitleCues()
-                if (subtitleTrackEnabled && selectedSubtitleIsAss) {
-                    assOverlayView?.renderAtPlaybackPosition(newPosition.positionMs)
+                if (subtitlePositionChanged(oldPosition, newPosition)) {
+                    clearSubtitleCues()
+                    if (subtitleTrackEnabled && selectedSubtitleIsAss) {
+                        assOverlayView?.renderAtPlaybackPosition(
+                            newPosition.positionMs,
+                            waitForDialogue = !player.playWhenReady,
+                        )
+                    }
                 }
                 scheduleAudioRekickAfterSeek()
                 // Otherwise Dart only learns the seek landed from the next
@@ -1996,6 +2019,8 @@ class Media3VideoView(
             AssHandlerConfig(cacheSize = assCacheSizeMb()),
         )
         registerAssFonts(assHandler)
+        // Tie extractor callbacks to this player, not a later replacement.
+        val associatedAssOverlay = AtomicReference<MoonfinAssOverlayView?>()
         // Serializes track creation and dialogue reads against the overlay's
         // render thread.
         assParserFactory = MoonfinAssParserFactory(
@@ -2008,7 +2033,10 @@ class Media3VideoView(
             // inner layer ends up producing.
             DoviCompatExtractorsFactory(
                 LiveFmp4ExtractorsFactory(
-                    extractorsFactory.withMoonfinMkvSupport(assParserFactory, assHandler),
+                    extractorsFactory.withMoonfinMkvSupport(
+                        assParserFactory, assHandler,
+                        onAssDialogueLoaded = { associatedAssOverlay.get()?.onAssDialogueLoaded() },
+                    ),
                     assParserFactory,
                 ),
                 mode = { doviCompatMode },
@@ -2041,6 +2069,7 @@ class Media3VideoView(
             .build()
             .also {
                 attachAssOverlay(assHandler)
+                associatedAssOverlay.set(requireNotNull(assOverlayView))
                 // init() sets up the handler's looper and registers it as a
                 // listener. Its callbacks reach libass unlocked, so the
                 // forwarder takes that seat instead.

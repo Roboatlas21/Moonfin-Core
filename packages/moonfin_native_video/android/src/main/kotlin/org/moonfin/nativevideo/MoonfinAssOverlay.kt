@@ -83,6 +83,10 @@ class MoonfinAssOverlayView(
     // A newer time can arrive while that task is already rendering.
     private val renderPending = AtomicBoolean(false)
 
+    // After a paused seek, embedded dialogue may arrive after the first
+    // destination render. Keep requesting that position until playback resumes.
+    @Volatile private var awaitingPausedSeekDialogue = false
+
     // libass reports differences from its last actual render, not from the
     // selected track. Retain that image and its owner across unrendered switches.
     private data class CachedFrame(
@@ -106,7 +110,7 @@ class MoonfinAssOverlayView(
 
     // Hiding the cached image on Primary Off must not discard it: libass can
     // return changed=0 if the same subtitle is selected again while paused.
-    private var primaryVisible = true
+    @Volatile private var primaryVisible = true
 
     fun setPrimaryVisible(visible: Boolean) {
         if (primaryVisible == visible) return
@@ -151,8 +155,22 @@ class MoonfinAssOverlayView(
 
     // Paused seeks may not produce a clock callback: ass-media forwards only
     // every third distinct timestamp. Render the destination explicitly.
-    fun renderAtPlaybackPosition(positionMs: Long) {
-        if (positionMs >= 0L) requestRender(positionMs * 1000L)
+    fun renderAtPlaybackPosition(positionMs: Long, waitForDialogue: Boolean = false) {
+        if (positionMs < 0L) return
+        awaitingPausedSeekDialogue = waitForDialogue
+        requestRender(positionMs * 1000L)
+    }
+
+    // The MKV loader calls this after adding a dialogue chunk under the native
+    // lock. A paused player may never produce another clock callback.
+    fun onAssDialogueLoaded() {
+        if (awaitingPausedSeekDialogue && primaryAssTrackActive && primaryVisible) {
+            redrawCurrentAssFrame()
+        }
+    }
+
+    fun stopAwaitingPausedSeekDialogue() {
+        awaitingPausedSeekDialogue = false
     }
 
     /** Called on the UI thread when ASS's visible image rectangles change. */
@@ -273,6 +291,7 @@ class MoonfinAssOverlayView(
         }
         renderScheduled.set(false)
         renderPending.set(false)
+        awaitingPausedSeekDialogue = false
         cachedFrame = null
         onFrameChanged?.invoke()
     }
@@ -420,6 +439,7 @@ class MoonfinAssPlayerListener(
 ) : Player.Listener {
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+        overlay.stopAwaitingPausedSeekDialogue()
         synchronized(assHandler) { assHandler.onMediaItemTransition(mediaItem, reason) }
     }
 
