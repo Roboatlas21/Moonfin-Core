@@ -492,6 +492,7 @@ class HtmlVideoBackend extends PlayerBackend
     final container = payload['container']?.toString();
     if (url.isEmpty) return;
     final generation = ++_playbackGeneration;
+    updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
 
     _tracksKnown = false;
     _tracksReadyCompleter = null;

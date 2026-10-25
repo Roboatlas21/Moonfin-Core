@@ -848,6 +848,7 @@ class MediaKitPlayerBackend extends PlayerBackend
         ? mediaItem
         : payload['url']?.toString() ?? '';
     if (url.isEmpty) return;
+    updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
 
     final generation = ++_playbackGeneration;
     _liveStartupGate = null;

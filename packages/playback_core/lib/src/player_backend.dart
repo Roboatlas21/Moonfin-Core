@@ -80,7 +80,15 @@ abstract interface class SecondarySubtitleBackend {
 /// Keeps subtitle timing through source reloads within a viewing session.
 mixin SubtitleDelayState {
   double subtitleDelaySeconds = 0;
+  int? _subtitleDelaySessionId;
 
+  void updateSubtitleDelaySession(int? sessionId) {
+    // A source without a session ID is a fresh playback request.
+    if (sessionId == null || sessionId != _subtitleDelaySessionId) {
+      subtitleDelaySeconds = 0;
+    }
+    _subtitleDelaySessionId = sessionId;
+  }
 }
 
 abstract class PlayerBackend {

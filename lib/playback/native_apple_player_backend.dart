@@ -300,6 +300,7 @@ class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend,
         ? mediaItem
         : payload['url']?.toString() ?? '';
     if (_disposed || url.isEmpty) return;
+    updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
 
     final autoPlay = payload['autoPlay'] != false;
 

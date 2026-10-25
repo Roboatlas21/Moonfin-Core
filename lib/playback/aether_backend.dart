@@ -276,6 +276,7 @@ class AetherBackend with SubtitleDelayState
         ? mediaItem
         : payload['url']?.toString() ?? '';
     if (_disposed || url.isEmpty) return;
+    updateSubtitleDelaySession(payload['subtitleDelaySessionId'] as int?);
 
     final headers = payload['headers'] is Map
         ? (payload['headers'] as Map).map(
