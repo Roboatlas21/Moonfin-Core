@@ -4365,6 +4365,7 @@ class Media3VideoView(
                     }
                     applyTrackSelectorForCurrentSource()
                 }
+                applySecondarySubtitle()
             }
         }
         if (!posted) cancelPendingRetime()
