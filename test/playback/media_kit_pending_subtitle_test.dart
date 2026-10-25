@@ -90,6 +90,9 @@ class _Player extends Fake implements Player {
   final selections = <String>[];
   final opened = <String>[];
   String? automaticSubtitleSid;
+  Completer<void>? openStarted;
+  Completer<void>? delayOpen;
+  List<Map<String, dynamic>>? tracksAfterOpen;
 
   @override
   Future<void> seek(Duration position) async {
@@ -105,6 +108,13 @@ class _Player extends Fake implements Player {
   @override
   Future<void> open(Playable playable, {bool play = true}) async {
     opened.add((playable as Media).uri);
+    final started = openStarted;
+    if (started != null && !started.isCompleted) started.complete();
+    if (delayOpen != null) await delayOpen!.future;
+    if (tracksAfterOpen != null) {
+      native.tracks = tracksAfterOpen!;
+      stream.changes.add(const Tracks());
+    }
     if (platform is _Native && native.properties['sid'] == 'auto' && automaticSubtitleSid != null) {
       native.properties['sid'] = automaticSubtitleSid!;
     }
@@ -375,6 +385,75 @@ void main() {
       expect(properties['secondary-sid'], 'no');
     },
   );
+
+  test('a new secondary choice during open uses the replacement track list', () async {
+    player.discover();
+    await backend.setSecondarySubtitle(embeddedTrackId: 2);
+    expect(properties['secondary-sid'], '17');
+
+    player.openStarted = Completer<void>();
+    player.delayOpen = Completer<void>();
+    player.tracksAfterOpen = [
+      {'type': 'sub', 'id': 7, 'codec': 'subrip'},
+      {'type': 'sub', 'id': 29, 'codec': 'subrip'},
+    ];
+    final opening = backend.play({
+      'url': 'https://server/replacement.mkv',
+      'autoPlay': false,
+      'secondarySubtitleTrackId': 1,
+    });
+    await player.openStarted!.future;
+    await backend.setSecondarySubtitle(embeddedTrackId: 2);
+    expect(properties['secondary-sid'], 'no',
+        reason: 'Never resolve a new choice against the old file');
+    player.delayOpen!.complete();
+    await opening;
+    await _flush();
+    expect(properties['secondary-sid'], '29');
+  });
+
+  test('external choice made during open is added only to the new file', () async {
+    player.discover();
+    player.openStarted = Completer<void>();
+    player.delayOpen = Completer<void>();
+    player.tracksAfterOpen = [];
+    final opening = backend.play({
+      'url': 'https://server/replacement.mkv',
+      'autoPlay': false,
+      'secondarySubtitleTrackId': 1,
+    });
+    await player.openStarted!.future;
+    const url = '/downloads/new-translation.srt';
+    await backend.setSecondarySubtitle(url: url, codec: 'srt');
+    expect(player.native.commands.where((cmd) => cmd.first == 'sub-add'), isEmpty);
+    player.delayOpen!.complete();
+    await opening;
+    await _flush();
+    expect(player.native.commands.where((cmd) => cmd.first == 'sub-add').single.take(2),
+        ['sub-add', url]);
+    expect(properties['secondary-sid'], '52');
+  });
+
+  test('Off chosen while a new file opens overrides its startup selection', () async {
+    player.discover();
+    player.openStarted = Completer<void>();
+    player.delayOpen = Completer<void>();
+    player.tracksAfterOpen = [
+      {'type': 'sub', 'id': 7, 'codec': 'subrip'},
+      {'type': 'sub', 'id': 29, 'codec': 'subrip'},
+    ];
+    final opening = backend.play({
+      'url': 'https://server/replacement.mkv',
+      'autoPlay': false,
+      'secondarySubtitleTrackId': 2,
+    });
+    await player.openStarted!.future;
+    await backend.setSecondarySubtitle();
+    player.delayOpen!.complete();
+    await opening;
+    await _flush();
+    expect(properties['secondary-sid'], 'no');
+  });
 
   test('discovery selects the embedded ordinal once, excluding external and CC tracks', () async {
     await backend.setSubtitleTrack(2);

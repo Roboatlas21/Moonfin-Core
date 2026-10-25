@@ -280,7 +280,11 @@ class MediaKitPlayerBackend extends PlayerBackend
   final _pendingSubtitleChoice = PendingSubtitleChoice();
   int _secondarySubtitleGeneration = 0;
   double _secondarySubtitleDelay = 0;
-  ({int? ordinal, String? url, int generation})? _pendingSecondarySubtitle;
+  ({int? ordinal, String? url, String? codec, int generation})?
+      _pendingSecondarySubtitle;
+  // A new choice made while mpv is opening must not resolve against the old
+  // file's track list. Only the completed source may consume that choice.
+  int _secondarySourceReadyGeneration = 0;
   late final Future<void> _secondaryControlsReady;
   bool _secondaryDelaySupported = false;
   bool _secondaryPositionSupported = false;
@@ -957,12 +961,25 @@ class MediaKitPlayerBackend extends PlayerBackend
       verticalOffset: (payload['secondarySubtitleOffset'] as num?)?.toDouble(),
     );
     if (!_ownsPlayback(generation)) return;
+    _secondarySourceReadyGeneration = generation;
     if (secondaryGeneration == _secondarySubtitleGeneration) {
       await setSecondarySubtitle(
         embeddedTrackId: payload['secondarySubtitleTrackId'] as int?,
         url: payload['secondarySubtitleUrl'] as String?,
         codec: payload['secondarySubtitleCodec'] as String?,
       );
+    } else {
+      // A newer choice arrived during open. Apply it to this file, including
+      // the external subtitle load that had to wait for the new source.
+      final pending = _pendingSecondarySubtitle;
+      await _applyPendingSecondarySubtitle();
+      if (pending != null && pending.url != null &&
+          _pendingSecondarySubtitle == pending &&
+          _isCurrentSecondarySubtitle(pending.generation)) {
+        unawaited(_loadSecondarySubtitle(
+          pending.url!, pending.codec, pending.generation,
+        ));
+      }
     }
     unawaited(() async {
       await _configureLetterboxCropper();
@@ -3065,12 +3082,13 @@ class MediaKitPlayerBackend extends PlayerBackend
     final externalUrl = url?.isNotEmpty == true ? url : null;
     _pendingSecondarySubtitle = ordinal == null && externalUrl == null
         ? null
-        : (ordinal: ordinal, url: externalUrl, generation: generation);
+        : (ordinal: ordinal, url: externalUrl, codec: codec, generation: generation);
     final native = _player.platform;
     if (native is! NativePlayer) return;
     if (!_secondarySubtitleRequested) _lastPrimaryText = null;
     await _nativeSetProperty(native, 'secondary-sid', 'no');
-    if (!_isCurrentSecondarySubtitle(generation)) return;
+    if (!_isCurrentSecondarySubtitle(generation) ||
+        _secondarySourceReadyGeneration != _playbackGeneration) return;
     await _applyPendingSecondarySubtitle();
     if (!_isCurrentSecondarySubtitle(generation) ||
         _pendingSecondarySubtitle == null ||
@@ -3092,11 +3110,13 @@ class MediaKitPlayerBackend extends PlayerBackend
     final native = _player.platform;
     if (pending == null ||
         native is! NativePlayer ||
+        _secondarySourceReadyGeneration != _playbackGeneration ||
         !_isCurrentSecondarySubtitle(pending.generation)) {
       return;
     }
     final raw = await _tryNativeGetProperty(native, 'track-list');
     if (!_isCurrentSecondarySubtitle(pending.generation) ||
+        _secondarySourceReadyGeneration != _playbackGeneration ||
         _pendingSecondarySubtitle != pending) {
       return;
     }
