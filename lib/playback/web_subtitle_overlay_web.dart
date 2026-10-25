@@ -174,6 +174,9 @@ class WebSubtitleOverlay {
         return;
       }
       _pgsRenderer = ctor.callAsConstructor<_PgsRenderer>(options);
+      // Prime the empty timeline before loading completes so libpgs does not
+      // mistake the first active cue for one it has already drawn.
+      _pgsRenderer!.renderAtTimestamp(_video.currentTime - _delaySeconds);
     } catch (error) {
       _pgsRenderer = null;
       _reportFailure(generation, 'PGS', error);
@@ -298,5 +301,6 @@ extension type _Jassub._(JSObject _) implements JSObject {
 
 extension type _PgsRenderer._(JSObject _) implements JSObject {
   external set timeOffset(double seconds);
+  external void renderAtTimestamp(double seconds);
   external void dispose();
 }
