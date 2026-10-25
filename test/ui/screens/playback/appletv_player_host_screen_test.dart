@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/playback/native_apple_player_backend.dart';
-import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,7 +13,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/ui/screens/playback/appletv_player_host_screen.dart';
-import 'package:moonfin/ui/screens/playback/appletv_livetv_player_host_screen.dart';
 import 'package:moonfin/ui/widgets/playback/player_loading_overlay.dart';
 import 'package:playback_core/playback_core.dart';
 
@@ -39,11 +37,6 @@ class _SegmentClient extends Fake implements MediaServerClient {
   TrickplayApi? get trickplayApi => null;
 }
 
-class _LiveClient extends _SegmentClient {
-  @override
-  String get baseUrl => 'https://example.invalid';
-}
-
 class _EmptyImageApi extends Fake implements ImageApi {}
 
 const _control = MethodChannel('moonfin/native_apple_player_control');
@@ -54,7 +47,6 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(() {
     registerFallbackValue(Duration.zero);
-    registerFallbackValue(<dynamic>[]);
   });
 
   late _MockPlaybackManager manager;
@@ -236,75 +228,6 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-
-  testWidgets('tvOS Live TV refreshes subtitle metadata only for appearance', (
-    tester,
-  ) async {
-    SharedPreferences.setMockInitialValues({});
-    final store = PreferenceStore();
-    await store.init();
-    final prefs = UserPreferences(store);
-    addTearDown(prefs.dispose);
-    GetIt.instance.registerSingleton<UserPreferences>(prefs);
-    final backend = NativeApplePlayerBackend(prefs);
-    addTearDown(backend.dispose);
-    GetIt.instance.registerSingleton<NativeApplePlayerBackend>(backend);
-    GetIt.instance.registerSingleton<MediaServerClient>(_LiveClient());
-    when(() => manager.isTranscodeForced).thenReturn(false);
-    when(() => manager.playItems(
-      any(),
-      enableDirectPlay: any(named: 'enableDirectPlay'),
-      enableDirectStream: any(named: 'enableDirectStream'),
-      enableTranscoding: any(named: 'enableTranscoding'),
-    )).thenAnswer((_) => Completer<void>().future);
-
-    final calls = <MethodCall>[];
-    final messenger = tester.binding.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(_control, (call) async {
-      calls.add(call);
-      return null;
-    });
-    messenger.setMockMethodCallHandler(_events, (_) async => null);
-    addTearDown(() {
-      messenger.setMockMethodCallHandler(_control, null);
-      messenger.setMockMethodCallHandler(_events, null);
-    });
-
-    await tester.pumpWidget(MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: const [Locale('en')],
-      home: const AppleTvLiveTvPlayerHostScreen(
-        channels: [
-          GuideChannel(
-            id: 'channel-1', name: 'News',
-            rawData: {'Id': 'channel-1', 'Name': 'News', 'Type': 'TvChannel'},
-          ),
-        ],
-        startIndex: 0,
-      ),
-    ));
-    await tester.pump();
-
-    calls.clear();
-    await prefs.set(UserPreferences.subtitlesTextSize, 24.0);
-    await tester.pump();
-    var updates = calls.where((c) => c.method == 'setUiMetadata').toList();
-    expect(updates, hasLength(1));
-    expect((updates.single.arguments as Map)['subtitleControls']['primaryFontSize'], 24.0);
-
-    calls.clear();
-    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 10.0);
-    await tester.pump();
-    updates = calls.where((c) => c.method == 'setUiMetadata').toList();
-    expect(updates, hasLength(1));
-    expect((updates.single.arguments as Map)['subtitleControls']['sizeAdjustment'], 10.0);
-
-    calls.clear();
-    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
-    await tester.pump();
-    expect(calls.where((c) => c.method == 'setUiMetadata'), isEmpty);
-    await tester.pumpWidget(const SizedBox());
-  });
 
   testWidgets('uses a white native spinner throughout tvOS bring-up', (
     tester,

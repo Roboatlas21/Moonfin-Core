@@ -180,50 +180,7 @@ void main() {
   );
 
 
-  testWidgets(
-    'shared controls stay in the slot menu and primary opens only tracks',
-    (tester) async {
-      final manager = _Manager(
-        _Backend(secondaryStyle: true),
-        resolution: StreamResolutionResult(
-          streamUrl: 'https://host/stream',
-          mediaSourceId: 'source',
-          playMethod: StreamPlayMethod.directPlay,
-          mediaStreams: [
-            {
-              'Type': 'Subtitle',
-              'Index': 2,
-              'DisplayTitle': 'English',
-              'Codec': 'srt',
-            },
-            {
-              'Type': 'Subtitle',
-              'Index': 3,
-              'DisplayTitle': 'French',
-              'Codec': 'srt',
-            },
-          ],
-        ),
-      );
-      addTearDown(manager.dispose);
-      await openPicker(tester, manager, audio: false);
-      expect(find.text(l10n.primarySubtitleSlot), findsOneWidget);
-      expect(find.text(l10n.secondarySubtitleSlot), findsOneWidget);
-      expect(find.text(l10n.subtitleSize), findsOneWidget);
-      expect(find.text(l10n.verticalOffset), findsOneWidget);
-      expect(find.byIcon(Icons.av_timer), findsOneWidget);
-      await tester.tap(find.text(l10n.primarySubtitleSlot));
-      await tester.pumpAndSettle();
-      expect(find.text(l10n.subtitleSize), findsNothing);
-      expect(find.text(l10n.subtitleDelay), findsNothing);
-      expect(find.textContaining('English'), findsOneWidget);
-    },
-  );
-
-
-  testWidgets('selected subtitle slots with no metadata are not shown as Off', (
-    tester,
-  ) async {
+  testWidgets('unnamed subtitle slots show labels and keep controls above the track list', (tester) async {
     final manager = _Manager(
       _Backend(secondaryStyle: true),
       primaryIndex: 2,
@@ -243,6 +200,14 @@ void main() {
     expect(find.text(l10n.streamTypeFallback('Subtitle', 1)), findsOneWidget);
     expect(find.text(l10n.streamTypeFallback('Subtitle', 2)), findsOneWidget);
     expect(find.text(l10n.off), findsNothing);
+    expect(find.text(l10n.subtitleSize), findsOneWidget);
+    expect(find.text(l10n.verticalOffset), findsOneWidget);
+    expect(find.byIcon(Icons.av_timer), findsOneWidget);
+    await tester.tap(find.text(l10n.primarySubtitleSlot));
+    await tester.pumpAndSettle();
+    expect(find.text(l10n.subtitleSize), findsNothing);
+    expect(find.text(l10n.subtitleDelay), findsNothing);
+    expect(find.textContaining(l10n.streamTypeFallback('Subtitle', 1)), findsOneWidget);
   });
 
   testWidgets('the secondary subtitle delay opens in the same bar', (

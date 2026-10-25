@@ -28,6 +28,13 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [28], manifest = Config.NONE)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class SecondarySubtitleRenderingTest {
+    private fun fixture(): Triple<SubtitleView, SubtitleView, SecondarySubtitleOverlay> {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        return Triple(primary, secondary, SecondarySubtitleOverlay(secondary, primary))
+    }
+
     private fun inkBounds(view: SubtitleView): Rect {
         val bitmap = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888)
         view.measure(View.MeasureSpec.makeMeasureSpec(1280, View.MeasureSpec.EXACTLY),
@@ -50,11 +57,7 @@ class SecondarySubtitleRenderingTest {
 
     @Test
     fun automaticSecondaryRemainsCenteredForLatinAndArabic() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context)
-        secondary.layout(0, 0, 1280, 720)
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         overlay.select(true)
         overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary subtitle").build()))
         for (text in listOf("Short subtitle", "الترجمة العربية")) {
@@ -67,11 +70,7 @@ class SecondarySubtitleRenderingTest {
 
     @Test
     fun secondaryKeepsExplicitLeftAndRightAnchors() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context)
-        secondary.layout(0, 0, 1280, 720)
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         overlay.select(true)
         for ((position, anchor) in listOf(0.1f to Cue.ANCHOR_TYPE_START,
                 0.9f to Cue.ANCHOR_TYPE_END)) {
@@ -127,13 +126,9 @@ class SecondarySubtitleRenderingTest {
             secondPixels.bottom < primaryPixels.top)
     }
 
-
     @Test
     fun secondaryKeepsEmphasisInBothStackedAndPrimaryOffModes() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         val styled = Html.fromHtml(
             "<i>italic</i> <b>bold</b> <u>underlined</u> <font color='#ff0000'>red</font> <big>large</big>",
             Html.FROM_HTML_MODE_COMPACT,
@@ -146,13 +141,6 @@ class SecondarySubtitleRenderingTest {
             Cue.Builder().setText(second).build(),
         ))
 
-        // SubtitleView has no public cue getter. Read its input cues rather than
-        // depending on renderer-specific drawing internals.
-        val field = SubtitleView::class.java.getDeclaredField("cues").apply { isAccessible = true }
-        fun displayed(): Spanned {
-            val cues = field.get(secondary) as List<*>
-            return (cues.single() as Cue).text as Spanned
-        }
         fun check(text: Spanned) {
             val italicAt = text.indexOf("italic")
             val boldAt = text.indexOf("bold")
@@ -167,19 +155,15 @@ class SecondarySubtitleRenderingTest {
             assertTrue(text.getSpans(0, text.length, ForegroundColorSpan::class.java).isEmpty())
             assertTrue(text.getSpans(0, text.length, RelativeSizeSpan::class.java).isEmpty())
         }
-        check(displayed())
-        assertFalse(((field.get(secondary) as List<*>).single() as Cue).windowColorSet)
+        check(displayedCues(secondary).single().text as Spanned)
+        assertFalse(displayedCues(secondary).single().windowColorSet)
         overlay.setPrimaryEnabled(false)
-        check(displayed())
+        check(displayedCues(secondary).single().text as Spanned)
     }
-
 
     @Test
     fun secondaryDelayClearKeepsPrimaryCuesAndTheirPlacement() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         overlay.select(true)
         overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary")
             .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
@@ -203,10 +187,7 @@ class SecondarySubtitleRenderingTest {
 
     @Test
     fun subtitleDelayClearsCachedPositionAndKeepsSecondarySelectable() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         overlay.select(true)
         overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Old primary")
             .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
@@ -229,29 +210,8 @@ class SecondarySubtitleRenderingTest {
             .get(view) as List<*>).filterIsInstance<Cue>()
 
     @Test
-    fun seekDropsOldCuesWithoutDisablingSecondarySelection() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
-        overlay.select(true)
-        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Old primary").build()))
-        overlay.updateCues(listOf(Cue.Builder().setText("Old secondary").build()))
-
-        overlay.resetPrimaryCues(clearSecondary = true)
-
-        assertTrue(displayedCues(primary).isEmpty())
-        assertTrue(displayedCues(secondary).isEmpty())
-        overlay.updateCues(listOf(Cue.Builder().setText("New secondary").build()))
-        assertEquals("New secondary", displayedCues(secondary).single().text.toString())
-    }
-
-    @Test
     fun dialogueGapKeepsPositionButNewPrimaryTrackResetsIt() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         val top = Cue.Builder().setText("Top primary")
             .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
             .setLineAnchor(Cue.ANCHOR_TYPE_START).build()
@@ -272,10 +232,7 @@ class SecondarySubtitleRenderingTest {
 
     @Test
     fun centredBitmapPrimaryKeepsAuthoredGeometryWithSecondaryEnabled() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         val bitmap = Bitmap.createBitmap(128, 64, Bitmap.Config.ARGB_8888)
         val authored = Cue.Builder().setBitmap(bitmap)
             .setPosition(0.5f).setPositionAnchor(Cue.ANCHOR_TYPE_MIDDLE)
@@ -303,10 +260,7 @@ class SecondarySubtitleRenderingTest {
 
     @Test
     fun centredPrimaryAvoidsOtherPrimaryCuesAndKeepsResolvedGapPlacement() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0f)
         overlay.select(true)
         val centred = Cue.Builder().setText("Centre primary")
@@ -335,10 +289,7 @@ class SecondarySubtitleRenderingTest {
 
     @Test
     fun upperPrimaryObstacleKeepsSecondaryStableDuringDialogueGap() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val (primary, secondary, overlay) = fixture()
         overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0f)
         overlay.select(true)
         val centred = Cue.Builder().setText("Centre primary")

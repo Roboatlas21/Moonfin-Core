@@ -20,8 +20,6 @@ const _transcodedDownloadStreams = <Map<String, dynamic>>[
 
 class _CapturingBackend extends Fake
     implements PlayerBackend, SecondarySubtitleBackend {
-  _CapturingBackend({this.demuxesEmbeddedSubtitles = true});
-
   Map<String, dynamic>? payload;
   String? selectedSecondaryLanguage;
 
@@ -60,7 +58,7 @@ class _CapturingBackend extends Fake
   @override
   bool get nativelyHandlesStartPosition => true;
   @override
-  final bool demuxesEmbeddedSubtitles;
+  bool get demuxesEmbeddedSubtitles => true;
 
   @override
   Map<String, dynamic> getDeviceProfile({
@@ -164,11 +162,8 @@ Future<Map<String, dynamic>> _payloadFor({
   int? subtitleStreamIndex,
   int? secondarySubtitleStreamIndex,
   StreamPlayMethod playMethod = StreamPlayMethod.directPlay,
-  bool demuxesEmbeddedSubtitles = true,
 }) async {
-  final backend = _CapturingBackend(
-    demuxesEmbeddedSubtitles: demuxesEmbeddedSubtitles,
-  );
+  final backend = _CapturingBackend();
   final manager = PlaybackManager()
     ..secondarySubtitleTrackSelector = ((_, _) => secondarySubtitleStreamIndex)
     ..setBackend(backend)
@@ -213,7 +208,7 @@ void main() {
     final payload = await _payloadFor(
       mediaStreams: const [
         {'Type': 'Video', 'Index': 0},
-        {'Type': 'Subtitle', 'Index': 2, 'Codec': 'subrip'},
+        {'Type': 'Subtitle', 'Index': 2, 'Codec': 'subrip', 'Language': 'jpn'},
       ],
       externalSubtitles: const [
         ExternalSubtitle(deliveryUrl: 'https://server/sub.srt', codec: 'subrip', streamIndex: 2),
@@ -224,6 +219,7 @@ void main() {
     );
     expect(payload['secondarySubtitleTrackId'], isNull);
     expect(payload['secondarySubtitleUrl'], 'https://server/sub.srt');
+    expect(payload['secondarySubtitleLanguage'], 'jpn');
   });
 
 
@@ -403,26 +399,6 @@ void main() {
     expect(payload.containsKey('selectedExternalSubtitleUrl'), isFalse);
   });
 
-
-  test('passes secondary language in the startup payload', () async {
-    final payload = await _payloadFor(
-      mediaStreams: const [
-        {'Type': 'Video', 'Index': 0},
-        {'Type': 'Subtitle', 'Index': 2, 'Codec': 'srt',
-         'Language': 'jpn', 'IsExternal': true},
-      ],
-      externalSubtitles: const [
-        ExternalSubtitle(
-          deliveryUrl: 'https://server/sub.srt',
-          codec: 'srt',
-          streamIndex: 2,
-        ),
-      ],
-      subtitleStreamIndex: -1,
-      secondarySubtitleStreamIndex: 2,
-    );
-    expect(payload['secondarySubtitleLanguage'], 'jpn');
-  });
 
   test('passes secondary language when switching tracks', () async {
     final backend = _CapturingBackend();

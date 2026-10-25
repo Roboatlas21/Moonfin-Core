@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _Native extends Fake implements NativePlayer {
   List<Map<String, dynamic>> tracks = [];
-  final properties = <String, String>{'sid': 'no', 'secondary-sub-delay': '0'};
+  final properties = <String, String>{'sid': 'no', 'secondary-sub-delay': '0', 'secondary-sub-pos': '100'};
   Completer<String>? delayedTracks;
   Completer<String>? delayedSecondaryText;
   Completer<void>? secondaryTextReadStarted;
@@ -172,7 +172,6 @@ void main() {
     prefs.dispose();
   });
 
-
   test('audio startup does not require a native player', () async {
     final other = _NonNativePlayer();
     final second = MediaKitPlayerBackend.forTesting(other, prefs);
@@ -191,86 +190,71 @@ void main() {
   });
 
   test('seeks clear in-flight placement but dialogue gaps keep it', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
-      'secondary-sub-pos': '100',
+    player.platform.properties.addAll({
       'sub-text/ass': r'{\an2}Bottom primary',
       'secondary-sub-text': 'Translation',
     });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    int position() => int.parse(other.platform.properties['secondary-sub-pos']!);
-    try {
-      other.discover();
-      await second.setSubtitleTrack(1);
-      await second.setSecondarySubtitle(embeddedTrackId: 2);
-      final bottomPosition = position();
-      expect(bottomPosition, greaterThan(50));
+    int position() => int.parse(player.platform.properties['secondary-sub-pos']!);
+    player.discover();
+    await backend.setSubtitleTrack(1);
+    await backend.setSecondarySubtitle(embeddedTrackId: 2);
+    final bottomPosition = position();
+    expect(bottomPosition, greaterThan(50));
 
-      other.platform.properties.remove('sub-text/ass');
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(position(), bottomPosition);
+    player.platform.properties.remove('sub-text/ass');
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    expect(position(), bottomPosition);
 
-      await second.seekTo(const Duration(seconds: 51));
-      expect(position(), lessThan(50));
+    await backend.seekTo(const Duration(seconds: 51));
+    expect(position(), lessThan(50));
 
-      other.platform.properties['sub-text/ass'] = r'{\an2}Bottom primary';
-      final delayed = other.platform.delayedSecondaryText = Completer<String>();
-      final started = other.platform.secondaryTextReadStarted = Completer<void>();
-      final update = second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      await started.future;
-      final seek = second.seekTo(const Duration(seconds: 60));
-      await _flush();
-      delayed.complete('Translation');
-      await Future.wait([update, seek]);
-      expect(position(), lessThan(50));
-    } finally {
-      second.dispose();
-    }
+    player.platform.properties['sub-text/ass'] = r'{\an2}Bottom primary';
+    final delayed = player.platform.delayedSecondaryText = Completer<String>();
+    final started = player.platform.secondaryTextReadStarted = Completer<void>();
+    final update = backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    await started.future;
+    final seek = backend.seekTo(const Duration(seconds: 60));
+    await _flush();
+    delayed.complete('Translation');
+    await Future.wait([update, seek]);
+    expect(position(), lessThan(50));
   });
 
   test('changing primary text or caption tracks clears the old position', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
-      'secondary-sub-pos': '100',
+    player.platform.properties.addAll({
       'sub-text/ass': r'{\an2}Bottom primary',
       'secondary-sub-text': 'Translation',
     });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    int position() => int.parse(other.platform.properties['secondary-sub-pos']!);
-    try {
-      other.discover();
-      other.platform.tracks.add({'type': 'sub', 'id': 23, 'codec': 'subrip'});
-      await _flush(); // Caption discovery reports the CC1 track.
-      await second.setSubtitleTrack(1);
-      await second.setSecondarySubtitle(embeddedTrackId: 3);
-      final bottomPosition = position();
-      expect(bottomPosition, greaterThan(50));
+    int position() => int.parse(player.platform.properties['secondary-sub-pos']!);
+    player.discover();
+    player.platform.tracks.add({'type': 'sub', 'id': 23, 'codec': 'subrip'});
+    await _flush(); // Caption discovery reports the CC1 track.
+    await backend.setSubtitleTrack(1);
+    await backend.setSecondarySubtitle(embeddedTrackId: 3);
+    final bottomPosition = position();
+    expect(bottomPosition, greaterThan(50));
 
-      other.platform.properties.remove('sub-text/ass');
-      await second.setSubtitleTrack(1);
-      expect(position(), bottomPosition); // Same track preserves dialogue-gap placement.
+    player.platform.properties.remove('sub-text/ass');
+    await backend.setSubtitleTrack(1);
+    expect(position(), bottomPosition); // Same track preserves dialogue-gap placement.
 
-      await second.setSubtitleTrack(2);
-      expect(other.platform.properties['sid'], '17');
-      expect(position(), lessThan(50));
+    await backend.setSubtitleTrack(2);
+    expect(player.platform.properties['sid'], '17');
+    expect(position(), lessThan(50));
 
-      other.platform.properties['sub-text/ass'] = 'Primary again';
-      await second.setSubtitleTrack(1);
-      expect(position(), greaterThan(50));
-      other.platform.properties.remove('sub-text/ass');
-      await second.setEmbeddedCaptionTrack(1);
-      expect(other.platform.properties['sid'], '3');
-      expect(position(), lessThan(50));
-    } finally {
-      second.dispose();
-    }
+    player.platform.properties['sub-text/ass'] = 'Primary again';
+    await backend.setSubtitleTrack(1);
+    expect(position(), greaterThan(50));
+    player.platform.properties.remove('sub-text/ass');
+    await backend.setEmbeddedCaptionTrack(1);
+    expect(player.platform.properties['sid'], '3');
+    expect(position(), lessThan(50));
   });
 
   test('primary gaps use the current font and viewport for stacking', () async {
     const primary = 'A primary subtitle which wraps in a narrow window';
     final properties = player.platform.properties;
     properties.addAll({
-      'secondary-sub-pos': '100',
       'secondary-sub-text': 'Translation',
       'osd-height': '720',
     });
@@ -302,38 +286,31 @@ void main() {
   });
 
   test('Primary Off does not persist into a new source with automatic subtitles', () async {
-    final other = _Player()..automaticSubtitleSid = '11';
-    other.platform.properties.addAll({
-      'secondary-sub-pos': '100',
+    player.automaticSubtitleSid = '11';
+    player.platform.properties.addAll({
       'sub-text/ass': 'Primary',
       'secondary-sub-text': 'Translation',
     });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      other.discover();
-      await second.disableSubtitleTrack();
-      expect(other.platform.properties['sid'], 'no');
+    player.discover();
+    await backend.disableSubtitleTrack();
+    expect(player.platform.properties['sid'], 'no');
 
-      await second.play({
-        'url': 'https://server/next.mkv',
-        'autoPlay': false,
-      });
-      expect(other.platform.properties['sid'], '11');
-      await second.setSecondarySubtitle(embeddedTrackId: 2);
-      final activePosition =
-          int.parse(other.platform.properties['secondary-sub-pos']!);
-      expect(activePosition, inInclusiveRange(50, 99));
+    await backend.play({
+      'url': 'https://server/next.mkv',
+      'autoPlay': false,
+    });
+    expect(player.platform.properties['sid'], '11');
+    await backend.setSecondarySubtitle(embeddedTrackId: 2);
+    final activePosition =
+        int.parse(player.platform.properties['secondary-sub-pos']!);
+    expect(activePosition, inInclusiveRange(50, 99));
 
-      await second.disableSubtitleTrack();
-      expect(other.platform.properties['secondary-sub-pos'], '100');
-    } finally {
-      second.dispose();
-    }
+    await backend.disableSubtitleTrack();
+    expect(player.platform.properties['secondary-sub-pos'], '100');
   });
 
   test('paused subtitle delay refreshes secondary placement for the current cue', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
+    player.platform.properties.addAll({
       'secondary-sub-delay': '0',
       'secondary-sub-pos': '0',
       'sub-text/ass': 'One line',
@@ -341,21 +318,16 @@ void main() {
       'osd-width': '1280',
       'osd-height': '720',
     });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      other.discover();
-      await second.setSecondarySubtitle(embeddedTrackId: 1);
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      final before = int.parse(other.platform.properties['secondary-sub-pos']!);
-      // No position-stream tick occurs while this fake player is paused.
-      other.platform.properties['sub-text/ass'] = r'One\NTwo\NThree';
-      await second.setSubtitleDelay(1.0);
-      final after = int.parse(other.platform.properties['secondary-sub-pos']!);
-      expect(after, lessThan(before));
-      expect(other.platform.properties['secondary-sub-delay'], '1.000');
-    } finally {
-      second.dispose();
-    }
+    player.discover();
+    await backend.setSecondarySubtitle(embeddedTrackId: 1);
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    final before = int.parse(player.platform.properties['secondary-sub-pos']!);
+    // No position-stream tick occurs while this fake player is paused.
+    player.platform.properties['sub-text/ass'] = r'One\NTwo\NThree';
+    await backend.setSubtitleDelay(1.0);
+    final after = int.parse(player.platform.properties['secondary-sub-pos']!);
+    expect(after, lessThan(before));
+    expect(player.platform.properties['secondary-sub-delay'], '1.000');
   });
 
   testWidgets('window resize refreshes secondary placement without playback ticks', (tester) async {
@@ -416,7 +388,6 @@ void main() {
     expect(player.platform.properties['sub-delay'], '0.000');
   });
 
-
   test(
     'secondary embedded track uses its real sid and survives primary changes',
     () async {
@@ -436,7 +407,6 @@ void main() {
     },
   );
 
-
   test(
     'secondary Off cancels a selection rejected by the automatic primary',
     () async {
@@ -449,7 +419,6 @@ void main() {
       expect(player.platform.properties['secondary-sid'], 'no');
     },
   );
-
 
   test('external secondary uses sub-add auto without changing primary or adding duplicates', () async {
     const url = '/downloads/secondary.srt';
@@ -465,139 +434,89 @@ void main() {
     expect(player.platform.commands, hasLength(1));
   });
 
-
   test('mpv spacing uses native font units and the bottom margin', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
+    player.platform.properties.addAll({
       'secondary-sub-delay': '0',
       'secondary-sub-pos': '0',
       'sub-text/ass': r'{\an2}Bottom',
       'secondary-sub-text': 'Other language',
     });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      other.discover();
-      await second.setSecondarySubtitle(embeddedTrackId: 1);
-      double? baselineDistance;
-      for (final spacing in [0.0, 0.02, 0.04]) {
-        for (final primaryOffset in [0.0, 0.04, 0.08]) {
-          await second.configureSubtitleStyle(fontSize: 24, verticalOffset: primaryOffset);
-          await second.configureSecondarySubtitleStyle(verticalOffset: spacing);
-          final margin = double.parse(other.platform.properties['sub-margin-y']!) / 720;
-          final position = double.parse(other.platform.properties['secondary-sub-pos']!) / 100;
-          final distance = (1 - margin) * (1 - position);
-          baselineDistance ??= distance;
-          // The gap is measured on screen. mpv's percentage coordinate shrinks when
-          // its bottom margin grows, so the property itself cannot stay constant.
-          expect(distance - spacing, closeTo(baselineDistance, 0.01));
-          expect(distance, greaterThan(55 / 720));
-        }
+    player.discover();
+    await backend.setSecondarySubtitle(embeddedTrackId: 1);
+    double? baselineDistance;
+    for (final spacing in [0.0, 0.02, 0.04]) {
+      for (final primaryOffset in [0.0, 0.04, 0.08]) {
+        await backend.configureSubtitleStyle(fontSize: 24, verticalOffset: primaryOffset);
+        await backend.configureSecondarySubtitleStyle(verticalOffset: spacing);
+        final margin = double.parse(player.platform.properties['sub-margin-y']!) / 720;
+        final position = double.parse(player.platform.properties['secondary-sub-pos']!) / 100;
+        final distance = (1 - margin) * (1 - position);
+        baselineDistance ??= distance;
+        // The gap is measured on screen. mpv's percentage coordinate shrinks when
+        // its bottom margin grows, so the property itself cannot stay constant.
+        expect(distance - spacing, closeTo(baselineDistance, 0.01));
+        expect(distance, greaterThan(55 / 720));
       }
-      expect(other.platform.properties['sub-pos'], isNull);
-      await second.disableSubtitleTrack();
-      expect(other.platform.properties['secondary-sub-pos'], '100');
-    } finally {
-      second.dispose();
     }
-  });
-
-  test('mpv reserves more room for multiline text and narrow windows', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
-      'secondary-sub-pos': '100',
-      'sub-text/ass': 'Primary',
-      'secondary-sub-text': 'Second',
-      'osd-dimensions': 'not a JSON string',
-      'osd-width': '1280',
-      'osd-height': '720',
-    });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      other.discover();
-      await second.setSecondarySubtitle(embeddedTrackId: 1);
-      await second.configureSubtitleStyle(fontSize: 24, verticalOffset: 0.04);
-      final oneLine = int.parse(other.platform.properties['secondary-sub-pos']!);
-      other.platform.properties['sub-text/ass'] = r'One\NTwo\NThree';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      final threeLines = int.parse(other.platform.properties['secondary-sub-pos']!);
-      expect(oneLine - threeLines, greaterThanOrEqualTo(15));
-      other.platform.properties['sub-text/ass'] = 'A long primary subtitle which must wrap';
-      other.platform.properties['osd-width'] = '400';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(int.parse(other.platform.properties['secondary-sub-pos']!), lessThan(threeLines));
-    } finally {
-      second.dispose();
-    }
+    expect(player.platform.properties['sub-pos'], isNull);
+    await backend.disableSubtitleTrack();
+    expect(player.platform.properties['secondary-sub-pos'], '100');
   });
 
   test('mpv OSD dimensions fall back for missing or invalid scalar values', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
-      'secondary-sub-pos': '100',
+    player.platform.properties.addAll({
       'sub-text/ass': 'A long primary subtitle that can wrap on narrow displays',
       'secondary-sub-text': 'Translation',
       'osd-dimensions': 'not JSON',
     });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    int position() => int.parse(other.platform.properties['secondary-sub-pos']!);
-    try {
-      other.discover();
-      await second.setSecondarySubtitle(embeddedTrackId: 1);
-      await second.configureSubtitleStyle(fontSize: 24, verticalOffset: 0.04);
-      final fallbackPosition = position();
+    int position() => int.parse(player.platform.properties['secondary-sub-pos']!);
+    player.discover();
+    await backend.setSecondarySubtitle(embeddedTrackId: 1);
+    await backend.configureSubtitleStyle(fontSize: 24, verticalOffset: 0.04);
+    final fallbackPosition = position();
 
-      other.platform.properties['osd-width'] = 'invalid';
-      other.platform.properties['osd-height'] = '720';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(position(), fallbackPosition);
+    player.platform.properties['osd-width'] = 'invalid';
+    player.platform.properties['osd-height'] = '720';
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    expect(position(), fallbackPosition);
 
-      other.platform.properties['osd-width'] = '400';
-      other.platform.properties['osd-height'] = '0';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(position(), fallbackPosition);
+    player.platform.properties['osd-width'] = '400';
+    player.platform.properties['osd-height'] = '0';
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    expect(position(), fallbackPosition);
 
-      other.platform.properties['osd-height'] = '720';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(position(), lessThan(fallbackPosition));
-    } finally {
-      second.dispose();
-    }
+    player.platform.properties['osd-height'] = '720';
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    expect(position(), lessThan(fallbackPosition));
   });
 
   test('mpv keeps unmeasurable primaries distinct from Primary Off', () async {
-    final other = _Player();
-    other.platform.properties.addAll({
-      'secondary-sub-pos': '100',
+    player.platform.properties.addAll({
       'secondary-sub-text': 'Other language',
     });
-    final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    int position() => int.parse(other.platform.properties['secondary-sub-pos']!);
-    try {
-      other.discover();
-      await second.setSubtitleTrack(1, isBitmapSubtitle: true);
-      await second.setSecondarySubtitle(embeddedTrackId: 2);
-      final fallback = position();
-      expect(fallback, inExclusiveRange(0, 50));
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0.06);
-      expect(position(), fallback);
+    int position() => int.parse(player.platform.properties['secondary-sub-pos']!);
+    player.discover();
+    await backend.setSubtitleTrack(1, isBitmapSubtitle: true);
+    await backend.setSecondarySubtitle(embeddedTrackId: 2);
+    final fallback = position();
+    expect(fallback, inExclusiveRange(0, 50));
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+    expect(position(), fallback);
 
-      // Text cues restore measured placement, retained through dialogue gaps.
-      other.platform.properties['sub-text/ass'] = 'Primary';
-      await second.setSubtitleTrack(1);
-      final measured = position();
-      expect(measured, greaterThan(50));
-      other.platform.properties['sub-text/ass'] = '';
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0.06);
-      expect(position(), measured);
+    // Text cues restore measured placement, retained through dialogue gaps.
+    player.platform.properties['sub-text/ass'] = 'Primary';
+    await backend.setSubtitleTrack(1);
+    final measured = position();
+    expect(measured, greaterThan(50));
+    player.platform.properties['sub-text/ass'] = '';
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+    expect(position(), measured);
 
-      // Reposition on selection even while paused, without a position-stream tick.
-      await second.setSubtitleTrack(1, isBitmapSubtitle: true);
-      expect(position(), fallback);
-      await second.disableSubtitleTrack();
-      expect(position(), 100);
-    } finally {
-      second.dispose();
-    }
+    // Reposition on selection even while paused, without a position-stream tick.
+    await backend.setSubtitleTrack(1, isBitmapSubtitle: true);
+    expect(position(), fallback);
+    await backend.disableSubtitleTrack();
+    expect(position(), 100);
   });
 
   test('discovery selects the embedded ordinal once, excluding external and CC tracks', () async {

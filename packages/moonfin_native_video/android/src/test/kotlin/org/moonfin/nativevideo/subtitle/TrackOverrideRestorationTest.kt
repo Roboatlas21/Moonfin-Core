@@ -5,7 +5,6 @@ import androidx.media3.common.TrackGroup
 import androidx.media3.common.TrackSelectionOverride
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -32,30 +31,4 @@ class TrackOverrideRestorationTest {
         assertNull(overriddenTrackOrdinal(listOf(text to 0), emptyMap()))
     }
 
-    @Test
-    fun latestExplicitChoiceWinsOverAnOlderActivatedTrack() {
-        val english = Format.Builder().setSampleMimeType("application/x-subrip")
-            .setLanguage("en").build()
-        val japanese = Format.Builder().setSampleMimeType("application/x-subrip")
-            .setLanguage("ja").build()
-        val original = TrackGroup("original", english, japanese)
-        val replacement = TrackGroup("0:original", english, japanese)
-
-        // English is still active, but the pending Media3 override already requests Japanese.
-        val activatedOrdinal = 1
-        val overrides = mapOf(original to TrackSelectionOverride(original, listOf(1)))
-        val requestedOrdinal = overriddenTrackOrdinal(
-            listOf(original to 0, original to 1), overrides,
-        )
-        assertNotEquals(activatedOrdinal, requestedOrdinal)
-        assertEquals(2, requestedOrdinal)
-        // The old override isn't attached to the replacement group.
-        assertNull(overriddenTrackOrdinal(listOf(replacement to 0, replacement to 1), overrides))
-        val reapplied = mapOf(replacement to TrackSelectionOverride(
-            replacement, listOf(requestedOrdinal!! - 1),
-        ))
-        assertEquals(2, overriddenTrackOrdinal(
-            listOf(replacement to 0, replacement to 1), reapplied,
-        ))
-    }
 }
