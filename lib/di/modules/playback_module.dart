@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
@@ -447,8 +448,9 @@ void registerPlaybackModule() {
   };
   manager.secondarySubtitleTrackSelector = (itemId, streams) {
     if (itemId.isEmpty) return null;
-    return restoreSecondarySubtitleTrack(
-      prefs.getItemSecondarySubtitleSelection(itemId),
+    final saved = prefs.getItemSecondarySubtitleSelection(itemId);
+    final restored = restoreSecondarySubtitleTrack(
+      saved,
       streams,
       isCompatible: (stream) {
         final index = stream['Index'];
@@ -457,6 +459,15 @@ void registerPlaybackModule() {
             manager.canUseAsSecondarySubtitle(index);
       },
     );
+    if (restored != null && restored >= 0 && saved != null) {
+      final canonical = secondarySubtitleTrackSelection(streams, restored);
+      if (jsonEncode(saved) != jsonEncode(canonical)) {
+        // Upgrade legacy sidecar identities after a successful restore, so
+        // later server/download switches use the stable original identity.
+        unawaited(prefs.setItemSecondarySubtitleSelection(itemId, canonical));
+      }
+    }
+    return restored;
   };
 
   // This choice carries to the next episode, so it takes the selected signal

@@ -140,6 +140,11 @@ void main() {
       legacy, [newDownload], isCompatible: (_) => true), 3);
     expect(restoreSecondarySubtitleTrack(
       legacy, [source], isCompatible: (_) => true), 3);
+    // Successful restoration can now be persisted using the source identity.
+    final canonical = secondarySubtitleTrackSelection([newDownload], 3);
+    expect(canonical['identity'], secondarySubtitleTrackSelection([source], 3)['identity']);
+    expect(restoreSecondarySubtitleTrack(
+      canonical, [source], isCompatible: (_) => true), 3);
     expect(restoreSecondarySubtitleTrack(
       legacy, [newDownload], isCompatible: (_) => false), -1);
 
