@@ -6,7 +6,6 @@ import io.github.peerless2012.ass.AssTex
 import io.github.peerless2012.ass.media.AssHandler
 import io.github.peerless2012.ass.media.type.AssRenderType
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,6 +17,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28, 35], manifest = Config.NONE)
 class MoonfinAssOverlayVisibilityTest {
+    private fun cachedAssFrame(overlay: MoonfinAssOverlayView): AssFrame? {
+        val cached = overlay.javaClass.getDeclaredField("cachedFrame")
+            .apply { isAccessible = true }.get(overlay) ?: return null
+        return cached.javaClass.getDeclaredField("frame")
+            .apply { isAccessible = true }.get(cached) as AssFrame
+    }
+
     @Test
     fun firstNewTrackBitmapSurvivesAndUnchangedRetryCannotReplaceIt() {
         val overlay = MoonfinAssOverlayView(
@@ -25,8 +31,6 @@ class MoonfinAssOverlayVisibilityTest {
             AssHandler(AssRenderType.OVERLAY_CANVAS),
         )
         val generationField = overlay.javaClass.getDeclaredField("primaryTrackGeneration")
-            .apply { isAccessible = true }
-        val frameField = overlay.javaClass.getDeclaredField("currentFrame")
             .apply { isAccessible = true }
         val publish = overlay.javaClass.getDeclaredMethod(
             "publishFrame", AssFrame::class.java, Int::class.javaPrimitiveType!!,
@@ -37,27 +41,65 @@ class MoonfinAssOverlayVisibilityTest {
         val previousGeneration = generationField.getInt(overlay)
         val oldFrame = AssFrame(emptyArray(), changed = 1)
         publish.invoke(overlay, oldFrame, previousGeneration, true)
-        assertSame(oldFrame, frameField.get(overlay))
+        assertSame(oldFrame, cachedAssFrame(overlay))
 
         // B's native selection is now recorded before the render task can
         // snapshot its generation. An already-finished A frame is stale.
         overlay.syncNativeAssTrack(Any())
         val currentGeneration = generationField.getInt(overlay)
         assertTrue(currentGeneration > previousGeneration)
-        assertNull(frameField.get(overlay))
+        // A's bitmap stays cached but is hidden until its owner is reselected.
+        assertSame(oldFrame, cachedAssFrame(overlay))
+        assertTrue(overlay.visibleFrameBounds().isEmpty())
         publish.invoke(overlay, oldFrame, previousGeneration, true)
-        assertNull(frameField.get(overlay))
+        assertSame(oldFrame, cachedAssFrame(overlay))
 
         val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
         val firstB = AssFrame(arrayOf(AssTex(12, 26, 2, 2, 0, bitmap)), changed = 1)
         publish.invoke(overlay, firstB, currentGeneration, true)
-        assertSame(firstB, frameField.get(overlay))
+        assertSame(firstB, cachedAssFrame(overlay))
         assertEquals(12f, overlay.visibleFrameBounds().single().left)
 
         // Native libass returns changed=0 with no image array on retry.
         // That cannot reconstruct a B bitmap lost in the ownership handover.
         publish.invoke(overlay, AssFrame(images = null, changed = 0), currentGeneration, true)
-        assertSame(firstB, frameField.get(overlay))
+        assertSame(firstB, cachedAssFrame(overlay))
+    }
+
+    @Test
+    fun rapidAssTrackABARetainsTheLastRenderedImage() {
+        val overlay = MoonfinAssOverlayView(
+            RuntimeEnvironment.getApplication(),
+            AssHandler(AssRenderType.OVERLAY_CANVAS),
+        )
+        val generation = overlay.javaClass.getDeclaredField("primaryTrackGeneration")
+            .apply { isAccessible = true }
+        val publish = overlay.javaClass.getDeclaredMethod(
+            "publishFrame", AssFrame::class.java, Int::class.javaPrimitiveType!!,
+            Boolean::class.javaPrimitiveType!!,
+        ).apply { isAccessible = true }
+        val a = Any()
+        val b = Any()
+        val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        val frameA = AssFrame(arrayOf(AssTex(37, 42, 2, 2, 0, bitmap)), changed = 2)
+
+        assertTrue(overlay.syncNativeAssTrack(a))
+        publish.invoke(overlay, frameA, generation.getInt(overlay), true)
+        assertEquals(37f, overlay.visibleFrameBounds().single().left)
+
+        // B was selected but never rendered, so libass's next render for A
+        // reports unchanged and does not supply a replacement bitmap.
+        assertTrue(overlay.syncNativeAssTrack(b))
+        assertSame(frameA, cachedAssFrame(overlay))
+        assertTrue(overlay.visibleFrameBounds().isEmpty())
+
+        assertTrue(overlay.syncNativeAssTrack(a))
+        assertEquals(37f, overlay.visibleFrameBounds().single().left)
+        publish.invoke(
+            overlay, AssFrame(images = null, changed = 0), generation.getInt(overlay), true,
+        )
+        assertSame(frameA, cachedAssFrame(overlay))
+        assertEquals(37f, overlay.visibleFrameBounds().single().left)
     }
 
     @Test
@@ -67,8 +109,6 @@ class MoonfinAssOverlayVisibilityTest {
             AssHandler(AssRenderType.OVERLAY_CANVAS),
         )
         val generation = overlay.javaClass.getDeclaredField("primaryTrackGeneration")
-            .apply { isAccessible = true }
-        val storedFrame = overlay.javaClass.getDeclaredField("currentFrame")
             .apply { isAccessible = true }
         val publish = overlay.javaClass.getDeclaredMethod(
             "publishFrame", AssFrame::class.java, Int::class.javaPrimitiveType!!,
@@ -86,7 +126,7 @@ class MoonfinAssOverlayVisibilityTest {
         assertTrue(!overlay.syncNativeAssTrack(null))
         // No active track: a null native return must not erase the cached cue.
         publish.invoke(overlay, null, currentGeneration, false)
-        assertSame(cue, storedFrame.get(overlay))
+        assertSame(cue, cachedAssFrame(overlay))
         assertTrue(overlay.visibleFrameBounds().isEmpty())
 
         // Selecting the same track again is still an activation transition:
@@ -97,9 +137,9 @@ class MoonfinAssOverlayVisibilityTest {
         overlay.setPrimaryVisible(true)
         // A late Off-time result cannot overwrite the reactivated track.
         publish.invoke(overlay, null, currentGeneration, false)
-        assertSame(cue, storedFrame.get(overlay))
+        assertSame(cue, cachedAssFrame(overlay))
         publish.invoke(overlay, AssFrame(images = null, changed = 0), resumedGeneration, true)
-        assertSame(cue, storedFrame.get(overlay))
+        assertSame(cue, cachedAssFrame(overlay))
         assertEquals(15f, overlay.visibleFrameBounds().single().left)
 
         // If playback crossed the cue's end while Off, the active render

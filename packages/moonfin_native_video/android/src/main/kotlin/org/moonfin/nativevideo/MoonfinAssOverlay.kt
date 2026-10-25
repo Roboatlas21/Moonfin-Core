@@ -81,8 +81,12 @@ class MoonfinAssOverlayView(
     // Bounds the executor queue to one task. Cleared by the task itself.
     private val renderScheduled = AtomicBoolean(false)
 
+    // libass reports differences from its last actual render, not from the
+    // selected track. Retain that image and its owner across unrendered switches.
+    private data class CachedFrame(val track: Any, val frame: AssFrame)
+
     @Volatile
-    private var currentFrame: AssFrame? = null
+    private var cachedFrame: CachedFrame? = null
 
     @Volatile
     private var primaryTrackGeneration = 0
@@ -123,7 +127,8 @@ class MoonfinAssOverlayView(
         }
         primaryNativeTrack = track
         primaryTrackGeneration++
-        currentFrame = null
+        // Hide the previous track immediately, but don't discard its bitmap:
+        // A -> B -> A can complete without libass ever rendering B.
         if (Looper.myLooper() == Looper.getMainLooper()) {
             invalidate()
             onFrameChanged?.invoke()
@@ -141,8 +146,14 @@ class MoonfinAssOverlayView(
     /** Called on the UI thread when ASS's visible image rectangles change. */
     var onFrameChanged: (() -> Unit)? = null
 
+    private fun visibleFrame(): AssFrame? {
+        if (!primaryVisible || !primaryAssTrackActive) return null
+        val cached = cachedFrame ?: return null
+        return cached.frame.takeIf { cached.track === primaryNativeTrack }
+    }
+
     fun visibleFrameBounds(): List<RectF> =
-        (if (primaryVisible) currentFrame else null)?.images?.mapNotNull { image ->
+        visibleFrame()?.images?.mapNotNull { image ->
             val bitmap = image.bitmap ?: return@mapNotNull null
             RectF(
                 image.x.toFloat(), image.y.toFloat(),
@@ -202,7 +213,8 @@ class MoonfinAssOverlayView(
         // The renderer is rebuilt per media item, so the frames drawn from the
         // previous one have to go with it.
         assHandler.renderCallback = {
-            currentFrame = null
+            // A rebuilt native renderer no longer owns the last bitmap.
+            cachedFrame = null
             postInvalidate()
             post { if (!released) onFrameChanged?.invoke() }
         }
@@ -245,7 +257,7 @@ class MoonfinAssOverlayView(
             }
         }
         renderScheduled.set(false)
-        currentFrame = null
+        cachedFrame = null
         onFrameChanged?.invoke()
     }
 
@@ -272,22 +284,21 @@ class MoonfinAssOverlayView(
     }
 
     private fun publishFrame(frame: AssFrame?, generation: Int, hasActiveTrack: Boolean) {
-        // While Off, libass's wrapper returns null without rendering. That is
-        // not an empty cue: preserve the bitmap for same-track reactivation.
+        // An Off-time null result is not an empty cue. Nor is libass's
+        // changed=0 reply a new bitmap: the previous rendered image still owns
+        // the pixels, even if another track was selected in between.
         if (!hasActiveTrack || generation != primaryTrackGeneration) return
-        // An active track with an empty cue must still clear the old image.
-        if (frame != null && frame.changed == 0 && currentFrame != null) return
-        if (frame == null && currentFrame == null) return
+        if (frame?.changed == 0) return
+        if (frame == null && cachedFrame == null) return
         frame?.images?.forEach { it.bitmap?.prepareToDraw() }
-        currentFrame = frame
+        cachedFrame = frame?.let { CachedFrame(requireNotNull(primaryNativeTrack), it) }
         postInvalidate()
         post { if (!released) onFrameChanged?.invoke() }
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        if (!primaryVisible) return
-        val frame = currentFrame ?: return
+        val frame = visibleFrame() ?: return
         frame.images?.forEach { image ->
             val bitmap = image.bitmap ?: return@forEach
             // libass packs RGBA with an inverted alpha byte.
