@@ -2,6 +2,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/playback/web_subtitle_position.dart';
 
 void main() {
+  const centre = (align: 'center', position: 50.0, positionAlign: 'center', size: 100.0);
+
+  test('automatic cues stack by measured height above the chosen edge margin', () {
+    for (final offset in [0.0, 0.04, 0.2, 0.04]) {
+      final occupied = <WebVttCueBox>[];
+      var expectedBottom = 1 - offset;
+      for (final height in [0.06, 0.12, 0.09]) {
+        final top = fitWebAutomaticCue(1 - offset, height, centre, occupied);
+        expect(top, closeTo(expectedBottom - height, 0.000001));
+        occupied.add((top: top, bottom: top + height, horizontal: centre));
+        expectedBottom = top - 0.002;
+      }
+      final secondaryTop = fitWebSecondaryGroup(occupied.first.top - 0.075,
+          0.06, [for (final box in occupied) (top: box.top, bottom: box.bottom)],
+          0.015, preferBelow: false);
+      expect(secondaryTop + 0.06, closeTo(occupied.last.top - 0.015, 0.000001));
+    }
+  });
+
+  test('automatic cues keep separate columns and avoid authored boxes', () {
+    const left = (align: 'left', position: 0.0, positionAlign: 'line-left', size: 40.0);
+    const right = (align: 'right', position: 100.0, positionAlign: 'line-right', size: 40.0);
+    final occupied = <WebVttCueBox>[(top: 0.8, bottom: 0.9, horizontal: left)];
+    expect(fitWebAutomaticCue(0.9, 0.1, right, occupied), closeTo(0.8, 0.000001));
+    expect(fitWebAutomaticCue(0.9, 0.1, left, occupied), closeTo(0.698, 0.000001));
+    expect(fitWebAutomaticCue(0.7, 0.1, left, occupied), closeTo(0.6, 0.000001));
+    expect(occupied.single.top, 0.8);
+    expect(fitWebAutomaticCue(0.9, 0.1, left, const []), closeTo(0.8, 0.000001));
+  });
+
   test('SRT alignment tags use the same edge margin in all three columns', () {
     for (final offset in [0.0, 0.1, 0.2, 0.0]) {
       for (var alignment = 1; alignment <= 9; alignment++) {

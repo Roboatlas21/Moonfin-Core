@@ -1170,6 +1170,13 @@ class HtmlVideoBackend extends PlayerBackend
     );
   }
 
+  Object _cuePlacement(web.VTTCue cue) => (
+    cue.line.dartify(), cue.snapToLines, cue.position.dartify(), cue.size,
+    cue.align, cue.vertical, cue.region,
+    _nativeLineAlignment ? _cueAlignment(cue, 'lineAlign', 'start') : null,
+    _nativePositionAlignment ? _cueAlignment(cue, 'positionAlign', 'auto') : null,
+  );
+
   void _positionSecondaryCues() {
     if (_secondaryCues.isEmpty) return;
     final activePrimary = _activePrimaryCues();
@@ -1237,9 +1244,10 @@ class HtmlVideoBackend extends PlayerBackend
         )
         .toList();
     final horizontal = primary == null ? null : _measureCue(primary).horizontal;
-    final secondary = <({web.VTTCue cue, double height})>[];
+    final secondary = <({web.VTTCue cue, double height, Object placement})>[];
     for (final original in active.isEmpty ? _secondaryCues.take(1) : active) {
       final cue = original.cue;
+      final placement = _cuePlacement(cue);
       // Use the primary's physical box so opposite text directions keep the same
       // alignment. All active secondary cues share one group, in source order.
       cue
@@ -1254,6 +1262,7 @@ class HtmlVideoBackend extends PlayerBackend
       secondary.add((
         cue: cue,
         height: _primaryCueHeight(cue, secondary: true),
+        placement: placement,
       ));
     }
     final height = secondary.fold(0.0, (sum, item) => sum + item.height);
@@ -1264,6 +1273,7 @@ class HtmlVideoBackend extends PlayerBackend
       gap,
       preferBelow: below,
     );
+    var placementChanged = false;
     for (final item in secondary) {
       _setCueLine(
         item.cue,
@@ -1271,7 +1281,15 @@ class HtmlVideoBackend extends PlayerBackend
         below ? 'start' : 'end',
         secondary: true,
       );
+      placementChanged |= _cuePlacement(item.cue) != item.placement;
       top += item.height;
+    }
+    // Chromium can keep the old displayed box after a paused cue moves. Refresh
+    // only a visible track whose placement changed, so cuechange cannot loop.
+    final track = _secondaryTrack?.track;
+    if (placementChanged && track?.mode == 'showing') {
+      track!.mode = 'hidden';
+      track.mode = 'showing';
     }
   }
 
@@ -1419,7 +1437,7 @@ class HtmlVideoBackend extends PlayerBackend
   }
 
   void _positionPrimaryCues(Iterable<web.VTTCue> cues) {
-    final line = (1 - _subtitleVerticalOffset) * 100;
+    final automatic = <web.VTTCue>[];
     for (final vtt in cues) {
       final tag = srtAlignmentTag.firstMatch(vtt.text);
       if (tag != null) {
@@ -1451,7 +1469,7 @@ class HtmlVideoBackend extends PlayerBackend
       if (vtt.has(_autoPositionedCue) || vtt.line.dartify() == 'auto') {
         vtt.setProperty(_autoPositionedCue.toJS, true.toJS);
         _clearPrimaryMiddleCueState(vtt);
-        _setCueLine(vtt, line / 100, 'end');
+        automatic.add(vtt);
         continue;
       }
       final saved = vtt.getProperty<JSNumber?>(_authoredLine.toJS);
@@ -1492,6 +1510,21 @@ class HtmlVideoBackend extends PlayerBackend
             snap ? (authored < 0 ? 'end' : 'start')
                 : _nativeLineAlignment ? originalAlign : 'start');
       }
+    }
+    if (automatic.isEmpty) return;
+    // Absolute line coordinates disable native cue stacking. Recreate it for
+    // automatic cues using their measured boxes, without moving authored cues.
+    final occupied = cues.where((cue) => !automatic.contains(cue)).map((cue) {
+      final bounds = _primaryCueBounds(cue);
+      return (top: bounds.top, bottom: bounds.bottom, horizontal: _measureCue(cue).horizontal);
+    }).toList();
+    for (final cue in automatic) {
+      final measured = _measureCue(cue);
+      final top = fitWebAutomaticCue(1 - _subtitleVerticalOffset,
+          measured.height, measured.horizontal, occupied);
+      final bottom = top + measured.height;
+      _setCueLine(cue, bottom, 'end');
+      occupied.add((top: top, bottom: bottom, horizontal: measured.horizontal));
     }
   }
 

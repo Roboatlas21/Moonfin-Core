@@ -13,6 +13,39 @@ typedef WebVttHorizontalPlacement = ({
   double size,
 });
 
+typedef WebVttCueBox = ({
+  double top,
+  double bottom,
+  WebVttHorizontalPlacement horizontal,
+});
+
+/// Move an automatic cue above overlapping boxes, keeping separate columns level.
+double fitWebAutomaticCue(
+  double bottom,
+  double height,
+  WebVttHorizontalPlacement horizontal,
+  List<WebVttCueBox> occupied,
+) {
+  double left(WebVttHorizontalPlacement box) => box.position - switch (box.positionAlign) {
+    'line-left' => 0,
+    'line-right' => box.size,
+    _ => box.size / 2,
+  };
+  final cueLeft = left(horizontal);
+  final cueRight = cueLeft + horizontal.size;
+  final blockers = occupied.where((box) {
+    final boxLeft = left(box.horizontal);
+    return cueLeft < boxLeft + box.horizontal.size && cueRight > boxLeft;
+  }).toList()..sort((a, b) => b.top.compareTo(a.top));
+  const gap = 0.002;
+  for (final box in blockers) {
+    if (bottom > box.top - gap && bottom - height < box.bottom + gap) {
+      bottom = box.top - gap;
+    }
+  }
+  return (bottom - height).clamp(0.0, (1 - height).clamp(0.0, 1.0)).toDouble();
+}
+
 /// Resolve the primary's physical box before applying it to another language.
 /// Older browsers infer the position anchor from alignment, so moving that anchor
 /// also requires moving the position to the matching edge of the same box.
