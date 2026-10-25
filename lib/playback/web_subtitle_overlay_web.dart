@@ -59,6 +59,7 @@ class WebSubtitleOverlay {
   final web.HTMLVideoElement _video;
 
   _Jassub? _assRenderer;
+  Timer? _assFontRedraw;
   _PgsRenderer? _pgsRenderer;
   double _delaySeconds = 0;
   bool _disposed = false;
@@ -125,8 +126,24 @@ class WebSubtitleOverlay {
         return;
       }
       _assRenderer = renderer;
-      // A subtitle picked while paused may never receive a video-frame tick.
-      // Give it the current clock immediately, just as a delay change does.
+      // JASSUB reports worker readiness before asynchronously loaded fonts
+      // are registered. A paused video has no subsequent frame callback, so
+      // repaint after registration instead of trusting the initial clock tick.
+      renderer.addEventListener('fontAdded', ((JSAny? _) {
+        if (_disposed || generation != _rendererGeneration ||
+            !identical(_assRenderer, renderer) || !_video.paused) {
+          return;
+        }
+        _assFontRedraw?.cancel();
+        _assFontRedraw = Timer(const Duration(milliseconds: 100), () {
+          _assFontRedraw = null;
+          if (_disposed || generation != _rendererGeneration ||
+              !identical(_assRenderer, renderer) || !_video.paused) {
+            return;
+          }
+          renderer.setCurrentTime(true, _video.currentTime - _delaySeconds);
+        });
+      }).toJS);
       renderer.setCurrentTime(_video.paused, _video.currentTime - _delaySeconds);
     } catch (error) {
       _assRenderer?.destroy();
@@ -206,6 +223,8 @@ class WebSubtitleOverlay {
   void clear() {
     // Ignore pending load results after this subtitle selection is cleared or replaced.
     _rendererGeneration++;
+    _assFontRedraw?.cancel();
+    _assFontRedraw = null;
     final ass = _assRenderer;
     _assRenderer = null;
     if (ass != null) {
@@ -303,6 +322,7 @@ class WebSubtitleOverlay {
 @JS('JASSUB')
 extension type _Jassub._(JSObject _) implements JSObject {
   external factory _Jassub(JSObject options);
+  external void addEventListener(String type, JSFunction listener);
   external set timeOffset(double seconds);
   external void setCurrentTime(bool paused, double seconds);
   external void destroy();
