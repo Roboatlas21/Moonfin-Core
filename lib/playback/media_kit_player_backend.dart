@@ -859,6 +859,15 @@ class MediaKitPlayerBackend extends PlayerBackend
 
     _resetSubtitleState();
     if (!_ownsPlayback(generation)) return;
+    // Seed this source before awaiting preparation; later user changes must
+    // replace these values and be reapplied after mpv resets the source.
+    _secondarySubtitleDelay =
+        (((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000)
+            .clamp(-5.0, 5.0);
+    _secondaryVerticalOffset =
+        ((payload['secondarySubtitleOffset'] as num?)?.toDouble() ??
+                PlaybackManager.defaultSecondarySubtitleOffset)
+            .clamp(0.0, 0.06).toDouble();
     _setSelectedExternalSubtitle(
       payload['selectedExternalSubtitleUrl'] as String?,
     );
@@ -953,12 +962,10 @@ class MediaKitPlayerBackend extends PlayerBackend
       );
     }
     if (!_ownsPlayback(generation)) return;
-    await setSecondarySubtitleDelay(
-      ((payload['secondarySubtitleDelayMs'] as num?) ?? 0) / 1000,
-    );
+    await setSecondarySubtitleDelay(_secondarySubtitleDelay);
     if (!_ownsPlayback(generation)) return;
     await configureSecondarySubtitleStyle(
-      verticalOffset: (payload['secondarySubtitleOffset'] as num?)?.toDouble(),
+      verticalOffset: _secondaryVerticalOffset,
     );
     if (!_ownsPlayback(generation)) return;
     _secondarySourceReadyGeneration = generation;
@@ -3199,10 +3206,10 @@ class MediaKitPlayerBackend extends PlayerBackend
     double? verticalOffset,
     int? textColor,
   }) async {
-    await _secondaryControlsReady;
-    if (_isDisposed || !supportsSecondarySubtitlePosition) return;
     _secondaryVerticalOffset = (verticalOffset ??
         PlaybackManager.defaultSecondarySubtitleOffset).clamp(0.0, 0.06).toDouble();
+    await _secondaryControlsReady;
+    if (_isDisposed || !supportsSecondarySubtitlePosition) return;
     await _refreshStackedSecondaryPosition(force: true);
   }
 
