@@ -17,6 +17,7 @@ import androidx.media3.common.text.Cue
 import androidx.media3.common.text.LanguageFeatureSpan
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
+import kotlin.math.roundToInt
 
 /** Replace Media3's default SRT alignment margins; other formats keep their coordinates. */
 internal fun primaryCueWithoutDefaultMargin(cue: Cue, format: Format?): Cue {
@@ -482,6 +483,7 @@ internal class SecondarySubtitleOverlay(
             measureTextHeights(cue, width, height, fontPx, primary = true) else null
         val anchorHeight = measured?.anchor ?: (cue.bitmapHeight * height).coerceAtLeast(1f)
         val boxHeight = measured?.drawn ?: anchorHeight
+        val firstLineHeight = measured?.firstLine ?: fontPx
         val cueWidth = if (bitmap != null) {
             (boxHeight * bitmap.width / bitmap.height).coerceAtMost(width.toFloat())
         } else {
@@ -495,8 +497,10 @@ internal class SecondarySubtitleOverlay(
                 Cue.ANCHOR_TYPE_MIDDLE -> cue.line * height - anchorHeight / 2f
                 else -> cue.line * height
             }
-            cue.line < 0f -> height * (1f - primaryBottomPaddingFraction) + cue.line * fontPx - anchorHeight
-            else -> cue.line * fontPx
+            // Media3's numbered WebVTT lines use the measured FIRST line, not
+            // the nominal font size. Negative lines count from the screen bottom.
+            cue.line < 0f -> height + ((cue.line + 1f) * firstLineHeight).roundToInt() - anchorHeight
+            else -> (cue.line * firstLineHeight).roundToInt().toFloat()
         }
         // SubtitlePainter clamps positioned text using the initial layout height.
         // Its final drawn height still determines the collision box below.
@@ -538,7 +542,11 @@ internal class SecondarySubtitleOverlay(
         }
     }
 
-    private data class TextLayoutHeights(val anchor: Float, val drawn: Float)
+    private data class TextLayoutHeights(
+        val anchor: Float,
+        val drawn: Float,
+        val firstLine: Float,
+    )
 
     /** Media3 anchors the first layout but draws a second one after horizontal clipping. */
     @Suppress("DEPRECATION") // Use the same StaticLayout constructor as Media3.
@@ -592,7 +600,8 @@ internal class SecondarySubtitleOverlay(
         }
         val drawn = if (drawnWidth <= 0) 0f else StaticLayout(text, measurementPaint,
             drawnWidth, alignment, lineSpacingMultiplier, lineSpacingExtra, true).height.toFloat()
-        return TextLayoutHeights(initial.height.toFloat(), drawn)
+        return TextLayoutHeights(initial.height.toFloat(), drawn,
+            (initial.getLineBottom(0) - initial.getLineTop(0)).toFloat())
     }
 
     fun clear() {
