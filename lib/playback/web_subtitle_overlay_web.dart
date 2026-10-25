@@ -119,8 +119,17 @@ class WebSubtitleOverlay {
       ..setProperty('fallbackFont'.toJS, 'Noto Sans'.toJS)
       ..setProperty('availableFonts'.toJS, _cjkAvailableFonts());
     try {
-      _assRenderer = _Jassub(options);
+      final renderer = _Jassub(options);
+      if (_disposed || generation != _rendererGeneration) {
+        renderer.destroy();
+        return;
+      }
+      _assRenderer = renderer;
+      // A subtitle picked while paused may never receive a video-frame tick.
+      // Give it the current clock immediately, just as a delay change does.
+      renderer.setCurrentTime(_video.paused, _video.currentTime - _delaySeconds);
     } catch (error) {
+      _assRenderer?.destroy();
       _assRenderer = null;
       _reportFailure(generation, 'ASS', error);
     }
