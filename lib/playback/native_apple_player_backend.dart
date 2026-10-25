@@ -19,7 +19,7 @@ import 'letterbox_croppers.dart';
 import 'lossless_audio_bridge.dart';
 import 'server_transcode_capabilities.dart';
 
-class NativeApplePlayerBackend implements PlayerBackend {
+class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend {
   NativeApplePlayerBackend(this._prefs) {
     _eventSub = _events.receiveBroadcastStream().listen(
       _handleEvent,
@@ -783,7 +783,12 @@ class NativeApplePlayerBackend implements PlayerBackend {
   }
 
   @override
-  Future<void> setSecondarySubtitle({String? url, String? codec}) async {}
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    String? language,
+    int? embeddedTrackId,
+  }) async {}
 
   @override
   Future<void> setSecondarySubtitleDelay(double seconds) async {}
@@ -859,6 +864,7 @@ class NativeApplePlayerBackend implements PlayerBackend {
 
   @override
   Future<void> setSubtitleDelay(double seconds) async {
+    subtitleDelaySeconds = seconds;
     _subtitleDelaySeconds = seconds;
     await _invoke<void>('setSubtitleDelay', {
       'delayMs': (seconds * 1000).round(),

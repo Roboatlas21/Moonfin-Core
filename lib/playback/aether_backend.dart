@@ -25,7 +25,7 @@ import 'server_transcode_capabilities.dart';
 /// music, audiobooks and offline playback. Unlike the tvOS sibling there is
 /// no native player UI: Flutter owns the OSD and the video arrives through
 /// the `moonfin/aether_video` platform view.
-class AetherBackend implements PlayerBackend, SubtitleLoadingBackend {
+class AetherBackend with SubtitleDelayState implements PlayerBackend, SubtitleLoadingBackend {
   AetherBackend(this._prefs) {
     _eventSub = _events.receiveBroadcastStream().listen(
       _handleEvent,
@@ -588,7 +588,12 @@ class AetherBackend implements PlayerBackend, SubtitleLoadingBackend {
   }
 
   @override
-  Future<void> setSecondarySubtitle({String? url, String? codec}) async {}
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    String? language,
+    int? embeddedTrackId,
+  }) async {}
 
   @override
   Future<void> setSecondarySubtitleDelay(double seconds) async {}
@@ -660,6 +665,7 @@ class AetherBackend implements PlayerBackend, SubtitleLoadingBackend {
 
   @override
   Future<void> setSubtitleDelay(double seconds) async {
+    subtitleDelaySeconds = seconds;
     await _invoke<void>('setSubtitleDelay', {
       'delayMs': (seconds * 1000).round(),
     });
