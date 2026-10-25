@@ -2362,6 +2362,11 @@ class Media3VideoView(
                 }
 
                 "disableSubtitleTrack" -> {
+                    rememberSourceArguments(
+                        "forceSubtitlesDisabledOnStart" to true,
+                        "primarySubtitleSelection" to null,
+                        "closedCaptionTrackId" to null,
+                    )
                     trackSelector.parameters = trackSelector.parameters
                         .buildUpon()
                         .clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -2544,6 +2549,11 @@ class Media3VideoView(
                 }
 
                 "disableSubtitleTrack" -> {
+                    rememberSourceArguments(
+                        "forceSubtitlesDisabledOnStart" to true,
+                        "primarySubtitleSelection" to null,
+                        "closedCaptionTrackId" to null,
+                    )
                     trackSelector.parameters = trackSelector.parameters
                         .buildUpon()
                         .clearOverridesOfType(C.TRACK_TYPE_TEXT)
@@ -2706,18 +2716,25 @@ class Media3VideoView(
         val forceSubtitlesDisabledOnStart = args["forceSubtitlesDisabledOnStart"] as? Boolean ?: false
         subtitleTrackEnabled = !forceSubtitlesDisabledOnStart
         secondarySubtitleOverlay.setPrimaryEnabled(subtitleTrackEnabled)
-        pendingSubtitleIndex = null
-        pendingSubtitleCodec = null
-        pendingSubtitleIsExternal = null
-        pendingSubtitleIsBitmap = null
-        pendingExternalSubtitleUrl = null
+        // Replay the latest request after recreation, once the new track groups arrive.
+        val primarySelection = args["primarySubtitleSelection"] as? Map<*, *>
+        pendingSubtitleIndex = (primarySelection?.get("index") as? Number)?.toInt()
+        pendingSubtitleCodec = primarySelection?.get("codec")?.toString()
+        pendingSubtitleIsExternal = primarySelection?.get("isExternalSubtitle") as? Boolean
+        pendingSubtitleIsBitmap = primarySelection?.get("isBitmapSubtitle") as? Boolean
+        pendingExternalSubtitleUrl = primarySelection?.get("externalSubtitleUrl")?.toString()
+        pendingExternalSubtitleUrl?.takeIf { it.isNotBlank() }?.let { url ->
+            if (externalSubtitleConfigurations.none { it.uri == parseUri(url) }) {
+                appendExternalSubtitle(DeclaredSubtitle(url, pendingSubtitleCodec, null, null))
+            }
+        }
         // The first onTracksChanged applies this while the player is still
         // buffering, so playback starts on the requested track rather than
         // opening the container default and switching once it lands.
         pendingAudioIndex = (args["audioTrackOrdinal"] as? Number)
             ?.toInt()
             ?.takeIf { it > 0 }
-        pendingClosedCaptionId = null
+        pendingClosedCaptionId = (args["closedCaptionTrackId"] as? Number)?.toInt()
         firstFrameRendered = false
         firstFrameCover.visibility = View.VISIBLE
         if (letterboxCrop != null) {
@@ -3372,7 +3389,7 @@ class Media3VideoView(
     }
 
     // A resume from the background or the screensaver reloads
-    // lastSourceArguments, so the secondary track and its settings are kept
+    // lastSourceArguments, so subtitle selections and their settings are kept
     // there as they change.
     private fun rememberSourceArguments(vararg entries: Pair<String, Any?>) {
         val args = lastSourceArguments ?: return
@@ -5066,6 +5083,11 @@ class Media3VideoView(
         val isBitmap = args?.get("isBitmapSubtitle") as? Boolean ?: false
         val externalUrl = args?.get("externalSubtitleUrl")?.toString()
 
+        rememberSourceArguments(
+            "forceSubtitlesDisabledOnStart" to false,
+            "primarySubtitleSelection" to args?.toMap(),
+            "closedCaptionTrackId" to null,
+        )
         pendingClosedCaptionId = null
         pendingSubtitleIndex = index
         pendingSubtitleCodec = codec
@@ -5105,6 +5127,11 @@ class Media3VideoView(
     private fun handleSetClosedCaptionTrack(args: Map<*, *>?) {
         val id = (args?.get("id") as? Number)?.toInt() ?: 0
 
+        rememberSourceArguments(
+            "forceSubtitlesDisabledOnStart" to false,
+            "primarySubtitleSelection" to null,
+            "closedCaptionTrackId" to id,
+        )
         pendingSubtitleIndex = null
         pendingSubtitleCodec = null
         pendingSubtitleIsExternal = null
