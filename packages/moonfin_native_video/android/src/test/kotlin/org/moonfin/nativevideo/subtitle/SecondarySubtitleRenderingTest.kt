@@ -252,6 +252,31 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
+    fun numberedWebVttLinesDoNotOverlapAtZeroOffset() {
+        val text = "我们今天要一起讨论如何让中文字幕和英文翻译同时清晰地显示在屏幕上。"
+        for (line in listOf(2, 3)) {
+            val file = "WEBVTT\n\n00:00:00.000 --> 00:00:05.000 line:$line\n$text\n"
+            val bytes = file.toByteArray()
+            val cues = mutableListOf<Cue>()
+            WebvttParser().parse(bytes, 0, bytes.size, SubtitleParser.OutputOptions.allCues()) {
+                cues.addAll(it.cues)
+            }
+            val f = Scene()
+            f.primary.setFractionalTextSize(0.06f)
+            f.primary.setBottomPaddingFraction(0f)
+            f.style(0f)
+            f.show(cues, "English translation")
+
+            assertEquals(Cue.LINE_TYPE_NUMBER, f.main.single().lineType)
+            val primary = inkBounds(f.primary)
+            val secondary = inkBounds(f.secondary)
+            assertTrue("Expected a multiline primary for line:$line", primary.height() > 70)
+            assertTrue("Secondary must clear numbered line:$line ($primary / $secondary)",
+                secondary.top > primary.bottom)
+        }
+    }
+
+    @Test
     fun measuredHeightFollowsEmbeddedStyleAndFontSizePreferences() {
         val text = SpannableStringBuilder("我们今天要一起讨论如何让中文字幕和英文翻译同时清晰地显示在屏幕上。")
         text.setSpan(RelativeSizeSpan(1.5f), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)

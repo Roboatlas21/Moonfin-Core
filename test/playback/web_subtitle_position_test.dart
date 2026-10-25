@@ -32,6 +32,25 @@ void main() {
     expect(fitWebAutomaticCue(0.9, 0.1, left, const []), closeTo(0.8, 0.000001));
   });
 
+  test('percentage-position fallback avoids crowded columns but keeps distant ones level', () {
+    const left = (align: 'left', position: 0.0, positionAlign: 'line-left', size: 40.0);
+    const right = (align: 'right', position: 100.0, positionAlign: 'line-right', size: 40.0);
+    final occupied = <WebVttCueBox>[(top: 0.8, bottom: 0.9, horizontal: left)];
+
+    // Without a native positionAlign property, a cue can draw away from its
+    // inferred anchor. Treat these two columns as potentially overlapping.
+    expect(fitWebAutomaticCue(0.9, 0.1, right, occupied,
+        conservativeHorizontal: true), closeTo(0.698, 0.000001));
+    // A browser with native positioning keeps the two columns on one row.
+    expect(fitWebAutomaticCue(0.9, 0.1, right, occupied), closeTo(0.8, 0.000001));
+
+    const narrowLeft = (align: 'left', position: 0.0, positionAlign: 'line-left', size: 10.0);
+    const narrowRight = (align: 'right', position: 100.0, positionAlign: 'line-right', size: 10.0);
+    final distant = <WebVttCueBox>[(top: 0.8, bottom: 0.9, horizontal: narrowLeft)];
+    expect(fitWebAutomaticCue(0.9, 0.1, narrowRight, distant,
+        conservativeHorizontal: true), closeTo(0.8, 0.000001));
+  });
+
   test('SRT alignment tags use the same edge margin in all three columns', () {
     for (final offset in [0.0, 0.1, 0.2, 0.0]) {
       for (var alignment = 1; alignment <= 9; alignment++) {
