@@ -3426,7 +3426,15 @@ class Media3VideoView(
             prepareCurrentSource(player.currentPosition, player.playWhenReady)
         } else {
             applySecondarySubtitle()
-            if ((id != null || url != null) && embeddedOffsetSource == null) applySubtitleDelay()
+            // The adjustment can change while Secondary is Off. Existing source
+            // wrappers still hold its old offset, so synchronize them when a
+            // track is enabled again. Avoid retiming already up-to-date sources.
+            if ((id != null || url != null) &&
+                (embeddedOffsetSource == null ||
+                    embeddedOffsetSource?.currentSecondaryOffsetUs != secondarySubtitleOffsetUs())
+            ) {
+                applySubtitleDelay()
+            }
         }
     }
 

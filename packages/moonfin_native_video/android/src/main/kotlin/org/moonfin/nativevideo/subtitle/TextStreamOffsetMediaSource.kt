@@ -37,6 +37,10 @@ internal class TextStreamOffsetMediaSource(
     private var timeOffsetUs: Long = initialOffsetUs
     @Volatile private var secondaryOffsetUs: Long? = initialSecondaryOffsetUs
 
+    /** Most recently applied source offset, which may lag a saved adjustment while Off. */
+    val currentSecondaryOffsetUs: Long?
+        get() = secondaryOffsetUs
+
     fun setTimeOffsetUs(offsetUs: Long, secondaryUs: Long? = secondaryOffsetUs) {
         timeOffsetUs = offsetUs
         secondaryOffsetUs = secondaryUs
