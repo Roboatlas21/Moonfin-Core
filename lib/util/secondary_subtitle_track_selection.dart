@@ -65,6 +65,16 @@ int? restoreSecondarySubtitleTrack(
       return stream['Index'] as int?;
     }
   }
+
+  // Earlier downloads saved the local SRT/WebVTT sidecar identity. Newer
+  // downloads expose the originating stream instead. Accept a legacy choice
+  // only when the source title, language and normalized codec still agree.
+  final legacyMatches = candidates
+      .where((stream) => _matchesLegacyDownloadIdentity(identity, stream))
+      .toList();
+  final sameIndex = legacyMatches.where((s) => s['Index'] == savedIndex).toList();
+  if (sameIndex.length == 1) return sameIndex.single['Index'] as int?;
+  if (legacyMatches.length == 1) return legacyMatches.single['Index'] as int?;
   return -1;
 }
 
@@ -88,3 +98,38 @@ Map<String, dynamic> _identity(Map<String, dynamic> stream) {
 }
 
 String _signature(Map<String, dynamic> stream) => jsonEncode(_identity(stream));
+
+bool _matchesLegacyDownloadIdentity(
+  Map<String, dynamic> saved,
+  Map<String, dynamic> stream,
+) {
+  // This shape was written by transcoded downloads before they carried
+  // OriginalSubtitleStream. Other identities must continue matching exactly.
+  if (saved['IsExternal'] != true ||
+      saved.keys.any((key) => !const {
+        'Language',
+        'Title',
+        'Codec',
+        'IsExternal',
+      }.contains(key))) {
+    return false;
+  }
+  final title = saved['Title'];
+  final codec = _canonicalTextCodec(saved['Codec']);
+  if (title is! String || title.trim().isEmpty || codec == null) return false;
+  final original = stream['OriginalSubtitleStream'];
+  final source = original is Map ? original : stream;
+  if (_canonicalTextCodec(source['Codec']) != codec ||
+      source['Language'] != saved['Language']) {
+    return false;
+  }
+  final originalTitle = source['DisplayTitle'] ?? source['Title'];
+  return originalTitle == title;
+}
+
+String? _canonicalTextCodec(Object? codec) => switch (
+    codec?.toString().trim().toLowerCase()) {
+  'srt' || 'subrip' => 'srt',
+  'vtt' || 'webvtt' => 'vtt',
+  _ => null,
+};

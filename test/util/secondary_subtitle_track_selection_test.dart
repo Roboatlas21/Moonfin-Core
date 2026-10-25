@@ -111,6 +111,59 @@ void main() {
     ], isCompatible: (_) => true), -1);
   });
 
+  test('older downloaded sidecar selections restore after upgrading', () {
+    final source = <String, dynamic>{
+      'Type': 'Subtitle',
+      'Index': 3,
+      'Language': 'fra',
+      'Title': 'French SDH',
+      'DisplayTitle': 'French (SubRip) SDH',
+      'Codec': 'subrip',
+      'IsExternal': false,
+      'IsForced': false,
+    };
+    final oldDownload = <String, dynamic>{
+      'Type': 'Subtitle',
+      'Index': 3,
+      'Language': 'fra',
+      'Title': 'French (SubRip) SDH',
+      'Codec': 'srt',
+      'IsExternal': true,
+    };
+    final legacy = secondarySubtitleTrackSelection([oldDownload], 3);
+    final newDownload = <String, dynamic>{
+      ...oldDownload,
+      'OriginalSubtitleStream': source,
+    };
+
+    expect(restoreSecondarySubtitleTrack(
+      legacy, [newDownload], isCompatible: (_) => true), 3);
+    expect(restoreSecondarySubtitleTrack(
+      legacy, [source], isCompatible: (_) => true), 3);
+    expect(restoreSecondarySubtitleTrack(
+      legacy, [newDownload], isCompatible: (_) => false), -1);
+
+    // Never turn a legacy sidecar choice into an index-only fallback.
+    expect(restoreSecondarySubtitleTrack(legacy, [
+      {...source, 'Language': 'eng'},
+    ], isCompatible: (_) => true), -1);
+    expect(restoreSecondarySubtitleTrack(legacy, [
+      {...source, 'DisplayTitle': 'Another French caption'},
+    ], isCompatible: (_) => true), -1);
+    expect(restoreSecondarySubtitleTrack(legacy, [
+      {...source, 'Codec': 'ass'},
+    ], isCompatible: (_) => true), -1);
+
+    // A changed index needs an unambiguous match, as with modern identities.
+    final renumbered = {...source, 'Index': 17};
+    expect(restoreSecondarySubtitleTrack(
+      legacy, [renumbered], isCompatible: (_) => true), 17);
+    expect(restoreSecondarySubtitleTrack(legacy, [
+      renumbered,
+      {...source, 'Index': 18},
+    ], isCompatible: (_) => true), -1);
+  });
+
   test('explicit Off is distinct from no stored choice', () {
     final off = secondarySubtitleTrackSelection([french], -1);
 
