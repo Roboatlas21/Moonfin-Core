@@ -88,6 +88,8 @@ class MoonfinAssOverlayView(
     private var primaryTrackGeneration = 0
     @Volatile
     private var primaryNativeTrack: Any? = null
+    @Volatile
+    private var primaryAssTrackActive = false
 
     @Volatile
     private var lastPresentationTimeUs: Long? = null
@@ -107,7 +109,18 @@ class MoonfinAssOverlayView(
     // and before rendering. Off keeps the last native track identity so
     // reselecting it while paused can reuse an unchanged libass image.
     fun syncNativeAssTrack(track: Any?): Boolean {
-        if (track == null || primaryNativeTrack === track) return false
+        val wasActive = primaryAssTrackActive
+        primaryAssTrackActive = track != null
+        if (track == null) return false
+        // Off retains the previous native identity, but re-enabling the same
+        // track still needs a render at the current (possibly later) playhead.
+        if (primaryNativeTrack === track) {
+            if (wasActive) return false
+            // An Off-time render may still be in flight. Invalidate its
+            // generation without dropping this track's cached bitmap.
+            primaryTrackGeneration++
+            return true
+        }
         primaryNativeTrack = track
         primaryTrackGeneration++
         currentFrame = null
@@ -139,16 +152,18 @@ class MoonfinAssOverlayView(
 
     private val renderTask = Runnable {
         var generation = -1
+        var hasActiveTrack = false
         try {
             val timeUs = pendingTimeUs
             val frame = try {
                 synchronized(assHandler) {
-                    // The native track and its generation must be sampled under
-                    // the same lock as renderFrame. Otherwise B's first bitmap
-                    // can be stamped as A and discarded permanently.
-                    syncNativeAssTrack(assHandler.track)
+                    // Track activation, ownership, and rendering share one lock
+                    // so the first frame for a new track cannot be misidentified.
+                    val track = assHandler.track
+                    syncNativeAssTrack(track)
                     generation = primaryTrackGeneration
-                    if (released) {
+                    hasActiveTrack = track != null
+                    if (released || !hasActiveTrack) {
                         null
                     } else {
                         assHandler.render?.renderFrame(timeUs / 1000, AssTexType.BITMAP_ALPHA)
@@ -158,13 +173,13 @@ class MoonfinAssOverlayView(
                 // A dropped frame beats taking the process down.
                 null
             }
-            if (generation >= 0) publishFrame(frame, generation)
+            if (generation >= 0) publishFrame(frame, generation, hasActiveTrack)
         } finally {
             renderScheduled.set(false)
             // A genuine A frame can finish before B takes over. Retry B if
             // that switch occurred while the first render was still active.
             if (!released && generation >= 0 &&
-                generation != primaryTrackGeneration && primaryNativeTrack != null
+                generation != primaryTrackGeneration && primaryAssTrackActive
             ) {
                 redrawCurrentAssFrame()
             }
@@ -256,10 +271,11 @@ class MoonfinAssOverlayView(
         }
     }
 
-    private fun publishFrame(frame: AssFrame?, generation: Int) {
-        if (generation != primaryTrackGeneration) return
-        // If the old track's image was cleared, accept libass's unchanged
-        // image too; otherwise the replacement can stay blank until playback.
+    private fun publishFrame(frame: AssFrame?, generation: Int, hasActiveTrack: Boolean) {
+        // While Off, libass's wrapper returns null without rendering. That is
+        // not an empty cue: preserve the bitmap for same-track reactivation.
+        if (!hasActiveTrack || generation != primaryTrackGeneration) return
+        // An active track with an empty cue must still clear the old image.
         if (frame != null && frame.changed == 0 && currentFrame != null) return
         if (frame == null && currentFrame == null) return
         frame?.images?.forEach { it.bitmap?.prepareToDraw() }
