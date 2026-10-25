@@ -227,6 +227,31 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
+    fun viewportClampedVttPrimaryDoesNotOverlapSecondary() {
+        val text = "我们今天要一起讨论如何让中文字幕和英文翻译同时清晰地显示在屏幕上。"
+        for ((settings, topAligned) in listOf("line:95%" to false, "line:5%,end" to true)) {
+            val bytes = "WEBVTT\n\n00:00:00.000 --> 00:00:05.000 $settings\n$text\n".toByteArray()
+            val parsed = mutableListOf<Cue>()
+            WebvttParser().parse(bytes, 0, bytes.size, SubtitleParser.OutputOptions.allCues()) {
+                parsed.addAll(it.cues)
+            }
+            val f = Scene()
+            f.primary.setFractionalTextSize(0.06f)
+            f.primary.setBottomPaddingFraction(0.04f)
+            f.style(0.04f)
+            f.show(parsed, "English translation")
+
+            val primary = inkBounds(f.primary)
+            val secondary = inkBounds(f.secondary)
+            assertTrue("Primary must wrap onto multiple lines", primary.height() > 70)
+            assertEquals(if (topAligned) 0.09f else 0.91f, f.main.single().line, 0.0001f)
+            assertEquals(parsed.single().lineAnchor, f.main.single().lineAnchor)
+            assertTrue("Secondary must clear the clamped primary: $settings / $primary / $secondary",
+                if (topAligned) secondary.top > primary.bottom else secondary.bottom < primary.top)
+        }
+    }
+
+    @Test
     fun measuredHeightFollowsEmbeddedStyleAndFontSizePreferences() {
         val text = SpannableStringBuilder("我们今天要一起讨论如何让中文字幕和英文翻译同时清晰地显示在屏幕上。")
         text.setSpan(RelativeSizeSpan(1.5f), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)

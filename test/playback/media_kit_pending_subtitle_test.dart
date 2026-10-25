@@ -412,6 +412,35 @@ void main() {
     expect(properties['secondary-sid'], '29');
   });
 
+  test('newer secondary settings during open survive the native reset', () async {
+    await selectPair();
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+    final expectedPosition = position();
+    player.automaticSubtitleSid = '11';
+    player.openStarted = Completer<void>();
+    player.delayOpen = Completer<void>();
+    final opening = backend.play({
+      'url': 'https://server/replacement.mkv',
+      'autoPlay': false,
+      'secondarySubtitleTrackId': 2,
+      'secondarySubtitleDelayMs': 500,
+      'secondarySubtitleOffset': 0.01,
+    });
+    await player.openStarted!.future;
+    await backend.setSubtitleDelay(1.25);
+    await backend.setSecondarySubtitleDelay(2.0);
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+    // A source reset can clear native properties after the new settings arrive.
+    properties['secondary-sub-delay'] = '0';
+    properties['secondary-sub-pos'] = '100';
+    player.delayOpen!.complete();
+    await opening;
+    expect(properties['secondary-sid'], '17');
+    expect(properties['sub-delay'], '1.250');
+    expect(properties['secondary-sub-delay'], '3.250');
+    expect(position(), expectedPosition);
+  });
+
   test('external choice made during open is added only to the new file', () async {
     player.discover();
     player.openStarted = Completer<void>();
