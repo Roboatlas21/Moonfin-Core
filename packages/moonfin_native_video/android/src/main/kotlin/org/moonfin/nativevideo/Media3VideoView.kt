@@ -1372,6 +1372,7 @@ class Media3VideoView(
             ) {
                 if (subtitlePositionChanged(oldPosition, newPosition)) {
                     clearSubtitleCues()
+                    assOverlayView?.rememberPlaybackPosition(newPosition.positionMs)
                     if (subtitleTrackEnabled && selectedSubtitleIsAss) {
                         assOverlayView?.renderAtPlaybackPosition(
                             newPosition.positionMs,
@@ -3525,7 +3526,12 @@ class Media3VideoView(
             }
             return
         }
-        if (trackSelector.setSecondaryTrack(TrackSelectionOverride(entry.group, listOf(entry.trackIndex)))) {
+        val selection = TrackSelectionOverride(entry.group, listOf(entry.trackIndex))
+        secondarySubtitleOverlay.select(
+            enabled = true,
+            restoreRetained = trackSelector.isSecondaryTrackActive(entry.group, entry.trackIndex),
+        )
+        if (trackSelector.setSecondaryTrack(selection)) {
             Media3Bridge.emitEvent(mapOf(
                 "event" to "secondarySubtitleSelection",
                 "mode" to if (id != null) "embedded" else "external",
@@ -3996,7 +4002,8 @@ class Media3VideoView(
     private fun refreshSubtitleRendererMode() {
         // Synchronize libass with the selected primary track, not playback
         // ticks. A paused player may never render again after an Off request.
-        assOverlayView?.setPrimaryVisible(subtitleTrackEnabled && selectedSubtitleIsAss)
+        val assPrimaryVisible = subtitleTrackEnabled && selectedSubtitleIsAss
+        assOverlayView?.setPrimaryVisible(assPrimaryVisible)
         updateAssPrimaryBounds()
         val desiredMode = SubtitleRendererMode.NATIVE
         val resolvedMode = SubtitleRendererMode.NATIVE
@@ -4010,8 +4017,14 @@ class Media3VideoView(
         activeSubtitleRendererMode = resolvedMode
 
         applySubtitleRendererMode(activeSubtitleRendererMode)
-        // The overlay only shifts once the source tree shifts the cues with it.
+        // Apply the current delay before forcing a paused ASS frame.
         assOverlayView?.timeOffsetUs = if (embeddedOffsetSource == null) 0L else subtitleOffsetUs()
+        if (assPrimaryVisible && !player.playWhenReady) {
+            assOverlayView?.renderAtPlaybackPosition(
+                player.currentPosition,
+                waitForDialogue = true,
+            )
+        }
 
         if (previousActive != activeSubtitleRendererMode || desiredMode != previousActive) {
             emitSubtitleRendererModeChanged(desiredMode)

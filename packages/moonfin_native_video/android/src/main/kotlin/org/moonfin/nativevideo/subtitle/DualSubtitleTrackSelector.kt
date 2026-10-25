@@ -38,9 +38,13 @@ internal fun overriddenTrackOrdinal(
 internal class DualSubtitleTrackSelector(context: Context) : TrackSelector() {
     private val primary = DefaultTrackSelector(context)
     @Volatile private var secondary: TrackSelectionOverride? = null
+    @Volatile private var activeSecondary: TrackSelectionOverride? = null
     @Volatile private var suspended = false
     @Volatile private var primaryTracks = Tracks.EMPTY
-    private data class SelectionInfo(val primary: TrackSelectorResult)
+    private data class SelectionInfo(
+        val primary: TrackSelectorResult,
+        val secondary: TrackSelectionOverride?,
+    )
 
     val currentMappedTrackInfo get() = primary.currentMappedTrackInfo
 
@@ -52,6 +56,13 @@ internal class DualSubtitleTrackSelector(context: Context) : TrackSelector() {
         secondary = selection
         invalidate()
         return true
+    }
+
+    fun isSecondaryTrackActive(group: TrackGroup, index: Int): Boolean {
+        val active = activeSecondary ?: return false
+        return active.mediaTrackGroup === group &&
+            active.trackIndices.size == 1 &&
+            active.trackIndices.single() == index
     }
 
     fun suspendSecondary(value: Boolean) {
@@ -66,6 +77,7 @@ internal class DualSubtitleTrackSelector(context: Context) : TrackSelector() {
     }
 
     override fun release() {
+        activeSecondary = null
         primary.release()
         super.release()
     }
@@ -80,6 +92,7 @@ internal class DualSubtitleTrackSelector(context: Context) : TrackSelector() {
     override fun onSelectionActivated(info: Any?) {
         val selection = info as? SelectionInfo
         primaryTracks = selection?.primary?.tracks ?: Tracks.EMPTY
+        activeSecondary = selection?.secondary
         primary.onSelectionActivated(selection?.primary?.info)
     }
 
@@ -124,6 +137,11 @@ internal class DualSubtitleTrackSelector(context: Context) : TrackSelector() {
                 )
             },
         )
-        return TrackSelectorResult(configurations, selections, tracks, SelectionInfo(result))
+        return TrackSelectorResult(
+            configurations,
+            selections,
+            tracks,
+            SelectionInfo(result, requested.takeIf { selected != null }),
+        )
     }
 }

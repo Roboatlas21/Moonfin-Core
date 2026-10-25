@@ -347,6 +347,48 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
+    fun collapsedSecondaryRequestsCanRestoreOnlyTheStillActiveTrackCue() {
+        val f = Scene()
+        f.show(listOf(cue("Primary")), "Track A")
+        assertEquals("Track A", f.caption.text.toString())
+
+        // A -> Off -> A before native selection changes: hide while Off,
+        // then restore the retained A cue when the selector reports A still active.
+        f.overlay.select(false)
+        assertTrue(displayedCues(f.secondary).isEmpty())
+        f.overlay.select(true, restoreRetained = true)
+        assertEquals("Track A", f.caption.text.toString())
+
+        // A -> B hides A while B is pending. Returning to A can restore it
+        // only when the native selector confirms A never stopped being active.
+        f.overlay.select(true, restoreRetained = false)
+        assertTrue(displayedCues(f.secondary).isEmpty())
+        f.overlay.select(true, restoreRetained = true)
+        assertEquals("Track A", f.caption.text.toString())
+
+        // A real seek/delay invalidates the retained cue, so it cannot return.
+        f.overlay.clearSecondaryCues()
+        f.overlay.select(false)
+        f.overlay.select(true, restoreRetained = true)
+        assertTrue(displayedCues(f.secondary).isEmpty())
+    }
+
+    @Test
+    fun rendererOutputWhileHiddenReplacesTheRetainedSecondaryCue() {
+        val f = Scene()
+        f.show(listOf(cue("Primary")), "Track A")
+        f.overlay.select(false)
+        f.overlay.updateCues(listOf(cue("New active cue")))
+        assertTrue(displayedCues(f.secondary).isEmpty())
+        f.overlay.select(true, restoreRetained = true)
+        assertEquals("New active cue", f.caption.text.toString())
+
+        f.overlay.clear()
+        f.overlay.select(true, restoreRetained = true)
+        assertTrue(displayedCues(f.secondary).isEmpty())
+    }
+
+    @Test
     fun clearsDistinguishSecondaryDelayTrackChangeAndSeek() {
         for (action in listOf("secondary delay", "primary track", "seek")) {
             val f = Scene()

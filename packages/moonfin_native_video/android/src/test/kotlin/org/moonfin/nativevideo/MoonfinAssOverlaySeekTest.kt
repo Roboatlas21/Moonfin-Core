@@ -40,6 +40,28 @@ class MoonfinAssOverlaySeekTest {
     }
 
     @Test
+    fun hiddenSeekUpdatesTheTimeUsedWhenAssIsReactivated() {
+        val overlay = MoonfinAssOverlayView(
+            RuntimeEnvironment.getApplication(),
+            AssHandler(AssRenderType.OVERLAY_CANVAS),
+        )
+        overlay.timeOffsetUs = 250_000L
+        overlay.setPrimaryVisible(false)
+        overlay.rememberPlaybackPosition(9_500L)
+
+        val presented = overlay.javaClass.getDeclaredField("lastPresentationTimeUs")
+            .apply { isAccessible = true }
+        val pending = overlay.javaClass.getDeclaredField("pendingTimeUs")
+            .apply { isAccessible = true }
+        assertEquals(9_500_000L, presented.get(overlay) as Long)
+        assertEquals(9_250_000L, pending.getLong(overlay))
+
+        overlay.setPrimaryVisible(true)
+        overlay.redrawCurrentAssFrame()
+        assertEquals(9_250_000L, pending.getLong(overlay))
+    }
+
+    @Test
     fun newerTimeDuringAnInFlightRenderQueuesAnotherFrame() {
         val handler = AssHandler(AssRenderType.OVERLAY_CANVAS)
         val overlay = MoonfinAssOverlayView(RuntimeEnvironment.getApplication(), handler)

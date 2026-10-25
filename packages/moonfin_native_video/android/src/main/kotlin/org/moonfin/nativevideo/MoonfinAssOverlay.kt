@@ -153,6 +153,13 @@ class MoonfinAssOverlayView(
         lastPresentationTimeUs?.let(::requestRender)
     }
 
+    fun rememberPlaybackPosition(positionMs: Long) {
+        if (positionMs < 0L) return
+        val presentationTimeUs = positionMs * 1000L
+        lastPresentationTimeUs = presentationTimeUs
+        pendingTimeUs = presentationTimeUs - timeOffsetUs
+    }
+
     // Paused seeks may not produce a clock callback: ass-media forwards only
     // every third distinct timestamp. Render the destination explicitly.
     fun renderAtPlaybackPosition(positionMs: Long, waitForDialogue: Boolean = false) {

@@ -79,6 +79,7 @@ internal class SecondarySubtitleOverlay(
 
     private var disposed = false
     private var secondaryCues: List<Cue>? = null
+    private var retainedSecondaryCues: List<Cue> = emptyList()
     private var baseTextColor = Color.WHITE
     private var baseBackgroundColor = Color.TRANSPARENT
     private var baseStrokeColor = Color.TRANSPARENT
@@ -125,10 +126,12 @@ internal class SecondarySubtitleOverlay(
         view.setCues(emptyList())
     }
 
-    /** Clear the previous track's cues. Media3 handles loading, timing and seeking. */
-    fun select(enabled: Boolean) {
+    /** Hide a pending track change, optionally restoring the still-active track's last cue. */
+    fun select(enabled: Boolean, restoreRetained: Boolean = false) {
         val alreadySelected = secondaryCues != null
-        secondaryCues = if (enabled) emptyList() else null
+        secondaryCues = if (enabled) {
+            if (restoreRetained) retainedSecondaryCues else emptyList()
+        } else null
         if (!enabled || !alreadySelected) {
             // Clear the saved primary placement when secondary subtitles are enabled or
             // disabled. Keep it when switching secondary tracks so gaps in dialogue do
@@ -142,19 +145,22 @@ internal class SecondarySubtitleOverlay(
 
     /** Remove an old secondary cue before retiming without disturbing primary placement. */
     fun clearSecondaryCues() {
+        retainedSecondaryCues = emptyList()
         if (secondaryCues == null) return
         secondaryCues = emptyList()
         renderCues()
     }
 
     fun updateCues(cues: List<Cue>) {
-        if (secondaryCues == null || disposed) return
-        secondaryCues = cues.filter { it.text != null }.map { cue ->
+        if (disposed) return
+        retainedSecondaryCues = cues.filter { it.text != null }.map { cue ->
             cue.buildUpon()
                 .setText(keepSubtitleEmphasis(requireNotNull(cue.text)))
                 .clearWindowColor()
                 .build()
         }
+        if (secondaryCues == null) return
+        secondaryCues = retainedSecondaryCues
         renderCues()
     }
 
@@ -193,7 +199,10 @@ internal class SecondarySubtitleOverlay(
         lastPrimaryCueGroup = emptyList()
         resolvedPrimaryReference = null
         assPrimaryBounds = emptyList()
-        if (clearSecondary && secondaryCues != null) secondaryCues = emptyList()
+        if (clearSecondary) {
+            retainedSecondaryCues = emptyList()
+            if (secondaryCues != null) secondaryCues = emptyList()
+        }
         renderCues()
     }
 
@@ -619,6 +628,7 @@ internal class SecondarySubtitleOverlay(
         lastPrimaryCue = null
         lastPrimaryCueGroup = emptyList()
         resolvedPrimaryReference = null
+        retainedSecondaryCues = emptyList()
         primaryView.setCues(emptyList())
         select(false)
     }
