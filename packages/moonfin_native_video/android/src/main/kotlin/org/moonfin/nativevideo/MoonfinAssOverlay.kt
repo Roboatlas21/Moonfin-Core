@@ -83,11 +83,22 @@ class MoonfinAssOverlayView(
     @Volatile
     private var currentFrame: AssFrame? = null
 
+    // Hiding the cached image on Primary Off must not discard it: libass can
+    // return changed=0 if the same subtitle is selected again while paused.
+    private var primaryVisible = true
+
+    fun setPrimaryVisible(visible: Boolean) {
+        if (primaryVisible == visible) return
+        primaryVisible = visible
+        invalidate()
+        onFrameChanged?.invoke()
+    }
+
     /** Called on the UI thread when ASS's visible image rectangles change. */
     var onFrameChanged: (() -> Unit)? = null
 
     fun visibleFrameBounds(): List<RectF> =
-        currentFrame?.images?.mapNotNull { image ->
+        (if (primaryVisible) currentFrame else null)?.images?.mapNotNull { image ->
             val bitmap = image.bitmap ?: return@mapNotNull null
             RectF(
                 image.x.toFloat(), image.y.toFloat(),
@@ -213,6 +224,7 @@ class MoonfinAssOverlayView(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        if (!primaryVisible) return
         val frame = currentFrame ?: return
         frame.images?.forEach { image ->
             val bitmap = image.bitmap ?: return@forEach

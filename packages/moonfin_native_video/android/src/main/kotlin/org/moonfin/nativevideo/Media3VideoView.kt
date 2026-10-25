@@ -1301,6 +1301,7 @@ class Media3VideoView(
                 }
             }
             applySecondarySubtitle()
+            assOverlayView?.setPrimaryVisible(subtitleTrackEnabled && selectedSubtitleIsAss)
             emitTracksChanged()
             reportUnsupportedVideoIfNeeded()
             emitState()
@@ -3961,6 +3962,9 @@ class Media3VideoView(
     }
 
     private fun refreshSubtitleRendererMode() {
+        // Synchronize libass with the selected primary track, not playback
+        // ticks. A paused player may never render again after an Off request.
+        assOverlayView?.setPrimaryVisible(subtitleTrackEnabled && selectedSubtitleIsAss)
         updateAssPrimaryBounds()
         val desiredMode = SubtitleRendererMode.NATIVE
         val resolvedMode = SubtitleRendererMode.NATIVE
@@ -4025,6 +4029,8 @@ class Media3VideoView(
     }
 
     private fun clearAssSubtitleScript() {
+        // Hide immediately, but keep libass's last frame for a paused reselect.
+        assOverlayView?.setPrimaryVisible(false)
     }
 
     /**
