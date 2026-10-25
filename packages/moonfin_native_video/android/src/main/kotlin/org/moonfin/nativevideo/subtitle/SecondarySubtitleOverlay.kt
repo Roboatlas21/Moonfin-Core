@@ -176,7 +176,8 @@ internal class SecondarySubtitleOverlay(
     }
 
     private fun isCentredCue(cue: Cue): Boolean =
-        cue.lineType == Cue.LINE_TYPE_FRACTION &&
+        cue.bitmap == null &&
+            cue.lineType == Cue.LINE_TYPE_FRACTION &&
             cue.lineAnchor == Cue.ANCHOR_TYPE_MIDDLE &&
             cue.line in 0.35f..0.65f
 

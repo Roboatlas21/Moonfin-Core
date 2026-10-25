@@ -271,6 +271,37 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
+    fun centredBitmapPrimaryKeepsAuthoredGeometryWithSecondaryEnabled() {
+        val context = RuntimeEnvironment.getApplication()
+        val primary = SubtitleView(context)
+        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary)
+        val bitmap = Bitmap.createBitmap(128, 64, Bitmap.Config.ARGB_8888)
+        val authored = Cue.Builder().setBitmap(bitmap)
+            .setPosition(0.5f).setPositionAnchor(Cue.ANCHOR_TYPE_MIDDLE)
+            .setLine(0.5f, Cue.LINE_TYPE_FRACTION)
+            .setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE)
+            .setSize(0.4f).setBitmapHeight(0.2f).build()
+
+        overlay.updatePrimaryCues(listOf(authored))
+        overlay.select(true)
+        overlay.updateCues(listOf(Cue.Builder().setText("Translation").build()))
+        overlay.configureBaseStyle(
+            Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0.20f)
+        overlay.configureAppearance(null, 0.06f)
+
+        val displayed = displayedCues(primary).single()
+        assertTrue(displayed.bitmap === bitmap)
+        assertEquals(authored.line, displayed.line, 0.0001f)
+        assertEquals(authored.lineAnchor, displayed.lineAnchor)
+        assertEquals(authored.position, displayed.position, 0.0001f)
+        assertEquals(authored.positionAnchor, displayed.positionAnchor)
+        assertEquals(authored.size, displayed.size, 0.0001f)
+        assertEquals(authored.bitmapHeight, displayed.bitmapHeight, 0.0001f)
+        assertTrue(displayedCues(secondary).isNotEmpty())
+    }
+
+    @Test
     fun centredPrimaryAvoidsOtherPrimaryCuesAndKeepsResolvedGapPlacement() {
         val context = RuntimeEnvironment.getApplication()
         val primary = SubtitleView(context)
