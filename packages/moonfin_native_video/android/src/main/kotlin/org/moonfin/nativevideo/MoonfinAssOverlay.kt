@@ -80,6 +80,8 @@ class MoonfinAssOverlayView(
 
     // Bounds the executor queue to one task. Cleared by the task itself.
     private val renderScheduled = AtomicBoolean(false)
+    // A newer time can arrive while that task is already rendering.
+    private val renderPending = AtomicBoolean(false)
 
     // libass reports differences from its last actual render, not from the
     // selected track. Retain that image and its owner across unrendered switches.
@@ -147,6 +149,12 @@ class MoonfinAssOverlayView(
         lastPresentationTimeUs?.let(::requestRender)
     }
 
+    // Paused seeks may not produce a clock callback: ass-media forwards only
+    // every third distinct timestamp. Render the destination explicitly.
+    fun renderAtPlaybackPosition(positionMs: Long) {
+        if (positionMs >= 0L) requestRender(positionMs * 1000L)
+    }
+
     /** Called on the UI thread when ASS's visible image rectangles change. */
     var onFrameChanged: (() -> Unit)? = null
 
@@ -166,6 +174,9 @@ class MoonfinAssOverlayView(
         }.orEmpty()
 
     private val renderTask = Runnable {
+        // Clear before sampling the time so a request arriving mid-render is
+        // never mistaken for one already handled by this task.
+        renderPending.set(false)
         var generation = -1
         try {
             val timeUs = pendingTimeUs
@@ -191,12 +202,12 @@ class MoonfinAssOverlayView(
             }
         } finally {
             renderScheduled.set(false)
-            // A genuine A frame can finish before B takes over. Retry B if
-            // that switch occurred while the first render was still active.
-            if (!released && generation >= 0 &&
+            // A paused seek can change the time without changing the track.
+            // Also retry any native track switch made during this render.
+            val trackChanged = generation >= 0 &&
                 generation != primaryTrackGeneration && primaryAssTrackActive
-            ) {
-                redrawCurrentAssFrame()
+            if (!released && (renderPending.get() || trackChanged)) {
+                scheduleRender()
             }
         }
     }
@@ -261,6 +272,7 @@ class MoonfinAssOverlayView(
             }
         }
         renderScheduled.set(false)
+        renderPending.set(false)
         cachedFrame = null
         onFrameChanged?.invoke()
     }
@@ -270,11 +282,16 @@ class MoonfinAssOverlayView(
     private fun requestRender(presentationTimeUs: Long) {
         if (released) return
         lastPresentationTimeUs = presentationTimeUs
+        pendingTimeUs = presentationTimeUs - timeOffsetUs
         // The renderer only exists once a track has been created, so this keeps
         // content without ASS from waking the render thread on every frame.
         if (assHandler.render == null) return
-        pendingTimeUs = presentationTimeUs - timeOffsetUs
-        if (!renderScheduled.compareAndSet(false, true)) return
+        renderPending.set(true)
+        scheduleRender()
+    }
+
+    private fun scheduleRender() {
+        if (released || !renderScheduled.compareAndSet(false, true)) return
         val executor = this.executor
         if (executor == null) {
             renderScheduled.set(false)

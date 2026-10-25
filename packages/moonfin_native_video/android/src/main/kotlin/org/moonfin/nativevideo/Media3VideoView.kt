@@ -1353,6 +1353,9 @@ class Media3VideoView(
                 reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
             ) {
                 clearSubtitleCues()
+                if (subtitleTrackEnabled && selectedSubtitleIsAss) {
+                    assOverlayView?.renderAtPlaybackPosition(newPosition.positionMs)
+                }
                 scheduleAudioRekickAfterSeek()
                 // Otherwise Dart only learns the seek landed from the next
                 // 250ms ticker tick, which can still report the pre-seek
