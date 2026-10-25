@@ -40,6 +40,7 @@ void main() {
       (null, true), ([], false), ([{'Codec': 'PGSSUB'}], false),
       ([{'Codec': 'pgs'}, {'Codec': 'subrip'}], true),
       ([{'Codec': 'ass'}], true), ([{'IsTextSubtitleStream': true}], true),
+      ([{'Codec': 'mov_text'}], true), ([{'Codec': 'tx3g'}], true),
     ]) {
       expect(appleTvSubtitleMetadata(
         manager: manager, prefs: prefs, l10n: AppLocalizationsEn(),

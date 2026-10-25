@@ -208,6 +208,7 @@ void main() {
     for (final (codecs, showAppearance) in [
       (<String>[], false), (['pgssub'], false), (['pgs', 'dvdsub'], false),
       (['pgssub', 'subrip'], true), (['ass', 'ssa'], true), (['webvtt'], true),
+      (['mov_text'], true), (['tx3g'], true),
     ]) {
       for (final method in [StreamPlayMethod.directPlay, StreamPlayMethod.transcode]) {
         for (final selected in [-1, 2]) {
