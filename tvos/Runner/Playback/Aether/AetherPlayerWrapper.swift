@@ -96,6 +96,13 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     let subtitleOverlay = SubtitleOverlay()
     let secondarySubtitleOverlay = SubtitleOverlay()
     private var pendingSecondarySubtitle: (embeddedTrackId: Int?, url: URL?)?
+    // Aether can restore the secondary selection it captured before an internal
+    // reload. Keep the host's latest choice (including Off) as the authority.
+    private var secondaryReloadSelection = SecondarySubtitleReloadState()
+    private var lastReadySecondaryActive = false
+    // Audio switching snapshots the old selection before its async rebuild
+    // makes readiness fall. An Off choice can arrive between those steps.
+    private var audioSwitchSecondarySnapshotActive: Bool?
     private var secondarySubtitlesReady = false
     private(set) var secondaryDelayAdjustment: Double = 0
     private var secondaryFontSize: Double?
@@ -241,8 +248,14 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         guard let engine = Self.sharedEngine(),
             engine.playbackBackend == .none
         else { return }
+        // The engine's reload restores an older subtitle snapshot after its
+        // async load. Re-assert the latest host choice only once that completes.
+        let generation = loadGeneration
+        secondaryReloadSelection.beginReload(previouslyActive: lastReadySecondaryActive)
         do {
             try await engine.reloadAtCurrentPosition()
+            guard ownsEngine, generation == loadGeneration else { return }
+            reapplySecondaryAfterReload(force: true)
             engine.pause()
         } catch {
             // Every recovery downstream re-resolves against the server, which
@@ -272,6 +285,26 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         engine.$isBuffering
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.applyStalledState() }
+            .store(in: &cancellables)
+
+        // Audio-track reconstruction does not go through our load() or the
+        // foreground reload method. Track its readiness edge and wait for
+        // Aether's stale secondary restoration before replaying the latest
+        // host request. A previously-Off selection has no restoration event.
+        engine.$isSessionReady
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] ready in
+                guard let self, self.ownsEngine, self.secondarySubtitlesReady,
+                      !self.isAudioOnlySession else { return }
+                if !ready {
+                    self.secondaryReloadSelection.beginReload(
+                        previouslyActive: self.audioSwitchSecondarySnapshotActive
+                            ?? self.lastReadySecondaryActive)
+                    self.audioSwitchSecondarySnapshotActive = nil
+                } else if self.secondaryReloadSelection.shouldReapplyAtReadiness {
+                    self.reapplySecondaryAfterReload()
+                }
+            }
             .store(in: &cancellables)
 
         engine.$duration
@@ -382,6 +415,12 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak engine] _ in
                 guard let self, let engine else { return }
+                // A stale decode completion after Secondary Off must never
+                // repaint the overlay while engine reconstruction settles.
+                guard self.secondaryReloadSelection.latestChoice?.isEnabled == true else {
+                    self.secondarySubtitleOverlay.clear()
+                    return
+                }
                 Self.presentSubtitleEvents(
                     Self.subtitleEvents(from: engine.secondarySubtitleCues),
                     in: self.secondarySubtitleOverlay, at: engine.sourceTime)
@@ -390,9 +429,18 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
         engine.$isSecondarySubtitleActive
             .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak engine] _ in
-                self?.secondarySubtitleOverlay.keepsVideoComposited =
-                    engine?.isSecondarySubtitleActive ?? false
+            .sink { [weak self, weak engine] active in
+                guard let self, let engine else { return }
+                if self.ownsEngine, engine.isSessionReady,
+                   self.secondaryReloadSelection.shouldReapplyAfterRestoration(active: active) {
+                    self.reapplySecondaryAfterReload()
+                }
+                if engine.isSessionReady && !self.secondaryReloadSelection.needsReapply {
+                    self.lastReadySecondaryActive = engine.isSecondarySubtitleActive
+                }
+                self.secondarySubtitleOverlay.keepsVideoComposited =
+                    self.secondaryReloadSelection.latestChoice?.isEnabled == true
+                        && engine.isSecondarySubtitleActive
             }
             .store(in: &cancellables)
 
@@ -925,6 +973,10 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         setSubtitleDelay(sourceConfiguration.subtitleDelay)
         let secondary = sourceConfiguration.secondarySubtitle
         pendingSecondarySubtitle = (secondary.embeddedTrackId, secondary.url)
+        secondaryReloadSelection.startSource(
+            .init(embeddedTrackId: secondary.embeddedTrackId, url: secondary.url))
+        lastReadySecondaryActive = false
+        audioSwitchSecondarySnapshotActive = nil
         secondarySubtitleOverlay.stackingEnabled =
             secondary.embeddedTrackId != nil || secondary.url != nil
         setSecondarySubtitleDelay(secondary.delay)
@@ -1295,8 +1347,15 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     func setAudioTrack(_ trackIndex: Int32) {
         let index = Int(trackIndex) - 1
-        guard index >= 0, index < audioTable.count else { return }
-        Self.sharedEngine()?.selectAudioTrack(index: audioTable[index].id)
+        guard index >= 0, index < audioTable.count,
+              let engine = Self.sharedEngine() else { return }
+        // Capture before Aether schedules the rebuild: a newer Off/B choice
+        // can land before the old session actually begins tearing down.
+        if engine.isSessionReady, engine.videoRoute != .remoteBypass,
+           engine.activeAudioTrackIndex != audioTable[index].id {
+            audioSwitchSecondarySnapshotActive = engine.isSecondarySubtitleActive
+        }
+        engine.selectAudioTrack(index: audioTable[index].id)
     }
 
     func setSubtitleTrack(_ trackIndex: Int32) {
@@ -1662,11 +1721,27 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     func setSecondarySubtitle(embeddedTrackId: Int?, url: URL?) {
         nativePrimaryBridgeFailure = nil
+        secondaryReloadSelection.rememberChoice(.init(embeddedTrackId: embeddedTrackId, url: url))
         Self.sharedEngine()?.clearSecondarySubtitle()
         secondarySubtitleOverlay.clear()
         secondarySubtitleOverlay.stackingEnabled =
             embeddedTrackId != nil || url != nil
         pendingSecondarySubtitle = (embeddedTrackId, url)
+        applyPendingSecondarySubtitle()
+        updateNativePrimaryBridge()
+    }
+
+    /// Reapply after an internal rebuild instead of accepting Aether's older
+    /// selection snapshot. Consumes the replay before touching the engine, so
+    /// the activity publications from our own selection cannot retrigger it.
+    private func reapplySecondaryAfterReload(force: Bool = false) {
+        guard ownsEngine, secondarySubtitlesReady, let engine = Self._sharedEngine,
+              let choice = secondaryReloadSelection.takeLatest(force: force)
+        else { return }
+        engine.clearSecondarySubtitle()
+        secondarySubtitleOverlay.clear()
+        secondarySubtitleOverlay.stackingEnabled = choice.isEnabled
+        pendingSecondarySubtitle = (choice.embeddedTrackId, choice.url)
         applyPendingSecondarySubtitle()
         updateNativePrimaryBridge()
     }
@@ -1696,6 +1771,9 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         guard secondarySubtitlesReady, let pending = pendingSecondarySubtitle,
             let engine = Self.sharedEngine()
         else { return }
+        // A track switch made while rebuilding must wait for the new source,
+        // not resolve against the outgoing file's subtitle table.
+        if secondaryReloadSelection.needsReapply && !engine.isSessionReady { return }
 
         // The server's embedded ordinal is 1-based and excludes external
         // subtitles and broadcast captions.
@@ -1731,6 +1809,9 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         nativePrimaryBridgeFailure = nil
         secondarySubtitlesReady = false
         pendingSecondarySubtitle = nil
+        secondaryReloadSelection.reset()
+        lastReadySecondaryActive = false
+        audioSwitchSecondarySnapshotActive = nil
         secondarySubtitleOverlay.clear()
         secondarySubtitleOverlay.stackingEnabled = false
         secondarySubtitleOverlay.keepsVideoComposited = false
@@ -2093,6 +2174,56 @@ private final class NativePrimarySubtitleBridge {
         self.trackID = trackID
         self.sidecar = sidecar
         self.generation = generation
+    }
+}
+
+
+/// Host-authoritative secondary subtitle intent through Aether's asynchronous
+/// session-preserving reloads. Separate from the pending track-discovery retry:
+/// a successful selection can still be overwritten by the engine's old snapshot.
+struct SecondarySubtitleReloadState {
+    struct Choice: Equatable {
+        var embeddedTrackId: Int?
+        var url: URL?
+        var isEnabled: Bool { embeddedTrackId != nil || url != nil }
+    }
+
+    private(set) var latestChoice: Choice?
+    private(set) var needsReapply = false
+    private var wasActiveBeforeReload = false
+
+    mutating func startSource(_ choice: Choice) {
+        latestChoice = choice
+        needsReapply = false
+        wasActiveBeforeReload = false
+    }
+
+    mutating func rememberChoice(_ choice: Choice) {
+        latestChoice = choice
+    }
+
+    mutating func beginReload(previouslyActive: Bool) {
+        guard latestChoice != nil, !needsReapply else { return }
+        wasActiveBeforeReload = previouslyActive
+        needsReapply = true
+    }
+
+    // If Secondary was Off, there is no old selection for Aether to republish.
+    var shouldReapplyAtReadiness: Bool { needsReapply && !wasActiveBeforeReload }
+
+    // Otherwise wait for Aether's old track to be restored, then supersede it.
+    func shouldReapplyAfterRestoration(active: Bool) -> Bool {
+        needsReapply && wasActiveBeforeReload && active
+    }
+
+    mutating func takeLatest(force: Bool = false) -> Choice? {
+        guard force || needsReapply else { return nil }
+        needsReapply = false
+        return latestChoice
+    }
+
+    mutating func reset() {
+        self = Self()
     }
 }
 

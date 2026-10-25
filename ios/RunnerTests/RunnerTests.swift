@@ -384,6 +384,51 @@ final class RunnerTests: XCTestCase {
     }
 
     @MainActor
+    func testSecondaryReloadRestoresLatestOffInsteadOfOldTrack() {
+        var state = SecondarySubtitleReloadState()
+        let old = SecondarySubtitleReloadState.Choice(embeddedTrackId: nil,
+            url: URL(string: "https://example.com/old.srt")!)
+        let off = SecondarySubtitleReloadState.Choice(embeddedTrackId: nil, url: nil)
+        state.startSource(old)
+        state.beginReload(previouslyActive: true)
+        state.rememberChoice(off)
+        // Readiness alone is too early: Aether restores its stale old track
+        // afterward. Wait for that activity publication, then overwrite it.
+        XCTAssertFalse(state.shouldReapplyAtReadiness)
+        XCTAssertFalse(state.shouldReapplyAfterRestoration(active: false))
+        XCTAssertTrue(state.shouldReapplyAfterRestoration(active: true))
+        XCTAssertEqual(state.takeLatest(), off)
+        XCTAssertFalse(state.needsReapply)
+        XCTAssertNil(state.takeLatest())
+    }
+
+    @MainActor
+    func testSecondaryReloadRestoresNewerBAndPreviouslyOffSelections() {
+        var state = SecondarySubtitleReloadState()
+        let a = SecondarySubtitleReloadState.Choice(embeddedTrackId: 1, url: nil)
+        let b = SecondarySubtitleReloadState.Choice(embeddedTrackId: 2, url: nil)
+        state.startSource(a)
+        state.beginReload(previouslyActive: true)
+        state.rememberChoice(b)
+        XCTAssertFalse(state.shouldReapplyAtReadiness)
+        XCTAssertEqual(state.takeLatest(force: true), b,
+            "A foreground reload completion must use the latest B choice")
+
+        // With the old source Off there is no late active-track publication.
+        state.startSource(.init(embeddedTrackId: nil, url: nil))
+        state.beginReload(previouslyActive: false)
+        state.rememberChoice(b)
+        XCTAssertTrue(state.shouldReapplyAtReadiness)
+        XCTAssertEqual(state.takeLatest(), b)
+
+        // A new source must invalidate any old reconstruction snapshot.
+        state.startSource(a)
+        XCTAssertFalse(state.needsReapply)
+        XCTAssertNil(state.takeLatest())
+        XCTAssertEqual(state.latestChoice, a)
+    }
+
+    @MainActor
     func testPositionedGroupsFollowDelayChangesWhilePaused() {
         let f = OverlayPair()
         for time in [42.0, 0.0] {
