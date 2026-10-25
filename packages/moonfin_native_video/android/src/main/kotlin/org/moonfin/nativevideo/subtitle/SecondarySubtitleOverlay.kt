@@ -1,12 +1,20 @@
 package org.moonfin.nativevideo.subtitle
 
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.text.Layout
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.RelativeSizeSpan
 import android.view.View
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.text.Cue
+import androidx.media3.common.text.LanguageFeatureSpan
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.SubtitleView
 
@@ -75,6 +83,11 @@ internal class SecondarySubtitleOverlay(
     private var baseStrokeColor = Color.TRANSPARENT
     private var baseFontSize = 20f
     private var baseFontWeight = 400
+    private var embeddedStylesEnabled = true
+    private var embeddedFontSizesEnabled = true
+    private val measurementPaint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+    private val lineSpacingExtra: Float
+    private val lineSpacingMultiplier: Float
     private var fontSizeOverride: Float? = null
     private var textColorOverride: Int? = null
     private var offsetDelta = 0f
@@ -88,6 +101,11 @@ internal class SecondarySubtitleOverlay(
     private var primaryEnabled = true
 
     init {
+        val attributes = view.context.obtainStyledAttributes(null,
+            intArrayOf(android.R.attr.lineSpacingExtra, android.R.attr.lineSpacingMultiplier), 0, 0)
+        lineSpacingExtra = attributes.getDimensionPixelSize(0, 0).toFloat()
+        lineSpacingMultiplier = attributes.getFloat(1, 1f)
+        attributes.recycle()
         view.setApplyEmbeddedStyles(true)
         view.setApplyEmbeddedFontSizes(false)
         view.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -138,8 +156,11 @@ internal class SecondarySubtitleOverlay(
         fontWeight: Int,
         verticalOffset: Float?,
         embeddedStylesEnabled: Boolean = true,
+        embeddedFontSizesEnabled: Boolean = true,
     ) {
         view.setApplyEmbeddedStyles(embeddedStylesEnabled)
+        this.embeddedStylesEnabled = embeddedStylesEnabled
+        this.embeddedFontSizesEnabled = embeddedFontSizesEnabled
         baseTextColor = textColor
         baseBackgroundColor = backgroundColor
         baseStrokeColor = strokeColor
@@ -291,14 +312,14 @@ internal class SecondarySubtitleOverlay(
         val automatic = if (lastPrimaryCue == null) active.filter { it.line == Cue.DIMEN_UNSET } else active
         val rendered = ArrayList<Cue>()
         val occupied = ArrayList<SubtitleBox>(primaryBoxes)
-        val topFallback = ArrayList<Pair<String, Cue>>()
+        val topFallback = ArrayList<Cue>()
         for (sourceCue in fixed) {
             var cue = buildCue(sourceCue)
             val originalBox = estimateSecondaryBox(
                 cue,
                 width,
                 height,
-                estimateTextHeight(sourceCue.text.toString(), width * (sourceCue.size.takeUnless { it == Cue.DIMEN_UNSET } ?: 0.9f), secondaryFontPx),
+                measureTextHeight(cue, width, height, secondaryFontPx),
             )
             val inward = if (SubtitleLayoutPlanner.verticalAlignmentFor(originalBox, height) ==
                 SubtitleLayoutPlanner.ALIGN_TOP) offsetDelta else -offsetDelta
@@ -330,14 +351,14 @@ internal class SecondarySubtitleOverlay(
                 rendered += cue
                 occupied += placed
             } else if (verticalAlignment == SubtitleLayoutPlanner.ALIGN_TOP) {
-                topFallback.add(sourceCue.text.toString() to cue)
+                topFallback.add(cue)
             }
         }
 
         // Top-aligned captions that don't fit in the upper half fall back to
         // the normal bottom placement.
-        for ((text, cue) in topFallback) {
-            placeAutomaticCue(cue, text, width, height, secondaryFontPx, occupied, gapPx)
+        for (cue in topFallback) {
+            placeAutomaticCue(cue, width, height, secondaryFontPx, occupied, gapPx)
                 ?.let(rendered::add)
         }
 
@@ -347,7 +368,7 @@ internal class SecondarySubtitleOverlay(
         for (group in automaticGroups) {
             val text = joinKeepingSpans(group.map { requireNotNull(it.text) })
             placeAutomaticCue(
-                buildCue(group.first()).buildUpon().setText(text).build(), text.toString(), width, height, secondaryFontPx, occupied, gapPx,
+                buildCue(group.first()).buildUpon().setText(text).build(), width, height, secondaryFontPx, occupied, gapPx,
             )?.let(rendered::add)
         }
 
@@ -370,7 +391,6 @@ internal class SecondarySubtitleOverlay(
 
     private fun placeAutomaticCue(
         cue: Cue,
-        text: String,
         width: Int,
         height: Int,
         fontPx: Float,
@@ -382,7 +402,16 @@ internal class SecondarySubtitleOverlay(
         val reference = resolvedPrimaryReference
         val cueSize = reference?.size ?: cue.size
         val cueWidth = if (cueSize == Cue.DIMEN_UNSET) width * 0.9f else cueSize * width
-        val textHeight = estimateTextHeight(text, cueWidth, fontPx.coerceAtLeast(1f))
+        val alignedCue = if (reference == null) cue else cue.buildUpon()
+            // Keep the primary's whole horizontal box. Copying only its
+            // anchor can shift centred text to the edge of a wide cue.
+            .setPosition(if (reference.position == Cue.DIMEN_UNSET) 0.5f else reference.position)
+            .setPositionAnchor(if (reference.position == Cue.DIMEN_UNSET)
+                Cue.ANCHOR_TYPE_MIDDLE else reference.positionAnchor)
+            .setSize(cueSize)
+            .setTextAlignment(reference.textAlignment ?: Layout.Alignment.ALIGN_CENTER)
+            .build()
+        val textHeight = measureTextHeight(alignedCue, width, height, fontPx)
         val refBox = reference?.let {
             estimatePrimaryBox(it, width, height, (baseFontSize / 24f) * 0.06f * height)
         }
@@ -432,23 +461,12 @@ internal class SecondarySubtitleOverlay(
         if (placement == null) return null
         val topAligned = reference != null &&
             SubtitleLayoutPlanner.verticalAlignmentFor(refBox!!, height) == SubtitleLayoutPlanner.ALIGN_TOP
-        val placedCue = cue.buildUpon()
+        val placedCue = alignedCue.buildUpon()
             .setLine(
                 ((if (topAligned) placement.top else placement.bottom) / height).coerceIn(0f, 1f),
                 Cue.LINE_TYPE_FRACTION,
             )
             .setLineAnchor(if (topAligned) Cue.ANCHOR_TYPE_START else Cue.ANCHOR_TYPE_END)
-            .apply {
-                if (reference != null) {
-                    // Keep the primary's whole horizontal box. Copying only its
-                    // anchor can shift centred text to the edge of a wide cue.
-                    setPosition(if (reference.position == Cue.DIMEN_UNSET) 0.5f else reference.position)
-                    setPositionAnchor(if (reference.position == Cue.DIMEN_UNSET)
-                        Cue.ANCHOR_TYPE_MIDDLE else reference.positionAnchor)
-                    setSize(cueSize)
-                    setTextAlignment(reference.textAlignment ?: Layout.Alignment.ALIGN_CENTER)
-                }
-            }
             .build()
         occupied += placement
         return placedCue
@@ -460,7 +478,7 @@ internal class SecondarySubtitleOverlay(
         val boxHeight = if (bitmap != null) {
             (cue.bitmapHeight * height).coerceAtLeast(1f)
         } else {
-            estimateTextHeight(cue.text?.toString().orEmpty(), nominalWidth, fontPx.coerceAtLeast(1f))
+            measureTextHeight(cue, width, height, fontPx, primary = true)
         }
         val cueWidth = if (bitmap != null) {
             (boxHeight * bitmap.width / bitmap.height).coerceAtMost(width.toFloat())
@@ -512,12 +530,38 @@ internal class SecondarySubtitleOverlay(
         }
     }
 
-    private fun estimateTextHeight(text: String, availableWidth: Float, fontPx: Float): Float {
-        val charsPerLine = (availableWidth / (fontPx * 0.52f)).toInt().coerceAtLeast(1)
-        val lines = text.split('\n').sumOf { line ->
-            maxOf(1, kotlin.math.ceil(line.length.toFloat() / charsPerLine).toInt())
+    /** Match SubtitlePainter's text layout so wrapped lines reserve their actual height. */
+    @Suppress("DEPRECATION") // Use the same StaticLayout constructor as Media3.
+    private fun measureTextHeight(cue: Cue, width: Int, height: Int, fontPx: Float,
+                                  primary: Boolean = false): Float {
+        val text = SpannableStringBuilder(cue.text ?: "")
+        val useEmbeddedSizes = primary && embeddedStylesEnabled && embeddedFontSizesEnabled
+        for (span in text.getSpans(0, text.length, Any::class.java)) {
+            if ((!embeddedStylesEnabled && span !is LanguageFeatureSpan) ||
+                (!useEmbeddedSizes && (span is AbsoluteSizeSpan || span is RelativeSizeSpan))) {
+                text.removeSpan(span)
+            }
         }
-        return lines * fontPx * 1.25f
+        if (useEmbeddedSizes) {
+            val cueFontPx = when (cue.textSizeType) {
+                Cue.TEXT_SIZE_TYPE_ABSOLUTE -> cue.textSize
+                Cue.TEXT_SIZE_TYPE_FRACTIONAL, Cue.TEXT_SIZE_TYPE_FRACTIONAL_IGNORE_PADDING ->
+                    cue.textSize * height
+                else -> Cue.DIMEN_UNSET
+            }
+            if (cueFontPx > 0f) text.setSpan(AbsoluteSizeSpan(cueFontPx.toInt()),
+                0, text.length, Spanned.SPAN_PRIORITY)
+        }
+        measurementPaint.textSize = fontPx.coerceAtLeast(1f)
+        measurementPaint.typeface = Typeface.create(Typeface.DEFAULT,
+            if (baseFontWeight >= 600) Typeface.BOLD else Typeface.NORMAL)
+        // Media3 subtracts its inner padding before applying the authored cue width.
+        val padding = (measurementPaint.textSize * 0.125f + 0.5f).toInt()
+        val availableWidth = ((width - padding * 2) *
+            if (cue.size == Cue.DIMEN_UNSET) 1f else cue.size).toInt().coerceAtLeast(1)
+        return StaticLayout(text, measurementPaint, availableWidth,
+            cue.textAlignment ?: Layout.Alignment.ALIGN_CENTER,
+            lineSpacingMultiplier, lineSpacingExtra, true).height.toFloat()
     }
 
     fun clear() {

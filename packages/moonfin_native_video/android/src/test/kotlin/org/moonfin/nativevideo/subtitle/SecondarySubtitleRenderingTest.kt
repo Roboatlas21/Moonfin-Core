@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.Typeface
 import android.text.Html
+import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
@@ -184,6 +185,39 @@ class SecondarySubtitleRenderingTest {
                 if (topAligned) assertTrue(pixels.top > mainPixels.bottom)
                 else assertTrue(pixels.bottom < mainPixels.top)
             }
+        }
+    }
+
+    @Test
+    fun wrappedChinesePrimaryDoesNotOverlapTheSecondary() {
+        val f = Scene()
+        f.primary.setFractionalTextSize(0.06f)
+        f.primary.setBottomPaddingFraction(0.04f)
+        f.style(0.04f)
+        f.show(listOf(cue("我们今天要一起讨论如何让中文字幕和英文翻译同时清晰地显示在屏幕上。")))
+
+        val primary = inkBounds(f.primary)
+        val secondary = inkBounds(f.secondary)
+        assertTrue("The primary must wrap onto multiple lines", primary.height() > 70)
+        assertTrue("The secondary must stay above the wrapped primary", secondary.bottom < primary.top)
+    }
+
+    @Test
+    fun measuredHeightFollowsEmbeddedStyleAndFontSizePreferences() {
+        val text = SpannableStringBuilder("我们今天要一起讨论如何让中文字幕和英文翻译同时清晰地显示在屏幕上。")
+        text.setSpan(RelativeSizeSpan(1.5f), 0, text.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        for ((styles, sizes) in listOf(true to true, true to false, false to true)) {
+            val f = Scene()
+            f.primary.setFractionalTextSize(0.06f)
+            f.primary.setBottomPaddingFraction(0.04f)
+            f.primary.setApplyEmbeddedStyles(styles)
+            f.primary.setApplyEmbeddedFontSizes(sizes)
+            f.overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT,
+                24f, 400, 0.04f, styles, sizes)
+            f.show(listOf(cue(text)))
+
+            val gap = inkBounds(f.primary).top - inkBounds(f.secondary).bottom
+            assertTrue("Match the rendered height with styles=$styles, sizes=$sizes", gap in 1..64)
         }
     }
 
