@@ -44,6 +44,18 @@ void main() {
     // A browser with native positioning keeps the two columns on one row.
     expect(fitWebAutomaticCue(0.9, 0.1, right, occupied), closeTo(0.8, 0.000001));
 
+    // A narrow cue at 60% and a wide cue at 100% can overlap in Chromium
+    // after its percentage-line fallback shifts the wide box left.
+    const unequalLeft = (align: 'left', position: 60.0, positionAlign: 'line-left', size: 3.0);
+    const unequalRight = (align: 'right', position: 100.0, positionAlign: 'line-right', size: 23.0);
+    final unequalOccupied = <WebVttCueBox>[
+      (top: 0.8, bottom: 0.9, horizontal: unequalLeft),
+    ];
+    expect(fitWebAutomaticCue(0.9, 0.1, unequalRight, unequalOccupied,
+        conservativeHorizontal: true), closeTo(0.698, 0.000001));
+    expect(fitWebAutomaticCue(0.9, 0.1, unequalRight, unequalOccupied),
+        closeTo(0.8, 0.000001));
+
     const narrowLeft = (align: 'left', position: 0.0, positionAlign: 'line-left', size: 10.0);
     const narrowRight = (align: 'right', position: 100.0, positionAlign: 'line-right', size: 10.0);
     final distant = <WebVttCueBox>[(top: 0.8, bottom: 0.9, horizontal: narrowLeft)];
