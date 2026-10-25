@@ -394,9 +394,9 @@ final class RunnerTests: XCTestCase {
         state.rememberChoice(off)
         // Readiness alone is too early: Aether restores its stale old track
         // afterward. Wait for that activity publication, then overwrite it.
-        XCTAssertFalse(state.shouldReapplyAtReadiness)
-        XCTAssertFalse(state.shouldReapplyAfterRestoration(active: false))
-        XCTAssertTrue(state.shouldReapplyAfterRestoration(active: true))
+        XCTAssertFalse(state.shouldReapplyAtReadiness(secondaryActive: false))
+        XCTAssertFalse(state.shouldReapplyAfterRestoration(active: false, ready: true))
+        XCTAssertTrue(state.shouldReapplyAfterRestoration(active: true, ready: true))
         XCTAssertEqual(state.takeLatest(), off)
         XCTAssertFalse(state.needsReapply)
         XCTAssertNil(state.takeLatest())
@@ -410,7 +410,7 @@ final class RunnerTests: XCTestCase {
         state.startSource(a)
         state.beginReload(previouslyActive: true)
         state.rememberChoice(b)
-        XCTAssertFalse(state.shouldReapplyAtReadiness)
+        XCTAssertFalse(state.shouldReapplyAtReadiness(secondaryActive: false))
         XCTAssertEqual(state.takeLatest(force: true), b,
             "A foreground reload completion must use the latest B choice")
 
@@ -418,7 +418,7 @@ final class RunnerTests: XCTestCase {
         state.startSource(.init(embeddedTrackId: nil, url: nil))
         state.beginReload(previouslyActive: false)
         state.rememberChoice(b)
-        XCTAssertTrue(state.shouldReapplyAtReadiness)
+        XCTAssertTrue(state.shouldReapplyAtReadiness(secondaryActive: false))
         XCTAssertEqual(state.takeLatest(), b)
 
         // A new source must invalidate any old reconstruction snapshot.
@@ -426,6 +426,34 @@ final class RunnerTests: XCTestCase {
         XCTAssertFalse(state.needsReapply)
         XCTAssertNil(state.takeLatest())
         XCTAssertEqual(state.latestChoice, a)
+    }
+
+    @MainActor
+    func testSecondaryReloadReplaysForEitherRestorationEventOrder() {
+        let a = SecondarySubtitleReloadState.Choice(embeddedTrackId: 1, url: nil)
+        let b = SecondarySubtitleReloadState.Choice(embeddedTrackId: 2, url: nil)
+        for restoresBeforeReady in [false, true] {
+            var state = SecondarySubtitleReloadState()
+            state.startSource(a)
+            state.beginReload(previouslyActive: true)
+            state.rememberChoice(b)
+
+            if restoresBeforeReady {
+                // The active=true event arrives while AVPlayer is not ready.
+                // Readiness must later observe its persisted active state.
+                XCTAssertFalse(state.shouldReapplyAfterRestoration(
+                    active: true, ready: false))
+                XCTAssertTrue(state.shouldReapplyAtReadiness(secondaryActive: true))
+            } else {
+                // AVPlayer becomes ready before the old selection returns.
+                XCTAssertFalse(state.shouldReapplyAtReadiness(secondaryActive: false))
+                XCTAssertTrue(state.shouldReapplyAfterRestoration(
+                    active: true, ready: true))
+            }
+            XCTAssertEqual(state.takeLatest(), b)
+            XCTAssertFalse(state.shouldReapplyAtReadiness(secondaryActive: true))
+            XCTAssertFalse(state.shouldReapplyAfterRestoration(active: true, ready: true))
+        }
     }
 
     @MainActor

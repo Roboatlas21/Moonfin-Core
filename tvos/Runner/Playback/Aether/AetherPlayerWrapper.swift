@@ -293,15 +293,20 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         // host request. A previously-Off selection has no restoration event.
         engine.$isSessionReady
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] ready in
-                guard let self, self.ownsEngine, self.secondarySubtitlesReady,
+            .sink { [weak self, weak engine] ready in
+                guard let self, let engine, self.ownsEngine, self.secondarySubtitlesReady,
                       !self.isAudioOnlySession else { return }
                 if !ready {
                     self.secondaryReloadSelection.beginReload(
                         previouslyActive: self.audioSwitchSecondarySnapshotActive
                             ?? self.lastReadySecondaryActive)
                     self.audioSwitchSecondarySnapshotActive = nil
-                } else if self.secondaryReloadSelection.shouldReapplyAtReadiness {
+                } else if self.secondaryReloadSelection.shouldReapplyAtReadiness(
+                    secondaryActive: engine.isSecondarySubtitleActive
+                ) {
+                    // Aether may have restored its old selection before AVPlayer
+                    // became ready. The active state persists even if that
+                    // earlier publication could not trigger a replay.
                     self.reapplySecondaryAfterReload()
                 }
             }
@@ -431,8 +436,10 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self, weak engine] active in
                 guard let self, let engine else { return }
-                if self.ownsEngine, engine.isSessionReady,
-                   self.secondaryReloadSelection.shouldReapplyAfterRestoration(active: active) {
+                if self.ownsEngine,
+                   self.secondaryReloadSelection.shouldReapplyAfterRestoration(
+                       active: active, ready: engine.isSessionReady
+                   ) {
                     self.reapplySecondaryAfterReload()
                 }
                 if engine.isSessionReady && !self.secondaryReloadSelection.needsReapply {
@@ -2208,12 +2215,16 @@ struct SecondarySubtitleReloadState {
         needsReapply = true
     }
 
-    // If Secondary was Off, there is no old selection for Aether to republish.
-    var shouldReapplyAtReadiness: Bool { needsReapply && !wasActiveBeforeReload }
+    // An old active selection can be restored before AVPlayer reports ready.
+    // In that case the engine's active state still records the restoration.
+    // If it was Off, there is no old selection to wait for.
+    func shouldReapplyAtReadiness(secondaryActive: Bool) -> Bool {
+        needsReapply && (!wasActiveBeforeReload || secondaryActive)
+    }
 
-    // Otherwise wait for Aether's old track to be restored, then supersede it.
-    func shouldReapplyAfterRestoration(active: Bool) -> Bool {
-        needsReapply && wasActiveBeforeReload && active
+    // For restorations that arrive after readiness, replay immediately.
+    func shouldReapplyAfterRestoration(active: Bool, ready: Bool) -> Bool {
+        needsReapply && wasActiveBeforeReload && active && ready
     }
 
     mutating func takeLatest(force: Bool = false) -> Choice? {
