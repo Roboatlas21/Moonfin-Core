@@ -3300,6 +3300,7 @@ class Media3VideoView(
             return
         }
         manualSubtitleDelayMs = nextDelayMs
+        rememberSourceArguments("subtitleDelayMs" to nextDelayMs)
         clearSubtitleCues()
         applySubtitleDelay()
         emitSyncDelayState()
