@@ -25,7 +25,8 @@ import 'server_transcode_capabilities.dart';
 /// music, audiobooks and offline playback. Unlike the tvOS sibling there is
 /// no native player UI: Flutter owns the OSD and the video arrives through
 /// the `moonfin/aether_video` platform view.
-class AetherBackend with SubtitleDelayState implements PlayerBackend, SubtitleLoadingBackend {
+class AetherBackend with SubtitleDelayState
+    implements PlayerBackend, SubtitleLoadingBackend, SecondarySubtitleBackend {
   AetherBackend(this._prefs) {
     _eventSub = _events.receiveBroadcastStream().listen(
       _handleEvent,
@@ -322,6 +323,13 @@ class AetherBackend with SubtitleDelayState implements PlayerBackend, SubtitleLo
           _prefs.get(UserPreferences.subtitleMode) == SubtitleMode.none,
       'dolbyVisionBaseLayerOnly': needsBaseLayerOnlyForDolbyVisionAv1(payload),
       'externalSubtitles': payload['externalSubtitles'] ?? const [],
+      'secondarySubtitleTrackId': payload['secondarySubtitleTrackId'],
+      'secondarySubtitleUrl': payload['secondarySubtitleUrl'],
+      'subtitleDelayMs': (subtitleDelaySeconds * 1000).round(),
+      'secondarySubtitleDelayMs': payload['secondarySubtitleDelayMs'] ?? 0,
+      'secondarySubtitleOffset': payload['secondarySubtitleOffset'] ?? 0.0,
+      'secondarySubtitleFontSize': payload['secondarySubtitleFontSize'],
+      'secondarySubtitleTextColor': payload['secondarySubtitleTextColor'],
     });
   }
 
@@ -588,22 +596,47 @@ class AetherBackend with SubtitleDelayState implements PlayerBackend, SubtitleLo
   }
 
   @override
+  bool get supportsSecondarySubtitleDelay => true;
+
+  @override
+  bool get supportsSecondarySubtitlePosition => true;
+
+  @override
+  bool get supportsSecondarySubtitleStyle => true;
+
+  @override
   Future<void> setSecondarySubtitle({
     String? url,
     String? codec,
     String? language,
     int? embeddedTrackId,
-  }) async {}
+  }) async {
+    await _invoke<void>('setSecondarySubtitle', {
+      'embeddedTrackId': embeddedTrackId,
+      'url': url,
+    });
+  }
 
   @override
-  Future<void> setSecondarySubtitleDelay(double seconds) async {}
+  Future<void> setSecondarySubtitleDelay(double seconds) async {
+    await _invoke<void>('setSecondarySubtitleDelay', {
+      'delayMs': (seconds.clamp(-5.0, 5.0) * 1000).round(),
+    });
+  }
 
   @override
   Future<void> configureSecondarySubtitleStyle({
     double? fontSize,
     double? verticalOffset,
     int? textColor,
-  }) async {}
+  }) async {
+    await _invoke<void>('configureSecondarySubtitleStyle', {
+      if (fontSize != null) 'fontSize': fontSize.clamp(6.0, 72.0),
+      if (verticalOffset != null)
+        'verticalOffset': verticalOffset.clamp(-0.4, 0.4),
+      if (textColor != null) 'textColor': textColor,
+    });
+  }
 
   @override
   int? get activeSubtitleTrackIndex => _activeSubtitleTrackIndex;
