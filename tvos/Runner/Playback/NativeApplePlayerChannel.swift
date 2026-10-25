@@ -274,6 +274,7 @@ final class NativeApplePlayerChannel: NSObject, FlutterStreamHandler {
             fontWeight: (args["fontWeight"] as? NSNumber)?.intValue,
             verticalOffset: (args["verticalOffset"] as? NSNumber)?.doubleValue)
         vc?.baseSubtitlePos = player.baseSubtitlePos
+        vc?.reapplySubtitleClearance()
     }
 
     private func present(audioOnly: Bool) {
@@ -304,6 +305,9 @@ final class NativeApplePlayerChannel: NSObject, FlutterStreamHandler {
         }
         vc.onSelectSubtitle = { [weak self] index in
             self?.send(["event": "selectSubtitle", "index": index])
+        }
+        vc.onSubtitleAction = { [weak self] action in
+            self?.send(action)
         }
         // Keeps the stored delay on the Dart side in step with what the user
         // set here. Audio delay has no control on this path, so it stays zero.
