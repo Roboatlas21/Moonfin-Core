@@ -1,11 +1,29 @@
 package org.moonfin.nativevideo.subtitle
 
+import androidx.media3.exoplayer.source.MediaSource
+import java.lang.reflect.Proxy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SubtitleOffsetPolicyTest {
+
+    @Test
+    fun `secondary source exposes the last applied offset while the setting changes`() {
+        val unusedChild = Proxy.newProxyInstance(
+            MediaSource::class.java.classLoader,
+            arrayOf(MediaSource::class.java),
+        ) { _, method, _ -> error("Unexpected source call: ${method.name}") } as MediaSource
+        val source = TextStreamOffsetMediaSource(unusedChild, 0L, 1_000_000L)
+
+        // Changing a saved adjustment while Secondary is Off does not yet
+        // rewrite the source. Selection must detect the difference and retime.
+        assertEquals(1_000_000L, source.currentSecondaryOffsetUs)
+        assertTrue(source.currentSecondaryOffsetUs != 2_000_000L)
+        source.setTimeOffsetUs(0L, 2_000_000L)
+        assertEquals(2_000_000L, source.currentSecondaryOffsetUs)
+    }
 
     @Test
     fun `manual delay is clamped to five seconds either way`() {
