@@ -43,6 +43,19 @@ class SubtitleOffsetPolicyTest {
         assertFalse(shiftsEmbeddedFormat(null, null))
     }
 
+    @Test
+    fun `secondary accepts raw and parsed SRT and WebVTT including MP4`() {
+        for (mime in listOf("application/x-subrip", "text/vtt", "application/x-mp4-vtt")) {
+            assertTrue(mime, supportsSecondarySubtitleFormat(mime, null))
+            assertTrue(mime, supportsSecondarySubtitleFormat("application/x-media3-cues", mime))
+        }
+        for (mime in listOf(null, "text/x-ssa", "application/pgs", "application/vobsub",
+                "application/dvbsubs", "application/ttml+xml", "application/cea-608", "video/avc")) {
+            assertFalse(mime, supportsSecondarySubtitleFormat(mime, null))
+            assertFalse(mime, supportsSecondarySubtitleFormat("application/x-media3-cues", mime))
+        }
+    }
+
     private fun tree(
         isLive: Boolean = false,
         isPreview: Boolean = false,
@@ -50,6 +63,7 @@ class SubtitleOffsetPolicyTest {
         externalCount: Int = 0,
         manualDelayMs: Long = 0L,
         hasEmbeddedWrapper: Boolean = false,
+        hasSecondarySidecar: Boolean = false,
     ) = sourceTreeFor(
         isLive = isLive,
         isPreview = isPreview,
@@ -57,6 +71,7 @@ class SubtitleOffsetPolicyTest {
         externalCount = externalCount,
         manualDelayMs = manualDelayMs,
         hasEmbeddedWrapper = hasEmbeddedWrapper,
+        hasSecondarySidecar = hasSecondarySidecar,
     )
 
     @Test
@@ -65,10 +80,17 @@ class SubtitleOffsetPolicyTest {
     }
 
     @Test
-    fun `live preview and audio never get the tree`() {
+    fun `live preview and audio without secondary sidecars keep the player item path`() {
         assertEquals(SourceTree.PLAYER_ITEM, tree(isLive = true, externalCount = 2, manualDelayMs = 500L))
         assertEquals(SourceTree.PLAYER_ITEM, tree(isPreview = true, externalCount = 1))
         assertEquals(SourceTree.PLAYER_ITEM, tree(mediaType = "audio", manualDelayMs = 500L))
+    }
+
+    @Test
+    fun `secondary sidecars always get independent timing including live sources`() {
+        assertEquals(SourceTree.CUSTOM_TREE, tree(isLive = true, externalCount = 1, hasSecondarySidecar = true))
+        assertEquals(SourceTree.CUSTOM_TREE, tree(isPreview = true, externalCount = 1, hasSecondarySidecar = true))
+        assertEquals(SourceTree.CUSTOM_TREE, tree(mediaType = "audio", externalCount = 1, hasSecondarySidecar = true))
     }
 
     @Test
