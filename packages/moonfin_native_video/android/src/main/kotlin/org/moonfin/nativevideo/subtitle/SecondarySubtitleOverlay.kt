@@ -488,7 +488,7 @@ internal class SecondarySubtitleOverlay(
             nominalWidth
         }
         val left = cueLeft(cue, width, cueWidth)
-        val top = when {
+        var top = when {
             cue.line == Cue.DIMEN_UNSET -> height * (1f - primaryBottomPaddingFraction) - anchorHeight
             cue.lineType == Cue.LINE_TYPE_FRACTION -> when (cue.lineAnchor) {
                 Cue.ANCHOR_TYPE_END -> cue.line * height - anchorHeight
@@ -497,6 +497,12 @@ internal class SecondarySubtitleOverlay(
             }
             cue.line < 0f -> height * (1f - primaryBottomPaddingFraction) + cue.line * fontPx - anchorHeight
             else -> cue.line * fontPx
+        }
+        // SubtitlePainter clamps positioned text using the initial layout height.
+        // Its final drawn height still determines the collision box below.
+        if (bitmap == null && cue.line != Cue.DIMEN_UNSET) {
+            if (top + anchorHeight > height) top = height - anchorHeight
+            else if (top < 0f) top = 0f
         }
         return SubtitleBox(left, top, left + cueWidth, top + boxHeight)
     }
