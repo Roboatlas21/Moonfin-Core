@@ -39,7 +39,8 @@ class MoonfinAssOverlayVisibilityTest {
 
         overlay.syncNativeAssTrack(Any())
         val previousGeneration = generationField.getInt(overlay)
-        val oldFrame = AssFrame(emptyArray(), changed = 1)
+        val oldBitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        val oldFrame = AssFrame(arrayOf(AssTex(6, 9, 2, 2, 0, oldBitmap)), changed = 1)
         publish.invoke(overlay, oldFrame, previousGeneration, true)
         assertSame(oldFrame, cachedAssFrame(overlay))
 
@@ -100,6 +101,88 @@ class MoonfinAssOverlayVisibilityTest {
         )
         assertSame(frameA, cachedAssFrame(overlay))
         assertEquals(37f, overlay.visibleFrameBounds().single().left)
+    }
+
+    @Test
+    fun identicalPixelsTransferBitmapOwnershipAfterRenderingAnotherTrack() {
+        val overlay = MoonfinAssOverlayView(
+            RuntimeEnvironment.getApplication(),
+            AssHandler(AssRenderType.OVERLAY_CANVAS),
+        )
+        val generation = overlay.javaClass.getDeclaredField("primaryTrackGeneration")
+            .apply { isAccessible = true }
+        val publish = overlay.javaClass.getDeclaredMethod(
+            "publishFrame", AssFrame::class.java, Int::class.javaPrimitiveType!!,
+            Boolean::class.javaPrimitiveType!!,
+        ).apply { isAccessible = true }
+        val a = Any()
+        val b = Any()
+        val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        val frameA = AssFrame(arrayOf(AssTex(21, 34, 2, 2, 0, bitmap)), changed = 2)
+
+        overlay.syncNativeAssTrack(a)
+        publish.invoke(overlay, frameA, generation.getInt(overlay), true)
+        overlay.syncNativeAssTrack(b)
+        assertTrue(overlay.visibleFrameBounds().isEmpty())
+
+        // libass compared B's pixels to A's most recent native render and
+        // returned unchanged, but the identical image is valid for B too.
+        publish.invoke(
+            overlay, AssFrame(images = null, changed = 0), generation.getInt(overlay), true,
+        )
+        assertSame(frameA, cachedAssFrame(overlay))
+        assertEquals(21f, overlay.visibleFrameBounds().single().left)
+
+        // The same result must work in the opposite direction.
+        overlay.syncNativeAssTrack(a)
+        assertTrue(overlay.visibleFrameBounds().isEmpty())
+        publish.invoke(
+            overlay, AssFrame(images = null, changed = 0), generation.getInt(overlay), true,
+        )
+        assertEquals(21f, overlay.visibleFrameBounds().single().left)
+    }
+
+    @Test
+    fun emptySelectedTrackHidesWithoutDiscardingLastNativeBitmap() {
+        val overlay = MoonfinAssOverlayView(
+            RuntimeEnvironment.getApplication(),
+            AssHandler(AssRenderType.OVERLAY_CANVAS),
+        )
+        val generation = overlay.javaClass.getDeclaredField("primaryTrackGeneration")
+            .apply { isAccessible = true }
+        val publish = overlay.javaClass.getDeclaredMethod(
+            "publishFrame", AssFrame::class.java, Int::class.javaPrimitiveType!!,
+            Boolean::class.javaPrimitiveType!!,
+        ).apply { isAccessible = true }
+        val a = Any()
+        val b = Any()
+        val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        val frameA = AssFrame(arrayOf(AssTex(54, 63, 2, 2, 0, bitmap)), changed = 2)
+
+        overlay.syncNativeAssTrack(a)
+        publish.invoke(overlay, frameA, generation.getInt(overlay), true)
+        overlay.syncNativeAssTrack(b)
+
+        // The ASS track exists from its header, but its first dialogue hasn't
+        // loaded, so rendering B returns null without advancing libass's image.
+        publish.invoke(overlay, null, generation.getInt(overlay), true)
+        assertSame(frameA, cachedAssFrame(overlay))
+        assertTrue(overlay.visibleFrameBounds().isEmpty())
+
+        overlay.syncNativeAssTrack(a)
+        assertTrue(overlay.visibleFrameBounds().isEmpty())
+        publish.invoke(
+            overlay, AssFrame(images = null, changed = 0), generation.getInt(overlay), true,
+        )
+        assertEquals(54f, overlay.visibleFrameBounds().single().left)
+
+        // A genuinely empty current cue must hide its pixels and bounds too,
+        // even though the previous bitmap remains available if libass needs it.
+        publish.invoke(overlay, null, generation.getInt(overlay), true)
+        assertSame(frameA, cachedAssFrame(overlay))
+        assertTrue(overlay.visibleFrameBounds().isEmpty())
+        publish.invoke(overlay, null, generation.getInt(overlay), true)
+        assertTrue(overlay.visibleFrameBounds().isEmpty())
     }
 
     @Test

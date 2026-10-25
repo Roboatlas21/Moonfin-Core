@@ -83,7 +83,11 @@ class MoonfinAssOverlayView(
 
     // libass reports differences from its last actual render, not from the
     // selected track. Retain that image and its owner across unrendered switches.
-    private data class CachedFrame(val track: Any, val frame: AssFrame)
+    private data class CachedFrame(
+        val track: Any,
+        val frame: AssFrame,
+        val visible: Boolean = true,
+    )
 
     @Volatile
     private var cachedFrame: CachedFrame? = null
@@ -149,7 +153,7 @@ class MoonfinAssOverlayView(
     private fun visibleFrame(): AssFrame? {
         if (!primaryVisible || !primaryAssTrackActive) return null
         val cached = cachedFrame ?: return null
-        return cached.frame.takeIf { cached.track === primaryNativeTrack }
+        return cached.frame.takeIf { cached.visible && cached.track === primaryNativeTrack }
     }
 
     fun visibleFrameBounds(): List<RectF> =
@@ -284,14 +288,22 @@ class MoonfinAssOverlayView(
     }
 
     private fun publishFrame(frame: AssFrame?, generation: Int, hasActiveTrack: Boolean) {
-        // An Off-time null result is not an empty cue. Nor is libass's
-        // changed=0 reply a new bitmap: the previous rendered image still owns
-        // the pixels, even if another track was selected in between.
         if (!hasActiveTrack || generation != primaryTrackGeneration) return
-        if (frame?.changed == 0) return
-        if (frame == null && cachedFrame == null) return
-        frame?.images?.forEach { it.bitmap?.prepareToDraw() }
-        cachedFrame = frame?.let { CachedFrame(requireNotNull(primaryNativeTrack), it) }
+        val retained = cachedFrame
+        if (frame?.changed == 0) {
+            // Identical pixels may come from another track. The native render
+            // confirms they are valid for the newly selected track as well.
+            if (retained == null || (retained.visible && retained.track === primaryNativeTrack)) return
+            cachedFrame = retained.copy(track = requireNotNull(primaryNativeTrack), visible = true)
+        } else if (frame == null || frame.images.isNullOrEmpty()) {
+            // No current cue (or no dialogue loaded yet): hide the image but
+            // keep its pixels. An unchanged render can still need them later.
+            if (retained == null || !retained.visible) return
+            cachedFrame = retained.copy(visible = false)
+        } else {
+            frame.images?.forEach { it.bitmap?.prepareToDraw() }
+            cachedFrame = CachedFrame(requireNotNull(primaryNativeTrack), frame)
+        }
         postInvalidate()
         post { if (!released) onFrameChanged?.invoke() }
     }
