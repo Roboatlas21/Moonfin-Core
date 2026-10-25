@@ -20,12 +20,15 @@ typedef WebVttCueBox = ({
 });
 
 /// Move an automatic cue above overlapping boxes, keeping separate columns level.
+/// In browsers without positionAlign, percentage-positioned cues may be drawn
+/// half a cue width away from the inferred anchor; reserve that uncertainty.
 double fitWebAutomaticCue(
   double bottom,
   double height,
   WebVttHorizontalPlacement horizontal,
-  List<WebVttCueBox> occupied,
-) {
+  List<WebVttCueBox> occupied, {
+  bool conservativeHorizontal = false,
+}) {
   double left(WebVttHorizontalPlacement box) => box.position - switch (box.positionAlign) {
     'line-left' => 0,
     'line-right' => box.size,
@@ -33,9 +36,12 @@ double fitWebAutomaticCue(
   };
   final cueLeft = left(horizontal);
   final cueRight = cueLeft + horizontal.size;
+  final cuePadding = conservativeHorizontal ? horizontal.size / 2 : 0.0;
   final blockers = occupied.where((box) {
     final boxLeft = left(box.horizontal);
-    return cueLeft < boxLeft + box.horizontal.size && cueRight > boxLeft;
+    final boxPadding = conservativeHorizontal ? box.horizontal.size / 2 : 0.0;
+    return cueLeft - cuePadding < boxLeft + box.horizontal.size + boxPadding &&
+        cueRight + cuePadding > boxLeft - boxPadding;
   }).toList()..sort((a, b) => b.top.compareTo(a.top));
   const gap = 0.002;
   for (final box in blockers) {

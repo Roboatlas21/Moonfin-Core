@@ -1521,7 +1521,8 @@ class HtmlVideoBackend extends PlayerBackend
     for (final cue in automatic) {
       final measured = _measureCue(cue);
       final top = fitWebAutomaticCue(1 - _subtitleVerticalOffset,
-          measured.height, measured.horizontal, occupied);
+          measured.height, measured.horizontal, occupied,
+          conservativeHorizontal: !_nativePositionAlignment);
       final bottom = top + measured.height;
       _setCueLine(cue, bottom, 'end');
       occupied.add((top: top, bottom: bottom, horizontal: measured.horizontal));
