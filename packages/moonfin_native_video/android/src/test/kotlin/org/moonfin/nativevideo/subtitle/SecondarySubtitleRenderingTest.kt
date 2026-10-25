@@ -28,12 +28,30 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [28], manifest = Config.NONE)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class SecondarySubtitleRenderingTest {
-    private fun fixture(): Triple<SubtitleView, SubtitleView, SecondarySubtitleOverlay> {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context)
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        return Triple(primary, secondary, SecondarySubtitleOverlay(secondary, primary))
+    private class Scene {
+        val primary = SubtitleView(RuntimeEnvironment.getApplication())
+        val secondary = SubtitleView(primary.context).apply { layout(0, 0, 1280, 720) }
+        val overlay = SecondarySubtitleOverlay(secondary, primary).apply { select(true) }
+        val main get() = displayedCues(primary)
+        val caption get() = displayedCues(secondary).single()
+        fun show(cues: List<Cue>, text: String = "Translation") {
+            overlay.updatePrimaryCues(cues)
+            overlay.updateCues(listOf(Cue.Builder().setText(text).build()))
+        }
+        fun style(offset: Float = 0f) = overlay.configureBaseStyle(
+            Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, offset)
     }
+
+    companion object {
+        private fun displayedCues(view: SubtitleView): List<Cue> =
+            (SubtitleView::class.java.getDeclaredField("cues").apply { isAccessible = true }
+                .get(view) as List<*>).filterIsInstance<Cue>()
+    }
+
+    private fun cue(text: CharSequence, line: Float = Cue.DIMEN_UNSET,
+                    anchor: Int = Cue.ANCHOR_TYPE_START) = Cue.Builder().setText(text).apply {
+        if (line != Cue.DIMEN_UNSET) setLine(line, Cue.LINE_TYPE_FRACTION).setLineAnchor(anchor)
+    }.build()
 
     private fun inkBounds(view: SubtitleView): Rect {
         val bitmap = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888)
@@ -56,85 +74,56 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
-    fun automaticSecondaryRemainsCenteredForLatinAndArabic() {
-        val (primary, secondary, overlay) = fixture()
-        overlay.select(true)
-        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary subtitle").build()))
-        for (text in listOf("Short subtitle", "الترجمة العربية")) {
-            overlay.updateCues(listOf(Cue.Builder().setText(text).build()))
-            val pixels = inkBounds(secondary)
-            assertEquals("Text must use the centre anchor, not the collision box's left edge",
-                640f, pixels.exactCenterX(), 12f)
+    fun secondaryPreservesCenterLeftAndRightAnchorsForLatinAndArabic() {
+        for ((text, position, anchor) in listOf(
+            Triple("Short subtitle", 0.5f, Cue.ANCHOR_TYPE_MIDDLE),
+            Triple("الترجمة العربية", 0.5f, Cue.ANCHOR_TYPE_MIDDLE),
+            Triple("Left", 0.1f, Cue.ANCHOR_TYPE_START),
+            Triple("Right", 0.9f, Cue.ANCHOR_TYPE_END),
+        )) {
+            val f = Scene()
+            val primary = Cue.Builder().setText("Primary")
+            if (anchor != Cue.ANCHOR_TYPE_MIDDLE) primary.setPosition(position).setPositionAnchor(anchor)
+            f.show(listOf(primary.build()), text)
+            val pixels = inkBounds(f.secondary)
+            val edge = when (anchor) {
+                Cue.ANCHOR_TYPE_START -> pixels.left.toFloat()
+                Cue.ANCHOR_TYPE_END -> pixels.right.toFloat()
+                else -> pixels.exactCenterX()
+            }
+            assertEquals(text, position * 1280, edge, 12f)
         }
     }
 
     @Test
-    fun secondaryKeepsExplicitLeftAndRightAnchors() {
-        val (primary, secondary, overlay) = fixture()
-        overlay.select(true)
-        for ((position, anchor) in listOf(0.1f to Cue.ANCHOR_TYPE_START,
-                0.9f to Cue.ANCHOR_TYPE_END)) {
-            overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary")
-                .setPosition(position).setPositionAnchor(anchor).build()))
-            overlay.updateCues(listOf(Cue.Builder().setText("Secondary").build()))
-            val pixels = inkBounds(secondary)
-            val edge = if (anchor == Cue.ANCHOR_TYPE_START) pixels.left else pixels.right
-            assertEquals(position * 1280, edge.toFloat(), 12f)
+    fun multilinePairRemainsVisibleAtMaximumOffsetsAndSpacing() {
+        for (offset in listOf(0.04f, 0.20f)) {
+            val f = Scene()
+            f.primary.setFractionalTextSize(0.06f)
+            f.primary.setBottomPaddingFraction(offset)
+            f.style(offset)
+            val primary = if (offset == 0.04f) "Primary" else "First line\nSecond line"
+            val secondary = if (offset == 0.04f) "One\nTwo\nThree" else "Translation one\nTranslation two"
+            f.show(listOf(cue(primary)), secondary)
+            for (spacing in listOf(0f, 0.06f)) {
+                f.overlay.configureAppearance(if (offset == 0.04f) 36f else null, spacing)
+                assertEquals(View.VISIBLE, f.secondary.visibility)
+                val pixels = inkBounds(f.secondary)
+                if (offset == 0.04f) assertTrue(pixels.top >= 360)
+                assertTrue(pixels.bottom < inkBounds(f.primary).top)
+            }
         }
-    }
-
-    @Test
-    fun increasedSpacingKeepsMultilineSecondaryVisibleWhenItFits() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context).apply {
-            setFractionalTextSize(0.06f)
-            setBottomPaddingFraction(0.04f)
-        }
-        val secondary = SubtitleView(context)
-        secondary.layout(0, 0, 1280, 720)
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
-        overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0.04f)
-        overlay.select(true)
-        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary").build()))
-        overlay.updateCues(listOf(Cue.Builder().setText("One\nTwo\nThree").build()))
-        for (spacing in listOf(0f, 0.06f)) {
-            overlay.configureAppearance(36f, spacing)
-            assertEquals(View.VISIBLE, secondary.visibility)
-            val pixels = inkBounds(secondary)
-            assertTrue(pixels.top >= 360)
-            assertTrue(pixels.bottom < inkBounds(primary).top)
-        }
-    }
-    @Test
-    fun twentyPercentPrimaryOffsetKeepsMultilinePairVisible() {
-        val context = RuntimeEnvironment.getApplication()
-        val primary = SubtitleView(context).apply {
-            setFractionalTextSize(0.06f)
-            setBottomPaddingFraction(0.20f)
-        }
-        val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-        val overlay = SecondarySubtitleOverlay(secondary, primary)
-        overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0.20f)
-        overlay.select(true)
-        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("First line\nSecond line").build()))
-        overlay.updateCues(listOf(Cue.Builder().setText("Translation one\nTranslation two").build()))
-        overlay.configureAppearance(null, 0.06f)
-        assertEquals(View.VISIBLE, secondary.visibility)
-        val secondPixels = inkBounds(secondary)
-        val primaryPixels = inkBounds(primary)
-        assertTrue("Secondary should remain above primary at maximum spacing",
-            secondPixels.bottom < primaryPixels.top)
     }
 
     @Test
     fun secondaryKeepsEmphasisInBothStackedAndPrimaryOffModes() {
-        val (primary, secondary, overlay) = fixture()
+        val f = Scene()
+        val overlay = f.overlay
         val styled = Html.fromHtml(
             "<i>italic</i> <b>bold</b> <u>underlined</u> <font color='#ff0000'>red</font> <big>large</big>",
             Html.FROM_HTML_MODE_COMPACT,
         )
         val second = Html.fromHtml("<u>second line</u>", Html.FROM_HTML_MODE_COMPACT)
-        overlay.select(true)
         overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary").build()))
         overlay.updateCues(listOf(
             Cue.Builder().setText(styled).setWindowColor(Color.BLUE).build(),
@@ -142,217 +131,122 @@ class SecondarySubtitleRenderingTest {
         ))
 
         fun check(text: Spanned) {
-            val italicAt = text.indexOf("italic")
-            val boldAt = text.indexOf("bold")
-            val underlinedAt = text.indexOf("underlined")
-            val secondAt = text.indexOf("second line")
-            assertTrue(text.getSpans(italicAt, italicAt + 6, StyleSpan::class.java)
-                .any { it.style and Typeface.ITALIC != 0 })
-            assertTrue(text.getSpans(boldAt, boldAt + 4, StyleSpan::class.java)
-                .any { it.style and Typeface.BOLD != 0 })
-            assertTrue(text.getSpans(underlinedAt, underlinedAt + 10, UnderlineSpan::class.java).isNotEmpty())
-            assertTrue(text.getSpans(secondAt, secondAt + 11, UnderlineSpan::class.java).isNotEmpty())
+            for ((word, style) in listOf("italic" to Typeface.ITALIC, "bold" to Typeface.BOLD)) {
+                val at = text.indexOf(word)
+                assertTrue(text.getSpans(at, at + word.length, StyleSpan::class.java)
+                    .any { it.style and style != 0 })
+            }
+            for (word in listOf("underlined", "second line")) {
+                val at = text.indexOf(word)
+                assertTrue(text.getSpans(at, at + word.length, UnderlineSpan::class.java).isNotEmpty())
+            }
             assertTrue(text.getSpans(0, text.length, ForegroundColorSpan::class.java).isEmpty())
             assertTrue(text.getSpans(0, text.length, RelativeSizeSpan::class.java).isEmpty())
         }
-        check(displayedCues(secondary).single().text as Spanned)
-        assertFalse(displayedCues(secondary).single().windowColorSet)
+        check(f.caption.text as Spanned)
+        assertFalse(f.caption.windowColorSet)
         overlay.setPrimaryEnabled(false)
-        check(displayedCues(secondary).single().text as Spanned)
+        check(f.caption.text as Spanned)
     }
 
     @Test
-    fun secondaryDelayClearKeepsPrimaryCuesAndTheirPlacement() {
-        val (primary, secondary, overlay) = fixture()
-        overlay.select(true)
-        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Primary")
-            .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
-            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()))
-        overlay.updateCues(listOf(Cue.Builder().setText("Old secondary").build()))
-        val originalPrimary = displayedCues(primary).single()
-        assertTrue(displayedCues(secondary).isNotEmpty())
-
-        overlay.clearSecondaryCues()
-
-        assertTrue(displayedCues(secondary).isEmpty())
-        assertEquals("Primary", displayedCues(primary).single().text.toString())
-        assertEquals(originalPrimary.line, displayedCues(primary).single().line, 0.0001f)
-
-        // A dialogue gap must still use the same primary position when new secondary cues arrive.
-        overlay.updatePrimaryCues(emptyList())
-        overlay.updateCues(listOf(Cue.Builder().setText("New secondary").build()))
-        assertEquals("New secondary", displayedCues(secondary).single().text.toString())
-        assertTrue(displayedCues(secondary).single().line < 0.5f)
+    fun clearsDistinguishSecondaryDelayTrackChangeAndSeek() {
+        for (action in listOf("secondary delay", "primary track", "seek")) {
+            val f = Scene()
+            f.show(listOf(cue("Primary", 0.1f)), "Old secondary")
+            val primaryLine = f.main.single().line
+            val oldLine = f.caption.line
+            if (action == "secondary delay") {
+                f.overlay.clearSecondaryCues()
+                assertTrue(displayedCues(f.secondary).isEmpty())
+                assertEquals(primaryLine, f.main.single().line, 0.0001f)
+                assertEquals("Primary", f.main.single().text.toString())
+            }
+            f.overlay.updatePrimaryCues(emptyList())
+            if (action == "primary track") {
+                assertEquals(oldLine, f.caption.line, 0.0001f)
+                f.overlay.resetPrimaryCues()
+                assertEquals("Old secondary", f.caption.text.toString())
+            } else if (action == "seek") {
+                f.overlay.resetPrimaryCues(clearSecondary = true)
+                assertTrue(displayedCues(f.secondary).isEmpty())
+            }
+            assertTrue(f.main.isEmpty())
+            f.overlay.updateCues(listOf(cue("New secondary")))
+            assertEquals("New secondary", f.caption.text.toString())
+            if (action == "secondary delay") assertEquals(oldLine, f.caption.line, 0.0001f)
+            else assertTrue(f.caption.line > oldLine + 0.2f)
+        }
     }
 
     @Test
-    fun subtitleDelayClearsCachedPositionAndKeepsSecondarySelectable() {
-        val (primary, secondary, overlay) = fixture()
-        overlay.select(true)
-        overlay.updatePrimaryCues(listOf(Cue.Builder().setText("Old primary")
-            .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
-            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()))
-        overlay.updateCues(listOf(Cue.Builder().setText("Old secondary").build()))
-        val previousLine = displayedCues(secondary).single().line
-        overlay.updatePrimaryCues(emptyList())
-
-        overlay.resetPrimaryCues(clearSecondary = true)
-
-        assertTrue(displayedCues(primary).isEmpty())
-        assertTrue(displayedCues(secondary).isEmpty())
-        overlay.updateCues(listOf(Cue.Builder().setText("New secondary").build()))
-        assertEquals("New secondary", displayedCues(secondary).single().text.toString())
-        assertTrue(displayedCues(secondary).single().line > previousLine + 0.2f)
-    }
-
-    private fun displayedCues(view: SubtitleView): List<Cue> =
-        (SubtitleView::class.java.getDeclaredField("cues").apply { isAccessible = true }
-            .get(view) as List<*>).filterIsInstance<Cue>()
-
-    @Test
-    fun dialogueGapKeepsPositionButNewPrimaryTrackResetsIt() {
-        val (primary, secondary, overlay) = fixture()
-        val top = Cue.Builder().setText("Top primary")
-            .setLine(0.1f, Cue.LINE_TYPE_FRACTION)
-            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()
-        overlay.select(true)
-        overlay.updatePrimaryCues(listOf(top))
-        overlay.updateCues(listOf(Cue.Builder().setText("Translation").build()))
-        val previousLine = displayedCues(secondary).single().line
-
-        overlay.updatePrimaryCues(emptyList()) // Dialogue gap, not a new track.
-        assertEquals(previousLine, displayedCues(secondary).single().line, 0.0001f)
-
-        overlay.resetPrimaryCues() // Primary-track change.
-        assertTrue(displayedCues(primary).isEmpty())
-        val displayed = displayedCues(secondary).single()
-        assertEquals("Translation", displayed.text.toString())
-        assertTrue(displayed.line > previousLine + 0.2f)
-    }
-
-    @Test
-    fun centredBitmapPrimaryKeepsAuthoredGeometryWithSecondaryEnabled() {
-        val (primary, secondary, overlay) = fixture()
+    fun bitmapPrimaryKeepsAuthoredGeometryAtMaximumOffsets() {
+        val f = Scene()
         val bitmap = Bitmap.createBitmap(128, 64, Bitmap.Config.ARGB_8888)
         val authored = Cue.Builder().setBitmap(bitmap)
             .setPosition(0.5f).setPositionAnchor(Cue.ANCHOR_TYPE_MIDDLE)
-            .setLine(0.5f, Cue.LINE_TYPE_FRACTION)
-            .setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE)
+            .setLine(0.5f, Cue.LINE_TYPE_FRACTION).setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE)
             .setSize(0.4f).setBitmapHeight(0.2f).build()
-
-        overlay.updatePrimaryCues(listOf(authored))
-        overlay.select(true)
-        overlay.updateCues(listOf(Cue.Builder().setText("Translation").build()))
-        overlay.configureBaseStyle(
-            Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0.20f)
-        overlay.configureAppearance(null, 0.06f)
-
-        val displayed = displayedCues(primary).single()
-        assertTrue(displayed.bitmap === bitmap)
-        assertEquals(authored.line, displayed.line, 0.0001f)
-        assertEquals(authored.lineAnchor, displayed.lineAnchor)
-        assertEquals(authored.position, displayed.position, 0.0001f)
-        assertEquals(authored.positionAnchor, displayed.positionAnchor)
-        assertEquals(authored.size, displayed.size, 0.0001f)
-        assertEquals(authored.bitmapHeight, displayed.bitmapHeight, 0.0001f)
-        assertTrue(displayedCues(secondary).isNotEmpty())
+        f.show(listOf(authored))
+        f.style(0.20f)
+        f.overlay.configureAppearance(null, 0.06f)
+        assertEquals(authored, f.main.single())
+        assertTrue(displayedCues(f.secondary).isNotEmpty())
     }
 
     @Test
-    fun centredPrimaryAvoidsOtherPrimaryCuesAndKeepsResolvedGapPlacement() {
-        val (primary, secondary, overlay) = fixture()
-        overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0f)
-        overlay.select(true)
-        val centred = Cue.Builder().setText("Centre primary")
-            .setLine(0.40f, Cue.LINE_TYPE_FRACTION)
-            .setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE).build()
-        val below = Cue.Builder().setText("Separate lower primary")
-            .setLine(0.46f, Cue.LINE_TYPE_FRACTION)
-            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()
-
-        // Moving the centred line down would overlap the next authored cue,
-        // so preserve the centred line and place the secondary around it.
-        overlay.updatePrimaryCues(listOf(centred, below))
-        val displayed = displayedCues(primary)
-        assertEquals(Cue.ANCHOR_TYPE_MIDDLE, displayed[0].lineAnchor)
-        assertEquals(0.40f, displayed[0].line, 0.0001f)
-        assertEquals(0.46f, displayed[1].line, 0.0001f)
-
-        overlay.updateCues(listOf(Cue.Builder().setText("Translation").build()))
-        val secondaryLine = displayedCues(secondary).single().line
-        overlay.updatePrimaryCues(emptyList())
-        assertEquals(secondaryLine, displayedCues(secondary).single().line, 0.0001f)
-        overlay.updatePrimaryCues(listOf(centred, below))
-        assertEquals(Cue.ANCHOR_TYPE_MIDDLE, displayedCues(primary)[0].lineAnchor)
-        assertEquals(secondaryLine, displayedCues(secondary).single().line, 0.0001f)
+    fun centeredPrimaryAvoidsUpperAndLowerObstaclesThroughDialogueGaps() {
+        for ((center, obstacle) in listOf(0.40f to 0.46f, 0.50f to 0.37f)) {
+            val f = Scene()
+            f.style()
+            val cues = listOf(cue("Center", center, Cue.ANCHOR_TYPE_MIDDLE), cue("Obstacle", obstacle))
+            f.show(cues)
+            val main = f.main
+            if (obstacle > center) {
+                assertEquals(Cue.ANCHOR_TYPE_MIDDLE, main[0].lineAnchor)
+                assertEquals(center, main[0].line, 0.0001f)
+                assertEquals(obstacle, main[1].line, 0.0001f)
+            }
+            val before = f.caption
+            f.overlay.updatePrimaryCues(emptyList())
+            assertTrue(f.main.isEmpty())
+            assertEquals(before.line, f.caption.line, 0.0001f)
+            assertEquals(before.lineAnchor, f.caption.lineAnchor)
+            f.overlay.updatePrimaryCues(cues)
+            assertEquals(main, f.main)
+            assertEquals(before.line, f.caption.line, 0.0001f)
+            assertEquals(before.lineAnchor, f.caption.lineAnchor)
+        }
     }
 
     @Test
-    fun upperPrimaryObstacleKeepsSecondaryStableDuringDialogueGap() {
-        val (primary, secondary, overlay) = fixture()
-        overlay.configureBaseStyle(Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, 0f)
-        overlay.select(true)
-        val centred = Cue.Builder().setText("Centre primary")
-            .setLine(0.50f, Cue.LINE_TYPE_FRACTION)
-            .setLineAnchor(Cue.ANCHOR_TYPE_MIDDLE).build()
-        val upper = Cue.Builder().setText("Upper primary")
-            .setLine(0.37f, Cue.LINE_TYPE_FRACTION)
-            .setLineAnchor(Cue.ANCHOR_TYPE_START).build()
-        val translation = Cue.Builder().setText("Translation continues during gap").build()
-
-        overlay.updatePrimaryCues(listOf(centred, upper))
-        overlay.updateCues(listOf(translation))
-        val before = displayedCues(secondary).single()
-        assertTrue(displayedCues(primary).size == 2)
-
-        // Both primary lines end; only the secondary is still on screen.
-        // Keep the upper obstacle from the remembered primary group.
-        overlay.updatePrimaryCues(emptyList())
-        assertTrue(displayedCues(primary).isEmpty())
-        val duringGap = displayedCues(secondary).single()
-        assertEquals(before.line, duringGap.line, 0.0001f)
-        assertEquals(before.lineAnchor, duringGap.lineAnchor)
-
-        overlay.updatePrimaryCues(listOf(centred, upper))
-        val resumed = displayedCues(secondary).single()
-        assertEquals(before.line, resumed.line, 0.0001f)
-        assertEquals(before.lineAnchor, resumed.lineAnchor)
-    }
-
-    @Test
-    fun appearanceChangesUpdateCachedPrimaryPlacementDuringDialogueGaps() {
-        val context = RuntimeEnvironment.getApplication()
-        for ((line, anchor, expectedShift) in listOf(
+    fun appearanceChangesRemeasurePrimaryPlacementDuringDialogueGaps() {
+        for ((line, anchor, shift) in listOf(
             Triple(0.08f, Cue.ANCHOR_TYPE_START, 0.16f),
             Triple(0.92f, Cue.ANCHOR_TYPE_END, -0.16f),
             Triple(0.5f, Cue.ANCHOR_TYPE_MIDDLE, -0.03f),
+            Triple(0f, Cue.ANCHOR_TYPE_START, 0.16f), Triple(-1f, Cue.ANCHOR_TYPE_END, -0.16f),
         )) {
-            val primary = SubtitleView(context)
-            val secondary = SubtitleView(context).apply { layout(0, 0, 1280, 720) }
-            val overlay = SecondarySubtitleOverlay(secondary, primary)
-            fun setPrimaryOffset(offset: Float) = overlay.configureBaseStyle(
-                Color.WHITE, Color.TRANSPARENT, Color.TRANSPARENT, 24f, 400, offset)
-            val authored = Cue.Builder().setText("Primary")
-                .setLine(line, Cue.LINE_TYPE_FRACTION).setLineAnchor(anchor).build()
-            setPrimaryOffset(0.04f)
-            overlay.select(true)
-            overlay.updatePrimaryCues(listOf(authored))
-            overlay.updatePrimaryCues(emptyList())
-            overlay.updateCues(listOf(Cue.Builder().setText("Translation during gap").build()))
-            val previousLine = displayedCues(secondary).single().line
-
-            setPrimaryOffset(0.20f)
-            if (anchor == Cue.ANCHOR_TYPE_MIDDLE) {
-                // A 6% gap increase moves each centred row outward by 3%.
-                overlay.configureAppearance(null, 0.06f)
+            val f = Scene()
+            val numbered = line <= 0f
+            val authored = if (numbered) Cue.Builder().setText("Primary")
+                .setLine(line, Cue.LINE_TYPE_NUMBER).build() else cue("Primary", line, anchor)
+            f.style(0.04f)
+            f.show(listOf(authored))
+            if (numbered) {
+                assertEquals(if (line == 0f) 0.04f else 0.96f, f.main.single().line, 0.0001f)
+                assertTrue(authored === offsetPrimaryCue(authored, 0f, 0.06f))
             }
-
-            assertTrue(displayedCues(primary).isEmpty())
-            val duringGap = displayedCues(secondary).single()
-            assertEquals("Translation during gap", duringGap.text.toString())
-            assertEquals(previousLine + expectedShift, duringGap.line, 0.0001f)
-            overlay.updatePrimaryCues(listOf(authored))
-            assertEquals(duringGap.line, displayedCues(secondary).single().line, 0.0001f)
+            f.overlay.updatePrimaryCues(emptyList())
+            val previous = f.caption.line
+            f.style(0.20f)
+            if (anchor == Cue.ANCHOR_TYPE_MIDDLE) f.overlay.configureAppearance(null, 0.06f)
+            assertTrue(f.main.isEmpty())
+            val duringGap = f.caption.line
+            assertEquals(previous + shift, duringGap, 0.0001f)
+            f.overlay.updatePrimaryCues(listOf(authored))
+            assertEquals(duringGap, f.caption.line, 0.0001f)
         }
     }
+
 }

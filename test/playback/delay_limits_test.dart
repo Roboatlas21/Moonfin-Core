@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/playback/aether_backend.dart';
 import 'package:moonfin/playback/delay_limits.dart';
-import 'package:moonfin/playback/html_video_backend.dart';
 import 'package:moonfin/playback/media3_player_backend.dart';
 import 'package:moonfin/playback/media_kit_player_backend.dart';
 
@@ -10,7 +9,6 @@ class _Media3 extends Fake implements Media3PlayerBackend {}
 class _MediaKit extends Fake implements MediaKitPlayerBackend {}
 
 class _Aether extends Fake implements AetherBackend {}
-class _Web extends Fake implements HtmlVideoBackend {}
 
 void main() {
   test('Media3 subtitles can go five seconds either way', () {
@@ -31,10 +29,5 @@ void main() {
   test('no backend means no delay', () {
     expect(delayLimitsFor(null, audio: false), isNull);
     expect(delayLimitsFor(null, audio: true), isNull);
-  });
-
-  test('web shifts subtitles up to five seconds and leaves audio alone', () {
-    expect(delayLimitsFor(_Web(), audio: false), (-5.0, 5.0));
-    expect(delayLimitsFor(_Web(), audio: true), isNull);
   });
 }

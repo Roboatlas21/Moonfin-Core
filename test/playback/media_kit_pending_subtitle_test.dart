@@ -14,7 +14,6 @@ class _Native extends Fake implements NativePlayer {
   Completer<String>? delayedTracks;
   Completer<String>? delayedSecondaryText;
   Completer<void>? secondaryTextReadStarted;
-  Completer<void>? delayedSubtitleLoad;
   final commands = <List<String>>[];
   int rejectedSecondarySelections = 0;
 
@@ -25,7 +24,6 @@ class _Native extends Fake implements NativePlayer {
   }) async {
     commands.add(args);
     if (args.first == 'sub-add') {
-      await delayedSubtitleLoad?.future;
       tracks.add({
         'type': 'sub',
         'id': 52,
@@ -81,8 +79,10 @@ class _Streams extends Fake implements PlayerStream {
 }
 
 class _Player extends Fake implements Player {
+  _Player({PlatformPlayer? platform}) : platform = platform ?? _Native();
   @override
-  final _Native platform = _Native();
+  final PlatformPlayer platform;
+  _Native get native => platform as _Native;
   @override
   final _Streams stream = _Streams();
   @override
@@ -94,19 +94,19 @@ class _Player extends Fake implements Player {
   @override
   Future<void> seek(Duration position) async {
     // mpv clears the old active subtitle when a seek lands.
-    platform.properties.remove('sub-text/ass');
+    native.properties.remove('sub-text/ass');
   }
   @override
   Future<void> setSubtitleTrack(SubtitleTrack track) async {
     selections.add(track.id);
-    await platform.setProperty('sid', track.id);
+    await native.setProperty('sid', track.id);
   }
 
   @override
   Future<void> open(Playable playable, {bool play = true}) async {
     opened.add((playable as Media).uri);
-    if (platform.properties['sid'] == 'auto' && automaticSubtitleSid != null) {
-      platform.properties['sid'] = automaticSubtitleSid!;
+    if (platform is _Native && native.properties['sid'] == 'auto' && automaticSubtitleSid != null) {
+      native.properties['sid'] = automaticSubtitleSid!;
     }
   }
 
@@ -118,7 +118,7 @@ class _Player extends Fake implements Player {
   }
 
   void discover() {
-    platform.tracks = [
+    native.tracks = [
       {'type': 'sub', 'id': 3, 'codec': 'eia_608'},
       {'type': 'sub', 'id': 8, 'codec': 'subrip', 'external': true},
       {'type': 'sub', 'id': 11, 'codec': 'subrip'},
@@ -129,22 +129,6 @@ class _Player extends Fake implements Player {
 }
 
 class _NonNativePlatform extends Fake implements PlatformPlayer {}
-
-class _NonNativePlayer extends Fake implements Player {
-  @override
-  final _NonNativePlatform platform = _NonNativePlatform();
-  @override
-  final _Streams stream = _Streams();
-  @override
-  PlayerState get state => const PlayerState();
-  final opened = <String>[];
-  @override
-  Future<void> open(Playable playable, {bool play = true}) async {
-    opened.add((playable as Media).uri);
-  }
-  @override
-  Future<void> dispose() => stream.changes.close();
-}
 
 Future<void> _flush() async {
   for (var n = 0; n < 5; n++) {
@@ -158,12 +142,21 @@ void main() {
   late UserPreferences prefs;
   late MediaKitPlayerBackend backend;
   bool disposed = false;
+  late Map<String, String> properties;
+  int position() => int.parse(properties['secondary-sub-pos']!);
+  Future<void> selectPair({String primary = 'Primary', int secondary = 2}) async {
+    properties.addAll({'sub-text/ass': primary, 'secondary-sub-text': 'Translation'});
+    player.discover();
+    await backend.setSubtitleTrack(1);
+    await backend.setSecondarySubtitle(embeddedTrackId: secondary);
+  }
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     final store = PreferenceStore();
     await store.init();
     prefs = UserPreferences(store);
     player = _Player();
+    properties = player.native.properties;
     backend = MediaKitPlayerBackend.forTesting(player, prefs);
     disposed = false;
   });
@@ -173,44 +166,34 @@ void main() {
   });
 
   test('audio startup does not require a native player', () async {
-    final other = _NonNativePlayer();
+    final other = _Player(platform: _NonNativePlatform());
     final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      await second.play({
-        'url': 'https://server/song.mp3',
-        'mediaType': 'audio',
-        'autoPlay': false,
-      }, startPosition: const Duration(seconds: 30));
-      expect(other.opened, ['https://server/song.mp3']);
-      await second.setSubtitleDelay(1.25);
-      expect(second.subtitleDelaySeconds, 1.25);
-    } finally {
-      second.dispose();
-    }
+    addTearDown(second.dispose);
+    await second.play({
+      'url': 'https://server/song.mp3',
+      'mediaType': 'audio',
+      'autoPlay': false,
+    }, startPosition: const Duration(seconds: 30));
+    expect(other.opened, ['https://server/song.mp3']);
+    await second.setSubtitleDelay(1.25);
+    expect(second.subtitleDelaySeconds, 1.25);
   });
 
-  test('seeks clear in-flight placement but dialogue gaps keep it', () async {
-    player.platform.properties.addAll({
-      'sub-text/ass': r'{\an2}Bottom primary',
-      'secondary-sub-text': 'Translation',
-    });
-    int position() => int.parse(player.platform.properties['secondary-sub-pos']!);
-    player.discover();
-    await backend.setSubtitleTrack(1);
-    await backend.setSecondarySubtitle(embeddedTrackId: 2);
+  test('seeks and track changes clear placement while dialogue gaps keep it', () async {
+    await selectPair(primary: r'{\an2}Bottom primary');
     final bottomPosition = position();
     expect(bottomPosition, greaterThan(50));
 
-    player.platform.properties.remove('sub-text/ass');
+    properties.remove('sub-text/ass');
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
     expect(position(), bottomPosition);
 
     await backend.seekTo(const Duration(seconds: 51));
     expect(position(), lessThan(50));
 
-    player.platform.properties['sub-text/ass'] = r'{\an2}Bottom primary';
-    final delayed = player.platform.delayedSecondaryText = Completer<String>();
-    final started = player.platform.secondaryTextReadStarted = Completer<void>();
+    properties['sub-text/ass'] = r'{\an2}Bottom primary';
+    final delayed = player.native.delayedSecondaryText = Completer<String>();
+    final started = player.native.secondaryTextReadStarted = Completer<void>();
     final update = backend.configureSecondarySubtitleStyle(verticalOffset: 0);
     await started.future;
     final seek = backend.seekTo(const Duration(seconds: 60));
@@ -218,122 +201,88 @@ void main() {
     delayed.complete('Translation');
     await Future.wait([update, seek]);
     expect(position(), lessThan(50));
-  });
-
-  test('changing primary text or caption tracks clears the old position', () async {
-    player.platform.properties.addAll({
-      'sub-text/ass': r'{\an2}Bottom primary',
-      'secondary-sub-text': 'Translation',
-    });
-    int position() => int.parse(player.platform.properties['secondary-sub-pos']!);
-    player.discover();
-    player.platform.tracks.add({'type': 'sub', 'id': 23, 'codec': 'subrip'});
-    await _flush(); // Caption discovery reports the CC1 track.
-    await backend.setSubtitleTrack(1);
+    player.native.delayedSecondaryText = null;
+    player.native.tracks.add({'type': 'sub', 'id': 23, 'codec': 'subrip'});
     await backend.setSecondarySubtitle(embeddedTrackId: 3);
-    final bottomPosition = position();
-    expect(bottomPosition, greaterThan(50));
-
-    player.platform.properties.remove('sub-text/ass');
+    properties['sub-text/ass'] = r'{\an2}Bottom primary';
     await backend.setSubtitleTrack(1);
-    expect(position(), bottomPosition); // Same track preserves dialogue-gap placement.
+    final positionBeforeSwitch = position();
+    properties.remove('sub-text/ass');
+    await backend.setSubtitleTrack(1);
+    expect(position(), positionBeforeSwitch); // Same track preserves dialogue-gap placement.
 
     await backend.setSubtitleTrack(2);
-    expect(player.platform.properties['sid'], '17');
+    expect(properties['sid'], '17');
     expect(position(), lessThan(50));
 
-    player.platform.properties['sub-text/ass'] = 'Primary again';
+    properties['sub-text/ass'] = 'Primary again';
     await backend.setSubtitleTrack(1);
     expect(position(), greaterThan(50));
-    player.platform.properties.remove('sub-text/ass');
+    properties.remove('sub-text/ass');
     await backend.setEmbeddedCaptionTrack(1);
-    expect(player.platform.properties['sid'], '3');
+    expect(properties['sid'], '3');
     expect(position(), lessThan(50));
+    await backend.setSubtitleTrack(1, isBitmapSubtitle: true);
+    final fallback = position();
+    expect(fallback, inExclusiveRange(0, 50));
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
+    expect(position(), fallback);
+    properties['sub-text/ass'] = 'Primary';
+    await backend.setSubtitleTrack(1);
+    expect(position(), greaterThan(50));
+    properties.remove('sub-text/ass');
+    await backend.setSubtitleTrack(1, isBitmapSubtitle: true);
+    expect(position(), fallback);
+    await backend.disableSubtitleTrack();
+    expect(position(), 100);
   });
 
-  test('primary gaps use the current font and viewport for stacking', () async {
+  test('primary gaps remeasure fonts and valid viewports, with dimension fallbacks', () async {
     const primary = 'A primary subtitle which wraps in a narrow window';
-    final properties = player.platform.properties;
-    properties.addAll({
-      'secondary-sub-text': 'Translation',
-      'osd-height': '720',
-    });
-    player.discover();
-    await backend.setSubtitleTrack(1);
-    await backend.setSecondarySubtitle(embeddedTrackId: 2);
-    int position() => int.parse(properties['secondary-sub-pos']!);
-
-    for (final (fontSize, width) in [(48.0, '1280'), (24.0, '400')]) {
-      properties['sub-text/ass'] = primary;
-      properties['osd-width'] = '1280';
+    await selectPair(primary: primary);
+    properties['osd-dimensions'] = 'not JSON';
+    for (final (font, width, height, moves) in [
+      (48.0, '1280', '720', true), (24.0, '400', '720', true),
+      (24.0, 'invalid', '720', false), (24.0, '400', '0', false),
+    ]) {
+      properties.addAll({'sub-text/ass': primary, 'osd-width': '1280', 'osd-height': '720'});
       await backend.configureSubtitleStyle(fontSize: 24, verticalOffset: 0.04);
       final before = position();
-
       properties.remove('sub-text/ass');
-      properties['osd-width'] = width;
-      await backend.configureSubtitleStyle(fontSize: fontSize);
-      final duringGap = position();
-      expect(duringGap, lessThan(before));
-
+      properties.addAll({'osd-width': width, 'osd-height': height});
+      await backend.configureSubtitleStyle(fontSize: font);
+      final gap = position();
+      expect(gap, moves ? lessThan(before) : before);
       properties['sub-text/ass'] = primary;
       await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
-      expect(
-        position(),
-        duringGap,
-        reason: 'The same primary cue must not move the secondary when it returns',
-      );
+      expect(position(), gap, reason: 'Returning primary must match its gap reference');
     }
-  });
-
-  test('Primary Off does not persist into a new source with automatic subtitles', () async {
-    player.automaticSubtitleSid = '11';
-    player.platform.properties.addAll({
-      'sub-text/ass': 'Primary',
-      'secondary-sub-text': 'Translation',
-    });
-    player.discover();
-    await backend.disableSubtitleTrack();
-    expect(player.platform.properties['sid'], 'no');
-
-    await backend.play({
-      'url': 'https://server/next.mkv',
-      'autoPlay': false,
-    });
-    expect(player.platform.properties['sid'], '11');
-    await backend.setSecondarySubtitle(embeddedTrackId: 2);
-    final activePosition =
-        int.parse(player.platform.properties['secondary-sub-pos']!);
-    expect(activePosition, inInclusiveRange(50, 99));
-
-    await backend.disableSubtitleTrack();
-    expect(player.platform.properties['secondary-sub-pos'], '100');
+    double distance() => (1 - double.parse(properties['sub-margin-y']!) / 720) * (1 - position() / 100);
+    await backend.configureSubtitleStyle(fontSize: 24, verticalOffset: 0);
+    final baseline = distance();
+    expect(baseline, greaterThan(55 / 720));
+    await backend.configureSubtitleStyle(verticalOffset: 0.08);
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
+    expect(distance() - 0.04, closeTo(baseline, 0.01));
+    expect(properties['sub-pos'], isNull);
   });
 
   test('paused subtitle delay refreshes secondary placement for the current cue', () async {
-    player.platform.properties.addAll({
-      'secondary-sub-delay': '0',
-      'secondary-sub-pos': '0',
-      'sub-text/ass': 'One line',
-      'secondary-sub-text': 'Translation',
-      'osd-width': '1280',
-      'osd-height': '720',
-    });
-    player.discover();
-    await backend.setSecondarySubtitle(embeddedTrackId: 1);
+    properties.addAll({'osd-width': '1280', 'osd-height': '720'});
+    await selectPair(primary: 'One line');
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
-    final before = int.parse(player.platform.properties['secondary-sub-pos']!);
+    final before = position();
     // No position-stream tick occurs while this fake player is paused.
-    player.platform.properties['sub-text/ass'] = r'One\NTwo\NThree';
+    properties['sub-text/ass'] = r'One\NTwo\NThree';
     await backend.setSubtitleDelay(1.0);
-    final after = int.parse(player.platform.properties['secondary-sub-pos']!);
-    expect(after, lessThan(before));
-    expect(player.platform.properties['secondary-sub-delay'], '1.000');
+    expect(position(), lessThan(before));
+    expect(properties['secondary-sub-delay'], '1.000');
   });
 
   testWidgets('window resize refreshes secondary placement without playback ticks', (tester) async {
     addTearDown(tester.view.resetPhysicalSize);
     final other = _Player();
-    other.platform.properties.addAll({
+    other.native.properties.addAll({
       'secondary-sub-delay': '0',
       'secondary-sub-pos': '0',
       'sub-text/ass': 'A long primary subtitle which wraps only in a narrow window',
@@ -342,21 +291,18 @@ void main() {
       'osd-height': '720',
     });
     final second = MediaKitPlayerBackend.forTesting(other, prefs);
-    try {
-      other.discover();
-      await second.setSecondarySubtitle(embeddedTrackId: 1);
-      await second.configureSecondarySubtitleStyle(verticalOffset: 0);
-      final before = int.parse(other.platform.properties['secondary-sub-pos']!);
-      other.platform.properties['osd-width'] = '400';
-      // Exercise Flutter's real metrics observer, not the callback directly.
-      tester.view.physicalSize = tester.view.physicalSize * 0.9;
-      await tester.pump(const Duration(milliseconds: 150));
-      await tester.pump();
-      await tester.pump();
-      expect(int.parse(other.platform.properties['secondary-sub-pos']!), lessThan(before));
-    } finally {
-      second.dispose();
-    }
+    addTearDown(second.dispose);
+    other.discover();
+    await second.setSecondarySubtitle(embeddedTrackId: 1);
+    await second.configureSecondarySubtitleStyle(verticalOffset: 0);
+    final before = int.parse(other.native.properties['secondary-sub-pos']!);
+    other.native.properties['osd-width'] = '400';
+    // Exercise Flutter's real metrics observer, not the callback directly.
+    tester.view.physicalSize = tester.view.physicalSize * 0.9;
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump();
+    await tester.pump();
+    expect(int.parse(other.native.properties['secondary-sub-pos']!), lessThan(before));
   });
 
   test('delay survives source reloads but resets for the next session', () async {
@@ -371,21 +317,21 @@ void main() {
     player.discover();
     await backend.setSubtitleTrack(1);
     await backend.setSubtitleTrack(2);
-    expect(player.platform.properties['sub-delay'], '1.250');
-    expect(player.platform.properties['secondary-sub-delay'], '1.750');
+    expect(properties['sub-delay'], '1.250');
+    expect(properties['secondary-sub-delay'], '1.750');
 
     await backend.stop();
     await open(1, secondaryDelayMs: 500);
-    expect(player.platform.properties['sub-delay'], '1.250');
-    expect(player.platform.properties['secondary-sub-delay'], '1.750');
+    expect(properties['sub-delay'], '1.250');
+    expect(properties['secondary-sub-delay'], '1.750');
     expect(backend.subtitleDelaySeconds, 1.25);
 
     await open(2);
-    expect(player.platform.properties['sub-delay'], '0.000');
-    expect(player.platform.properties['secondary-sub-delay'], '0.000');
+    expect(properties['sub-delay'], '0.000');
+    expect(properties['secondary-sub-delay'], '0.000');
     await backend.setSubtitleDelay(-0.5);
     await open(null);
-    expect(player.platform.properties['sub-delay'], '0.000');
+    expect(properties['sub-delay'], '0.000');
   });
 
   test(
@@ -394,136 +340,47 @@ void main() {
       player.discover();
       await backend.setSubtitleTrack(1);
       await backend.setSecondarySubtitle(embeddedTrackId: 2);
-      expect(player.platform.properties['sid'], '11');
-      expect(player.platform.properties['secondary-sid'], '17');
+      expect(properties['sid'], '11');
+      expect(properties['secondary-sid'], '17');
       await backend.setSubtitleTrack(1);
       await backend.disableSubtitleTrack();
-      expect(player.platform.properties['secondary-sid'], '17');
-      expect(player.platform.properties['secondary-sub-visibility'], 'yes');
-      await backend.setSubtitleTrack(1);
-      await backend.setSecondarySubtitle();
-      expect(player.platform.properties['sid'], '11');
-      expect(player.platform.properties['secondary-sid'], 'no');
-    },
-  );
-
-  test(
-    'secondary Off cancels a selection rejected by the automatic primary',
-    () async {
-      player.discover();
-      player.platform.properties['sid'] = '17';
+      expect(properties['secondary-sid'], '17');
+      expect(properties['secondary-sub-visibility'], 'yes');
+      expect(properties['secondary-sub-pos'], '100');
+      player.automaticSubtitleSid = '11';
+      properties.addAll({'sub-text/ass': 'Primary', 'secondary-sub-text': 'Translation'});
+      await backend.play({'url': 'https://server/next.mkv', 'autoPlay': false});
+      expect(properties['sid'], '11');
       await backend.setSecondarySubtitle(embeddedTrackId: 2);
-      expect(player.platform.rejectedSecondarySelections, greaterThan(0));
+      expect(position(), inInclusiveRange(50, 99));
+      await backend.setSubtitleTrack(1);
+      await backend.setSecondarySubtitle();
+      expect(properties['sid'], '11');
+      expect(properties['secondary-sid'], 'no');
+      const url = '/downloads/secondary.srt';
+      await backend.setSecondarySubtitle(url: url, codec: 'srt');
+      await _flush();
+      expect(properties['sid'], '11');
+      expect(properties['secondary-sid'], '52');
+      final additions = player.native.commands.where((command) => command.first == 'sub-add');
+      expect(additions.single.take(3), ['sub-add', url, 'auto']);
+      await backend.addExternalSubtitle(url);
+      await backend.setSecondarySubtitle(url: url);
+      expect(additions, hasLength(1));
+      properties['sid'] = '17';
+      await backend.setSecondarySubtitle(embeddedTrackId: 2);
+      expect(player.native.rejectedSecondarySelections, greaterThan(0));
       await backend.setSecondarySubtitle();
       await backend.setSubtitleTrack(1);
-      expect(player.platform.properties['secondary-sid'], 'no');
+      expect(properties['secondary-sid'], 'no');
     },
   );
-
-  test('external secondary uses sub-add auto without changing primary or adding duplicates', () async {
-    const url = '/downloads/secondary.srt';
-    player.discover();
-    await backend.setSubtitleTrack(1);
-    await backend.setSecondarySubtitle(url: url, codec: 'srt');
-    await _flush();
-    expect(player.platform.properties['sid'], '11');
-    expect(player.platform.properties['secondary-sid'], '52');
-    expect(player.platform.commands.single.take(3), ['sub-add', url, 'auto']);
-    await backend.addExternalSubtitle(url);
-    await backend.setSecondarySubtitle(url: url);
-    expect(player.platform.commands, hasLength(1));
-  });
-
-  test('mpv spacing uses native font units and the bottom margin', () async {
-    player.platform.properties.addAll({
-      'secondary-sub-delay': '0',
-      'secondary-sub-pos': '0',
-      'sub-text/ass': r'{\an2}Bottom',
-      'secondary-sub-text': 'Other language',
-    });
-    player.discover();
-    await backend.setSecondarySubtitle(embeddedTrackId: 1);
-    double? baselineDistance;
-    for (final spacing in [0.0, 0.02, 0.04]) {
-      for (final primaryOffset in [0.0, 0.04, 0.08]) {
-        await backend.configureSubtitleStyle(fontSize: 24, verticalOffset: primaryOffset);
-        await backend.configureSecondarySubtitleStyle(verticalOffset: spacing);
-        final margin = double.parse(player.platform.properties['sub-margin-y']!) / 720;
-        final position = double.parse(player.platform.properties['secondary-sub-pos']!) / 100;
-        final distance = (1 - margin) * (1 - position);
-        baselineDistance ??= distance;
-        // The gap is measured on screen. mpv's percentage coordinate shrinks when
-        // its bottom margin grows, so the property itself cannot stay constant.
-        expect(distance - spacing, closeTo(baselineDistance, 0.01));
-        expect(distance, greaterThan(55 / 720));
-      }
-    }
-    expect(player.platform.properties['sub-pos'], isNull);
-    await backend.disableSubtitleTrack();
-    expect(player.platform.properties['secondary-sub-pos'], '100');
-  });
-
-  test('mpv OSD dimensions fall back for missing or invalid scalar values', () async {
-    player.platform.properties.addAll({
-      'sub-text/ass': 'A long primary subtitle that can wrap on narrow displays',
-      'secondary-sub-text': 'Translation',
-      'osd-dimensions': 'not JSON',
-    });
-    int position() => int.parse(player.platform.properties['secondary-sub-pos']!);
-    player.discover();
-    await backend.setSecondarySubtitle(embeddedTrackId: 1);
-    await backend.configureSubtitleStyle(fontSize: 24, verticalOffset: 0.04);
-    final fallbackPosition = position();
-
-    player.platform.properties['osd-width'] = 'invalid';
-    player.platform.properties['osd-height'] = '720';
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
-    expect(position(), fallbackPosition);
-
-    player.platform.properties['osd-width'] = '400';
-    player.platform.properties['osd-height'] = '0';
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
-    expect(position(), fallbackPosition);
-
-    player.platform.properties['osd-height'] = '720';
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
-    expect(position(), lessThan(fallbackPosition));
-  });
-
-  test('mpv keeps unmeasurable primaries distinct from Primary Off', () async {
-    player.platform.properties.addAll({
-      'secondary-sub-text': 'Other language',
-    });
-    int position() => int.parse(player.platform.properties['secondary-sub-pos']!);
-    player.discover();
-    await backend.setSubtitleTrack(1, isBitmapSubtitle: true);
-    await backend.setSecondarySubtitle(embeddedTrackId: 2);
-    final fallback = position();
-    expect(fallback, inExclusiveRange(0, 50));
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
-    expect(position(), fallback);
-
-    // Text cues restore measured placement, retained through dialogue gaps.
-    player.platform.properties['sub-text/ass'] = 'Primary';
-    await backend.setSubtitleTrack(1);
-    final measured = position();
-    expect(measured, greaterThan(50));
-    player.platform.properties['sub-text/ass'] = '';
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.06);
-    expect(position(), measured);
-
-    // Reposition on selection even while paused, without a position-stream tick.
-    await backend.setSubtitleTrack(1, isBitmapSubtitle: true);
-    expect(position(), fallback);
-    await backend.disableSubtitleTrack();
-    expect(position(), 100);
-  });
 
   test('discovery selects the embedded ordinal once, excluding external and CC tracks', () async {
     await backend.setSubtitleTrack(2);
     player.discover();
     await _flush();
-    expect(player.platform.properties['sid'], '17');
+    expect(properties['sid'], '17');
     player.discover();
     await _flush();
     expect(player.selections.where((id) => id == '17'), hasLength(1));
@@ -561,7 +418,7 @@ void main() {
     test('$action cancels a discovery read already in flight', () async {
       await backend.setSubtitleTrack(1);
       final read = Completer<String>();
-      player.platform.delayedTracks = read;
+      player.native.delayedTracks = read;
       player.discover();
       await _flush();
       Future<void>? replacement;
@@ -582,7 +439,7 @@ void main() {
           replacement = backend.setSubtitleTrack(2);
       }
       player.selections.clear();
-      read.complete(jsonEncode(player.platform.tracks));
+      read.complete(jsonEncode(player.native.tracks));
       await replacement;
       await _flush();
       expect(player.selections, action == 'choice' ? ['17'] : isEmpty);

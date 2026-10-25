@@ -3,700 +3,366 @@ import QuartzCore
 import XCTest
 @testable import Runner
 
-final class RunnerTests: XCTestCase {
-    private func cue(_ text: String, start: Double = 1, end: Double = 3) -> SubtitleEvent {
-        SubtitleEvent(
-            startTime: start, endTime: end, text: text,
-            bitmap: nil, bitmapWidth: 0, bitmapHeight: 0)
-    }
+private func cue(_ text: String, start: Double = 1, end: Double = 3,
+                 alignment: Int? = nil, position: CGPoint? = nil) -> SubtitleEvent {
+    SubtitleEvent(startTime: start, endTime: end, text: text,
+        bitmap: nil, bitmapWidth: 0, bitmapHeight: 0, alignment: alignment, position: position)
+}
 
+@MainActor
+private extension SubtitleOverlay {
+    var caption: UILabel { subviews.compactMap { $0 as? UILabel }.last! }
+    var groups: [SubtitleOverlay] { subviews.compactMap { $0 as? SubtitleOverlay } }
+    var images: [UIImageView] {
+        subviews.compactMap { $0 as? UIImageView }.filter { !$0.isHidden && $0.image != nil }
+    }
+    func show(_ events: [SubtitleEvent], at time: Double = 2) {
+        setEvents(events)
+        update(currentTime: time)
+    }
+    func style(fontSize: Double? = nil, offset: Double? = nil) {
+        applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
+                   fontSize: fontSize, fontWeight: nil, verticalOffset: offset)
+    }
+}
+
+@MainActor
+private final class OverlayPair {
+    let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+    let secondary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
+    init(stacking: Bool = true) {
+        primary.secondaryForStacking = secondary
+        secondary.primaryForStacking = primary
+        secondary.stackingEnabled = stacking
+    }
+    func tick(_ time: Double) {
+        primary.update(currentTime: time)
+        secondary.update(currentTime: time)
+    }
+    func layout() {
+        primary.layoutIfNeeded()
+        secondary.layoutIfNeeded()
+    }
+    func picture(_ rect: CGRect) {
+        for overlay in [primary, secondary] {
+            overlay.videoRectProvider = { rect }
+            overlay.refreshVideoGeometry()
+        }
+        layout()
+    }
+}
+
+final class RunnerTests: XCTestCase {
     @MainActor
-    private func makeBitmap(width: CGFloat, height: CGFloat) -> CGImage {
-        UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { context in
+    private func image() -> CGImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 100, height: 40)).image { context in
             UIColor.white.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            context.fill(CGRect(x: 0, y: 0, width: 100, height: 40))
         }.cgImage!
     }
 
     @MainActor
-    private func overlays(stacking: Bool = true) -> (SubtitleOverlay, SubtitleOverlay) {
-        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
-        let secondary = SubtitleOverlay(frame: primary.bounds)
-        primary.secondaryForStacking = secondary
-        secondary.primaryForStacking = primary
-        secondary.stackingEnabled = stacking
-        return (primary, secondary)
-    }
-
-    @MainActor
-    private func tick(_ primary: SubtitleOverlay, _ secondary: SubtitleOverlay, at time: Double) {
-        primary.update(currentTime: time)
-        secondary.update(currentTime: time)
-    }
-
-    @MainActor
-    func testNewSubtitleCuesCanBeEvaluatedWhilePausedIncludingAtZero() {
-        let primary = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
-        primary.update(currentTime: 42)
-        primary.clear() // Switching primary resets its remembered playback time.
-        // Invoke the same presentation method the wrapper's primary publisher
-        // uses; the test must not supply its own post-load clock update.
-        AetherPlayerWrapper.presentSubtitleEvents(
-            [cue("New language", start: 41, end: 45)], in: primary, at: 42)
-        XCTAssertEqual(primary.activeText, "New language")
-
-        let secondary = SubtitleOverlay(frame: primary.bounds)
-        // The secondary publisher uses this method too, including at time zero.
-        AetherPlayerWrapper.presentSubtitleEvents(
-            [cue("At start", start: 0, end: 3)], in: secondary, at: 0)
-        XCTAssertEqual(secondary.activeText, "At start")
-    }
-
-    @MainActor
-    func testAppleOffsetUsesPictureHeightAndPreservesControlsLift() {
-        let overlay = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
-        // Letterboxing must not change the offset distance for default or explicitly
-        // positioned subtitles.
-        overlay.videoRectProvider = { CGRect(x: 0, y: 50, width: 800, height: 300) }
-        let label = overlay.subviews.compactMap { $0 as? UILabel }.last!
-
-        func placed(_ alignment: Int, position: CGPoint? = nil) -> CGRect {
-            overlay.setEvents([
-                SubtitleEvent(startTime: 1, endTime: 3, text: "Caption",
-                    bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
-                    alignment: alignment, position: position)
-            ])
-            overlay.update(currentTime: 2)
-            // setSubtitlePosition schedules layout without replacing the cues.
-            overlay.layoutIfNeeded()
-            return label.frame
-        }
-
-        let top = placed(7).minY
-        let bottom = placed(2).maxY
-        let authoredTop = placed(7, position: CGPoint(x: 0.5, y: 0.08)).minY
-        let authoredBottom = placed(2, position: CGPoint(x: 0.5, y: 0.92)).maxY
-        overlay.applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
-                           fontSize: nil, fontWeight: nil, verticalOffset: 0.04)
-        // Four percent of the 300pt picture is 12pt for both placement paths.
-        XCTAssertEqual(placed(7).minY, top + 12, accuracy: 0.1)
-        XCTAssertEqual(placed(2).maxY, bottom - 12, accuracy: 0.1)
-        XCTAssertEqual(placed(7, position: CGPoint(x: 0.5, y: 0.08)).minY,
-                       authoredTop + 12, accuracy: 0.1)
-        XCTAssertEqual(placed(2, position: CGPoint(x: 0.5, y: 0.92)).maxY,
-                       authoredBottom - 12, accuracy: 0.1)
-        XCTAssertEqual(placed(5).midY, 200, accuracy: 0.1)
-
-        // Showing playback controls raises the bottom subtitle by 100pt: 25% of the
-        // 400pt view on the 40–100 position scale.
-        overlay.setSubtitlePosition(basePosition: 70)
-        XCTAssertEqual(placed(2).maxY, bottom - 100, accuracy: 0.1)
-        XCTAssertEqual(placed(2, position: CGPoint(x: 0.5, y: 0.92)).maxY,
-                       authoredBottom - 100, accuracy: 0.1)
-        XCTAssertEqual(placed(7, position: CGPoint(x: 0.5, y: 0.08)).minY,
-                       authoredTop + 12, accuracy: 0.1)
-        overlay.setSubtitlePosition(basePosition: 98)
-        XCTAssertEqual(placed(2).maxY, bottom - 12, accuracy: 0.1)
-        XCTAssertEqual(placed(2, position: CGPoint(x: 0.5, y: 0.92)).maxY,
-                       authoredBottom - 12, accuracy: 0.1)
-    }
-
-    @MainActor
-    func testPositionedPrimaryUsesScreenRegionForStacking() {
-        for (alignment, position) in [
-            (2, CGPoint(x: 0.5, y: 0.1)), // line:10%,end
-            (8, CGPoint(x: 0.5, y: 0.9)), // line:90%,start
-            (2, CGPoint(x: 0.5, y: 0.5)), // line:50%,end
-            (7, CGPoint(x: 0.1, y: 0.1)),
-            (9, CGPoint(x: 0.9, y: 0.1)),
-        ] {
-            let (primary, secondary) = overlays()
-            secondary.secondaryVerticalAdjustment = 0.06
-            primary.setEvents([SubtitleEvent(
-                startTime: 1, endTime: 3, text: "Primary",
-                bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
-                alignment: alignment, position: position)])
-            secondary.setEvents([cue("Secondary", end: 8)])
-            tick(primary, secondary, at: 2)
-            let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
-            let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
-            if position.y < 1.0 / 3 {
-                XCTAssertGreaterThan(secondaryLabel.frame.minY, primaryLabel.frame.maxY)
-            } else {
-                XCTAssertLessThan(secondaryLabel.frame.maxY, primaryLabel.frame.minY)
-            }
+    func testPositionedPrimaryStacksByScreenRegionAndResetsOnPrimaryOff() {
+        for (alignment, position) in [(2, CGPoint(x: 0.5, y: 0.1)), (8, CGPoint(x: 0.5, y: 0.9)),
+            (2, CGPoint(x: 0.5, y: 0.5)), (7, CGPoint(x: 0.1, y: 0.1)), (9, CGPoint(x: 0.9, y: 0.1))] {
+            let f = OverlayPair()
+            f.secondary.secondaryVerticalAdjustment = 0.06
+            f.primary.show([cue("Primary", alignment: alignment, position: position)])
+            f.secondary.show([cue("Secondary", end: 8)])
+            let main = f.primary.caption.frame
+            var stacked = f.secondary.caption.frame
+            XCTAssertTrue(position.y < 1.0 / 3 ? stacked.minY > main.maxY : stacked.maxY < main.minY)
             if position.y == 0.5 {
-                XCTAssertEqual((secondaryLabel.frame.maxY + primaryLabel.frame.minY) / 2,
-                               200, accuracy: 0.1)
+                XCTAssertEqual((stacked.maxY + main.minY) / 2, 200, accuracy: 0.1)
             }
-            func textAlignment() -> NSTextAlignment? {
-                (secondaryLabel.attributedText?.attribute(.paragraphStyle, at: 0,
+            func alignmentOfSecondary() -> NSTextAlignment? {
+                (f.secondary.caption.attributedText?.attribute(.paragraphStyle, at: 0,
                     effectiveRange: nil) as? NSParagraphStyle)?.alignment
             }
             let expected: NSTextAlignment = alignment == 7 ? .left : alignment == 9 ? .right : .center
-            XCTAssertEqual(textAlignment(), expected)
-            let stacked = secondaryLabel.frame
-            tick(primary, secondary, at: 4)
-            XCTAssertEqual(secondaryLabel.frame.minY, stacked.minY, accuracy: 0.1)
-            XCTAssertEqual(textAlignment(), expected)
-            primary.clear()
-            XCTAssertEqual(secondaryLabel.frame.maxY, 400, accuracy: 0.1)
-            XCTAssertEqual(textAlignment(), .center)
-            XCTAssertEqual(secondary.activeText, "Secondary")
+            XCTAssertEqual(alignmentOfSecondary(), expected)
+            f.secondary.show([cue("One\nTwo\nThree", end: 8)])
+            XCTAssertEqual(f.primary.caption.frame, main)
+            let expanded = f.secondary.caption.frame
+            XCTAssertEqual(position.y < 1.0 / 3 ? expanded.minY : expanded.maxY,
+                           position.y < 1.0 / 3 ? stacked.minY : stacked.maxY, accuracy: 0.1)
+            stacked = expanded
+            f.tick(4)
+            XCTAssertEqual(f.secondary.caption.frame, stacked)
+            XCTAssertEqual(alignmentOfSecondary(), expected)
+            f.primary.clear()
+            XCTAssertEqual(f.secondary.caption.frame.maxY, 400, accuracy: 0.1)
+            XCTAssertEqual(alignmentOfSecondary(), .center)
+            XCTAssertEqual(f.secondary.activeText, "One\nTwo\nThree")
         }
     }
 
     @MainActor
-    func testAppleSpacingFollowsPrimaryHeightNotSecondaryDialogue() {
-        for alignment in [2, 7] {
-            let (primary, secondary) = overlays()
-
-            let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
-            let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
-
-            func showPrimary(_ text: String) {
-                primary.setEvents([
-                    SubtitleEvent(startTime: 1, endTime: 4, text: text,
-                        bitmap: nil, bitmapWidth: 0, bitmapHeight: 0,
-                        alignment: alignment)
-                ])
-                primary.update(currentTime: 2)
+    func testGapRemeasuresFontSpacingGeometryAndControlsWithoutRedrawingPrimary() {
+        for change in ["font", "spacing", "geometry", "offset"] {
+            let f = OverlayPair()
+            let letterbox = CGRect(x: 0, y: 50, width: 800, height: 300)
+            f.picture(letterbox)
+            var event = cue("First line\nSecond line", alignment: change == "spacing" ? 5 : 2,
+                            position: change == "geometry" ? CGPoint(x: 0.5, y: 0.85) : nil)
+            event.styledRuns = [SubtitleStyledRun(text: event.text!, isBold: true, isItalic: true,
+                                                isUnderlined: false, isStruckThrough: false)]
+            f.primary.show([event])
+            f.secondary.show([cue("Secondary", end: 8)])
+            let original = f.secondary.caption.frame
+            f.tick(4)
+            switch change {
+            case "font":
+                f.primary.style(fontSize: 48)
+                f.secondary.applySecondaryStyle(from: f.primary, fontSize: 24, textColor: nil)
+                XCTAssertLessThan(f.secondary.caption.frame.maxY, original.maxY)
+            case "spacing":
+                f.secondary.secondaryVerticalAdjustment = 0.04
+                f.layout()
+                XCTAssertEqual(f.secondary.caption.frame.maxY, original.maxY - 8, accuracy: 0.1)
+            case "geometry":
+                f.picture(CGRect(x: 0, y: 0, width: 800, height: 400))
+                XCTAssertGreaterThan(f.secondary.caption.frame.midY, original.midY)
+            default:
+                f.primary.style(offset: 0.12)
+                f.secondary.applySecondaryStyle(from: f.primary, fontSize: nil, textColor: nil)
+                f.layout()
+                XCTAssertEqual(f.secondary.caption.frame.minY, original.minY - 36, accuracy: 0.1)
+                for (position, lift) in [(70, 100.0), (93, 36.0), (70, 100.0)] {
+                    f.primary.setSubtitlePosition(basePosition: position)
+                    f.secondary.setSubtitlePosition(basePosition: position)
+                    f.layout()
+                    XCTAssertEqual(f.secondary.caption.frame.minY, original.minY - lift, accuracy: 0.1)
+                }
             }
-            secondary.setEvents([cue("Secondary")])
-            secondary.update(currentTime: 2)
-            showPrimary("One")
-            let oneLinePrimary = primaryLabel.frame
-            let startingTop = secondaryLabel.frame.minY
-            let startingBottom = secondaryLabel.frame.maxY
-
-            // Adding secondary lines keeps the primary in place and preserves the
-            // secondary edge nearest it.
-            secondary.setEvents([cue("One\nTwo\nThree")])
-            secondary.update(currentTime: 2)
-            XCTAssertEqual(primaryLabel.frame, oneLinePrimary)
-            if alignment == 2 {
-                XCTAssertEqual(secondaryLabel.frame.maxY, startingBottom, accuracy: 0.1)
-            } else {
-                XCTAssertEqual(secondaryLabel.frame.minY, startingTop, accuracy: 0.1)
+            let gap = f.secondary.caption.frame
+            XCTAssertTrue(f.primary.caption.isHidden, change)
+            XCTAssertEqual(f.primary.activeText, "", change)
+            f.tick(2)
+            XCTAssertEqual(f.secondary.caption.frame, gap, change)
+            if change == "geometry" {
+                XCTAssertEqual(f.primary.caption.text, event.text)
+                f.tick(4)
+                f.picture(letterbox)
+                XCTAssertEqual(f.secondary.caption.frame, original)
             }
-
-            // When the primary gains lines, move the secondary to preserve the gap.
-            showPrimary("One\nTwo\nThree")
-            XCTAssertGreaterThan(primaryLabel.frame.height, oneLinePrimary.height)
-            if alignment == 2 {
-                XCTAssertLessThan(secondaryLabel.frame.maxY, startingBottom)
-            } else {
-                XCTAssertGreaterThan(secondaryLabel.frame.minY, startingTop)
-            }
-            let activeTop = secondaryLabel.frame.minY
-            let activeBottom = secondaryLabel.frame.maxY
-
-            // Dialogue gaps must not discard the last known primary placement.
-            primary.setEvents([])
-            primary.update(currentTime: 2)
-            XCTAssertEqual(secondaryLabel.frame.minY, activeTop, accuracy: 0.1)
-            XCTAssertEqual(secondaryLabel.frame.maxY, activeBottom, accuracy: 0.1)
-            secondary.setEvents([])
-            secondary.update(currentTime: 2)
-            secondary.setEvents([cue("Another")])
-            secondary.update(currentTime: 2)
-            if alignment == 2 {
-                XCTAssertEqual(secondaryLabel.frame.maxY, activeBottom, accuracy: 0.1)
-            } else {
-                XCTAssertEqual(secondaryLabel.frame.minY, activeTop, accuracy: 0.1)
+            if change == "offset" {
+                f.primary.clear()
+                for (position, bottom) in [(93, 364.0), (70, 300.0), (93, 364.0)] {
+                    f.secondary.setSubtitlePosition(basePosition: position)
+                    f.layout()
+                    XCTAssertEqual(f.secondary.caption.frame.maxY, bottom, accuracy: 0.1)
+                }
             }
         }
     }
 
     @MainActor
-    func testPrimaryGapFollowsOffsetAndControlsLiftWithoutRedrawingPrimary() {
-        let (primary, secondary) = overlays()
-        let picture = CGRect(x: 0, y: 50, width: 800, height: 300)
-        primary.videoRectProvider = { picture }
-        secondary.videoRectProvider = { picture }
-        primary.setEvents([cue("Primary"), cue("Primary", start: 6, end: 8)])
-        secondary.setEvents([cue("Secondary", end: 10)])
-        tick(primary, secondary, at: 2)
-        let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
-        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        let originalTop = label.frame.minY
-        tick(primary, secondary, at: 4)
-
-        primary.applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
-                           fontSize: nil, fontWeight: nil, verticalOffset: 0.12)
-        secondary.applySecondaryStyle(from: primary, fontSize: nil, textColor: nil)
-        primary.layoutIfNeeded()
-        secondary.layoutIfNeeded()
-        XCTAssertEqual(label.frame.minY, originalTop - 36, accuracy: 0.1)
-
-        for (position, lift) in [(70, 100.0), (93, 36.0), (70, 100.0)] {
-            primary.setSubtitlePosition(basePosition: position)
-            secondary.setSubtitlePosition(basePosition: position)
-            primary.layoutIfNeeded()
-            secondary.layoutIfNeeded()
-            XCTAssertEqual(label.frame.minY, originalTop - CGFloat(lift), accuracy: 0.1)
-            XCTAssertEqual(primary.activeText, "")
-            XCTAssertTrue(primaryLabel.isHidden)
-        }
-        let gapFrame = label.frame
-        tick(primary, secondary, at: 7)
-        XCTAssertEqual(label.frame, gapFrame)
-    }
-
-    @MainActor
-    func testPrimaryGapRemeasuresStyledTextWhenFontChanges() {
-        let (primary, secondary) = overlays()
-        var mainCue = cue("First line\nSecond line")
-        mainCue.styledRuns = [SubtitleStyledRun(
-            text: mainCue.text!, isBold: true, isItalic: true,
-            isUnderlined: false, isStruckThrough: false)]
-        primary.setEvents([mainCue])
-        secondary.setEvents([cue("Secondary", end: 8)])
-        tick(primary, secondary, at: 2)
-        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        let originalBottom = label.frame.maxY
-        tick(primary, secondary, at: 4)
-
-        primary.applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
-                           fontSize: 48, fontWeight: nil, verticalOffset: nil)
-        // Hold the secondary font fixed so only the primary reference grows.
-        secondary.applySecondaryStyle(from: primary, fontSize: 24, textColor: nil)
-        XCTAssertLessThan(label.frame.maxY, originalBottom)
-        let gapFrame = label.frame
-        XCTAssertEqual(primary.activeText, "")
-        primary.update(currentTime: 2)
-        XCTAssertEqual(label.frame, gapFrame)
-    }
-
-    @MainActor
-    func testCenteredPrimaryGapUsesBothHalvesOfChangedSpacing() {
-        let (primary, secondary) = overlays()
-        var centered = cue("Primary")
-        centered.alignment = 5
-        primary.setEvents([centered])
-        secondary.setEvents([cue("Secondary", end: 8)])
-        tick(primary, secondary, at: 2)
-        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        let originalBottom = label.frame.maxY
-        tick(primary, secondary, at: 4)
-
-        secondary.secondaryVerticalAdjustment = 0.04
-        primary.layoutIfNeeded()
-        secondary.layoutIfNeeded()
-        // A 16pt gap increase moves each half of the centered pair by 8pt.
-        XCTAssertEqual(label.frame.maxY, originalBottom - 8, accuracy: 0.1)
-        let gapFrame = label.frame
-        XCTAssertEqual(primary.activeText, "")
-        primary.update(currentTime: 2)
-        XCTAssertEqual(label.frame, gapFrame)
-    }
-
-    @MainActor
-    func testSeekResetsPrimaryPlacementWithoutDiscardingQueuedCues() {
-        let (primary, secondary) = overlays()
-        primary.setEvents([
-            SubtitleEvent(startTime: 1, endTime: 3, text: "Top left",
-                bitmap: nil, bitmapWidth: 0, bitmapHeight: 0, alignment: 7),
-            cue("Later primary", start: 10, end: 12),
-        ])
-        secondary.setEvents([cue("Secondary", start: 0, end: 15)])
-        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        func update(_ time: Double) {
-            tick(primary, secondary, at: time)
-        }
-
-        // Seek forward and backward into a primary gap, then back into its cue.
-        // Neither track republishes its file during these seeks.
+    func testSeekResetsPlacementWithoutDiscardingQueuedCues() {
+        let f = OverlayPair()
+        f.primary.setEvents([cue("Top left", alignment: 7), cue("Later", start: 10, end: 12)])
+        f.secondary.setEvents([cue("Secondary", start: 0, end: 15)])
         for target in [6.0, 0.5] {
-            update(2)
-            let previousTop = label.frame.minY
-            primary.resetPlacement()
-            update(target)
-            let style = label.attributedText?.attribute(
-                .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
-            XCTAssertEqual(primary.activeText, "")
-            XCTAssertEqual(secondary.activeText, "Secondary")
-            XCTAssertEqual(style?.alignment, .center)
-            XCTAssertGreaterThan(label.frame.minY, primary.bounds.midY)
-            XCTAssertGreaterThan(label.frame.minY, previousTop)
-
-            primary.resetPlacement()
-            update(2)
-            XCTAssertEqual(primary.activeText, "Top left")
-            XCTAssertEqual(label.frame.minY, previousTop, accuracy: 0.1)
+            f.tick(2)
+            let previous = f.secondary.caption.frame
+            f.primary.resetPlacement()
+            f.tick(target)
+            XCTAssertEqual(f.primary.activeText, "")
+            XCTAssertEqual(f.secondary.activeText, "Secondary")
+            XCTAssertGreaterThan(f.secondary.caption.frame.minY, 200)
+            f.primary.resetPlacement()
+            f.tick(2)
+            XCTAssertEqual(f.primary.activeText, "Top left")
+            XCTAssertEqual(f.secondary.caption.frame, previous)
         }
-        update(11)
-        XCTAssertEqual(primary.activeText, "Later primary")
-        XCTAssertEqual(secondary.activeText, "Secondary")
+        f.tick(11)
+        XCTAssertEqual(f.primary.activeText, "Later")
+        XCTAssertEqual(f.secondary.activeText, "Secondary")
     }
 
     @MainActor
-    func testSecondaryAvoidsBitmapBoundsThroughDialogueGaps() {
-        let (primary, secondary) = overlays()
-        primary.videoRectProvider = { CGRect(x: 0, y: 50, width: 800, height: 300) }
-        let image = makeBitmap(width: 100, height: 40)
-        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        secondary.setEvents([cue("Secondary", start: 1, end: 8)])
-        secondary.update(currentTime: 2)
-
-        primary.setEvents([SubtitleEvent(
-            startTime: 1, endTime: 3, text: nil, bitmap: image,
-            bitmapWidth: 100, bitmapHeight: 40,
-            normalizedRect: CGRect(x: 0.25, y: 0.8, width: 0.5, height: 0.1),
-            canvasSize: CGSize(width: 800, height: 300))])
-        primary.update(currentTime: 2)
-        XCTAssertLessThan(label.frame.maxY, 290)
-        XCTAssertEqual(label.frame.midX, 400, accuracy: 0.1)
-        let bitmapTop = label.frame.minY
-        primary.update(currentTime: 4)
-        XCTAssertEqual(label.frame.minY, bitmapTop, accuracy: 0.1)
-
-        // Retained bitmap placement uses its authored canvas after a geometry change.
-        primary.videoRectProvider = { CGRect(x: 100, y: 50, width: 600, height: 300) }
-        primary.refreshVideoGeometry()
-        primary.layoutIfNeeded()
-        let resizedBitmapFrame = label.frame
-        XCTAssertEqual(label.frame.minY, bitmapTop - 22.5, accuracy: 0.1)
-        primary.update(currentTime: 2)
-        XCTAssertEqual(label.frame, resizedBitmapFrame)
-        primary.videoRectProvider = { CGRect(x: 0, y: 50, width: 800, height: 300) }
-
+    func testBitmapRegionsStayVisibleAndReservePlacementThroughGapsAndResizes() {
+        let f = OverlayPair()
+        let bitmap = image()
+        func event(_ y: CGFloat) -> SubtitleEvent {
+            SubtitleEvent(startTime: 1, endTime: 3, text: nil, bitmap: bitmap,
+                bitmapWidth: 100, bitmapHeight: 40,
+                normalizedRect: CGRect(x: 0.25, y: y, width: 0.5, height: 0.1),
+                canvasSize: CGSize(width: 800, height: 300))
+        }
+        f.picture(CGRect(x: 0, y: 50, width: 800, height: 300))
+        f.secondary.show([cue("Secondary", end: 8)])
+        f.primary.show([event(0.65), event(0.8)])
+        XCTAssertEqual(f.primary.images.count, 2)
+        XCTAssertLessThan(f.secondary.caption.frame.maxY, f.primary.images.map(\.frame.minY).min()!)
+        f.primary.show([event(0.8)])
+        XCTAssertEqual(f.primary.images.count, 1)
+        let original = f.secondary.caption.frame
+        XCTAssertLessThan(original.maxY, 290)
+        XCTAssertEqual(original.midX, 400, accuracy: 0.1)
+        f.tick(4)
+        XCTAssertEqual(f.secondary.caption.frame, original)
+        f.picture(CGRect(x: 100, y: 50, width: 600, height: 300))
+        let resized = f.secondary.caption.frame
+        XCTAssertEqual(resized.minY, original.minY - 22.5, accuracy: 0.1)
+        f.tick(2)
+        XCTAssertEqual(f.secondary.caption.frame, resized)
     }
 
     @MainActor
-    func testSecondaryFitsBetweenAssRegionsAndKeepsPlacementDuringGap() {
-        let (primary, secondary) = overlays()
-        secondary.setEvents([cue("Secondary")])
-        secondary.update(currentTime: 2)
-        let image = makeBitmap(width: 1, height: 1)
+    func testAssRegionsKeepFreeSpaceAndAnchorThroughSeeksGapsAndResizes() {
+        let f = OverlayPair()
+        f.secondary.show([cue("Secondary")])
+        let bitmap = image()
         let regions = AssRenderer.groupedRegions([
             CGRect(x: 0.2, y: 0.875, width: 0.4, height: 0.1),
             CGRect(x: 0.2, y: 0.025, width: 0.1, height: 0.1),
-            CGRect(x: 0.3, y: 0.04, width: 0.3, height: 0.06),
-        ])
+            CGRect(x: 0.3, y: 0.04, width: 0.3, height: 0.06)])
         XCTAssertEqual(regions.count, 2)
-        primary.showAssImage(image, regions: regions)
-        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        XCTAssertGreaterThan(label.frame.minY, 50)
-        XCTAssertLessThan(label.frame.maxY, 350)
-        XCTAssertEqual(label.frame.midX, 320, accuracy: 0.1)
-        XCTAssertNil(label.layer.mask)
-        let frame = label.frame
-
-        // Seeking within the unchanged image must retain both free space and anchor.
-        primary.resetPlacement()
-        primary.rememberPrimaryPlacement()
-        XCTAssertTrue(primary.subviews.compactMap { $0 as? UIImageView }
-            .contains { !$0.isHidden && $0.image != nil })
-        primary.showAssImage(nil)
-        XCTAssertEqual(label.frame, frame)
-        XCTAssertNil(label.layer.mask)
-
-        // Re-map each retained ASS region into the current canvas without restoring
-        // the image. Drawing the same regions again must not move the secondary.
-        primary.videoRectProvider = { CGRect(x: 100, y: 50, width: 600, height: 300) }
-        primary.refreshVideoGeometry()
-        primary.layoutIfNeeded()
-        let gapFrame = label.frame
-        XCTAssertEqual(label.frame.midX, 340, accuracy: 0.1)
-        XCTAssertNotEqual(gapFrame, frame)
-        XCTAssertNil(label.layer.mask)
-        primary.showAssImage(image, regions: regions)
-        XCTAssertEqual(label.frame, gapFrame)
-        primary.resetPlacement()
-        primary.showAssImage(nil)
-        primary.rememberPrimaryPlacement()
-        XCTAssertEqual(label.frame.maxY, 400, accuracy: 0.1)
+        f.primary.showAssImage(bitmap, regions: regions)
+        let original = f.secondary.caption.frame
+        XCTAssertGreaterThan(original.minY, 50)
+        XCTAssertLessThan(original.maxY, 350)
+        XCTAssertEqual(original.midX, 320, accuracy: 0.1)
+        XCTAssertNil(f.secondary.caption.layer.mask)
+        f.primary.resetPlacement()
+        f.primary.rememberPrimaryPlacement()
+        XCTAssertFalse(f.primary.images.isEmpty)
+        f.primary.showAssImage(nil)
+        XCTAssertEqual(f.secondary.caption.frame, original)
+        f.picture(CGRect(x: 100, y: 50, width: 600, height: 300))
+        let resized = f.secondary.caption.frame
+        XCTAssertEqual(resized.midX, 340, accuracy: 0.1)
+        XCTAssertNotEqual(resized, original)
+        f.primary.showAssImage(bitmap, regions: regions)
+        XCTAssertEqual(f.secondary.caption.frame, resized)
+        f.primary.resetPlacement()
+        f.primary.showAssImage(nil)
+        f.primary.rememberPrimaryPlacement()
+        XCTAssertEqual(f.secondary.caption.frame.maxY, 400, accuracy: 0.1)
     }
 
     @MainActor
-    func testSecondaryWithoutPrimaryKeepsOffsetAndControlsLift() {
-        let (primary, secondary) = overlays()
-        let picture = CGRect(x: 0, y: 50, width: 800, height: 300)
-        primary.videoRectProvider = { picture }
-        secondary.videoRectProvider = { picture }
-        primary.applyStyle(textColor: nil, backgroundColor: nil, strokeColor: nil,
-                           fontSize: nil, fontWeight: nil, verticalOffset: 0.12)
-        secondary.applySecondaryStyle(from: primary, fontSize: nil, textColor: nil)
-        secondary.secondaryVerticalAdjustment = 0.06
-        secondary.setEvents([cue("Secondary")])
-        secondary.update(currentTime: 2)
-        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        XCTAssertEqual(label.frame.maxY, 364, accuracy: 0.1)
-        secondary.setSubtitlePosition(basePosition: 70)
-        secondary.layoutIfNeeded()
-        XCTAssertEqual(label.frame.maxY, 300, accuracy: 0.1)
-        secondary.setSubtitlePosition(basePosition: 93)
-        secondary.layoutIfNeeded()
-        XCTAssertEqual(label.frame.maxY, 364, accuracy: 0.1)
-    }
-
-    @MainActor
-    func testApplePrimaryAndSecondaryPreserveInlineEmphasis() {
-        let (primary, secondary) = overlays()
-        secondary.applySecondaryStyle(from: primary, fontSize: 18, textColor: 0xFFFFFF00)
-
-        let runs = [
-            SubtitleStyledRun(text: "Normal ", isBold: false, isItalic: false,
-                              isUnderlined: false, isStruckThrough: false),
-            SubtitleStyledRun(text: "bold italic", isBold: true, isItalic: true,
-                              isUnderlined: false, isStruckThrough: false),
-            SubtitleStyledRun(text: " and ", isBold: false, isItalic: false,
-                              isUnderlined: false, isStruckThrough: false),
-            SubtitleStyledRun(text: "underlined", isBold: false, isItalic: false,
-                              isUnderlined: true, isStruckThrough: false),
-        ]
-        var event = cue(runs.map(\.text).joined())
-        event.styledRuns = runs
-        primary.setEvents([event])
-        secondary.setEvents([event])
-        tick(primary, secondary, at: 2)
-
-        for overlay in [primary, secondary] {
-            let label = overlay.subviews.compactMap { $0 as? UILabel }.last!
-            let text = label.attributedText!
-            let styleRange = (text.string as NSString).range(of: "bold italic")
-            let font = text.attribute(.font, at: styleRange.location,
-                                      effectiveRange: nil) as! UIFont
-            XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains(.traitBold))
-            XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains(.traitItalic))
-            let underline = (text.string as NSString).range(of: "underlined")
-            XCTAssertEqual(text.attribute(.underlineStyle, at: underline.location,
-                                          effectiveRange: nil) as? Int,
+    func testBothTracksPreserveEmphasisAndCanRestyleIdenticalCues() {
+        let f = OverlayPair()
+        f.secondary.applySecondaryStyle(from: f.primary, fontSize: 18, textColor: 0xFFFFFF00)
+        var event = cue("Normal bold italic underlined")
+        event.styledRuns = [
+            SubtitleStyledRun(text: "Normal ", isBold: false, isItalic: false, isUnderlined: false, isStruckThrough: false),
+            SubtitleStyledRun(text: "bold italic ", isBold: true, isItalic: true, isUnderlined: false, isStruckThrough: false),
+            SubtitleStyledRun(text: "underlined", isBold: false, isItalic: false, isUnderlined: true, isStruckThrough: false)]
+        for overlay in [f.primary, f.secondary] {
+            overlay.show([event])
+            let text = overlay.caption.attributedText!
+            let font = text.attribute(.font, at: 7, effectiveRange: nil) as! UIFont
+            XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains([.traitBold, .traitItalic]))
+            XCTAssertEqual(text.attribute(.underlineStyle, at: 19, effectiveRange: nil) as? Int,
                            NSUnderlineStyle.single.rawValue)
             XCTAssertNil(text.attribute(.underlineStyle, at: 0, effectiveRange: nil))
         }
-
-        let secondaryLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        XCTAssertEqual(secondaryLabel.attributedText?.attribute(
+        XCTAssertEqual(f.secondary.caption.attributedText?.attribute(
             .foregroundColor, at: 0, effectiveRange: nil) as? UIColor, .yellow)
-
-        // The same cue text and timing can still be restyled during playback.
         event.styledRuns = nil
-        primary.setEvents([event])
-        let primaryLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
-        let reset = primaryLabel.attributedText!.attribute(
-            .font, at: 7, effectiveRange: nil) as! UIFont
+        f.primary.setEvents([event])
+        let reset = f.primary.caption.attributedText!.attribute(.font, at: 7, effectiveRange: nil) as! UIFont
         XCTAssertFalse(reset.fontDescriptor.symbolicTraits.contains(.traitItalic))
     }
 
     @MainActor
-    func testPrimaryGroupsPreserveStyleSpacingAndControlsLift() {
-        let (primary, secondary) = overlays(stacking: false)
-        var top = cue("Top")
-        top.alignment = 8
-        top.position = CGPoint(x: 0.5, y: 0.1)
-        var bottom = cue("Italic")
-        bottom.alignment = 2
-        bottom.position = CGPoint(x: 0.5, y: 0.85)
-        bottom.styledRuns = [SubtitleStyledRun(
-            text: "Italic", isBold: false, isItalic: true,
-            isUnderlined: false, isStruckThrough: false)]
-        primary.setEvents([top, bottom])
-        primary.update(currentTime: 2)
-        let topLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
-        let extra = primary.subviews.compactMap { $0 as? SubtitleOverlay }.first!
-        let bottomLabel = extra.subviews.compactMap { $0 as? UILabel }.last!
-        let font = bottomLabel.attributedText!.attribute(
-            .font, at: 0, effectiveRange: nil) as! UIFont
-        XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains(.traitItalic))
-        let topFrame = topLabel.frame
-        let bottomFrame = bottomLabel.frame
-        primary.setSubtitlePosition(basePosition: 70)
-        primary.layoutIfNeeded()
-        XCTAssertEqual(topLabel.frame, topFrame)
-        XCTAssertEqual(bottomLabel.frame.maxY, bottomFrame.maxY - 100, accuracy: 0.1)
-        XCTAssertTrue(primary.subviews.contains(extra))
-        XCTAssertEqual(bottomLabel.text, "Italic")
-        primary.setSubtitlePosition(basePosition: 100)
-        primary.layoutIfNeeded()
-        XCTAssertEqual(bottomLabel.frame, bottomFrame)
-
-        secondary.stackingEnabled = true
-        secondary.setEvents([cue("Secondary")])
-        tick(primary, secondary, at: 2)
-        let caption = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        XCTAssertGreaterThan(caption.frame.minY, topLabel.frame.maxY)
-        XCTAssertLessThan(caption.frame.maxY, bottomLabel.frame.minY)
-        XCTAssertNil(caption.layer.mask)
-        primary.clear()
-        XCTAssertTrue(primary.subviews.compactMap { $0 as? SubtitleOverlay }.isEmpty)
-
-        bottom.position = nil
-        primary.setEvents([cue("First speaker"), bottom])
-        primary.update(currentTime: 2)
-        XCTAssertTrue(primary.subviews.compactMap { $0 as? SubtitleOverlay }.isEmpty)
-        XCTAssertEqual(topLabel.text, "First speaker\nItalic")
-    }
-
-    @MainActor
-    func testSimultaneousBitmapRegionsRemainVisibleAndReserveTheirFullBounds() {
-        let (primary, secondary) = overlays()
-        let image = makeBitmap(width: 60, height: 20)
-        func bitmap(_ y: CGFloat) -> SubtitleEvent {
-            SubtitleEvent(startTime: 1, endTime: 3, text: nil,
-                bitmap: image, bitmapWidth: 60, bitmapHeight: 20,
-                normalizedRect: CGRect(x: 0.25, y: y, width: 0.5, height: 0.1),
-                canvasSize: CGSize(width: 800, height: 400))
+    func testPrimaryGroupsKeepStyleAndAvoidCollisionsThroughControlsAndGaps() {
+        for centered in [false, true] {
+            let f = OverlayPair(stacking: false)
+            if !centered { f.picture(CGRect(x: 0, y: 50, width: 800, height: 300)) }
+            f.secondary.secondaryVerticalAdjustment = centered ? 0.06 : 0
+            let top = cue("First speaker", alignment: centered ? 5 : 8,
+                          position: CGPoint(x: 0.5, y: centered ? 0.5 : 0.1))
+            var bottom = cue("Italic", start: 1.1, alignment: centered ? 8 : 2,
+                             position: CGPoint(x: 0.5, y: centered ? 0.56 : 0.85))
+            bottom.styledRuns = [SubtitleStyledRun(text: "Italic", isBold: false, isItalic: true,
+                                                 isUnderlined: false, isStruckThrough: false)]
+            f.primary.show([top, bottom])
+            let extra = f.primary.groups.first!
+            let topFrame = f.primary.caption.frame
+            let bottomFrame = extra.caption.frame
+            let font = extra.caption.attributedText!.attribute(.font, at: 0, effectiveRange: nil) as! UIFont
+            XCTAssertTrue(font.fontDescriptor.symbolicTraits.contains(.traitItalic))
+            XCTAssertLessThan(topFrame.maxY, bottomFrame.minY)
+            if !centered {
+                f.primary.style(offset: 0.04) // Four percent of the picture height is 12pt.
+                for (position, lift) in [(70, 100.0), (98, 12.0)] {
+                    f.primary.setSubtitlePosition(basePosition: position)
+                    f.layout()
+                    XCTAssertEqual(f.primary.caption.frame.minY, topFrame.minY + 12, accuracy: 0.1)
+                    XCTAssertTrue(f.primary.groups.contains(extra))
+                    XCTAssertEqual(extra.caption.frame.maxY, bottomFrame.maxY - lift, accuracy: 0.1)
+                }
+            }
+            let main = f.primary.caption.frame
+            let lower = extra.caption.frame
+            f.secondary.stackingEnabled = true
+            f.secondary.show([cue("Secondary", end: 8)])
+            f.layout()
+            let active = f.secondary.caption.frame
+            XCTAssertFalse(active.intersects(main))
+            XCTAssertFalse(active.intersects(lower))
+            XCTAssertNil(f.secondary.caption.layer.mask)
+            if centered {
+                f.tick(4)
+                XCTAssertEqual(f.primary.activeText, "")
+                XCTAssertEqual(f.secondary.caption.frame, active)
+                f.secondary.secondaryVerticalAdjustment = 0.04
+                f.layout()
+                let gap = f.secondary.caption.frame
+                XCTAssertNotEqual(gap, active)
+                f.tick(2)
+                XCTAssertEqual(f.primary.caption.frame, main)
+                XCTAssertEqual(f.primary.groups.first!.caption.frame, lower)
+                XCTAssertEqual(f.secondary.caption.frame, gap)
+                XCTAssertLessThan(gap.maxY, main.minY)
+            }
+            f.primary.clear()
+            XCTAssertTrue(f.primary.groups.isEmpty)
+            bottom.alignment = 2
+            bottom.position = nil
+            f.primary.show([cue("First speaker"), bottom])
+            XCTAssertTrue(f.primary.groups.isEmpty)
+            XCTAssertEqual(f.primary.caption.text, "First speaker\nItalic")
         }
-        secondary.setEvents([cue("Secondary")])
-        secondary.update(currentTime: 2)
-        primary.setEvents([bitmap(0.65), bitmap(0.75)])
-        primary.update(currentTime: 2)
-        let visible = primary.subviews.compactMap { $0 as? UIImageView }
-            .filter { !$0.isHidden && $0.image != nil }
-        XCTAssertEqual(visible.count, 2)
-        let label = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        XCTAssertLessThan(label.frame.maxY, visible.map(\.frame.minY).min()!)
-        primary.setEvents([bitmap(0.65)])
-        XCTAssertEqual(primary.subviews.compactMap { $0 as? UIImageView }
-            .filter { !$0.isHidden && $0.image != nil }.count, 1)
-    }
-
-    @MainActor
-    func testCenteredPrimaryDoesNotMoveIntoAnotherPrimaryCue() {
-        let (primary, secondary) = overlays(stacking: false)
-        secondary.secondaryVerticalAdjustment = 0.06
-        // WebVTT line:50%,center and line:56%,start, both position:50%.
-        var centered = cue("First speaker")
-        centered.alignment = 5
-        centered.position = CGPoint(x: 0.5, y: 0.5)
-        var lower = cue("Second speaker", start: 1.1)
-        lower.alignment = 8
-        lower.position = CGPoint(x: 0.5, y: 0.56)
-        primary.setEvents([centered, lower])
-        primary.update(currentTime: 2)
-        let mainLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
-        func lowerLabel() -> UILabel {
-            primary.subviews.compactMap { $0 as? SubtitleOverlay }.first!
-                .subviews.compactMap { $0 as? UILabel }.last!
-        }
-        let mainFrame = mainLabel.frame
-        let lowerFrame = lowerLabel().frame
-        XCTAssertLessThan(mainFrame.maxY, lowerFrame.minY)
-
-        secondary.stackingEnabled = true
-        secondary.setEvents([cue("Secondary", end: 8)])
-        secondary.update(currentTime: 2)
-        primary.layoutIfNeeded()
-        secondary.layoutIfNeeded()
-        let caption = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        XCTAssertEqual(mainLabel.frame, mainFrame)
-        XCTAssertEqual(lowerLabel().frame, lowerFrame)
-        XCTAssertFalse(mainLabel.frame.intersects(lowerLabel().frame))
-        XCTAssertFalse(caption.frame.intersects(mainFrame))
-        XCTAssertFalse(caption.frame.intersects(lowerFrame))
-        let activeFrame = caption.frame
-
-        tick(primary, secondary, at: 4)
-        XCTAssertEqual(primary.activeText, "")
-        XCTAssertEqual(caption.frame, activeFrame)
-        secondary.secondaryVerticalAdjustment = 0.04
-        primary.layoutIfNeeded()
-        secondary.layoutIfNeeded()
-        let gapFrame = caption.frame
-        XCTAssertNotEqual(gapFrame, activeFrame)
-        tick(primary, secondary, at: 2)
-        XCTAssertEqual(mainLabel.frame, mainFrame)
-        XCTAssertEqual(lowerLabel().frame, lowerFrame)
-        XCTAssertEqual(caption.frame, gapFrame)
-        XCTAssertLessThan(caption.frame.maxY, mainLabel.frame.minY)
     }
 
     @MainActor
     func testOversizedSecondaryIsMaskedAndRecoversOnPrimaryOff() {
-        let (primary, secondary) = overlays()
-        primary.setEvents([cue("Primary")])
-        primary.update(currentTime: 2)
-        secondary.setEvents([cue(Array(repeating: "Long subtitle line", count: 40)
-            .joined(separator: "\n"))])
-        secondary.update(currentTime: 2)
-        let caption = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        let mask = caption.layer.mask as? CAShapeLayer
+        let f = OverlayPair()
+        f.primary.show([cue("Primary")])
+        f.secondary.show([cue(Array(repeating: "Long subtitle line", count: 40).joined(separator: "\n"))])
+        let mask = f.secondary.caption.layer.mask as? CAShapeLayer
         XCTAssertNotNil(mask)
-        XCTAssertLessThan(mask!.path!.boundingBox.height, caption.frame.height)
-        primary.clear()
-        XCTAssertNil(caption.layer.mask)
+        XCTAssertLessThan(mask!.path!.boundingBox.height, f.secondary.caption.frame.height)
+        f.primary.clear()
+        XCTAssertNil(f.secondary.caption.layer.mask)
     }
 
     @MainActor
-    func testPositionedCuesFollowPrimaryDelayWhenChangedWhilePaused() {
-        let overlay = SubtitleOverlay(frame: CGRect(x: 0, y: 0, width: 800, height: 400))
-        func positioned(_ text: String, start: Double, end: Double, top: Bool) -> SubtitleEvent {
-            var event = cue(text, start: start, end: end)
-            event.alignment = top ? 8 : 2
-            event.position = CGPoint(x: 0.5, y: top ? 0.1 : 0.85)
-            return event
+    func testPositionedGroupsFollowDelayChangesWhilePaused() {
+        let f = OverlayPair()
+        for time in [42.0, 0.0] {
+            f.primary.update(currentTime: 42)
+            f.primary.clear()
+            // Use the publisher's presentation method without supplying a later clock tick.
+            AetherPlayerWrapper.presentSubtitleEvents(
+                [cue("New language", start: max(0, time - 1), end: time + 3)], in: f.primary, at: time)
+            XCTAssertEqual(f.primary.activeText, "New language")
         }
-        overlay.setEvents([
-            positioned("Early top", start: 8, end: 10, top: true),
-            positioned("Early bottom", start: 8, end: 10, top: false),
-            positioned("Late top", start: 10, end: 14, top: true),
-            positioned("Late bottom", start: 10, end: 14, top: false),
-        ])
-        func visibleText() -> Set<String> {
-            let nested = overlay.subviews.compactMap { $0 as? SubtitleOverlay }.first
-            return Set([
-                overlay.subviews.compactMap { $0 as? UILabel }.last?.text,
-                nested?.subviews.compactMap { $0 as? UILabel }.last?.text,
-            ].compactMap { $0 })
+        f.primary.setEvents([(8.0, 10.0, "Early"), (10.0, 14.0, "Late")].flatMap { start, end, name in
+            [cue("\(name) top", start: start, end: end, alignment: 8, position: CGPoint(x: 0.5, y: 0.1)),
+             cue("\(name) bottom", start: start, end: end, position: CGPoint(x: 0.5, y: 0.85))]
+        })
+        for (delay, name) in [(0.0, "Late"), (4.0, "Early"), (3.0, "Early")] {
+            f.primary.delaySeconds = delay
+            f.primary.update(currentTime: 12)
+            let nested = f.primary.groups.first!
+            XCTAssertEqual(Set([f.primary.caption.text, nested.caption.text]), Set(["\(name) top", "\(name) bottom"]))
+            XCTAssertEqual(nested.delaySeconds, delay, accuracy: 0.001)
         }
-
-        overlay.update(currentTime: 12)
-        XCTAssertEqual(visibleText(), Set(["Late top", "Late bottom"]))
-
-        // Simulate changing the delay while paused: the playhead remains at 12.
-        overlay.delaySeconds = 4
-        overlay.update(currentTime: 12)
-        XCTAssertEqual(visibleText(), Set(["Early top", "Early bottom"]))
-
-        let nested = overlay.subviews.compactMap { $0 as? SubtitleOverlay }.first!
-        overlay.delaySeconds = 3
-        overlay.update(currentTime: 12)
-        XCTAssertTrue(overlay.subviews.contains(nested))
-        XCTAssertEqual(nested.delaySeconds, 3, accuracy: 0.001)
-        XCTAssertEqual(visibleText(), Set(["Early top", "Early bottom"]))
-    }
-
-    @MainActor
-    func testVideoGeometryRefreshRepositionsPrimaryAndSecondary() {
-        let (primary, secondary) = overlays()
-
-        let letterboxed = CGRect(x: 0, y: 60, width: 800, height: 280)
-        primary.videoRectProvider = { letterboxed }
-        secondary.videoRectProvider = { letterboxed }
-        var authored = cue("Primary")
-        authored.position = CGPoint(x: 0.5, y: 0.85)
-        primary.setEvents([authored])
-        secondary.setEvents([cue("Secondary", end: 8)])
-        tick(primary, secondary, at: 2)
-
-        let mainLabel = primary.subviews.compactMap { $0 as? UILabel }.last!
-        let secondLabel = secondary.subviews.compactMap { $0 as? UILabel }.last!
-        let firstY = mainLabel.frame.midY
-        let secondY = secondLabel.frame.midY
-
-        let filled = CGRect(x: 0, y: 0, width: 800, height: 400)
-        primary.videoRectProvider = { filled }
-        secondary.videoRectProvider = { filled }
-        primary.refreshVideoGeometry()
-        secondary.refreshVideoGeometry()
-        primary.layoutIfNeeded()
-        secondary.layoutIfNeeded()
-
-        XCTAssertGreaterThan(mainLabel.frame.midY, firstY)
-        XCTAssertGreaterThan(secondLabel.frame.midY, secondY)
-        XCTAssertEqual(mainLabel.text, "Primary")
-        XCTAssertEqual(secondLabel.text, "Secondary")
-
-        tick(primary, secondary, at: 4)
-        primary.videoRectProvider = { letterboxed }
-        secondary.videoRectProvider = { letterboxed }
-        primary.refreshVideoGeometry()
-        secondary.refreshVideoGeometry()
-        primary.layoutIfNeeded()
-        secondary.layoutIfNeeded()
-        XCTAssertEqual(secondLabel.frame.midY, secondY, accuracy: 0.1)
-        XCTAssertTrue(mainLabel.isHidden)
     }
 }

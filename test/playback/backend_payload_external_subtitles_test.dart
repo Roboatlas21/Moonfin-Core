@@ -161,6 +161,7 @@ Future<Map<String, dynamic>> _payloadFor({
   required List<ExternalSubtitle> externalSubtitles,
   int? subtitleStreamIndex,
   int? secondarySubtitleStreamIndex,
+  Future<void> Function(PlaybackManager, _CapturingBackend)? onStarted,
   StreamPlayMethod playMethod = StreamPlayMethod.directPlay,
 }) async {
   final backend = _CapturingBackend();
@@ -177,6 +178,7 @@ Future<Map<String, dynamic>> _payloadFor({
   await manager.playItems(<dynamic>[
     <String, dynamic>{'Id': 'movie', 'Type': 'Movie'},
   ], subtitleStreamIndex: subtitleStreamIndex);
+  await onStarted?.call(manager, backend);
   manager.dispose();
   return backend.payload!;
 }
@@ -186,42 +188,31 @@ List<Map<String, dynamic>> _declared(Map<String, dynamic> payload) =>
         .cast<Map<String, dynamic>>();
 
 void main() {
-
-  test('embedded secondary uses its native ordinal even without an extraction URL', () async {
-    final payload = await _payloadFor(
-      mediaStreams: const [
-        {'Type': 'Video', 'Index': 0},
-        {'Type': 'Subtitle', 'Index': 2, 'Codec': 'srt', 'IsExternal': true},
-        {'Type': 'Subtitle', 'Index': 4, 'Codec': 'subrip'},
-        {'Type': 'Subtitle', 'Index': 7, 'Codec': 'subrip'},
-      ],
-      externalSubtitles: const [],
-      subtitleStreamIndex: 4,
-      secondarySubtitleStreamIndex: 7,
-    );
-    expect(payload['secondarySubtitleTrackId'], 2);
-    expect(payload['secondarySubtitleUrl'], isNull);
-  });
-
-
-  test('remuxed secondary keeps file delivery because embedded tracks were stripped', () async {
-    final payload = await _payloadFor(
-      mediaStreams: const [
-        {'Type': 'Video', 'Index': 0},
-        {'Type': 'Subtitle', 'Index': 2, 'Codec': 'subrip', 'Language': 'jpn'},
-      ],
-      externalSubtitles: const [
-        ExternalSubtitle(deliveryUrl: 'https://server/sub.srt', codec: 'subrip', streamIndex: 2),
-      ],
-      subtitleStreamIndex: -1,
-      secondarySubtitleStreamIndex: 2,
-      playMethod: StreamPlayMethod.directStream,
-    );
-    expect(payload['secondarySubtitleTrackId'], isNull);
-    expect(payload['secondarySubtitleUrl'], 'https://server/sub.srt');
-    expect(payload['secondarySubtitleLanguage'], 'jpn');
-  });
-
+  for (final remux in [false, true]) {
+    test('secondary startup uses ${remux ? "server file" : "embedded ordinal"} and retains language', () async {
+      const url = 'https://server/sub.srt';
+      final payload = await _payloadFor(
+        mediaStreams: const [
+          {'Type': 'Video', 'Index': 0},
+          {'Type': 'Subtitle', 'Index': 2, 'Codec': 'srt', 'IsExternal': true},
+          {'Type': 'Subtitle', 'Index': 4, 'Codec': 'subrip'},
+          {'Type': 'Subtitle', 'Index': 7, 'Codec': 'subrip', 'Language': 'fr-CA'},
+        ],
+        externalSubtitles: remux ? const [ExternalSubtitle(deliveryUrl: url, codec: 'subrip', streamIndex: 7)] : const [],
+        subtitleStreamIndex: remux ? -1 : 4,
+        secondarySubtitleStreamIndex: 7,
+        playMethod: remux ? StreamPlayMethod.directStream : StreamPlayMethod.directPlay,
+        onStarted: (manager, backend) async {
+          await manager.changeSecondarySubtitleTrack(null);
+          await manager.changeSecondarySubtitleTrack(7);
+          expect(backend.selectedSecondaryLanguage, 'fr-CA');
+        },
+      );
+      expect(payload['secondarySubtitleTrackId'], remux ? null : 2);
+      expect(payload['secondarySubtitleUrl'], remux ? url : null);
+      expect(payload['secondarySubtitleLanguage'], remux ? 'fr-CA' : null);
+    });
+  }
 
   test('a transcoded download declares its sidecars with the source', () async {
     final payload = await _payloadFor(
@@ -397,36 +388,6 @@ void main() {
     );
 
     expect(payload.containsKey('selectedExternalSubtitleUrl'), isFalse);
-  });
-
-
-  test('passes secondary language when switching tracks', () async {
-    final backend = _CapturingBackend();
-    final manager = PlaybackManager()
-      ..setBackend(backend)
-      ..setResolver(_StubResolver(
-        mediaStreams: const [
-          {'Type': 'Video', 'Index': 0},
-          {'Type': 'Subtitle', 'Index': 2, 'Codec': 'vtt',
-           'Language': 'fr-CA', 'IsExternal': true},
-        ],
-        externalSubtitles: const [
-          ExternalSubtitle(
-            deliveryUrl: 'https://server/sub.vtt',
-            codec: 'vtt',
-            streamIndex: 2,
-          ),
-        ],
-      ));
-    try {
-      await manager.playItems(<dynamic>[
-        <String, dynamic>{'Id': 'movie', 'Type': 'Movie'},
-      ], subtitleStreamIndex: -1);
-      await manager.changeSecondarySubtitleTrack(2);
-      expect(backend.selectedSecondaryLanguage, 'fr-CA');
-    } finally {
-      manager.dispose();
-    }
   });
 
 }

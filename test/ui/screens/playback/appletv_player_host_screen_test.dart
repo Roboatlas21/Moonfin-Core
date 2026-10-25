@@ -18,7 +18,6 @@ import 'package:playback_core/playback_core.dart';
 
 import '../../../util/media_segment_fakes.dart';
 
-
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
 
 class _SegmentClient extends Fake implements MediaServerClient {
@@ -42,12 +41,9 @@ class _EmptyImageApi extends Fake implements ImageApi {}
 const _control = MethodChannel('moonfin/native_apple_player_control');
 const _events = MethodChannel('moonfin/native_apple_player_events');
 
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUpAll(() {
-    registerFallbackValue(Duration.zero);
-  });
+  setUpAll(() => registerFallbackValue(Duration.zero));
 
   late _MockPlaybackManager manager;
   late QueueService queue;
@@ -86,8 +82,7 @@ void main() {
     playerState.dispose();
   });
 
-
-  testWidgets('tvOS blocks ordinary segments and redirects Forward Skip', (
+  testWidgets('tvOS host refreshes subtitle appearance and routes segment controls', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -110,6 +105,14 @@ void main() {
     when(() => manager.playbackDeferredToExternalPlayer).thenReturn(false);
     when(() => manager.seekTo(any())).thenAnswer((_) async {});
     when(() => manager.nextInQueue()).thenAnswer((_) async => queue.next());
+    when(
+      () => manager.configureSecondarySubtitleStyle(
+        fontSize: any(named: 'fontSize'),
+        verticalOffset: any(named: 'verticalOffset'),
+        textColor: any(named: 'textColor'),
+      ),
+    ).thenAnswer((_) async {});
+
     final calls = <MethodCall>[];
     final messenger = tester.binding.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(_control, (call) async {
@@ -134,6 +137,20 @@ void main() {
       ),
     );
     await tester.pump();
+
+    calls.clear();
+
+    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 10.0);
+    await tester.pump();
+    final updates = calls.where((call) => call.method == 'setUiMetadata').toList();
+    expect(updates, hasLength(1));
+    final metadata = updates.single.arguments as Map;
+    expect((metadata['subtitleControls'] as Map)['sizeAdjustment'], 10.0);
+
+    calls.clear();
+    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
+    await tester.pump();
+    expect(calls.where((call) => call.method == 'setUiMetadata'), isEmpty);
 
     Future<void> send(Map<String, Object> data) async {
       await messenger.handlePlatformMessage(
@@ -167,67 +184,6 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpWidget(const SizedBox());
   });
-
-
-  testWidgets('tvOS refreshes subtitle metadata only for appearance changes', (
-    tester,
-  ) async {
-    SharedPreferences.setMockInitialValues({});
-    final store = PreferenceStore();
-    await store.init();
-    final prefs = UserPreferences(store);
-    addTearDown(prefs.dispose);
-    GetIt.instance.registerSingleton<UserPreferences>(prefs);
-    final backend = NativeApplePlayerBackend(prefs);
-    addTearDown(backend.dispose);
-    GetIt.instance.registerSingleton<NativeApplePlayerBackend>(backend);
-    when(() => manager.isOfflinePlayback).thenReturn(false);
-    when(() => manager.isTranscodeForced).thenReturn(false);
-    when(() => manager.playbackDeferredToExternalPlayer).thenReturn(false);
-    when(
-      () => manager.configureSecondarySubtitleStyle(
-        fontSize: any(named: 'fontSize'),
-        verticalOffset: any(named: 'verticalOffset'),
-        textColor: any(named: 'textColor'),
-      ),
-    ).thenAnswer((_) async {});
-
-    final calls = <MethodCall>[];
-    final messenger = tester.binding.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(_control, (call) async {
-      calls.add(call);
-      return null;
-    });
-    messenger.setMockMethodCallHandler(_events, (_) async => null);
-    addTearDown(() {
-      messenger.setMockMethodCallHandler(_control, null);
-      messenger.setMockMethodCallHandler(_events, null);
-    });
-
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: const [Locale('en')],
-        home: const AppleTvPlayerHostScreen(),
-      ),
-    );
-    await tester.pump();
-    calls.clear();
-
-    await prefs.set(UserPreferences.secondarySubtitleSizeAdjustment, 10.0);
-    await tester.pump();
-    final updates = calls.where((call) => call.method == 'setUiMetadata').toList();
-    expect(updates, hasLength(1));
-    final metadata = updates.single.arguments as Map;
-    expect((metadata['subtitleControls'] as Map)['sizeAdjustment'], 10.0);
-
-    calls.clear();
-    await prefs.set(UserPreferences.cinemaModeSkipEnabled, true);
-    await tester.pump();
-    expect(calls.where((call) => call.method == 'setUiMetadata'), isEmpty);
-    await tester.pumpWidget(const SizedBox());
-  });
-
 
   testWidgets('uses a white native spinner throughout tvOS bring-up', (
     tester,
