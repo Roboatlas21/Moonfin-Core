@@ -2921,6 +2921,14 @@ final class NativeApplePlayerViewController: UIViewController {
             sheet.addAction(makePlayerAction(title: subtitleText("delayLabel") + "…", style: .default) {
                 [weak self] _ in self?.presentSubtitleDelayMenu(secondary: secondary)
             })
+            if secondary || (subtitleControls["showPrimaryAppearance"] as? Bool ?? true) {
+                for field in secondary ? ["sizeAdjustment", "textColor", "verticalOffset"] : ["primaryFontSize", "primaryVerticalOffset"] {
+                    let key = field.contains("Offset") ? "positionLabel" : field == "textColor" ? "colorLabel" : "sizeLabel"
+                    sheet.addAction(makePlayerAction(title: subtitleText(key) + "…", style: .default) {
+                        [weak self] _ in self?.presentSubtitleAppearanceMenu(field: field)
+                    })
+                }
+            }
         }
         if !secondary && !showSlots && canDownloadSubtitles {
             sheet.addAction(makePlayerAction(title: "Download Subtitles…", style: .default) {
@@ -2976,6 +2984,53 @@ final class NativeApplePlayerViewController: UIViewController {
         presentSubtitleDelayMenu(secondary: secondary)
     }
 
+    private func presentSubtitleAppearanceMenu(field: String) {
+        let color = field == "textColor"
+        let primary = field.hasPrefix("primary")
+        let size = field == "sizeAdjustment" || field == "primaryFontSize"
+        let current = (subtitleControls[field] as? NSNumber)?.doubleValue ?? 0
+        let label = subtitleText(size ? "sizeLabel" : color ? "colorLabel" : "positionLabel")
+        let valueLabel = !primary && current == 0 ? subtitleText("defaultLabel")
+            : size && primary ? String(format: "%.0f", current)
+            : String(format: primary ? "%.0f%%" : "%+.0f%%", size ? current : current * 100)
+        let sheet = makePlayerMenu(title: label, message: color ? nil : valueLabel, preferredStyle: .actionSheet)
+        if color {
+            for entry in (subtitleControls["colors"] as? [[String: Any]]) ?? [] {
+                guard let value = entry["value"] as? NSNumber, let title = entry["label"] as? String else { continue }
+                sheet.addAction(makePlayerAction(
+                    title: (value.doubleValue == current ? "\u{2713} " : "") + title, style: .default
+                ) { [weak self] _ in self?.applySubtitleAppearance(field: field, value: value.doubleValue) })
+            }
+        } else {
+            for direction in [-1.0, 1.0] {
+                let step = direction * (size ? (primary ? 2 : 10) : 0.02)
+                let title = size && primary ? String(format: "%+.0f", step)
+                    : String(format: "%+.0f%%", size ? step : step * 100)
+                sheet.addAction(makePlayerAction(title: title, style: .default) { [weak self] _ in
+                    let minimum = size ? (primary ? 12.0 : -50.0) : 0.0
+                    let maximum = size ? (primary ? 48.0 : 50.0) : (primary ? 0.20 : 0.06)
+                    let next = min(max(current + step, minimum), maximum)
+                    self?.applySubtitleAppearance(field: field, value: (next * 100).rounded() / 100)
+                })
+            }
+        }
+        sheet.addAction(makePlayerAction(title: subtitleText("done"), style: .cancel))
+        presentSheet(sheet, from: .subtitles)
+    }
+
+    private func applySubtitleAppearance(field: String, value: Double) {
+        if (subtitleControls[field] as? NSNumber)?.doubleValue != value {
+            subtitleControls[field] = value
+            if field == "primaryFontSize" {
+                onSubtitleAction?(["event": "setSubtitleSize", "fontSize": value])
+            } else if field == "primaryVerticalOffset" {
+                onSubtitleAction?(["event": "setSubtitlePosition", "verticalOffset": value])
+            } else {
+                onSubtitleAction?(["event": "configureSecondarySubtitleStyle", field: value])
+            }
+        }
+        presentSubtitleAppearanceMenu(field: field)
+    }
 
     private func beginSubtitleSearch() {
         onSearchSubtitles?()

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
+import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:server_core/server_core.dart';
 
@@ -14,11 +15,12 @@ import '../../../playback/subtitle_style.dart';
 import '../../../preference/user_preferences.dart';
 import '../../../util/remote_subtitle_labels.dart';
 import '../../../util/subtitle_appearance_schedule.dart';
+import '../../../util/subtitle_track_logic.dart';
 import '../overlay_sheet.dart';
 import '../progress_snack_bar.dart';
 import '../track_selector_dialog.dart';
 import 'delay_footer.dart';
-import 'secondary_subtitle_appearance_footer.dart';
+import 'subtitle_appearance_footer.dart';
 import 'track_choices.dart';
 
 /// Runs a change to the player, returning false when it was refused.
@@ -172,51 +174,82 @@ abstract final class TrackPicker {
       );
     }
     Widget? footer;
-    if (secondary) {
+    if (!audio &&
+        showControls &&
+        (secondary || streams.any(isTextSubtitleStream)) &&
+        (!secondary ||
+            secondaryControls?.supportsSecondarySubtitleStyle == true ||
+            secondaryControls?.supportsSecondarySubtitlePosition == true)) {
       final style = SubtitleStyle.forResolution(
         prefs,
         manager.currentResolution,
       );
+      Future<void> saveSecondaryAppearance<T>(Preference<T> key, T value) async {
+        await prefs.set(key, value);
+        await syncSecondarySubtitleStyle(manager, prefs);
+      }
+
       footer = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: Container(
-              height: 1,
-              color: Colors.white.withValues(alpha: 0.08),
+          if (delayLimits == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Container(
+                height: 1,
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
             ),
-          ),
-          SecondarySubtitleAppearanceFooter(
-            initialFontSize:
-                manager.secondarySubtitleFontSize ?? style.fontSize,
-            initialOffset: manager.secondarySubtitleOffset,
-            initialTextColor: manager.secondarySubtitleTextColor,
-            defaultTextColor: style.textColor,
-            onChanged: (fontSize, offset, textColor) {
-              unawaited(
-                manager.configureSecondarySubtitleStyle(
-                  fontSize: fontSize,
-                  verticalOffset: offset,
-                  textColor: textColor,
-                ),
-              );
-              unawaited(
-                prefs.set(UserPreferences.secondarySubtitleTextSize, fontSize),
-              );
-              unawaited(
-                prefs.set(
-                  UserPreferences.secondarySubtitleOffsetPosition,
-                  offset,
-                ),
-              );
-              unawaited(
-                prefs.set(
-                  UserPreferences.secondarySubtitleTextColor,
-                  textColor ?? -1,
-                ),
-              );
+          SubtitleAppearanceFooter(
+            showStyle:
+                !secondary || secondaryControls!.supportsSecondarySubtitleStyle,
+            showPosition:
+                !secondary ||
+                secondaryControls!.supportsSecondarySubtitlePosition,
+            showColor: secondary,
+            secondary: secondary,
+            maxOffset: secondary
+                ? secondarySubtitleMaxOffset
+                : primarySubtitleMaxOffset,
+            initialFontSize: secondary
+                ? prefs.get(UserPreferences.secondarySubtitleSizeAdjustment)
+                : style.fontSize,
+            initialOffset: secondary
+                ? prefs.get(UserPreferences.secondarySubtitleOffsetPosition)
+                : style.verticalOffset,
+            initialTextColor: switch (prefs.get(
+              UserPreferences.secondarySubtitleTextColor,
+            )) {
+              -1 => null,
+              final color => color,
             },
+            defaultTextColor: style.textColor,
+            onFontSizeChanged: (fontSize) => unawaited(
+              secondary
+                  ? saveSecondaryAppearance(
+                      UserPreferences.secondarySubtitleSizeAdjustment,
+                      fontSize,
+                    )
+                  : setPrimarySubtitleSize(manager, prefs, fontSize),
+            ),
+            onOffsetChanged: (offset) => unawaited(
+              secondary
+                  ? saveSecondaryAppearance(
+                      UserPreferences.secondarySubtitleOffsetPosition,
+                      offset,
+                    )
+                  : setPrimarySubtitleAppearance(
+                      manager,
+                      prefs,
+                      verticalOffset: offset,
+                    ),
+            ),
+            onTextColorChanged: (textColor) => unawaited(
+              saveSecondaryAppearance(
+                UserPreferences.secondarySubtitleTextColor,
+                textColor ?? -1,
+              ),
+            ),
           ),
         ],
       );

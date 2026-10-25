@@ -53,7 +53,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   StreamSubscription<PlaybackBringupState>? _bringupSub;
   StreamSubscription<bool>? _screensaverPlayingSub;
 
-  SubtitleStyle? _lastSubtitleStyle;
+  (SubtitleStyle, double, double, int)? _lastSubtitleStyle;
 
   late int _currentIndex;
   bool _exiting = false;
@@ -213,8 +213,16 @@ class _AppleTvLiveTvPlayerHostScreenState
         _prefs,
         _manager.currentResolution,
       );
-      if (!force && style == _lastSubtitleStyle) return;
-      _lastSubtitleStyle = style;
+      final appearance = (
+        style,
+        _prefs.get(UserPreferences.secondarySubtitleSizeAdjustment),
+        _prefs.get(UserPreferences.secondarySubtitleOffsetPosition),
+        _prefs.get(UserPreferences.secondarySubtitleTextColor),
+      );
+      final previous = _lastSubtitleStyle;
+      if (!force && appearance == previous) return;
+      _lastSubtitleStyle = appearance;
+      if (!force && style == previous?.$1) return;
       backend.configureSubtitleStyle(
         textColor: style.textColor,
         backgroundColor: style.backgroundColor,

@@ -611,7 +611,7 @@ class PlaybackManager implements AudioOwnable {
 
   /// Default extra gap between primary and secondary subtitles, as a fraction of player
   /// height. Zero keeps the normal gap.
-  static const defaultSecondarySubtitleOffset = 0.08;
+  static const defaultSecondarySubtitleOffset = 0.0;
 
   int? get secondarySubtitleStreamIndex => _secondarySubtitleStreamIndex;
   double get secondarySubtitleDelaySeconds => _secondarySubtitleDelaySeconds;
@@ -3884,10 +3884,10 @@ class PlaybackManager implements AudioOwnable {
     double? verticalOffset,
     int? textColor,
   }) async {
-    _secondarySubtitleFontSize = fontSize?.clamp(8.0, 72.0).toDouble();
+    _secondarySubtitleFontSize = fontSize?.clamp(6.0, 72.0).toDouble();
     _secondarySubtitleTextColor = textColor;
     final offset = verticalOffset ?? defaultSecondarySubtitleOffset;
-    _secondarySubtitleOffset = offset.clamp(0.0, 0.4).toDouble();
+    _secondarySubtitleOffset = offset.clamp(0.0, 0.06).toDouble();
     await _backend?.configureSecondarySubtitleStyle(
       fontSize: _secondarySubtitleFontSize,
       verticalOffset: _secondarySubtitleOffset,
