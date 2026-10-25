@@ -83,6 +83,13 @@ class MoonfinAssOverlayView(
     @Volatile
     private var currentFrame: AssFrame? = null
 
+    @Volatile
+    private var primaryTrackGeneration = 0
+    private var primaryTrackIndex: Int? = null
+
+    @Volatile
+    private var lastPresentationTimeUs: Long? = null
+
     // Hiding the cached image on Primary Off must not discard it: libass can
     // return changed=0 if the same subtitle is selected again while paused.
     private var primaryVisible = true
@@ -92,6 +99,23 @@ class MoonfinAssOverlayView(
         primaryVisible = visible
         invalidate()
         onFrameChanged?.invoke()
+    }
+
+    // Called after Media3 has activated its new primary selection. Primary Off
+    // only hides the view and deliberately leaves this identity unchanged.
+    fun selectPrimaryAssTrack(index: Int?) {
+        if (primaryTrackIndex == index) {
+            if (index != null && currentFrame == null) {
+                lastPresentationTimeUs?.let(::requestRender)
+            }
+            return
+        }
+        primaryTrackIndex = index
+        primaryTrackGeneration++
+        currentFrame = null
+        invalidate()
+        onFrameChanged?.invoke()
+        if (index != null) lastPresentationTimeUs?.let(::requestRender)
     }
 
     /** Called on the UI thread when ASS's visible image rectangles change. */
@@ -107,6 +131,7 @@ class MoonfinAssOverlayView(
         }.orEmpty()
 
     private val renderTask = Runnable {
+        val generation = primaryTrackGeneration
         try {
             val timeUs = pendingTimeUs
             val frame = try {
@@ -121,9 +146,14 @@ class MoonfinAssOverlayView(
                 // A dropped frame beats taking the process down.
                 null
             }
-            publishFrame(frame)
+            publishFrame(frame, generation)
         } finally {
             renderScheduled.set(false)
+            // A render for track A may have been in flight when B was picked.
+            // It must not paint A, and B still needs a render while paused.
+            if (!released && generation != primaryTrackGeneration && primaryTrackIndex != null) {
+                lastPresentationTimeUs?.let(::requestRender)
+            }
         }
     }
 
@@ -194,6 +224,7 @@ class MoonfinAssOverlayView(
     // stays off the lock and never blocks.
     private fun requestRender(presentationTimeUs: Long) {
         if (released) return
+        lastPresentationTimeUs = presentationTimeUs
         // The renderer only exists once a track has been created, so this keeps
         // content without ASS from waking the render thread on every frame.
         if (assHandler.render == null) return
@@ -211,13 +242,18 @@ class MoonfinAssOverlayView(
         }
     }
 
-    private fun publishFrame(frame: AssFrame?) {
-        // changed == 0 means libass produced the same content again, so the
-        // frame already on screen stands and redrawing it is wasted work.
-        if (frame != null && frame.changed == 0) return
+    private fun publishFrame(frame: AssFrame?, generation: Int) {
+        if (generation != primaryTrackGeneration) return
+        // If the old track's image was cleared, accept libass's unchanged
+        // image too; otherwise the replacement can stay blank until playback.
+        if (frame != null && frame.changed == 0 && currentFrame != null) return
         if (frame == null && currentFrame == null) return
         frame?.images?.forEach { it.bitmap?.prepareToDraw() }
         currentFrame = frame
+        if (generation != primaryTrackGeneration) {
+            currentFrame = null
+            return
+        }
         postInvalidate()
         post { if (!released) onFrameChanged?.invoke() }
     }

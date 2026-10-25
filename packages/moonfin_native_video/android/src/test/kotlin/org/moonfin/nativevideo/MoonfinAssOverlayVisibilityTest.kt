@@ -14,6 +14,35 @@ import org.robolectric.annotation.Config
 @Config(sdk = [28, 35], manifest = Config.NONE)
 class MoonfinAssOverlayVisibilityTest {
     @Test
+    fun differentAssTracksClearCachedPlacementWithoutPlaybackTicks() {
+        val overlay = MoonfinAssOverlayView(
+            RuntimeEnvironment.getApplication(),
+            AssHandler(AssRenderType.OVERLAY_CANVAS),
+        )
+        var placementUpdates = 0
+        overlay.onFrameChanged = { placementUpdates++ }
+
+        overlay.selectPrimaryAssTrack(1)
+        assertEquals(1, placementUpdates)
+        overlay.selectPrimaryAssTrack(1)
+        assertEquals(1, placementUpdates)
+
+        // Off and reselection of A retain the cache; B invalidates it.
+        overlay.setPrimaryVisible(false)
+        assertEquals(2, placementUpdates)
+        overlay.setPrimaryVisible(true)
+        overlay.selectPrimaryAssTrack(1)
+        assertEquals(3, placementUpdates)
+
+        overlay.selectPrimaryAssTrack(2)
+        assertEquals(4, placementUpdates)
+        overlay.selectPrimaryAssTrack(2)
+        assertEquals(4, placementUpdates)
+        overlay.selectPrimaryAssTrack(null)
+        assertEquals(5, placementUpdates)
+    }
+
+    @Test
     fun primaryOffImmediatelyUpdatesAssVisibilityWithoutAFrameTick() {
         val overlay = MoonfinAssOverlayView(
             RuntimeEnvironment.getApplication(),

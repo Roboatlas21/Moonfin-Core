@@ -1301,6 +1301,16 @@ class Media3VideoView(
                 }
             }
             applySecondarySubtitle()
+            if (subtitleTrackEnabled) {
+                val primary = collectTracks(C.TRACK_TYPE_TEXT).indexOfFirst {
+                    trackSelector.isPrimaryTrackSelected(it.group, it.trackIndex)
+                }
+                if (primary >= 0) {
+                    assOverlayView?.selectPrimaryAssTrack(
+                        if (selectedSubtitleIsAss) primary + 1 else null,
+                    )
+                }
+            }
             assOverlayView?.setPrimaryVisible(subtitleTrackEnabled && selectedSubtitleIsAss)
             emitTracksChanged()
             reportUnsupportedVideoIfNeeded()
