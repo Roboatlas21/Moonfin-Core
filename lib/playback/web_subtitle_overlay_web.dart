@@ -250,7 +250,13 @@ class WebSubtitleOverlay {
       completer.complete();
       return load;
     }
-    final script = web.HTMLScriptElement()..src = '$_libpgsBase/libpgs.js';
+    // The bundled libpgs file exports PgsRenderer as an ES module; loading it
+    // as a classic script fails before the constructor can be published.
+    final script = web.HTMLScriptElement()
+      ..type = 'module'
+      ..text =
+          "import { PgsRenderer } from '$_libpgsBase/libpgs.js'; "
+          "window.libpgs = { PgsRenderer };";
     (web.document.head ?? web.document.documentElement)?.appendChild(script);
     _pollFor('libpgs', completer);
     return load;
