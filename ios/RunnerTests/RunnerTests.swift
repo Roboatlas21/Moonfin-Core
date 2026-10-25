@@ -429,6 +429,45 @@ final class RunnerTests: XCTestCase {
     }
 
     @MainActor
+    func testPrimaryOffWinsAetherReloadForEitherEventOrder() {
+        for restoresBeforeReady in [false, true] {
+            var state = PrimarySubtitleReloadState()
+            state.remember(.text(1, nil))
+            state.beginReload(previouslyActive: true)
+            state.remember(.off)
+            if restoresBeforeReady {
+                XCTAssertFalse(state.shouldReapplyAfterRestoration(active: true, ready: false))
+                XCTAssertTrue(state.shouldReapplyAtReadiness(primaryActive: true))
+            } else {
+                XCTAssertFalse(state.shouldReapplyAtReadiness(primaryActive: false))
+                XCTAssertTrue(state.shouldReapplyAfterRestoration(active: true, ready: true))
+            }
+            XCTAssertEqual(state.takeLatest(), .off)
+            XCTAssertNil(state.takeLatest())
+        }
+    }
+
+    @MainActor
+    func testPrimaryReloadReplaysNewerTextCaptionAndPreviouslyOff() {
+        var state = PrimarySubtitleReloadState()
+        state.remember(.text(1, nil))
+        state.beginReload(previouslyActive: true)
+        state.remember(.text(2, "https://example.com/second.srt"))
+        XCTAssertEqual(state.takeLatest(force: true),
+            .text(2, "https://example.com/second.srt"))
+
+        state.reset()
+        state.remember(.off)
+        state.beginReload(previouslyActive: false)
+        state.remember(.caption(1))
+        XCTAssertTrue(state.shouldReapplyAtReadiness(primaryActive: false))
+        XCTAssertEqual(state.takeLatest(), .caption(1))
+        state.reset()
+        XCTAssertNil(state.latestChoice)
+        XCTAssertFalse(state.needsReapply)
+    }
+
+    @MainActor
     func testSecondaryReloadReplaysForEitherRestorationEventOrder() {
         let a = SecondarySubtitleReloadState.Choice(embeddedTrackId: 1, url: nil)
         let b = SecondarySubtitleReloadState.Choice(embeddedTrackId: 2, url: nil)
