@@ -141,10 +141,10 @@ class WebSubtitleOverlay {
               !identical(_assRenderer, renderer) || !_video.paused) {
             return;
           }
-          renderer.setCurrentTime(true, _video.currentTime - _delaySeconds);
+          _redrawAssAtCurrentTime(renderer);
         });
       }).toJS);
-      renderer.setCurrentTime(_video.paused, _video.currentTime - _delaySeconds);
+      _redrawAssAtCurrentTime(renderer);
     } catch (error) {
       _assRenderer?.destroy();
       _assRenderer = null;
@@ -209,13 +209,20 @@ class WebSubtitleOverlay {
     }
   }
 
+  void _redrawAssAtCurrentTime(_Jassub renderer) {
+    // Request one frame, not a predictive playback clock. JASSUB already
+    // follows video frames via requestVideoFrameCallback when available;
+    // starting its own clock here makes captions advance after video pauses.
+    renderer.setCurrentTime(true, _video.currentTime - _delaySeconds);
+  }
+
   void setDelay(double seconds) {
     _delaySeconds = seconds;
     // These renderers offset their clock, so a positive delay moves it back.
     final ass = _assRenderer;
     if (ass != null) {
       ass.timeOffset = -seconds;
-      ass.setCurrentTime(_video.paused, _video.currentTime - seconds);
+      _redrawAssAtCurrentTime(ass);
     }
     _pgsRenderer?.timeOffset = -seconds;
   }
