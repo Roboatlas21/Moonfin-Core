@@ -110,6 +110,7 @@ import org.moonfin.nativevideo.subtitle.DeclaredSubtitle
 import org.moonfin.nativevideo.subtitle.DualSubtitleTrackSelector
 import org.moonfin.nativevideo.subtitle.SidecarSourceFactory
 import org.moonfin.nativevideo.subtitle.SecondarySubtitleOverlay
+import org.moonfin.nativevideo.subtitle.SubtitleBox
 import org.moonfin.nativevideo.subtitle.SourceTree
 import org.moonfin.nativevideo.subtitle.SupAwareSubtitleParserFactory
 import org.moonfin.nativevideo.subtitle.TextStreamOffsetMediaSource
@@ -831,6 +832,9 @@ class Media3VideoView(
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+        subtitleView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updateAssPrimaryBounds()
+        }
 
         container.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
@@ -2101,9 +2105,23 @@ class Media3VideoView(
             .toInt()
     }
 
+    private fun updateAssPrimaryBounds() {
+        if (!::secondarySubtitleOverlay.isInitialized) return
+        val ass = assOverlayView
+        val bounds = if (subtitleTrackEnabled && selectedSubtitleIsAss && ass != null) {
+            val dx = (subtitleView.left + ass.left - secondarySubtitleView.left).toFloat()
+            val dy = (subtitleView.top + ass.top - secondarySubtitleView.top).toFloat()
+            ass.visibleFrameBounds().map {
+                SubtitleBox(it.left + dx, it.top + dy, it.right + dx, it.bottom + dy)
+            }
+        } else emptyList()
+        secondarySubtitleOverlay.updateAssPrimaryBounds(bounds)
+    }
+
     private fun attachAssOverlay(assHandler: AssHandler) {
         releaseAssOverlay()
         val overlay = MoonfinAssOverlayView(context, assHandler)
+        overlay.onFrameChanged = ::updateAssPrimaryBounds
         subtitleView.addView(
             overlay,
             FrameLayout.LayoutParams(
@@ -2119,10 +2137,12 @@ class Media3VideoView(
     // the last references to the handler's native objects.
     private fun releaseAssOverlay() {
         assOverlayView?.let { overlay ->
+            overlay.onFrameChanged = null
             subtitleView.removeView(overlay)
             overlay.release()
         }
         assOverlayView = null
+        updateAssPrimaryBounds()
     }
 
     private fun rebuildPlayerForDecoderPreference() {
@@ -3938,6 +3958,7 @@ class Media3VideoView(
     }
 
     private fun refreshSubtitleRendererMode() {
+        updateAssPrimaryBounds()
         val desiredMode = SubtitleRendererMode.NATIVE
         val resolvedMode = SubtitleRendererMode.NATIVE
         val fallbackReason = if (requestedSubtitleRendererMode == SubtitleRendererMode.ASS_OVERLAY) {

@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
 import android.view.View
 import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
@@ -82,6 +83,18 @@ class MoonfinAssOverlayView(
     @Volatile
     private var currentFrame: AssFrame? = null
 
+    /** Called on the UI thread when ASS's visible image rectangles change. */
+    var onFrameChanged: (() -> Unit)? = null
+
+    fun visibleFrameBounds(): List<RectF> =
+        currentFrame?.images?.mapNotNull { image ->
+            val bitmap = image.bitmap ?: return@mapNotNull null
+            RectF(
+                image.x.toFloat(), image.y.toFloat(),
+                image.x + bitmap.width.toFloat(), image.y + bitmap.height.toFloat(),
+            )
+        }.orEmpty()
+
     private val renderTask = Runnable {
         try {
             val timeUs = pendingTimeUs
@@ -121,6 +134,7 @@ class MoonfinAssOverlayView(
         assHandler.renderCallback = {
             currentFrame = null
             postInvalidate()
+            post { if (!released) onFrameChanged?.invoke() }
         }
     }
 
@@ -162,6 +176,7 @@ class MoonfinAssOverlayView(
         }
         renderScheduled.set(false)
         currentFrame = null
+        onFrameChanged?.invoke()
     }
 
     // Called on the ExoPlayer playback thread for every video frame, so it
@@ -193,6 +208,7 @@ class MoonfinAssOverlayView(
         frame?.images?.forEach { it.bitmap?.prepareToDraw() }
         currentFrame = frame
         postInvalidate()
+        post { if (!released) onFrameChanged?.invoke() }
     }
 
     override fun onDraw(canvas: Canvas) {

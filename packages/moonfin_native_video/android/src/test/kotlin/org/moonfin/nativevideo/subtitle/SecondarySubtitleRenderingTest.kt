@@ -189,6 +189,23 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
+    fun assPrimaryBitmapBoundsReserveRoomForSecondarySrt() {
+        val f = Scene()
+        f.style(0.04f)
+        // An ASS primary is drawn outside Media3's cue list, at the bottom.
+        val ass = SubtitleBox(474f, 657f, 807f, 689f)
+        f.overlay.updateAssPrimaryBounds(listOf(ass))
+        f.show(emptyList(), "English translation")
+        val secondary = inkBounds(f.secondary)
+        assertTrue("Secondary must clear ASS's bottom-centred ink",
+            secondary.bottom < ass.top && secondary.left < ass.right && secondary.right > ass.left)
+        f.overlay.updateAssPrimaryBounds(emptyList())
+        val normal = inkBounds(f.secondary)
+        assertTrue("Without ASS, secondary returns to its normal bottom position",
+            normal.bottom > secondary.bottom)
+    }
+
+    @Test
     fun wrappedChinesePrimaryDoesNotOverlapTheSecondary() {
         val f = Scene()
         f.primary.setFractionalTextSize(0.06f)
