@@ -63,6 +63,14 @@ final class SubtitleOverlay: PlatformView {
             requestLayout()
         }
     }
+    /// ASS/SSA primaries use a stable top lane for the secondary instead of
+    /// chasing libass regions that can move or animate from frame to frame.
+    var secondaryUsesTopFallback = false {
+        didSet {
+            guard oldValue != secondaryUsesTopFallback else { return }
+            secondaryForStacking?.requestLayout()
+        }
+    }
     // Keep source placement inputs through dialogue gaps. Final screen rectangles
     // go stale when the font, controls lift, spacing or picture geometry changes.
     private enum PrimaryPlacement {
@@ -427,7 +435,9 @@ final class SubtitleOverlay: PlatformView {
             assImageView.image = nil
             assImageView.isHidden = true
         }
-        updateSecondaryPlacement()
+        if !secondaryUsesTopFallback {
+            updateSecondaryPlacement()
+        }
     }
 
     /// The engine republishes the full active-cue set, so replace the queue
@@ -832,13 +842,16 @@ final class SubtitleOverlay: PlatformView {
 
     private func layoutTextLabel() {
         guard !textLabel.isHidden else { return }
+        let topFallback =
+            stackingEnabled && primaryForStacking?.secondaryUsesTopFallback == true
         let placement = primaryForStacking != nil && stackingEnabled ? nil
             : activeTextPlacement
-        let alignment = primaryForStacking != nil && stackingEnabled
-            ? currentAlignment : Self.effectiveAlignment(placement)
+        let alignment = topFallback ? 8
+            : primaryForStacking != nil && stackingEnabled
+                ? currentAlignment : Self.effectiveAlignment(placement)
         let layout = textLayout(
             for: textLabel, placement: placement, alignment: alignment,
-            centeredPair: (currentAlignment - 1) / 3 == 1)
+            centeredPair: !topFallback && (currentAlignment - 1) / 3 == 1)
         textLabel.frame = layout.frame
         outlineLabel.frame = layout.frame
         applyOverflowClip(layout.clip, left: layout.left, right: layout.right)
@@ -889,7 +902,14 @@ final class SubtitleOverlay: PlatformView {
         var overflowClip: ClosedRange<CGFloat>?
         let primary = stackingEnabled ? primaryForStacking : nil
         let occupied = primary?.stackingRegions ?? []
-        if let primary, let parentFrame = occupied.first {
+        if let primary, primary.secondaryUsesTopFallback {
+            // The primary's authored offset remains the shared base position.
+            // Secondary Position adds only its relative 0...+6% adjustment.
+            let top = picture.minY + picture.height * (
+                primary.authoredVerticalOffset + CGFloat(secondaryVerticalAdjustment))
+            x = minimumX + max(0, maximumX - minimumX - size.width) / 2
+            y = min(max(top, minimumY), max(minimumY, maximumY - size.height))
+        } else if let primary, let parentFrame = occupied.first {
             let parentAlignment = primary.currentAlignment
             let parentColumn = (parentAlignment - 1) % 3
             let parentRow = (parentAlignment - 1) / 3

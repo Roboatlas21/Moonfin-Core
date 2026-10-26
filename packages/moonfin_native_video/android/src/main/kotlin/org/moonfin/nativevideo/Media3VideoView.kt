@@ -111,7 +111,6 @@ import org.moonfin.nativevideo.subtitle.DeclaredSubtitle
 import org.moonfin.nativevideo.subtitle.DualSubtitleTrackSelector
 import org.moonfin.nativevideo.subtitle.SidecarSourceFactory
 import org.moonfin.nativevideo.subtitle.SecondarySubtitleOverlay
-import org.moonfin.nativevideo.subtitle.SubtitleBox
 import org.moonfin.nativevideo.subtitle.SourceTree
 import org.moonfin.nativevideo.subtitle.SupAwareSubtitleParserFactory
 import org.moonfin.nativevideo.subtitle.TextStreamOffsetMediaSource
@@ -2144,15 +2143,9 @@ class Media3VideoView(
 
     private fun updateAssPrimaryBounds() {
         if (!::secondarySubtitleOverlay.isInitialized) return
-        val ass = assOverlayView
-        val bounds = if (subtitleTrackEnabled && selectedSubtitleIsAss && ass != null) {
-            val dx = (subtitleView.left + ass.left - secondarySubtitleView.left).toFloat()
-            val dy = (subtitleView.top + ass.top - secondarySubtitleView.top).toFloat()
-            ass.visibleFrameBounds().map {
-                SubtitleBox(it.left + dx, it.top + dy, it.right + dx, it.bottom + dy)
-            }
-        } else emptyList()
-        secondarySubtitleOverlay.updateAssPrimaryBounds(bounds)
+        // ASS/SSA uses a stable top fallback for the secondary. Do not feed
+        // animated libass ink bounds into the stacking layout.
+        secondarySubtitleOverlay.updateAssPrimaryBounds(emptyList())
     }
 
     private fun attachAssOverlay(assHandler: AssHandler) {
@@ -4004,6 +3997,7 @@ class Media3VideoView(
         // ticks. A paused player may never render again after an Off request.
         val assPrimaryVisible = subtitleTrackEnabled && selectedSubtitleIsAss
         assOverlayView?.setPrimaryVisible(assPrimaryVisible)
+        secondarySubtitleOverlay.setPrimaryUsesTopFallback(assPrimaryVisible)
         updateAssPrimaryBounds()
         val desiredMode = SubtitleRendererMode.NATIVE
         val resolvedMode = SubtitleRendererMode.NATIVE

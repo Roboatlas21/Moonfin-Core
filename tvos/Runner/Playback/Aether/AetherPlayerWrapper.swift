@@ -186,6 +186,18 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     private var lastKnownSourceTime: Double = 0
     private var lastKnownSourceTimeHostTime: CFTimeInterval = 0
 
+    private static func isAssSubtitleCodec(_ codec: String) -> Bool {
+        let value = codec.lowercased()
+        return value == "ass" || value == "ssa"
+    }
+
+    private func primaryUsesAssTopFallback(_ id: Int?) -> Bool {
+        guard let id else { return false }
+        let track = subtitleTable.first { $0.id == id }
+            ?? closedCaptionTable.first { $0.id == id }
+        return track.map { Self.isAssSubtitleCodec($0.codec) } ?? false
+    }
+
     /// Video gets a Now Playing session bound to its AVPlayer. On iOS the
     /// shared centers stay with `audio_service`, but they can't win Now Playing
     /// back once Picture in Picture or another app has taken it.
@@ -432,6 +444,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
                 self.currentSubtitleTrackIndex = self.ordinal(for: id, in: self.subtitleTable)
                 self.subtitleOverlay.keepsVideoComposited = id != nil
                 self.resetAssState()
+                self.subtitleOverlay.secondaryUsesTopFallback =
+                    self.primaryUsesAssTopFallback(id)
                 self.updateNativePrimaryBridge()
             }
             .store(in: &cancellables)
@@ -1414,6 +1428,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
         if effectivePrimaryTrackID(engine) != id {
             subtitleOverlay.clear()
         }
+        subtitleOverlay.secondaryUsesTopFallback = primaryUsesAssTopFallback(id)
         endNativePrimaryBridge(restoreNative: false)
         nativePrimaryBridgeFailure = nil
         engine.selectSubtitleTrack(index: id)
@@ -1488,6 +1503,7 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
 
     func disableSubtitles() {
         primaryReloadSelection.remember(.off)
+        subtitleOverlay.secondaryUsesTopFallback = false
         endNativePrimaryBridge(restoreNative: false)
         nativePrimaryBridgeFailure = nil
         Self.sharedEngine()?.clearSubtitle()
@@ -1897,6 +1913,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
             }
         }
         let activeTrack = subtitleTable.first { $0.id == effectivePrimaryTrackID(engine) }
+        subtitleOverlay.secondaryUsesTopFallback =
+            activeTrack.map { Self.isAssSubtitleCodec($0.codec) } ?? false
 
         #if canImport(Libass)
             if let track = activeTrack,

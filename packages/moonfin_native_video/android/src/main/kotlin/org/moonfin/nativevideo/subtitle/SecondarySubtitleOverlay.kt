@@ -101,6 +101,7 @@ internal class SecondarySubtitleOverlay(
     private var lastPrimaryCueGroup: List<Cue> = emptyList()
     private var resolvedPrimaryReference: Cue? = null
     private var primaryEnabled = true
+    private var primaryUsesTopFallback = false
     private var assPrimaryBounds: List<SubtitleBox> = emptyList()
 
     /** libass is drawn by a separate view; its image bounds still block secondary text. */
@@ -210,6 +211,17 @@ internal class SecondarySubtitleOverlay(
     fun setPrimaryEnabled(enabled: Boolean) {
         if (primaryEnabled == enabled) return
         primaryEnabled = enabled
+        resetPrimaryCues()
+    }
+
+    /**
+     * ASS/SSA primaries can move, animate and draw several independent regions.
+     * Their current libass ink is not a stable stacking anchor, so reserve a
+     * predictable top lane for the secondary instead.
+     */
+    fun setPrimaryUsesTopFallback(enabled: Boolean) {
+        if (primaryUsesTopFallback == enabled) return
+        primaryUsesTopFallback = enabled
         resetPrimaryCues()
     }
 
@@ -324,6 +336,29 @@ internal class SecondarySubtitleOverlay(
             return
         }
         val secondaryFontPx = ((fontSizeOverride ?: baseFontSize) / 24f) * 0.06f * height
+        if (primaryUsesTopFallback) {
+            val text = joinKeepingSpans(active.map { requireNotNull(it.text) })
+            val fallback = Cue.Builder()
+                .setText(text)
+                .setTextAlignment(Layout.Alignment.ALIGN_CENTER)
+                .setPosition(0.5f)
+                .setPositionAnchor(Cue.ANCHOR_TYPE_MIDDLE)
+                .build()
+            val measured = measureTextHeights(fallback, width, height, secondaryFontPx)
+            val desiredTop = (primaryBottomPaddingFraction + offsetDelta) * height
+            val top = desiredTop.coerceIn(
+                0f,
+                (height - measured.drawn).coerceAtLeast(0f),
+            )
+            view.visibility = View.VISIBLE
+            view.setCues(listOf(
+                fallback.buildUpon()
+                    .setLine(top / height, Cue.LINE_TYPE_FRACTION)
+                    .setLineAnchor(Cue.ANCHOR_TYPE_START)
+                    .build(),
+            ))
+            return
+        }
         val collisionCues = if (unmodifiedPrimaryCues.isEmpty()) referenceCues else primaryCues
         val primaryBoxes = collisionCues.map { estimatePrimaryBox(it, width, height, primaryFontPx) }
         // Position secondary cues relative to the primary's current or last known

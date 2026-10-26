@@ -1225,13 +1225,16 @@ class HtmlVideoBackend extends PlayerBackend
       }
     }
 
-    // ASS/PGS overlays have no VTTCue bounds. Keep the second track at the top
-    // instead of treating an enabled overlay as Primary Off.
+    // ASS/SSA and PGS overlays have no reliable VTTCue anchor. Keep the second
+    // track in the same stable top lane used by the other playback engines.
     final fallbackToTop = primary == null && _primaryUsesOverlay;
     final below = row == 2 || fallbackToTop;
     final secondaryEdge = bounds == null
         ? (fallbackToTop
-              ? _subtitleVerticalOffset
+              ? webOverlaySecondaryTop(
+                  _subtitleVerticalOffset,
+                  _secondaryOffset,
+                )
               : 1 - _subtitleVerticalOffset)
         : switch (row) {
             2 => bounds.bottom + gap,

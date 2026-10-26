@@ -6,6 +6,12 @@ double webSrtVerticalPosition(int alignment, double offset) =>
       _ => offset,
     };
 
+/// Stable top lane used when the primary is an ASS/SSA or bitmap overlay.
+/// The primary offset is the shared base position; the secondary offset is
+/// the relative 0...+6% adjustment.
+double webOverlaySecondaryTop(double primaryOffset, double secondaryOffset) =>
+    (primaryOffset + secondaryOffset).clamp(0.0, 1.0).toDouble();
+
 typedef WebVttHorizontalPlacement = ({
   String align,
   double position,
