@@ -3286,7 +3286,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     final next = (style, embeddedStyles, embeddedFontSizes);
     if (!force && next == _lastSubtitleStyle) return;
     _lastSubtitleStyle = next;
-    unawaited(syncSecondarySubtitleStyle(_manager, _prefs));
 
     // Embedded-style overrides are Media3-specific (Android only) and live on
     // the Media3PlayerBackend's wider signature, not the base PlayerBackend.
@@ -3304,6 +3303,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         ),
       );
     } else {
+      // MediaKit caches the primary font size synchronously before its first
+      // native await. Start the primary update first so the relative secondary
+      // scale is calculated against the new size rather than the previous one.
       unawaited(
         backend.configureSubtitleStyle(
           textColor: style.textColor,
@@ -3315,6 +3317,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         ),
       );
     }
+    unawaited(syncSecondarySubtitleStyle(_manager, _prefs));
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
