@@ -372,18 +372,21 @@ void main() {
     expect(position(), inExclusiveRange(1, 50));
   });
 
-  test('ASS primary uses the same stable top fallback as bitmap primary', () async {
-    await selectPair(primary: r'{\an2}Bottom ASS', primaryCodec: 'ass');
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
-    final fallback = position();
-    expect(fallback, inExclusiveRange(0, 50));
+  test('ASS and SSA primaries use the same stable top fallback as bitmap', () async {
+    for (final codec in ['ass', 'ssa']) {
+      await selectPair(primary: r'{\an2}Bottom ASS', primaryCodec: codec);
+      await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+      final fallback = position();
+      expect(fallback, inExclusiveRange(0, 50), reason: codec);
 
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
-    expect(position(), greaterThan(fallback));
+      await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
+      final spaced = position();
+      expect(spaced, greaterThan(fallback), reason: codec);
 
-    properties['sub-text/ass'] = r'{\an8}Top ASS';
-    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
-    expect(position(), greaterThan(fallback));
+      properties['sub-text/ass'] = r'{\an8}Top ASS';
+      await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
+      expect(position(), spaced, reason: codec);
+    }
   });
 
   test('paused subtitle delay refreshes secondary placement for the current cue', () async {

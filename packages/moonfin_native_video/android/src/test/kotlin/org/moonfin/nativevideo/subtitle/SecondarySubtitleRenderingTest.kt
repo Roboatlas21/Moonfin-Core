@@ -194,20 +194,28 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
-    fun assPrimaryBitmapBoundsReserveRoomForSecondarySrt() {
-        val f = Scene()
-        f.style(0.04f)
-        // An ASS primary is drawn outside Media3's cue list, at the bottom.
-        val ass = SubtitleBox(474f, 657f, 807f, 689f)
-        f.overlay.updateAssPrimaryBounds(listOf(ass))
+    fun assPrimaryUsesStableTopFallbackInsteadOfRenderedBounds() {
+        val f = Scene().configurePrimary(offset = 0.04f)
+        f.overlay.setPrimaryUsesTopFallback(true)
+        f.overlay.updateAssPrimaryBounds(listOf(SubtitleBox(474f, 657f, 807f, 689f)))
         f.show(emptyList(), "English translation")
-        val secondary = inkBounds(f.secondary)
-        assertTrue("Secondary must clear ASS's bottom-centred ink",
-            secondary.bottom < ass.top && secondary.left < ass.right && secondary.right > ass.left)
-        f.overlay.updateAssPrimaryBounds(emptyList())
-        val normal = inkBounds(f.secondary)
-        assertTrue("Without ASS, secondary returns to its normal bottom position",
-            normal.bottom > secondary.bottom)
+
+        assertEquals(0.04f, f.caption.line, 0.0001f)
+        assertEquals(Cue.ANCHOR_TYPE_START, f.caption.lineAnchor)
+        assertEquals(0.5f, f.caption.position, 0.0001f)
+
+        // Moving ASS ink from the bottom to the top must not move the secondary.
+        f.overlay.updateAssPrimaryBounds(listOf(SubtitleBox(100f, 20f, 900f, 90f)))
+        assertEquals(0.04f, f.caption.line, 0.0001f)
+
+        // Secondary Position remains a relative inward adjustment.
+        f.overlay.configureAppearance(fontSize = null, verticalOffset = 0.06f)
+        assertEquals(0.10f, f.caption.line, 0.0001f)
+
+        // Returning to a text primary restores dynamic stacking.
+        f.overlay.setPrimaryUsesTopFallback(false)
+        f.show(listOf(cue("Primary")), "English translation")
+        assertTrue(f.caption.line > 0.5f)
     }
 
     @Test

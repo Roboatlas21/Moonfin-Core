@@ -186,8 +186,8 @@ final class AetherPlayerWrapper: NSObject, ObservableObject {
     private var lastKnownSourceTime: Double = 0
     private var lastKnownSourceTimeHostTime: CFTimeInterval = 0
 
-    private static func isAssSubtitleCodec(_ codec: String) -> Bool {
-        let value = codec.lowercased()
+    private static func isAssSubtitleCodec(_ codec: String?) -> Bool {
+        guard let value = codec?.lowercased() else { return false }
         return value == "ass" || value == "ssa"
     }
 

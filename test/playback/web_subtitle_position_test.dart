@@ -12,6 +12,13 @@ void main() {
     expect(middleSubtitleGap(0.015, 0.06), closeTo(0.075, 0.000001));
   });
 
+  test('overlay primaries use a stable top fallback with relative spacing', () {
+    expect(webOverlaySecondaryTop(0.04, 0), closeTo(0.04, 0.000001));
+    expect(webOverlaySecondaryTop(0.04, 0.02), closeTo(0.06, 0.000001));
+    expect(webOverlaySecondaryTop(0.04, 0.06), closeTo(0.10, 0.000001));
+    expect(webOverlaySecondaryTop(0.98, 0.06), 1.0);
+  });
+
   test('automatic cues stack by measured height above the chosen edge margin', () {
     for (final offset in [0.0, 0.04, 0.36, 0.04]) {
       final occupied = <WebVttCueBox>[];
