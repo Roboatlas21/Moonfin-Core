@@ -17,7 +17,7 @@ env:
 jobs:
   macos:
     name: macOS final7 validation
-    runs-on: macos-15
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,7 +69,7 @@ jobs:
 
   tvos:
     name: tvOS final7 validation
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +97,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/flutter-tvos
-          key: flutter-tvos-${{ env.FLUTTER_TVOS_REF }}-${{ runner.os }}-arm64
+          key: flutter-tvos-${{ env.FLUTTER_TVOS_REF }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install flutter-tvos
         if: steps.cache-fluttertvos.outputs.cache-hit != 'true'
