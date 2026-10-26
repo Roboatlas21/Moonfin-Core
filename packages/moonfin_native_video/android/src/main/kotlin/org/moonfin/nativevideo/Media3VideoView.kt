@@ -3376,9 +3376,7 @@ class Media3VideoView(
         manualSubtitleDelayMs = nextDelayMs
         rememberSourceArguments("subtitleDelayMs" to nextDelayMs)
         clearSubtitleCues()
-        if (!moveEmbeddedSecondaryToSeekSafeSidecar()) {
-            applySubtitleDelay()
-        }
+        applySubtitleDelay()
         emitSyncDelayState()
         emitState()
     }
@@ -3460,16 +3458,7 @@ class Media3VideoView(
     private fun selectSecondarySubtitle(args: Map<*, *>?, sourceOpening: Boolean = false) {
         val url = args?.get("url")?.toString()?.takeIf { it.isNotBlank() }
         val codec = args?.get("codec")?.toString()
-        val requestedId = (args?.get("embeddedTrackId") as? Number)?.toInt()?.takeIf { it > 0 }
-        // An embedded stream cannot seek independently from video. With a positive
-        // effective delay, seeking into a cue's shifted display window starts the
-        // muxed subtitle stream too late to read that cue. Prefer the server sidecar
-        // when one exists; its independent period seeks back by the delay.
-        val sidecarAlreadyDeclared = url != null &&
-            externalSubtitleConfigurations.any { it.uri == parseUri(url) }
-        val id = requestedId?.takeUnless {
-            url != null && (secondarySubtitleOffsetUs() > 0L || sidecarAlreadyDeclared)
-        }
+        val id = (args?.get("embeddedTrackId") as? Number)?.toInt()?.takeIf { it > 0 }
         // Keep the current cue when the same track is selected again; the renderer may
         // not emit another cue for that selection.
         if (!sourceOpening && id == secondarySubtitleTrackId &&
@@ -3558,35 +3547,8 @@ class Media3VideoView(
         rememberSourceArguments("secondarySubtitleDelayMs" to next)
         if (changed && (secondarySubtitleTrackId != null || secondarySubtitleUrl != null)) {
             secondarySubtitleOverlay.clearSecondaryCues()
-            if (!moveEmbeddedSecondaryToSeekSafeSidecar()) {
-                applySubtitleDelay()
-            }
-        }
-    }
-
-    /**
-     * Positive embedded subtitle delays cannot survive arbitrary seeks: the muxed
-     * subtitle stream seeks with video, so a cue whose original end is before the
-     * destination is never read even when its shifted end is after it. A server
-     * sidecar has its own media period and can seek backward by the delay, so once
-     * one is available prefer it for the rest of this source.
-     */
-    private fun moveEmbeddedSecondaryToSeekSafeSidecar(): Boolean {
-        val url = secondarySubtitleUrl ?: return false
-        if (secondarySubtitleTrackId == null || secondarySubtitleOffsetUs() <= 0L) {
-            return false
-        }
-        secondarySubtitleTrackId = null
-        rememberSourceArguments("secondarySubtitleTrackId" to null)
-        trackSelector.setSecondaryTrack(null)
-        secondarySubtitleOverlay.clearSecondaryCues()
-        if (ensureSecondarySubtitleSource()) {
-            prepareCurrentSource(player.currentPosition, player.playWhenReady)
-        } else {
-            applySecondarySubtitle()
             applySubtitleDelay()
         }
-        return true
     }
 
     private fun configureSecondarySubtitleStyle(args: Map<*, *>?) {
