@@ -243,6 +243,10 @@ class MediaKitPlayerBackend extends PlayerBackend
   // pass can tell a fresh source apart from a choice it must not undo.
   bool _subtitlesDisabled = false;
   bool _primaryIsBitmapSubtitle = false;
+  bool _primaryIsAssSubtitle = false;
+
+  bool get _primaryUsesTopFallback =>
+      _primaryIsBitmapSubtitle || _primaryIsAssSubtitle;
 
   String? _selectedExternalSubtitleUrl;
   bool _isSubtitleLoading = false;
@@ -297,6 +301,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   double _secondaryScale = 1;
   int? _lastSecondaryStackPosition;
   String? _lastPrimaryText;
+  String? _lastSecondaryText;
   int _primaryPlacementGeneration = 0;
   DateTime? _lastSecondaryPositionCheck;
   Completer<void>? _secondaryPositionUpdate;
@@ -330,10 +335,11 @@ class MediaKitPlayerBackend extends PlayerBackend
   static const _externalSubtitleRetries = 5;
   static const _externalSubtitleRetryDelay = Duration(seconds: 10);
 
-  // Keep the last cue across dialogue gaps, but not across tracks or seeks.
+  // Keep the last cues across dialogue gaps, but not across tracks or seeks.
   void _resetPrimarySubtitlePlacement() {
     _primaryPlacementGeneration++;
     _lastPrimaryText = null;
+    _lastSecondaryText = null;
     _lastSecondaryStackPosition = null;
     _lastSecondaryPositionCheck = null;
   }
@@ -347,6 +353,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     _secondarySubtitleRequested = false;
     _subtitlesDisabled = false;
     _primaryIsBitmapSubtitle = false;
+    _primaryIsAssSubtitle = false;
     _resetPrimarySubtitlePlacement();
     _externalSubtitleLoads.clear();
     _pendingSubtitleChoice.nextSource();
@@ -2695,6 +2702,11 @@ class MediaKitPlayerBackend extends PlayerBackend
     }
   }
 
+  static bool _isAssSubtitleCodec(String? codec) {
+    final normalized = codec?.trim().toLowerCase();
+    return normalized == 'ass' || normalized == 'ssa';
+  }
+
   @override
   Future<void> setSubtitleTrack(
     int mpvTrackId, {
@@ -2711,9 +2723,12 @@ class MediaKitPlayerBackend extends PlayerBackend
       isExternalSubtitle ? externalSubtitleUrl : null,
     );
     _subtitlesDisabled = false;
-    final wasBitmap = _primaryIsBitmapSubtitle;
+    final usedTopFallback = _primaryUsesTopFallback;
     _primaryIsBitmapSubtitle = isBitmapSubtitle;
-    if (wasBitmap != isBitmapSubtitle) _resetPrimarySubtitlePlacement();
+    _primaryIsAssSubtitle = _isAssSubtitleCodec(subtitleCodec);
+    if (usedTopFallback != _primaryUsesTopFallback) {
+      _resetPrimarySubtitlePlacement();
+    }
     try {
       final native = _player.platform as NativePlayer;
       final trackListBefore = await _tryNativeGetProperty(native, 'track-list');
@@ -2971,7 +2986,10 @@ class MediaKitPlayerBackend extends PlayerBackend
     _setSelectedExternalSubtitle(null);
     final generation = ++_subtitleSelectionGeneration;
     _subtitlesDisabled = false;
+    final usedTopFallback = _primaryUsesTopFallback;
     _primaryIsBitmapSubtitle = false;
+    _primaryIsAssSubtitle = false;
+    if (usedTopFallback) _resetPrimarySubtitlePlacement();
     final platform = _player.platform;
     if (platform is! NativePlayer) return;
     final sid = _ccTrackSids[id - 1].toString();
@@ -2996,6 +3014,8 @@ class MediaKitPlayerBackend extends PlayerBackend
     final generation = ++_subtitleSelectionGeneration;
     _pendingEmbeddedSubtitle = null;
     _subtitlesDisabled = true;
+    _primaryIsBitmapSubtitle = false;
+    _primaryIsAssSubtitle = false;
     // Turning primary Off clears saved placement; ordinary dialogue gaps do not.
     _resetPrimarySubtitlePlacement();
     await _player.setSubtitleTrack(SubtitleTrack.no());
@@ -3092,6 +3112,7 @@ class MediaKitPlayerBackend extends PlayerBackend
   }) async {
     final generation = ++_secondarySubtitleGeneration;
     _secondarySubtitleRequested = embeddedTrackId != null || url?.isNotEmpty == true;
+    _lastSecondaryText = null;
     _lastSecondaryStackPosition = null;
     final ordinal = embeddedTrackId != null && embeddedTrackId > 0
         ? embeddedTrackId
@@ -3345,34 +3366,47 @@ class MediaKitPlayerBackend extends PlayerBackend
           1;
       if (!isCurrent()) return;
       if (!_subtitlesDisabled &&
-          !_primaryIsBitmapSubtitle &&
+          !_primaryUsesTopFallback &&
           primaryAss.isNotEmpty) {
         _lastPrimaryText = primaryAss;
       }
-      // Retain the cue through dialogue gaps, but measure it with the current
-      // font and viewport so appearance changes do not leave an old height.
+      if (secondaryText.trim().isNotEmpty) {
+        _lastSecondaryText = secondaryText;
+      }
+
+      // Retain both cues through dialogue gaps, but remeasure them with the current
+      // font and viewport so size and window changes cannot leave stale geometry.
       final primaryText = _lastPrimaryText ?? '';
+      final secondaryMeasurementText =
+          secondaryText.trim().isNotEmpty
+          ? secondaryText
+          : (_lastSecondaryText ?? 'Ag');
       final alignment =
           int.tryParse(_mpvSrtAlignment.firstMatch(primaryText)?[1] ?? '') ?? 2;
+      final availableWidth = width - marginX * 2;
       final primaryHeight = _subtitleHeight(
         primaryText,
         fontSize * primaryScale,
-        width - marginX * 2,
+        availableWidth,
       );
       final secondaryHeight = _subtitleHeight(
-        secondaryText,
+        secondaryMeasurementText,
         fontSize * secondaryScale,
-        width - marginX * 2,
+        availableWidth,
       );
       final primaryAnchor = mpvPrimaryStackingAnchor(alignment, margin: margin);
 
-      // secondary-sub-pos sets the bottom edge. For top captions, add the secondary
-      // height to keep the top edge fixed as lines are added. For middle and bottom
-      // captions, keep the bottom edge fixed.
-      // Bitmap primaries have no text bounds. Reserve the top until a text cue
-      // supplies measurable placement; only explicit Primary Off uses the bottom.
-      final secondaryTop = _lastPrimaryText == null
-          ? margin.clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0))
+      // secondary-sub-pos sets the bottom edge. For text primaries whose placement
+      // mpv exposes reliably, keep the secondary stacked relative to that text.
+      // PGS/bitmap and ASS/SSA can have authored geometry that mpv does not expose
+      // as usable bounds here, so reserve a stable top lane instead. Before the
+      // first secondary cue arrives, a one-line estimate prevents a flash at the
+      // top edge; dialogue gaps reuse the last non-empty cue and remeasure it.
+      final useTopFallback =
+          _primaryUsesTopFallback || _lastPrimaryText == null;
+      final secondaryTop = useTopFallback
+          ? (margin + _secondaryVerticalOffset)
+                .clamp(0.0, (1 - secondaryHeight).clamp(0.0, 1.0))
           : stackedSecondaryTop(
               alignment: alignment,
               primaryAnchor: primaryAnchor,

@@ -164,10 +164,19 @@ void main() {
   bool disposed = false;
   late Map<String, String> properties;
   int position() => int.parse(properties['secondary-sub-pos']!);
-  Future<void> selectPair({String primary = 'Primary', int secondary = 2}) async {
+  Future<void> selectPair({
+    String primary = 'Primary',
+    int secondary = 2,
+    String? primaryCodec,
+    bool primaryBitmap = false,
+  }) async {
     properties.addAll({'sub-text/ass': primary, 'secondary-sub-text': 'Translation'});
     player.discover();
-    await backend.setSubtitleTrack(1);
+    await backend.setSubtitleTrack(
+      1,
+      subtitleCodec: primaryCodec,
+      isBitmapSubtitle: primaryBitmap,
+    );
     await backend.setSecondarySubtitle(embeddedTrackId: secondary);
   }
 
@@ -261,7 +270,7 @@ void main() {
     final fallback = position();
     expect(fallback, inExclusiveRange(0, 50));
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
-    expect(position(), fallback);
+    expect(position(), greaterThan(fallback));
     properties['sub-text/ass'] = 'Primary';
     await backend.setSubtitleTrack(1);
     expect(position(), greaterThan(50));
@@ -334,6 +343,47 @@ void main() {
 
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
     expect(properties['secondary-sub-scale'], '1.000');
+  });
+
+  test('bitmap fallback keeps secondary height through dialogue gaps', () async {
+    await selectPair(primaryBitmap: true, primaryCodec: 'pgssub');
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    final visible = position();
+
+    properties.remove('secondary-sub-text');
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    expect(position(), visible);
+
+    properties['secondary-sub-text'] = 'Translation';
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    expect(position(), visible);
+  });
+
+  test('bitmap fallback estimates the first secondary line before a cue arrives', () async {
+    properties['sub-text/ass'] = '';
+    properties.remove('secondary-sub-text');
+    player.discover();
+    await backend.setSubtitleTrack(
+      1,
+      subtitleCodec: 'pgssub',
+      isBitmapSubtitle: true,
+    );
+    await backend.setSecondarySubtitle(embeddedTrackId: 2);
+    expect(position(), inExclusiveRange(1, 50));
+  });
+
+  test('ASS primary uses the same stable top fallback as bitmap primary', () async {
+    await selectPair(primary: r'{\an2}Bottom ASS', primaryCodec: 'ass');
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    final fallback = position();
+    expect(fallback, inExclusiveRange(0, 50));
+
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
+    expect(position(), greaterThan(fallback));
+
+    properties['sub-text/ass'] = r'{\an8}Top ASS';
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0.04);
+    expect(position(), greaterThan(fallback));
   });
 
   test('paused subtitle delay refreshes secondary placement for the current cue', () async {
