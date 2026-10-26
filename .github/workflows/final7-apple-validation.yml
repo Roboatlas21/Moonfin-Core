@@ -1,0 +1,190 @@
+name: Final7 Apple Validation
+
+on:
+  push:
+    branches:
+      - ci/final7-apple-validation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: '3.47.2'
+  FLUTTER_TVOS_REF: 'v3.47.2-tvos.1.10.0'
+  FINAL7_SHA: '862713daaf2ba3973ad967856e8fdac640aecf43'
+
+jobs:
+  macos:
+    name: macOS final7 validation
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FINAL7_SHA }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+
+      - name: Set up Developer ID signing
+        uses: ./.github/actions/apple-signing
+        with:
+          certificate-base64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          certificate-password: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+
+      - name: Store notarytool credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -z "$APPLE_ID" ]; then
+            echo "No Apple ID configured, skipping notarytool credentials"
+            exit 0
+          fi
+          xcrun notarytool store-credentials "moonfin-notary" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD"
+
+      - name: Build signed DMG
+        env:
+          APP_SIGN_ID: ${{ secrets.MACOS_APP_SIGN_ID }}
+          INSTALLER_ID: ${{ secrets.MACOS_INSTALLER_ID }}
+          NOTARYTOOL_PROFILE: ${{ secrets.APPLE_ID != '' && 'moonfin-notary' || '' }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          BUILD_APPSTORE_PKG: '0'
+        run: |
+          chmod +x build-macos.sh
+          ./build-macos.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final7-macos-dmg
+          path: Moonfin_macOS_v*.dmg
+
+  tvos:
+    name: tvOS final7 validation
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.FINAL7_SHA }}
+
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
+
+      - name: Install tvOS platform
+        run: |
+          sudo xcodebuild -runFirstLaunch || true
+          for i in 1 2 3 4 5 6; do
+            if xcodebuild -downloadPlatform tvOS; then
+              exit 0
+            fi
+            echo "downloadPlatform attempt $i failed, retrying in 25s"
+            sleep 25
+          done
+          echo "::error::tvOS platform install failed after 6 attempts"
+          exit 1
+
+      - name: Cache flutter-tvos toolchain
+        id: cache-fluttertvos
+        uses: actions/cache@v4
+        with:
+          path: ~/flutter-tvos
+          key: flutter-tvos-${{ env.FLUTTER_TVOS_REF }}-${{ runner.os }}-arm64
+
+      - name: Install flutter-tvos
+        if: steps.cache-fluttertvos.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$FLUTTER_TVOS_REF" \
+            https://github.com/fluttertv/flutter-tvos.git "$HOME/flutter-tvos"
+
+      - name: Add flutter-tvos to PATH and precache
+        run: |
+          echo "$HOME/flutter-tvos/bin" >> "$GITHUB_PATH"
+          "$HOME/flutter-tvos/bin/flutter-tvos" precache
+
+      - name: Resolve dependencies
+        run: flutter-tvos pub get
+
+      - name: Prepare Flutter build settings
+        run: |
+          flutter-tvos build tvos --release --no-tree-shake-icons --dart-define=MOONFIN_TVOS=true || true
+          test -f tvos/Flutter/Generated.xcconfig
+          grep -q '^FLUTTER_ROOT=' tvos/Flutter/Generated.xcconfig \
+            || echo "FLUTTER_ROOT=$HOME/flutter-tvos" >> tvos/Flutter/Generated.xcconfig
+
+      - name: Install pods
+        env:
+          LC_ALL: en_US.UTF-8
+        run: |
+          python3 tvos/scripts/restore_tvos_plugins.py
+          cd tvos && pod install
+
+      - name: Stage flutter_assets for the Xcode copy phase
+        run: |
+          DEST="tvos/Flutter/flutter_assets"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          SRC_APP=$(find build/tvos -maxdepth 3 -type d -path "*Release-appletvos/Runner.app/flutter_assets" | head -1)
+          if [ -n "$SRC_APP" ]; then
+            rsync -a "$SRC_APP/" "$DEST/"
+          else
+            rsync -a \
+              --exclude='*-appletvos' --exclude='*-appletvsimulator' \
+              --exclude='aot' --exclude='.last_build_id' \
+              --exclude='kernel_blob.bin' --exclude='vm_snapshot_data' \
+              --exclude='isolate_snapshot_data' \
+              build/tvos/ "$DEST/"
+          fi
+          test -f "$DEST/fonts/MaterialIcons-Regular.otf" \
+            || { echo "::error::MaterialIcons font missing from staged flutter_assets"; exit 1; }
+          test -f "$DEST/AssetManifest.bin" \
+            || { echo "::error::AssetManifest.bin missing from staged flutter_assets"; exit 1; }
+
+      - name: Build unsigned app
+        run: |
+          xcodebuild \
+            -workspace tvos/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk appletvos \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Verify the app bundle
+        env:
+          APP: ${{ runner.temp }}/dd/Build/Products/Release-appletvos/Runner.app
+        run: |
+          test -d "$APP" || { echo "::error::no app bundle at $APP"; exit 1; }
+          test -f "$APP/flutter_assets/fonts/MaterialIcons-Regular.otf" \
+            || { echo "::error::Built app is missing flutter_assets fonts"; exit 1; }
+          test -e "$APP/PlugIns/MoonfinTopShelf.appex/MoonfinTopShelf" \
+            || { echo "::error::Top Shelf extension missing from PlugIns"; exit 1; }
+          PLIST_MIN=$(plutil -extract MinimumOSVersion raw "$APP/Frameworks/App.framework/Info.plist")
+          BIN_MIN=$(vtool -show-build "$APP/Frameworks/App.framework/App" | awk '/minos/{print $2; exit}')
+          [ "$PLIST_MIN" = "$BIN_MIN" ] \
+            || { echo "::error::App.framework MinimumOSVersion ($PLIST_MIN) != binary minos ($BIN_MIN) (ITMS-90208)"; exit 1; }
+
+      - name: Package unsigned IPA
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | cut -d'+' -f1 | tr -d '[:space:]')
+          APP="$RUNNER_TEMP/dd/Build/Products/Release-appletvos/Runner.app"
+          rm -rf "$RUNNER_TEMP/Payload"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          ( cd "$RUNNER_TEMP" && zip -qry "$GITHUB_WORKSPACE/Moonfin_tvOS_v${VERSION}_unsigned.ipa" Payload )
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final7-tvos-ipa
+          path: Moonfin_tvOS_v*_unsigned.ipa
+          if-no-files-found: error
