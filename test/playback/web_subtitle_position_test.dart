@@ -12,6 +12,21 @@ void main() {
     expect(middleSubtitleGap(0.015, 0.06), closeTo(0.075, 0.000001));
   });
 
+  test('mpv default stacked gap matches Media3 eight-line clearance', () {
+    const primaryHeight = 55 / 720;
+    const secondaryHeight = 55 / 720;
+    final top = stackedSecondaryTop(
+      alignment: 2,
+      primaryAnchor: 0.96,
+      primaryHeight: primaryHeight,
+      secondaryHeight: secondaryHeight,
+      offset: 0,
+    );
+    final gap = 0.96 - primaryHeight - (top + secondaryHeight);
+    expect(gap, closeTo(mpvSecondarySubtitleGap, 0.000001));
+    expect(mpvSecondarySubtitleGap, closeTo(8 / 720, 0.000001));
+  });
+
   test('overlay primaries use a stable top fallback with relative spacing', () {
     expect(webOverlaySecondaryTop(0.04, 0), closeTo(0.04, 0.000001));
     expect(webOverlaySecondaryTop(0.04, 0.02), closeTo(0.06, 0.000001));

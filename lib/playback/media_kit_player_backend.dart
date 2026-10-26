@@ -3414,8 +3414,10 @@ class MediaKitPlayerBackend extends PlayerBackend
               secondaryHeight: secondaryHeight,
               offset: _secondaryVerticalOffset,
             );
-      // sub-pos is relative to the bottom margin, not the full screen height.
-      // Convert the screen edge back to mpv's scale after calculating the gap.
+      // mpv passes 100 - sub-pos to libass as line_position. For ordinary
+      // bottom-aligned text, libass interpolates that value between the normal
+      // bottom margin and the top of the frame. Invert that interpolation here:
+      // a desired screen-space bottom edge must be normalized by (1 - margin).
       final position = _subtitlesDisabled
           ? 100
           : ((secondaryTop + secondaryHeight) /
