@@ -76,10 +76,8 @@ final class SubtitleOverlay: PlatformView {
     private enum PrimaryPlacement {
         case text([SubtitleEvent], isMain: Bool)
         case bitmap(SubtitleEvent)
-        case ass(CGRect)
     }
     private var lastPrimaryPlacement: [PrimaryPlacement] = []
-    private var assVisibleRegions: [CGRect] = []
     var secondaryVerticalAdjustment: Double = 0 {
         didSet {
             primaryForStacking?.requestLayout()
@@ -99,17 +97,7 @@ final class SubtitleOverlay: PlatformView {
         for view in extraBitmapViews where !view.isHidden {
             regions.append(view.frame)
         }
-        if !assImageView.isHidden {
-            regions.append(contentsOf: assVisibleRegions.map { assRegion($0) })
-        }
         return regions.filter { !$0.isEmpty && !$0.isNull }
-    }
-
-    private func assRegion(_ rect: CGRect) -> CGRect {
-        let canvas = assCanvas
-        return CGRect(x: canvas.minX + rect.minX * canvas.width,
-                      y: canvas.minY + rect.minY * canvas.height,
-                      width: rect.width * canvas.width, height: rect.height * canvas.height)
     }
 
     private var stackingRegions: [CGRect] {
@@ -137,8 +125,6 @@ final class SubtitleOverlay: PlatformView {
                 centeredPair: isMain && (Self.stackingAlignment(placement) - 1) / 3 == 1).frame
         case .bitmap(let event):
             return bitmapFrame(for: event)
-        case .ass(let rect):
-            return assRegion(rect)
         }
     }
 
@@ -146,7 +132,6 @@ final class SubtitleOverlay: PlatformView {
         Self.textGroups(activeTextEvents).enumerated().map {
             PrimaryPlacement.text($0.element, isMain: $0.offset == 0)
         } + activeBitmapEvents.map { .bitmap($0) }
-            + assVisibleRegions.map { .ass($0) }
     }
 
     private var activeTextPlacement: SubtitleEvent? {
@@ -423,8 +408,7 @@ final class SubtitleOverlay: PlatformView {
         #endif
     }
 
-    func showAssImage(_ image: CGImage?, regions: [CGRect] = []) {
-        assVisibleRegions = image == nil ? [] : regions
+    func showAssImage(_ image: CGImage?) {
         if let image {
             // A zoom change moves the picture without a layout pass, so the frame
             // follows each render instead of waiting for one.
@@ -506,7 +490,6 @@ final class SubtitleOverlay: PlatformView {
         lastUpdateTime = 0
         assImageView.image = nil
         assImageView.isHidden = true
-        assVisibleRegions = []
         resetPlacement()
     }
 

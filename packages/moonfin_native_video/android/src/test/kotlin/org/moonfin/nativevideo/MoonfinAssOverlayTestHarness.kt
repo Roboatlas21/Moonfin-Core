@@ -27,6 +27,8 @@ internal class MoonfinAssOverlayTestHarness(
         Int::class.javaPrimitiveType!!,
         Boolean::class.javaPrimitiveType!!,
     ).apply { isAccessible = true }
+    private val visible = overlay.javaClass.getDeclaredMethod("visibleFrame")
+        .apply { isAccessible = true }
 
     val generation: Int get() = generationField.getInt(overlay)
     val lastPresentationTimeUs: Long get() = lastPresentationField.get(overlay) as Long
@@ -63,6 +65,8 @@ internal class MoonfinAssOverlayTestHarness(
         return cached.javaClass.getDeclaredField("frame")
             .apply { isAccessible = true }.get(cached) as AssFrame
     }
+
+    fun visibleFrame(): AssFrame? = visible.invoke(overlay) as AssFrame?
 }
 
 internal class RecordingExecutor : AbstractExecutorService() {

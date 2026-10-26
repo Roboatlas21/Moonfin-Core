@@ -194,19 +194,14 @@ class SecondarySubtitleRenderingTest {
     }
 
     @Test
-    fun assPrimaryUsesStableTopFallbackInsteadOfRenderedBounds() {
+    fun assPrimaryUsesStableTopFallback() {
         val f = Scene().configurePrimary(offset = 0.04f)
         f.overlay.setPrimaryUsesTopFallback(true)
-        f.overlay.updateAssPrimaryBounds(listOf(SubtitleBox(474f, 657f, 807f, 689f)))
         f.show(emptyList(), "English translation")
 
         assertEquals(0.04f, f.caption.line, 0.0001f)
         assertEquals(Cue.ANCHOR_TYPE_START, f.caption.lineAnchor)
         assertEquals(0.5f, f.caption.position, 0.0001f)
-
-        // Moving ASS ink from the bottom to the top must not move the secondary.
-        f.overlay.updateAssPrimaryBounds(listOf(SubtitleBox(100f, 20f, 900f, 90f)))
-        assertEquals(0.04f, f.caption.line, 0.0001f)
 
         // Secondary Position remains a relative inward adjustment.
         f.overlay.configureAppearance(fontSize = null, verticalOffset = 0.06f)

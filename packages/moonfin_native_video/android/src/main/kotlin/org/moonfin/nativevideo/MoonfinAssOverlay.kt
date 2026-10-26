@@ -5,7 +5,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
-import android.graphics.RectF
 import android.os.Looper
 import android.view.View
 import androidx.media3.common.Format
@@ -116,7 +115,6 @@ class MoonfinAssOverlayView(
         if (primaryVisible == visible) return
         primaryVisible = visible
         invalidate()
-        onFrameChanged?.invoke()
     }
 
     // Called while holding the assHandler lock, both from its track listener
@@ -141,10 +139,8 @@ class MoonfinAssOverlayView(
         // A -> B -> A can complete without libass ever rendering B.
         if (Looper.myLooper() == Looper.getMainLooper()) {
             invalidate()
-            onFrameChanged?.invoke()
         } else {
             postInvalidate()
-            post { if (!released) onFrameChanged?.invoke() }
         }
         return true
     }
@@ -180,23 +176,11 @@ class MoonfinAssOverlayView(
         awaitingPausedSeekDialogue = false
     }
 
-    /** Called on the UI thread when ASS's visible image rectangles change. */
-    var onFrameChanged: (() -> Unit)? = null
-
     private fun visibleFrame(): AssFrame? {
         if (!primaryVisible || !primaryAssTrackActive) return null
         val cached = cachedFrame ?: return null
         return cached.frame.takeIf { cached.visible && cached.track === primaryNativeTrack }
     }
-
-    fun visibleFrameBounds(): List<RectF> =
-        visibleFrame()?.images?.mapNotNull { image ->
-            val bitmap = image.bitmap ?: return@mapNotNull null
-            RectF(
-                image.x.toFloat(), image.y.toFloat(),
-                image.x + bitmap.width.toFloat(), image.y + bitmap.height.toFloat(),
-            )
-        }.orEmpty()
 
     private val renderTask = Runnable {
         // Clear before sampling the time so a request arriving mid-render is
@@ -256,7 +240,6 @@ class MoonfinAssOverlayView(
             // A rebuilt native renderer no longer owns the last bitmap.
             cachedFrame = null
             postInvalidate()
-            post { if (!released) onFrameChanged?.invoke() }
         }
     }
 
@@ -300,7 +283,6 @@ class MoonfinAssOverlayView(
         renderPending.set(false)
         awaitingPausedSeekDialogue = false
         cachedFrame = null
-        onFrameChanged?.invoke()
     }
 
     // Called on the ExoPlayer playback thread for every video frame, so it
@@ -348,7 +330,6 @@ class MoonfinAssOverlayView(
             cachedFrame = CachedFrame(requireNotNull(primaryNativeTrack), frame)
         }
         postInvalidate()
-        post { if (!released) onFrameChanged?.invoke() }
     }
 
     override fun onDraw(canvas: Canvas) {

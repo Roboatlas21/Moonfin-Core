@@ -848,10 +848,6 @@ class Media3VideoView(
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
-        subtitleView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            updateAssPrimaryBounds()
-        }
-
         container.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {
                 // A view that lost the slot stays released, so only the slot
@@ -1057,9 +1053,6 @@ class Media3VideoView(
     private fun clearSubtitleCues() {
         if (::secondarySubtitleOverlay.isInitialized) {
             secondarySubtitleOverlay.resetPrimaryCues(clearSecondary = true)
-            // libass can return an unchanged image after a seek. Keep its
-            // still-visible bounds as collision obstacles until the next frame.
-            updateAssPrimaryBounds()
         } else {
             subtitleView.setCues(emptyList())
         }
@@ -2141,17 +2134,9 @@ class Media3VideoView(
             .toInt()
     }
 
-    private fun updateAssPrimaryBounds() {
-        if (!::secondarySubtitleOverlay.isInitialized) return
-        // ASS/SSA uses a stable top fallback for the secondary. Do not feed
-        // animated libass ink bounds into the stacking layout.
-        secondarySubtitleOverlay.updateAssPrimaryBounds(emptyList())
-    }
-
     private fun attachAssOverlay(assHandler: AssHandler) {
         releaseAssOverlay()
         val overlay = MoonfinAssOverlayView(context, assHandler)
-        overlay.onFrameChanged = ::updateAssPrimaryBounds
         subtitleView.addView(
             overlay,
             FrameLayout.LayoutParams(
@@ -2167,12 +2152,10 @@ class Media3VideoView(
     // the last references to the handler's native objects.
     private fun releaseAssOverlay() {
         assOverlayView?.let { overlay ->
-            overlay.onFrameChanged = null
             subtitleView.removeView(overlay)
             overlay.release()
         }
         assOverlayView = null
-        updateAssPrimaryBounds()
     }
 
     private fun rebuildPlayerForDecoderPreference() {
@@ -3998,7 +3981,6 @@ class Media3VideoView(
         val assPrimaryVisible = subtitleTrackEnabled && selectedSubtitleIsAss
         assOverlayView?.setPrimaryVisible(assPrimaryVisible)
         secondarySubtitleOverlay.setPrimaryUsesTopFallback(assPrimaryVisible)
-        updateAssPrimaryBounds()
         val desiredMode = SubtitleRendererMode.NATIVE
         val resolvedMode = SubtitleRendererMode.NATIVE
         val fallbackReason = if (requestedSubtitleRendererMode == SubtitleRendererMode.ASS_OVERLAY) {

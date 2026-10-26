@@ -7,24 +7,10 @@ import Libass
 enum AssRenderResult {
     case unchanged
     case cleared
-    case image(CGImage, regions: [CGRect])
+    case image(CGImage)
 }
 
 final class AssRenderer {
-
-    /// Join image runs on the same line so the anchor spans the caption, not one
-    /// glyph. Keep the spaces between separate rows available for the secondary.
-    static func groupedRegions(_ rectangles: [CGRect]) -> [CGRect] {
-        var regions: [CGRect] = []
-        for rect in rectangles.sorted(by: { $0.minY < $1.minY }) {
-            if let last = regions.last, rect.minY <= last.maxY {
-                regions[regions.count - 1] = last.union(rect)
-            } else {
-                regions.append(rect)
-            }
-        }
-        return regions
-    }
 
 #if canImport(Libass)
     private var library: OpaquePointer?
@@ -101,7 +87,7 @@ final class AssRenderer {
             return .cleared
         }
         if let image = composite(first) {
-            return .image(image.image, regions: image.regions)
+            return .image(image)
         }
         return .cleared
     }
@@ -135,7 +121,7 @@ final class AssRenderer {
         close()
     }
 
-    private func composite(_ first: UnsafeMutablePointer<ASS_Image>) -> (image: CGImage, regions: [CGRect])? {
+    private func composite(_ first: UnsafeMutablePointer<ASS_Image>) -> CGImage? {
         let width = Int(frameWidth)
         let height = Int(frameHeight)
         let bytesPerRow = width * 4
@@ -144,7 +130,7 @@ final class AssRenderer {
         defer { dest.deallocate() }
 
         let canvas = CGRect(x: 0, y: 0, width: CGFloat(width), height: CGFloat(height))
-        var visibleRegions: [CGRect] = []
+        var hasVisibleImage = false
         var node: UnsafeMutablePointer<ASS_Image>? = first
         while let current = node {
             let image = current.pointee
@@ -153,11 +139,11 @@ final class AssRenderer {
                 let rect = CGRect(
                     x: CGFloat(image.dst_x), y: CGFloat(image.dst_y),
                     width: CGFloat(image.w), height: CGFloat(image.h)).intersection(canvas)
-                if !rect.isNull, !rect.isEmpty { visibleRegions.append(rect) }
+                if !rect.isNull, !rect.isEmpty { hasVisibleImage = true }
             }
             node = image.next
         }
-        guard !visibleRegions.isEmpty else { return nil }
+        guard hasVisibleImage else { return nil }
 
         guard let provider = CGDataProvider(
             data: Data(bytes: dest, count: bytesPerRow * height) as CFData
@@ -176,10 +162,7 @@ final class AssRenderer {
             shouldInterpolate: false,
             intent: .defaultIntent
         ) else { return nil }
-        return (result, Self.groupedRegions(visibleRegions).map { rect in
-            CGRect(x: rect.minX / canvas.width, y: rect.minY / canvas.height,
-                   width: rect.width / canvas.width, height: rect.height / canvas.height)
-        })
+        return result
     }
 
     private func blend(

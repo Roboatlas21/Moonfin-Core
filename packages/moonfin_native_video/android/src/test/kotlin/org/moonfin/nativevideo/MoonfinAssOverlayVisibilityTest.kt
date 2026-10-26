@@ -1,7 +1,6 @@
 package org.moonfin.nativevideo
 
 import io.github.peerless2012.ass.AssFrame
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -29,14 +28,14 @@ class MoonfinAssOverlayVisibilityTest {
         assertTrue(currentGeneration > previousGeneration)
         // A's bitmap stays cached but is hidden until its owner is reselected.
         assertSame(oldFrame, h.cachedFrame())
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
         h.publishFrame(oldFrame, previousGeneration)
         assertSame(oldFrame, h.cachedFrame())
 
         val firstB = h.frame(12, 26)
         h.publishFrame(firstB, currentGeneration)
         assertSame(firstB, h.cachedFrame())
-        assertEquals(12f, h.overlay.visibleFrameBounds().single().left)
+        assertSame(firstB, h.visibleFrame())
 
         // Native libass returns changed=0 with no image array on retry.
         // That cannot reconstruct a B bitmap lost in the ownership handover.
@@ -53,19 +52,19 @@ class MoonfinAssOverlayVisibilityTest {
 
         assertTrue(h.overlay.syncNativeAssTrack(a))
         h.publishFrame(frameA)
-        assertEquals(37f, h.overlay.visibleFrameBounds().single().left)
+        assertSame(frameA, h.visibleFrame())
 
         // B was selected but never rendered, so libass's next render for A
         // reports unchanged and does not supply a replacement bitmap.
         assertTrue(h.overlay.syncNativeAssTrack(b))
         assertSame(frameA, h.cachedFrame())
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
 
         assertTrue(h.overlay.syncNativeAssTrack(a))
-        assertEquals(37f, h.overlay.visibleFrameBounds().single().left)
+        assertSame(frameA, h.visibleFrame())
         h.publishFrame(AssFrame(images = null, changed = 0))
         assertSame(frameA, h.cachedFrame())
-        assertEquals(37f, h.overlay.visibleFrameBounds().single().left)
+        assertSame(frameA, h.visibleFrame())
     }
 
     @Test
@@ -78,19 +77,19 @@ class MoonfinAssOverlayVisibilityTest {
         h.overlay.syncNativeAssTrack(a)
         h.publishFrame(frameA)
         h.overlay.syncNativeAssTrack(b)
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
 
         // libass compared B's pixels to A's most recent native render and
         // returned unchanged, but the identical image is valid for B too.
         h.publishFrame(AssFrame(images = null, changed = 0))
         assertSame(frameA, h.cachedFrame())
-        assertEquals(21f, h.overlay.visibleFrameBounds().single().left)
+        assertSame(frameA, h.visibleFrame())
 
         // The same result must work in the opposite direction.
         h.overlay.syncNativeAssTrack(a)
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
         h.publishFrame(AssFrame(images = null, changed = 0))
-        assertEquals(21f, h.overlay.visibleFrameBounds().single().left)
+        assertSame(frameA, h.visibleFrame())
     }
 
     @Test
@@ -108,20 +107,20 @@ class MoonfinAssOverlayVisibilityTest {
         // loaded, so rendering B returns null without advancing libass's image.
         h.publishFrame(null)
         assertSame(frameA, h.cachedFrame())
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
 
         h.overlay.syncNativeAssTrack(a)
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
         h.publishFrame(AssFrame(images = null, changed = 0))
-        assertEquals(54f, h.overlay.visibleFrameBounds().single().left)
+        assertSame(frameA, h.visibleFrame())
 
-        // A genuinely empty current cue must hide its pixels and bounds too,
+        // A genuinely empty current cue must hide its pixels too,
         // even though the previous bitmap remains available if libass needs it.
         h.publishFrame(null)
         assertSame(frameA, h.cachedFrame())
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
         h.publishFrame(null)
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
     }
 
     @Test
@@ -139,7 +138,7 @@ class MoonfinAssOverlayVisibilityTest {
         // No active track: a null native return must not erase the cached cue.
         h.publishFrame(null, currentGeneration, active = false)
         assertSame(cue, h.cachedFrame())
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
 
         // Selecting the same track again is still an activation transition:
         // the player listener must ask for a render at the latest timestamp.
@@ -152,58 +151,55 @@ class MoonfinAssOverlayVisibilityTest {
         assertSame(cue, h.cachedFrame())
         h.publishFrame(AssFrame(images = null, changed = 0), resumedGeneration)
         assertSame(cue, h.cachedFrame())
-        assertEquals(15f, h.overlay.visibleFrameBounds().single().left)
+        assertSame(cue, h.visibleFrame())
 
         // If playback crossed the cue's end while Off, the active render
         // returns an empty changed frame, which must clear the old caption.
         h.publishFrame(AssFrame(emptyArray(), changed = 2), resumedGeneration)
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
     }
 
     @Test
-    fun differentAssTracksClearCachedPlacementWithoutPlaybackTicks() {
+    fun differentAssTracksHideCachedFramesWithoutPlaybackTicks() {
         val h = MoonfinAssOverlayTestHarness()
-        var placementUpdates = 0
-        h.overlay.onFrameChanged = { placementUpdates++ }
-
         val trackA = Any()
         val trackB = Any()
+        val frameA = h.frame(30, 40)
+
         assertTrue(h.overlay.syncNativeAssTrack(trackA))
-        assertEquals(1, placementUpdates)
+        h.publishFrame(frameA)
+        assertSame(frameA, h.visibleFrame())
         assertTrue(!h.overlay.syncNativeAssTrack(trackA))
-        assertEquals(1, placementUpdates)
+        assertSame(frameA, h.visibleFrame())
 
-        // Off retains native identity, while a genuinely different ASS track
-        // changes it under the same lock used by the render executor.
-        h.overlay.setPrimaryVisible(false)
-        assertTrue(!h.overlay.syncNativeAssTrack(null))
-        assertEquals(2, placementUpdates)
-        h.overlay.setPrimaryVisible(true)
-        assertTrue(h.overlay.syncNativeAssTrack(trackA))
-        assertEquals(3, placementUpdates)
-
+        // A genuinely different ASS track hides A immediately while retaining
+        // its cached bitmap in case A is selected again before B renders.
         assertTrue(h.overlay.syncNativeAssTrack(trackB))
-        assertEquals(4, placementUpdates)
+        assertTrue(h.visibleFrame() == null)
+        assertSame(frameA, h.cachedFrame())
         assertTrue(!h.overlay.syncNativeAssTrack(trackB))
-        assertEquals(4, placementUpdates)
-        assertTrue(!h.overlay.syncNativeAssTrack(null))
-        assertEquals(4, placementUpdates)
+
+        assertTrue(h.overlay.syncNativeAssTrack(trackA))
+        assertSame(frameA, h.visibleFrame())
     }
 
     @Test
     fun primaryOffImmediatelyUpdatesAssVisibilityWithoutAFrameTick() {
         val h = MoonfinAssOverlayTestHarness()
-        var placementUpdates = 0
-        h.overlay.onFrameChanged = { placementUpdates++ }
+        val track = Any()
+        val frame = h.frame(18, 28)
+
+        assertTrue(h.overlay.syncNativeAssTrack(track))
+        h.publishFrame(frame)
+        assertSame(frame, h.visibleFrame())
 
         h.overlay.setPrimaryVisible(false)
-        assertEquals(1, placementUpdates)
-        assertTrue(h.overlay.visibleFrameBounds().isEmpty())
+        assertTrue(h.visibleFrame() == null)
         h.overlay.setPrimaryVisible(false)
-        assertEquals(1, placementUpdates)
+        assertTrue(h.visibleFrame() == null)
 
         // Restoring the same ASS track must not depend on a new video frame.
         h.overlay.setPrimaryVisible(true)
-        assertEquals(2, placementUpdates)
+        assertSame(frame, h.visibleFrame())
     }
 }

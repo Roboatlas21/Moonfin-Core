@@ -240,7 +240,7 @@ final class RunnerTests: XCTestCase {
     }
 
     @MainActor
-    func testAssPrimaryUsesStableTopFallbackAcrossRenderedRegions() {
+    func testAssPrimaryUsesStableTopFallbackAcrossRedraws() {
         let f = OverlayPair()
         f.primary.secondaryUsesTopFallback = true
         f.primary.style(offset: 0.04)
@@ -253,14 +253,13 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(original.midX, 400, accuracy: 0.1)
 
         let bitmap = image()
-        let bottomRegions = AssRenderer.groupedRegions([
-            CGRect(x: 0.2, y: 0.875, width: 0.4, height: 0.1)])
-        let topRegions = AssRenderer.groupedRegions([
-            CGRect(x: 0.1, y: 0.02, width: 0.8, height: 0.15)])
-        f.primary.showAssImage(bitmap, regions: bottomRegions)
+        f.primary.showAssImage(bitmap)
         f.layout()
         XCTAssertEqual(f.secondary.caption.frame, original)
-        f.primary.showAssImage(bitmap, regions: topRegions)
+        f.primary.showAssImage(nil)
+        f.layout()
+        XCTAssertEqual(f.secondary.caption.frame, original)
+        f.primary.showAssImage(bitmap)
         f.layout()
         XCTAssertEqual(f.secondary.caption.frame, original)
 
@@ -268,12 +267,12 @@ final class RunnerTests: XCTestCase {
         f.layout()
         XCTAssertEqual(f.secondary.caption.frame.minY, 40, accuracy: 0.1)
 
-        // Fit/fill geometry can move the stable lane, but ASS ink cannot.
+        // Fit/fill geometry can move the stable lane, but ASS redraws cannot.
         f.picture(CGRect(x: 100, y: 50, width: 600, height: 300))
         let resized = f.secondary.caption.frame
         XCTAssertEqual(resized.minY, 80, accuracy: 0.1)
         XCTAssertEqual(resized.midX, 400, accuracy: 0.1)
-        f.primary.showAssImage(bitmap, regions: bottomRegions)
+        f.primary.showAssImage(bitmap)
         f.layout()
         XCTAssertEqual(f.secondary.caption.frame, resized)
     }

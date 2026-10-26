@@ -102,15 +102,6 @@ internal class SecondarySubtitleOverlay(
     private var resolvedPrimaryReference: Cue? = null
     private var primaryEnabled = true
     private var primaryUsesTopFallback = false
-    private var assPrimaryBounds: List<SubtitleBox> = emptyList()
-
-    /** libass is drawn by a separate view; its image bounds still block secondary text. */
-    fun updateAssPrimaryBounds(bounds: List<SubtitleBox>) {
-        val visible = if (primaryEnabled) bounds else emptyList()
-        if (assPrimaryBounds == visible || disposed) return
-        assPrimaryBounds = visible
-        renderCues()
-    }
 
     init {
         val attributes = view.context.obtainStyledAttributes(null,
@@ -199,7 +190,6 @@ internal class SecondarySubtitleOverlay(
         lastPrimaryCue = null
         lastPrimaryCueGroup = emptyList()
         resolvedPrimaryReference = null
-        assPrimaryBounds = emptyList()
         if (clearSecondary) {
             retainedSecondaryCues = emptyList()
             if (secondaryCues != null) secondaryCues = emptyList()
@@ -366,7 +356,7 @@ internal class SecondarySubtitleOverlay(
         val fixed = if (lastPrimaryCue == null) active.filter { it.line != Cue.DIMEN_UNSET } else emptyList()
         val automatic = if (lastPrimaryCue == null) active.filter { it.line == Cue.DIMEN_UNSET } else active
         val rendered = ArrayList<Cue>()
-        val occupied = ArrayList<SubtitleBox>(primaryBoxes + assPrimaryBounds)
+        val occupied = ArrayList<SubtitleBox>(primaryBoxes)
         val topFallback = ArrayList<Cue>()
         for (sourceCue in fixed) {
             var cue = buildCue(sourceCue)
