@@ -396,16 +396,16 @@ final class RunnerTests: XCTestCase {
 
     @MainActor
     func testSecondaryReloadRestoresLatestOffInsteadOfOldTrack() {
-        var state = SecondarySubtitleReloadState()
-        let old = SecondarySubtitleReloadState.Choice(embeddedTrackId: nil,
+        var state = SubtitleReloadState<AetherPlayerWrapper.SecondarySubtitleSelection>()
+        let old = AetherPlayerWrapper.SecondarySubtitleSelection(embeddedTrackId: nil,
             url: URL(string: "https://example.com/old.srt")!)
-        let off = SecondarySubtitleReloadState.Choice(embeddedTrackId: nil, url: nil)
+        let off = AetherPlayerWrapper.SecondarySubtitleSelection(embeddedTrackId: nil, url: nil)
         state.startSource(old)
         state.beginReload(previouslyActive: true)
-        state.rememberChoice(off)
+        state.remember(off)
         // Readiness alone is too early: Aether restores its stale old track
         // afterward. Wait for that activity publication, then overwrite it.
-        XCTAssertFalse(state.shouldReapplyAtReadiness(secondaryActive: false))
+        XCTAssertFalse(state.shouldReapplyAtReadiness(active: false))
         XCTAssertFalse(state.shouldReapplyAfterRestoration(active: false, ready: true))
         XCTAssertTrue(state.shouldReapplyAfterRestoration(active: true, ready: true))
         XCTAssertEqual(state.takeLatest(), off)
@@ -415,21 +415,21 @@ final class RunnerTests: XCTestCase {
 
     @MainActor
     func testSecondaryReloadRestoresNewerBAndPreviouslyOffSelections() {
-        var state = SecondarySubtitleReloadState()
-        let a = SecondarySubtitleReloadState.Choice(embeddedTrackId: 1, url: nil)
-        let b = SecondarySubtitleReloadState.Choice(embeddedTrackId: 2, url: nil)
+        var state = SubtitleReloadState<AetherPlayerWrapper.SecondarySubtitleSelection>()
+        let a = AetherPlayerWrapper.SecondarySubtitleSelection(embeddedTrackId: 1, url: nil)
+        let b = AetherPlayerWrapper.SecondarySubtitleSelection(embeddedTrackId: 2, url: nil)
         state.startSource(a)
         state.beginReload(previouslyActive: true)
-        state.rememberChoice(b)
-        XCTAssertFalse(state.shouldReapplyAtReadiness(secondaryActive: false))
+        state.remember(b)
+        XCTAssertFalse(state.shouldReapplyAtReadiness(active: false))
         XCTAssertEqual(state.takeLatest(force: true), b,
             "A foreground reload completion must use the latest B choice")
 
         // With the old source Off there is no late active-track publication.
         state.startSource(.init(embeddedTrackId: nil, url: nil))
         state.beginReload(previouslyActive: false)
-        state.rememberChoice(b)
-        XCTAssertTrue(state.shouldReapplyAtReadiness(secondaryActive: false))
+        state.remember(b)
+        XCTAssertTrue(state.shouldReapplyAtReadiness(active: false))
         XCTAssertEqual(state.takeLatest(), b)
 
         // A new source must invalidate any old reconstruction snapshot.
@@ -442,12 +442,12 @@ final class RunnerTests: XCTestCase {
     @MainActor
     func testPrimaryOffWinsAetherReloadForEitherEventOrder() {
         for restoresBeforeReady in [false, true] {
-            var state = PrimarySubtitleReloadState()
+            var state = SubtitleReloadState<PrimarySubtitleChoice>()
             state.remember(.text(1, nil))
             state.beginReload(previouslyActive: true)
             state.remember(.off)
             assertReloadEventOrder(restoresBeforeReady,
-                readiness: { state.shouldReapplyAtReadiness(primaryActive: $0) },
+                readiness: { state.shouldReapplyAtReadiness(active: $0) },
                 restoration: { state.shouldReapplyAfterRestoration(active: $0, ready: $1) })
             XCTAssertEqual(state.takeLatest(), .off)
             XCTAssertNil(state.takeLatest())
@@ -456,7 +456,7 @@ final class RunnerTests: XCTestCase {
 
     @MainActor
     func testPrimaryReloadReplaysNewerTextCaptionAndPreviouslyOff() {
-        var state = PrimarySubtitleReloadState()
+        var state = SubtitleReloadState<PrimarySubtitleChoice>()
         state.remember(.text(1, nil))
         state.beginReload(previouslyActive: true)
         state.remember(.text(2, "https://example.com/second.srt"))
@@ -467,7 +467,7 @@ final class RunnerTests: XCTestCase {
         state.remember(.off)
         state.beginReload(previouslyActive: false)
         state.remember(.caption(1))
-        XCTAssertTrue(state.shouldReapplyAtReadiness(primaryActive: false))
+        XCTAssertTrue(state.shouldReapplyAtReadiness(active: false))
         XCTAssertEqual(state.takeLatest(), .caption(1))
         state.reset()
         XCTAssertNil(state.latestChoice)
@@ -476,18 +476,18 @@ final class RunnerTests: XCTestCase {
 
     @MainActor
     func testSecondaryReloadReplaysForEitherRestorationEventOrder() {
-        let a = SecondarySubtitleReloadState.Choice(embeddedTrackId: 1, url: nil)
-        let b = SecondarySubtitleReloadState.Choice(embeddedTrackId: 2, url: nil)
+        let a = AetherPlayerWrapper.SecondarySubtitleSelection(embeddedTrackId: 1, url: nil)
+        let b = AetherPlayerWrapper.SecondarySubtitleSelection(embeddedTrackId: 2, url: nil)
         for restoresBeforeReady in [false, true] {
-            var state = SecondarySubtitleReloadState()
+            var state = SubtitleReloadState<AetherPlayerWrapper.SecondarySubtitleSelection>()
             state.startSource(a)
             state.beginReload(previouslyActive: true)
-            state.rememberChoice(b)
+            state.remember(b)
             assertReloadEventOrder(restoresBeforeReady,
-                readiness: { state.shouldReapplyAtReadiness(secondaryActive: $0) },
+                readiness: { state.shouldReapplyAtReadiness(active: $0) },
                 restoration: { state.shouldReapplyAfterRestoration(active: $0, ready: $1) })
             XCTAssertEqual(state.takeLatest(), b)
-            XCTAssertFalse(state.shouldReapplyAtReadiness(secondaryActive: true))
+            XCTAssertFalse(state.shouldReapplyAtReadiness(active: true))
             XCTAssertFalse(state.shouldReapplyAfterRestoration(active: true, ready: true))
         }
     }
