@@ -10,7 +10,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _Native extends Fake implements NativePlayer {
   List<Map<String, dynamic>> tracks = [];
-  final properties = <String, String>{'sid': 'no', 'secondary-sub-delay': '0', 'secondary-sub-pos': '100'};
+  final properties = <String, String>{
+    'sid': 'no',
+    'secondary-sub-delay': '0',
+    'secondary-sub-pos': '100',
+    'secondary-sub-scale': '1',
+  };
   Completer<String>? delayedTracks;
   Completer<String>? delayedSecondaryText;
   Completer<void>? secondaryTextReadStarted;
@@ -317,6 +322,18 @@ void main() {
     await backend.configureSecondarySubtitleStyle(verticalOffset: 0.5);
     expect(position(), wide);
     expect(wide, isNot(normal));
+  });
+
+  test('secondary size writes an independent mpv scale', () async {
+    await backend.configureSubtitleStyle(fontSize: 24);
+    await backend.configureSecondarySubtitleStyle(fontSize: 36, verticalOffset: 0);
+    expect(properties['secondary-sub-scale'], '1.500');
+
+    await backend.configureSecondarySubtitleStyle(fontSize: 12, verticalOffset: 0);
+    expect(properties['secondary-sub-scale'], '0.500');
+
+    await backend.configureSecondarySubtitleStyle(verticalOffset: 0);
+    expect(properties['secondary-sub-scale'], '1.000');
   });
 
   test('paused subtitle delay refreshes secondary placement for the current cue', () async {

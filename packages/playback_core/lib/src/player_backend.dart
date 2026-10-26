@@ -77,6 +77,14 @@ abstract interface class SecondarySubtitleBackend {
   bool get supportsSecondarySubtitleStyle;
 }
 
+/// Lets a backend expose secondary size and color support independently.
+/// Backends that do not implement this keep the all-or-nothing
+/// [SecondarySubtitleBackend.supportsSecondarySubtitleStyle] behavior.
+abstract interface class SecondarySubtitleAppearanceBackend {
+  bool get supportsSecondarySubtitleSize;
+  bool get supportsSecondarySubtitleColor;
+}
+
 /// Keeps subtitle timing through source reloads within a viewing session.
 mixin SubtitleDelayState {
   double subtitleDelaySeconds = 0;

@@ -180,7 +180,10 @@ class _MediaKitDeviceProfileCapabilities {
 
 class MediaKitPlayerBackend extends PlayerBackend
     with SubtitleDelayState, WidgetsBindingObserver
-    implements SubtitleLoadingBackend, SecondarySubtitleBackend {
+    implements
+        SubtitleLoadingBackend,
+        SecondarySubtitleBackend,
+        SecondarySubtitleAppearanceBackend {
   static const Duration _linuxHwdecFirstFrameTimeout = Duration(
     milliseconds: 1500,
   );
@@ -288,8 +291,10 @@ class MediaKitPlayerBackend extends PlayerBackend
   late final Future<void> _secondaryControlsReady;
   bool _secondaryDelaySupported = false;
   bool _secondaryPositionSupported = false;
+  bool _secondaryScaleSupported = false;
   bool _secondarySubtitleRequested = false;
   double _secondaryVerticalOffset = 0;
+  double _secondaryScale = 1;
   int? _lastSecondaryStackPosition;
   String? _lastPrimaryText;
   int _primaryPlacementGeneration = 0;
@@ -303,9 +308,13 @@ class MediaKitPlayerBackend extends PlayerBackend
   bool get supportsSecondarySubtitleDelay => _secondaryDelaySupported;
   @override
   bool get supportsSecondarySubtitlePosition => _secondaryPositionSupported;
-  // mpv's font and colour settings apply to both subtitle tracks.
+  // mpv has a dedicated secondary scale, but no independent secondary color.
   @override
   bool get supportsSecondarySubtitleStyle => false;
+  @override
+  bool get supportsSecondarySubtitleSize => _secondaryScaleSupported;
+  @override
+  bool get supportsSecondarySubtitleColor => false;
 
   Future<void> _probeSecondaryControls() async {
     final native = _player.platform;
@@ -314,6 +323,8 @@ class MediaKitPlayerBackend extends PlayerBackend
         await _tryNativeGetProperty(native, 'secondary-sub-delay') != null;
     _secondaryPositionSupported =
         await _tryNativeGetProperty(native, 'secondary-sub-pos') != null;
+    _secondaryScaleSupported =
+        await _tryNativeGetProperty(native, 'secondary-sub-scale') != null;
   }
 
   static const _externalSubtitleRetries = 5;
@@ -965,9 +976,7 @@ class MediaKitPlayerBackend extends PlayerBackend
     if (!_ownsPlayback(generation)) return;
     await setSecondarySubtitleDelay(_secondarySubtitleDelay);
     if (!_ownsPlayback(generation)) return;
-    await configureSecondarySubtitleStyle(
-      verticalOffset: _secondaryVerticalOffset,
-    );
+    await _reapplySecondarySubtitleAppearance();
     if (!_ownsPlayback(generation)) return;
     _secondarySourceReadyGeneration = generation;
     if (secondaryGeneration == _secondarySubtitleGeneration) {
@@ -3207,11 +3216,29 @@ class MediaKitPlayerBackend extends PlayerBackend
     double? verticalOffset,
     int? textColor,
   }) async {
+    final primarySize = (_lastFontSize ?? 24).clamp(6.0, 72.0);
+    _secondaryScale = fontSize == null
+        ? 1
+        : (fontSize / primarySize).clamp(0.5, 1.5).toDouble();
     _secondaryVerticalOffset = PlaybackManager.clampSecondarySubtitleOffset(
       verticalOffset ?? PlaybackManager.defaultSecondarySubtitleOffset,
     );
+    await _reapplySecondarySubtitleAppearance();
+  }
+
+  Future<void> _reapplySecondarySubtitleAppearance() async {
     await _secondaryControlsReady;
-    if (_isDisposed || !supportsSecondarySubtitlePosition) return;
+    if (_isDisposed) return;
+    final native = _player.platform;
+    if (native is! NativePlayer) return;
+    if (supportsSecondarySubtitleSize) {
+      await _nativeSetProperty(
+        native,
+        'secondary-sub-scale',
+        _secondaryScale.toStringAsFixed(3),
+      );
+    }
+    if (!supportsSecondarySubtitlePosition) return;
     await _refreshStackedSecondaryPosition(force: true);
   }
 

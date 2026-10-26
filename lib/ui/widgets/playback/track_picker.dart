@@ -145,6 +145,18 @@ abstract final class TrackPicker {
         backend is SecondarySubtitleBackend
         ? backend as SecondarySubtitleBackend
         : null;
+    final SecondarySubtitleAppearanceBackend? secondaryAppearance =
+        backend is SecondarySubtitleAppearanceBackend
+        ? backend as SecondarySubtitleAppearanceBackend
+        : null;
+    final supportsSecondarySize =
+        secondaryAppearance?.supportsSecondarySubtitleSize ??
+        secondaryControls?.supportsSecondarySubtitleStyle ==
+            true;
+    final supportsSecondaryColor =
+        secondaryAppearance?.supportsSecondarySubtitleColor ??
+        secondaryControls?.supportsSecondarySubtitleStyle ==
+            true;
     final delayLimits = !showControls
         ? null
         : secondary
@@ -178,7 +190,8 @@ abstract final class TrackPicker {
         showControls &&
         (secondary || streams.any(isTextSubtitleStream)) &&
         (!secondary ||
-            secondaryControls?.supportsSecondarySubtitleStyle == true ||
+            supportsSecondarySize ||
+            supportsSecondaryColor ||
             secondaryControls?.supportsSecondarySubtitlePosition == true)) {
       final style = SubtitleStyle.forResolution(
         prefs,
@@ -201,12 +214,11 @@ abstract final class TrackPicker {
               ),
             ),
           SubtitleAppearanceFooter(
-            showStyle:
-                !secondary || secondaryControls!.supportsSecondarySubtitleStyle,
+            showStyle: !secondary || supportsSecondarySize,
             showPosition:
                 !secondary ||
                 secondaryControls!.supportsSecondarySubtitlePosition,
-            showColor: secondary,
+            showColor: secondary && supportsSecondaryColor,
             secondary: secondary,
             minOffset: secondary ? secondarySubtitleMinOffset : 0.0,
             maxOffset: secondary

@@ -13,8 +13,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 class _Backend extends Fake implements MediaKitPlayerBackend {
   @override
   double subtitleDelaySeconds = 0;
-  _Backend({this.secondaryStyle = false});
+  _Backend({
+    this.secondaryStyle = false,
+    this.secondarySize = false,
+    this.secondaryColor = false,
+  });
   final bool secondaryStyle;
+  final bool secondarySize;
+  final bool secondaryColor;
   final audioDelays = <double>[];
   final primaryOffsets = <double>[];
 
@@ -22,6 +28,10 @@ class _Backend extends Fake implements MediaKitPlayerBackend {
   bool get supportsSecondarySubtitleDelay => true;
   @override
   bool get supportsSecondarySubtitleStyle => secondaryStyle;
+  @override
+  bool get supportsSecondarySubtitleSize => secondaryStyle || secondarySize;
+  @override
+  bool get supportsSecondarySubtitleColor => secondaryStyle || secondaryColor;
   @override
   bool get supportsSecondarySubtitlePosition => true;
 
@@ -175,6 +185,18 @@ void main() {
     await tester.tap(find.byTooltip(l10n.delayPlusMs(100)));
     await tester.pump();
     expect(manager.secondarySubtitleDelaySeconds, 0.1);
+  });
+
+  testWidgets('secondary size can be exposed without a color override', (
+    tester,
+  ) async {
+    final manager = _Manager(_Backend(secondarySize: true));
+    addTearDown(manager.dispose);
+    await openPicker(tester, manager, secondary: true);
+
+    expect(find.text(l10n.subtitleSize), findsOneWidget);
+    expect(find.text(l10n.verticalOffset), findsOneWidget);
+    expect(find.text(l10n.textFillColor), findsNothing);
   });
 
   testWidgets('the delay bar starts with Reset focused for a remote', (

@@ -106,7 +106,7 @@ class _SubtitleAppearanceFooterState extends State<SubtitleAppearanceFooter> {
                 _update(fontSize: _fontSize + (widget.secondary ? 10 : 2)),
             valueWidth: widget.secondary ? 80 : 48,
           ),
-        if (widget.showStyle && widget.showColor) _buildColorControl(context),
+        if (widget.showColor) _buildColorControl(context),
         if (widget.showPosition)
           _AppearanceControlRow(
             label: AppLocalizations.of(context).verticalOffset,
