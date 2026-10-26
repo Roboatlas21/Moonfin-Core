@@ -11,6 +11,7 @@ import '../preference/user_preferences.dart';
 import '../util/loggable_url.dart';
 import '../util/platform_detection.dart';
 
+import 'apple_secondary_subtitle_controls.dart';
 import 'device_profile_builder.dart';
 import 'dolby_vision_av1.dart';
 import 'engine_trust.dart';
@@ -19,7 +20,9 @@ import 'letterbox_croppers.dart';
 import 'lossless_audio_bridge.dart';
 import 'server_transcode_capabilities.dart';
 
-class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend, SecondarySubtitleBackend {
+class NativeApplePlayerBackend
+    with SubtitleDelayState, AppleSecondarySubtitleControls
+    implements PlayerBackend, SecondarySubtitleBackend {
   NativeApplePlayerBackend(this._prefs) {
     _eventSub = _events.receiveBroadcastStream().listen(
       _handleEvent,
@@ -96,6 +99,13 @@ class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend,
       return null;
     }
   }
+
+  @override
+  Future<T?> invokeAppleSecondaryControl<T>(
+    String method, [
+    dynamic arguments,
+  ]) =>
+      _invoke<T>(method, arguments);
 
   void _log(String message, {LogLevel level = LogLevel.debug, Object? error}) {
     if (!GetIt.instance.isRegistered<LogService>()) return;
@@ -793,49 +803,6 @@ class NativeApplePlayerBackend with SubtitleDelayState implements PlayerBackend,
     _activeSubtitleTrackIndex = -1;
     _log('disableSubtitleTrack');
     await _invoke<void>('disableSubtitleTrack');
-  }
-
-  @override
-  bool get supportsSecondarySubtitleDelay => true;
-
-  @override
-  bool get supportsSecondarySubtitlePosition => true;
-
-  @override
-  bool get supportsSecondarySubtitleStyle => true;
-
-  @override
-  Future<void> setSecondarySubtitle({
-    String? url,
-    String? codec,
-    String? language,
-    int? embeddedTrackId,
-  }) async {
-    await _invoke<void>('setSecondarySubtitle', {
-      'embeddedTrackId': embeddedTrackId,
-      'url': url,
-    });
-  }
-
-  @override
-  Future<void> setSecondarySubtitleDelay(double seconds) async {
-    await _invoke<void>('setSecondarySubtitleDelay', {
-      'delayMs': (seconds.clamp(-5.0, 5.0) * 1000).round(),
-    });
-  }
-
-  @override
-  Future<void> configureSecondarySubtitleStyle({
-    double? fontSize,
-    double? verticalOffset,
-    int? textColor,
-  }) async {
-    await _invoke<void>('configureSecondarySubtitleStyle', {
-      if (fontSize != null) 'fontSize': fontSize.clamp(6.0, 72.0),
-      if (verticalOffset != null)
-        'verticalOffset': verticalOffset.clamp(-0.4, 0.4),
-      if (textColor != null) 'textColor': textColor,
-    });
   }
 
   @override
