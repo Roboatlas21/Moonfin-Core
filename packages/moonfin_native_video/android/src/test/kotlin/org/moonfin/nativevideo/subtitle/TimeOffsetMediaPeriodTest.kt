@@ -15,6 +15,7 @@ import androidx.media3.exoplayer.source.TrackGroupArray
 import androidx.media3.exoplayer.source.chunk.MediaChunk
 import androidx.media3.exoplayer.source.chunk.MediaChunkIterator
 import androidx.media3.exoplayer.trackselection.ExoTrackSelection
+import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
@@ -28,10 +29,13 @@ class TimeOffsetMediaPeriodTest {
         var nextTimeUs = 0L
         var endOfStream = false
         var skippedToUs = C.TIME_UNSET
+        var error: IOException? = null
 
         override fun isReady(): Boolean = true
 
-        override fun maybeThrowError() {}
+        override fun maybeThrowError() {
+            error?.let { throw it }
+        }
 
         override fun readData(formatHolder: FormatHolder, buffer: DecoderInputBuffer, readFlags: Int): Int {
             if (nextResult == C.RESULT_BUFFER_READ) {
@@ -244,6 +248,39 @@ class TimeOffsetMediaPeriodTest {
     }
 
     @Test
+    fun `a failed secondary subtitle becomes end of stream without failing playback`() {
+        val subtitle = FakeStream()
+        val child = FakePeriod(listOf(subtitle))
+        val errors = mutableListOf<IOException>()
+        val period = TimeOffsetMediaPeriod(
+            child,
+            initialOffsetUs = 0L,
+            initialSecondaryOffsetUs = 500_000L,
+            onSecondaryError = errors::add,
+        )
+        val stream = select(period, selection("application/x-subrip"))[0]!!
+
+        subtitle.error = IOException("secondary unavailable")
+        stream.maybeThrowError()
+
+        assertEquals(1, errors.size)
+        assertEquals("secondary unavailable", errors.single().message)
+        assertTrue(stream.isReady)
+        assertTrue(readOnce(stream).isEndOfStream)
+        assertEquals(C.TIME_END_OF_SOURCE, period.bufferedPositionUs)
+        assertEquals(C.TIME_END_OF_SOURCE, period.nextLoadPositionUs)
+        assertEquals(
+            false,
+            period.continueLoading(
+                LoadingInfo.Builder().setPlaybackPositionUs(1_000_000L).build(),
+            ),
+        )
+        assertEquals(false, period.isLoading)
+        assertEquals(0, stream.skipData(1_000_000L))
+        assertEquals(C.TIME_UNSET, subtitle.skippedToUs)
+    }
+
+    @Test
     fun `a seek returns exactly the position it was given`() {
         val child = FakePeriod(emptyList())
         val period = TimeOffsetMediaPeriod(child, 2_000_000L)
@@ -349,5 +386,30 @@ class TimeOffsetMediaPeriodTest {
         assertEquals(750_000L, readOnce(streams[1]!!).timeUs)
         streams[1]!!.skipData(5_000_000L)
         assertEquals(5_250_000L, text.skippedToUs)
+    }
+
+    @Test
+    fun `embedded primary and secondary delays are independent and video stays unchanged`() {
+        val video = FakeStream().apply { nextTimeUs = 10_000_000L }
+        val primary = FakeStream().apply { nextTimeUs = 10_000_000L }
+        val secondary = FakeStream().apply { nextTimeUs = 10_000_000L }
+        val child = FakePeriod(listOf(video, primary, secondary))
+        val period = TextStreamOffsetMediaPeriod(child, 2_000_000L, -500_000L)
+        val streams = select(
+            period,
+            selection("video/avc"),
+            selection("application/x-media3-cues", "application/x-subrip"),
+            selection("application/x-media3-cues", "application/x-subrip"),
+            positionUs = 5_000_000L,
+        )
+        assertEquals(5_000_000L, child.selectedAtUs)
+        assertEquals(10_000_000L, readOnce(streams[0]!!).timeUs)
+        assertEquals(12_000_000L, readOnce(streams[1]!!).timeUs)
+        assertEquals(9_500_000L, readOnce(streams[2]!!).timeUs)
+        period.updateTimeOffsetUs(-250_000L, 1_000_000L)
+        assertEquals(9_750_000L, readOnce(streams[1]!!).timeUs)
+        assertEquals(11_000_000L, readOnce(streams[2]!!).timeUs)
+        streams[2]!!.skipData(5_000_000L)
+        assertEquals(4_000_000L, secondary.skippedToUs)
     }
 }
