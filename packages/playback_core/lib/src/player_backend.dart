@@ -70,6 +70,44 @@ abstract interface class SubtitleLoadingBackend {
   Stream<bool> get subtitleLoadingStream;
 }
 
+/// Reports which secondary subtitle controls a backend supports.
+abstract interface class SecondarySubtitleBackend {
+  bool get supportsSecondarySubtitleDelay;
+  bool get supportsSecondarySubtitlePosition;
+  bool get supportsSecondarySubtitleStyle;
+
+  /// Selects a secondary subtitle by a 1-based embedded track number or an
+  /// external URL. Omit both to turn it off.
+  Future<void> setSecondarySubtitle({
+    String? url,
+    String? codec,
+    String? language,
+    int? embeddedTrackId,
+  });
+}
+
+/// Lets a backend expose secondary size and color support independently.
+/// Backends that do not implement this keep the all-or-nothing
+/// [SecondarySubtitleBackend.supportsSecondarySubtitleStyle] behavior.
+abstract interface class SecondarySubtitleAppearanceBackend {
+  bool get supportsSecondarySubtitleSize;
+  bool get supportsSecondarySubtitleColor;
+}
+
+/// Keeps subtitle timing through source reloads within a viewing session.
+mixin SubtitleDelayState {
+  double subtitleDelaySeconds = 0;
+  int? _subtitleDelaySessionId;
+
+  void updateSubtitleDelaySession(int? sessionId) {
+    // A source without a session ID is a fresh playback request.
+    if (sessionId == null || sessionId != _subtitleDelaySessionId) {
+      subtitleDelaySeconds = 0;
+    }
+    _subtitleDelaySessionId = sessionId;
+  }
+}
+
 abstract class PlayerBackend {
   Future<void> play(
     dynamic mediaItem, {
@@ -116,10 +154,17 @@ abstract class PlayerBackend {
   });
   Future<void> disableSubtitleTrack();
 
-  /// Selects an independent text sidecar for the Android Media3 overlay.
-  /// Backends without a separate subtitle layer leave it disabled.
+  /// Selects an independent text sidecar where a backend supports one.
+  /// Backends with richer secondary-subtitle support advertise it through
+  /// [SecondarySubtitleBackend].
   Future<void> setSecondarySubtitle({String? url, String? codec}) async {}
+  /// Additional delay, in seconds, on top of the primary subtitle delay.
   Future<void> setSecondarySubtitleDelay(double seconds) async {}
+
+  /// Null fontSize or textColor follows the primary style. verticalOffset adds spacing
+  /// between the tracks as a fraction of player height; positive values increase the
+  /// gap. Top-aligned secondary text moves down, and centred layouts may move both
+  /// tracks.
   Future<void> configureSecondarySubtitleStyle({
     double? fontSize,
     double? verticalOffset,
