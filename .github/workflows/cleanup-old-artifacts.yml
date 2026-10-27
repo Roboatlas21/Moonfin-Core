@@ -1,0 +1,56 @@
+name: Cleanup old Actions artifacts
+
+on:
+  push:
+    branches:
+      - maintenance/artifact-cleanup
+    paths:
+      - .github/workflows/cleanup-old-artifacts.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old artifacts and keep latest final8
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP_RUN_ID: "40386088061"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo="$GITHUB_REPOSITORY"
+          deleted_count=0
+          deleted_bytes=0
+
+          while :; do
+            json="$(gh api -H "Accept: application/vnd.github+json"               "/repos/$repo/actions/artifacts?per_page=100&page=1")"
+
+            mapfile -t rows < <(
+              jq -r --argjson keep "$KEEP_RUN_ID" '
+                .artifacts[]
+                | select(.expired == false and .workflow_run.id != $keep)
+                | [.id, .size_in_bytes, .name, (.workflow_run.id | tostring)]
+                | @tsv
+              ' <<<"$json"
+            )
+
+            if (( ${#rows[@]} == 0 )); then
+              break
+            fi
+
+            for row in "${rows[@]}"; do
+              IFS=$'\t' read -r artifact_id size name run_id <<<"$row"
+              echo "Deleting artifact $artifact_id ($name) from run $run_id"
+              gh api --method DELETE                 -H "Accept: application/vnd.github+json"                 "/repos/$repo/actions/artifacts/$artifact_id"
+              deleted_count=$((deleted_count + 1))
+              deleted_bytes=$((deleted_bytes + size))
+            done
+          done
+
+          echo "Deleted $deleted_count artifacts"
+          awk -v bytes="$deleted_bytes" 'BEGIN { printf "Freed approximately %.2f GiB\n", bytes / 1073741824 }'
