@@ -37,6 +37,7 @@ import '../utils/next_up_enrichment.dart';
 import 'background_download_coordinator.dart';
 import 'book_reader_service.dart';
 import 'download_batch_notification_policy.dart';
+import 'download_batch_notification_ledger.dart';
 import 'download_notification_service.dart';
 import 'legacy_download_engine.dart';
 import 'media3_transmux_downloader.dart';
@@ -404,6 +405,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   // batch closes so the single completion alert cannot race batch cleanup.
   final Map<String, Future<void>> _postCompletionFutures = {};
   final Set<String> _batchedNotificationItems = {};
+  final DownloadBatchNotificationLedger _batchNotificationLedger =
+      DownloadBatchNotificationLedger();
+  final Set<String> _activeBatchLedgerIds = {};
   // Native transfers can finish after the Dart batch has disappeared.
   // Consolidate recovered completions rather than alerting per episode.
   final RecoveredDownloadNotificationBuffer _recoveredCompletions =
@@ -1383,7 +1387,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     // for every post-processing future in queueDownloads, including when
     // another episode's subtitles take longer than its media transfer.
     if (recovered) {
-      _recordRecoveredCompletion(item);
+      final belongsToPersistentBatch =
+          await _settlePersistedBatchNotifications(completed: item);
+      if (!belongsToPersistentBatch) _recordRecoveredCompletion(item);
     } else if (!isBatchItem &&
         generation == _batchGeneration &&
         !_cancelAllRequested &&
@@ -1394,6 +1400,51 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         ),
         const Duration(seconds: 10),
       );
+    }
+  }
+
+  /// Returns true when [completed] belongs to a persisted season. That
+  /// prevents the fallback two-second recovered-completion buffer from
+  /// posting an individual episode alert from the same season.
+  Future<bool> _settlePersistedBatchNotifications({
+    AggregatedItem? completed,
+  }) async {
+    if (!PlatformDetection.isAndroid) return false;
+    try {
+      final batches = await _batchNotificationLedger.pending();
+      final belongsToBatch = completed != null &&
+          batches.any((batch) => batch.contains(completed.serverId, completed.id));
+      if (_recoveryScanInProgress || batches.isEmpty) return belongsToBatch;
+
+      final rows = await _offlineRepo.getItems();
+      for (final batch in batches) {
+        if (batch.serverId != _serverId) continue;
+        final status = {
+          for (final item in rows)
+            if (item.serverId == batch.serverId) item.itemId: item.downloadStatus,
+        };
+        if (!batch.isSettled(status)) continue;
+        // Consume before posting: a crash during notification delivery should
+        // not replay an audible season-complete alert on every next startup.
+        await _batchNotificationLedger.consume(batch.id);
+        if (batch.allSucceeded(status) && !_cancelAllRequested && !_disposed) {
+          try {
+            await _notificationService.showComplete(
+              itemName: batch.itemName,
+              batchTotal: batch.itemIds.length,
+              batchSeries: batch.series,
+            );
+          } catch (e) {
+            debugPrint('[Download] Persisted batch alert failed: $e');
+          }
+        }
+      }
+      return belongsToBatch;
+    } catch (e) {
+      debugPrint('[Download] Persisted batch recovery failed: $e');
+      // Do not substitute a per-episode alert when a durable batch lookup
+      // fails: doing so could recreate the repeated-season sound problem.
+      return true;
     }
   }
 
@@ -3326,6 +3377,23 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _openBatches++;
     _totalQueued += toQueue.length;
     final queuedIds = {for (final item in toQueue) item.id};
+    if (PlatformDetection.isAndroid && toQueue.length > 1) {
+      try {
+        final series = toQueue.every(
+          (item) => item.type == 'Episode' &&
+              item.seriesName == toQueue.first.seriesName,
+        ) ? toQueue.first.seriesName : null;
+        final ledgerId = await _batchNotificationLedger.register(
+          serverId: _serverId,
+          itemIds: queuedIds.toList(),
+          itemName: _notificationLabel(toQueue.last),
+          series: series,
+        );
+        _activeBatchLedgerIds.add(ledgerId);
+      } catch (e) {
+        debugPrint('[Download] Could not persist season batch: $e');
+      }
+    }
     _batchedNotificationItems.addAll(queuedIds);
     if (ownerId != null) {
       _batchItemsByOwner.putIfAbsent(ownerId, () => {}).addAll(queuedIds);
@@ -3367,6 +3435,17 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             _completedSeries.length == 1 ? _completedSeries.single : null;
         final itemName = _lastCompletedNotificationLabel ??
             _notificationLabel(toQueue.last);
+        // Finish every durable manifest before showing the live batch alert,
+        // ensuring the same season will not alert again if the app restarts.
+        final ledgerIds = _activeBatchLedgerIds.toList();
+        _activeBatchLedgerIds.clear();
+        for (final ledgerId in ledgerIds) {
+          try {
+            await _batchNotificationLedger.consume(ledgerId);
+          } catch (e) {
+            debugPrint('[Download] Batch ledger cleanup failed: $e');
+          }
+        }
         _resetBatch();
         if (PlatformDetection.isAndroid) {
           await _notificationService.releaseIdleForegroundService();
@@ -4209,6 +4288,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _openBatches = 0;
     _recoveredCompletionTimer?.cancel();
     _recoveredCompletions.clear();
+    _activeBatchLedgerIds.clear();
+    unawaited(_batchNotificationLedger.clearAll().catchError((Object e) {
+      debugPrint('[Download] Cancel All ledger cleanup failed: $e');
+    }));
     _batchItemsByOwner.clear();
     _batchedNotificationItems.clear();
     _postCompletionFutures.clear();
@@ -4375,6 +4458,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         );
       } finally {
         _recoveryScanInProgress = false;
+        await _settlePersistedBatchNotifications();
         _scheduleRecoveredCompletionAlert();
       }
     }());
