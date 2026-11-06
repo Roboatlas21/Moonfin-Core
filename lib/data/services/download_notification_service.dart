@@ -91,7 +91,10 @@ class DownloadNotificationService {
 
   Future<void> initialize() async {
     final previous = _initializeFuture;
-    if (previous != null) return previous;
+    if (previous != null) {
+      await previous;
+      return;
+    }
     final task = _initialize();
     _initializeFuture = task;
     try {
@@ -303,6 +306,28 @@ class DownloadNotificationService {
               await _postAndroidProgress(promoted);
             } catch (e) {
               debugPrint('[DownloadNotification] Foreground handoff failed: $e');
+              // Retry once through the ordinary silent notification API.
+              // Also allow a subsequent unchanged progress value to retry.
+              _lastAndroidUpdate.remove(promoted.itemId);
+              _lastAndroidSignature.remove(promoted.itemId);
+              try {
+                await _plugin.show(
+                  id: DownloadProgressNotificationRegistry.foregroundId,
+                  title: promoted.title,
+                  body: promoted.body,
+                  notificationDetails: NotificationDetails(
+                    android: androidProgressDetails(
+                      promoted.percent,
+                      when: promoted.createdAtMillis,
+                    ),
+                  ),
+                );
+              } catch (retryError) {
+                debugPrint(
+                  '[DownloadNotification] Foreground fallback failed: '
+                  '$retryError',
+                );
+              }
             } finally {
               // Do not leak the old ordinary card, even if promotion failed.
               await _cancelProgressId(removal.promotedFromId!);
