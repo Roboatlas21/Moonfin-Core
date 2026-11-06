@@ -618,6 +618,35 @@ class DownloadNotificationService {
     });
   }
 
+  /// Wait for the native worker to actually post the terminal error before
+  /// removing its redundant quiet card. A fixed delay can fire too early.
+  Future<void> dismissNativeFailureCard(String taskId) async {
+    if (!_initialized || !PlatformDetection.isAndroid) return;
+    final id = androidNativeTaskNotificationId(taskId);
+    final title = currentAppLocalizations().downloadNotificationFailedTitle;
+    for (var attempt = 0; attempt < 24; attempt++) {
+      try {
+        final active = await _plugin
+            .getActiveNotifications()
+            .timeout(const Duration(seconds: 2));
+        if (active.any((n) => isNativeFailureCard(
+              id: n.id,
+              expectedId: id,
+              channelId: n.channelId,
+              title: n.title,
+              failureTitle: title,
+            ))) {
+          await _plugin.cancel(id: id).timeout(_operationTimeout);
+          return;
+        }
+      } catch (e) {
+        debugPrint('[DownloadNotification] Native error lookup failed: $e');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    // The native worker retains its own alert if Dart could not confirm it.
+  }
+
   Future<void> _retryPendingCancellations() async {
     // At most one stale cancellation attempt per timer tick, with a 2-second
     // RPC cap and exponential backoff. Do not monopolize progress updates.

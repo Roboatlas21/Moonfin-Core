@@ -429,4 +429,21 @@ void main() {
     });
   });
 
+  group('native failure card deduplication', () {
+    test('removes only the actual native terminal error for that task', () {
+      expect(isNativeFailureCard(
+        id: 1234, expectedId: 1234, channelId: 'background_downloader',
+        title: 'Download failed', failureTitle: 'Download failed'), isTrue);
+      expect(isNativeFailureCard(
+        id: 1234, expectedId: 1234, channelId: 'background_downloader',
+        title: 'Downloading', failureTitle: 'Download failed'), isFalse);
+      expect(isNativeFailureCard(
+        id: 1235, expectedId: 1234, channelId: 'background_downloader',
+        title: 'Download failed', failureTitle: 'Download failed'), isFalse);
+      expect(isNativeFailureCard(
+        id: 1234, expectedId: 1234, channelId: 'moonfin_download_alerts_v1',
+        title: 'Download failed', failureTitle: 'Download failed'), isFalse);
+    });
+  });
+
 }

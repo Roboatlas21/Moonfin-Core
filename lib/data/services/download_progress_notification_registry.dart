@@ -213,3 +213,17 @@ Duration cancellationRetryBackoff(int attempt) {
       : (attempt >= seconds.length ? seconds.length - 1 : attempt);
   return Duration(seconds: seconds[index]);
 }
+
+/// The native downloader uses one low-priority channel for progress and
+/// failures. Remove only a visibly terminal error for the exact task, never
+/// a running notification or an unrelated channel's notification.
+bool isNativeFailureCard({
+  required int id,
+  required int expectedId,
+  required String? channelId,
+  required String? title,
+  required String failureTitle,
+}) =>
+    id == expectedId &&
+    channelId == 'background_downloader' &&
+    title == failureTitle;
