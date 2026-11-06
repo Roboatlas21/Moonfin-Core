@@ -405,14 +405,36 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         episode: item.indexNumber,
       );
 
-  Future<void> _notifyDownloadError(String label, String error) =>
-      _notificationService.showError(
-        itemName: label,
-        error: error,
-        transfersRemain: _activeDownloads.values.any(
-          (download) => !download.isComplete && download.error == null,
-        ),
+  // A batch may have more transcoded episodes queued or being prepared even
+  // when its current foreground transfer just finished. Keep Android's
+  // service alive until the next one starts; the batch cleanup stops it.
+  bool _hasOtherTranscodedWork(String itemId) =>
+      _pendingDownloads.any((task) => task.quality.isTranscoded) ||
+      _activeDownloads.entries.any(
+        (entry) =>
+            entry.key != itemId &&
+            entry.value.quality.isTranscoded &&
+            !entry.value.isComplete &&
+            entry.value.error == null,
       );
+
+  Future<void> _notifyDownloadError(
+    String itemId,
+    String label,
+    String error,
+  ) async {
+    await _notificationService.finishProgress(
+      itemId,
+      keepForegroundService: _hasOtherTranscodedWork(itemId),
+    );
+    await _notificationService.showError(
+      itemName: label,
+      error: error,
+      transfersRemain: _activeDownloads.values.any(
+        (download) => !download.isComplete && download.error == null,
+      ),
+    );
+  }
 
   /// Batches still awaiting completion. Counters reset only when the last
   /// one finishes, so an automatic batch can run beside a manual one.
@@ -2512,7 +2534,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         _emitError('${item.name}: $refusal');
         // Nothing reaches the native engine, so no notification would come
         // from there. Say it here, for a queue nobody is watching.
-        unawaited(_notifyDownloadError(_notificationLabel(item), refusal));
+        unawaited(_notifyDownloadError(item.id, _notificationLabel(item), refusal));
         notifyListeners();
         return;
       }
@@ -2653,8 +2675,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       if (!pluginOwnsNotifications()) {
         await _notificationService.showProgress(
+          itemId: item.id,
           itemName: _notificationLabel(item),
           progress: initialProgress,
+          startNewTransfer: true,
           batchTotal: _totalQueued,
           batchCompleted: _completedCount,
         );
@@ -2755,6 +2779,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             _shouldUpdateSystemNotification(item.id, progress)) {
           unawaited(
             _notificationService.showProgress(
+              itemId: item.id,
               itemName: _notificationLabel(item),
               progress: progress,
               batchTotal: _totalQueued,
@@ -2926,6 +2951,13 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       notifyListeners();
 
+      // The transfer has finished but post-download assets can still run.
+      // Release only its progress card; concurrent transfers stay visible.
+      await _notificationService.finishProgress(
+        item.id,
+        keepForegroundService: _hasOtherTranscodedWork(item.id),
+      );
+
       unawaited(
         _runPostCompletionTasks(
           item: fullItem,
@@ -2945,7 +2977,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         await _deleteItemImages(item.id, imageDir);
         await _offlineRepo.deleteItem(item.id);
         await _cleanupEpisodeContainers(item, imageDir);
-        await _notificationService.dismiss();
+        await _notificationService.finishProgress(
+          item.id,
+          keepForegroundService: _hasOtherTranscodedWork(item.id),
+        );
         if (serverTicket != null) _forgetOnServer([item.id]);
       } else {
         final friendlyError = _friendlyDioError(e);
@@ -2964,7 +2999,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           error: friendlyError,
         );
         if (!pluginOwnsNotifications()) {
-          await _notifyDownloadError(item.name, friendlyError);
+          await _notifyDownloadError(item.id, item.name, friendlyError);
         }
         _emitError('${item.name}: $friendlyError');
       }
@@ -2981,7 +3016,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       await _offlineRepo.updateDownloadStatus(item.id, 3, error: friendlyError);
       if (!pluginOwnsNotifications()) {
-        await _notifyDownloadError(item.name, friendlyError);
+        await _notifyDownloadError(item.id, item.name, friendlyError);
       }
       _emitError('${item.name}: $friendlyError');
     } catch (e) {
@@ -3001,7 +3036,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       await _offlineRepo.updateDownloadStatus(item.id, 3, error: friendlyError);
       if (!pluginOwnsNotifications()) {
-        await _notifyDownloadError(item.name, friendlyError);
+        await _notifyDownloadError(item.id, item.name, friendlyError);
       }
       _emitError('${item.name}: $friendlyError');
     } finally {
@@ -4220,7 +4255,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       await _offlineRepo.updateDownloadStatus(entry.key, 3, error: refusal);
       final label = record.task.displayName;
       _emitError('$label: $refusal');
-      unawaited(_notifyDownloadError(label, refusal));
+      unawaited(_notifyDownloadError(entry.key, label, refusal));
       refused.add(entry.key);
     }
     return refused;
