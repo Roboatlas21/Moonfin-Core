@@ -1777,10 +1777,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             3,
             error: message,
           );
-          await _notifyDownloadError(
-            itemId, update.task.displayName, message,
-            nativeTaskId: update.task.taskId,
-          );
+          if (PlatformDetection.isAndroid) {
+            await _notifyDownloadError(
+              itemId, update.task.displayName, message,
+              nativeTaskId: update.task.taskId,
+            );
+          }
           await bgd.FileDownloader().database.deleteRecordWithId(
             update.task.taskId,
           );
@@ -4426,10 +4428,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           3,
           error: message,
         );
-        await _notifyDownloadError(
-          row.itemId, record.task.displayName, message,
-          nativeTaskId: record.task.taskId,
-        );
+        if (PlatformDetection.isAndroid) {
+          await _notifyDownloadError(
+            row.itemId, record.task.displayName, message,
+            nativeTaskId: record.task.taskId,
+          );
+        }
         await bgd.FileDownloader().database.deleteRecordWithId(
           record.task.taskId,
         );
@@ -4612,10 +4616,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
               quality: quality,
             );
             _emitError('${row.name}: $message');
-            await _notifyDownloadError(
-              itemId, row.name, message,
-              nativeTaskId: nativeTaskId,
-            );
+            if (PlatformDetection.isAndroid) {
+              await _notifyDownloadError(
+                itemId, row.name, message,
+                nativeTaskId: nativeTaskId,
+              );
+            }
           }
           notifyListeners();
         });
