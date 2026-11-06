@@ -1325,7 +1325,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             // A recovered batch may have another episode's postprocessing
             // running when its final media file reached status=2.
             if (recovered && !_disposed) {
-              unawaited(_settlePersistedBatchNotifications());
+              unawaited(
+                _settlePersistedBatchNotifications().then<void>((_) {}),
+              );
             }
             // Batch entries remain available until queueDownloads has
             // explicitly awaited their post-processing futures.

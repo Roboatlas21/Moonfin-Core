@@ -754,6 +754,12 @@ class DownloadNotificationService {
         _foregroundServiceRunning = succeeded;
         if (!succeeded) {
           debugPrint('[DownloadNotification] Late foreground start failed');
+          if (_androidProgress.activeCount == 0 &&
+              !_retainForegroundBetweenTransfers) {
+            await _cancelProgressId(
+              DownloadProgressNotificationRegistry.foregroundId,
+            );
+          }
           return;
         }
         if (shouldStopLateForegroundStart(
