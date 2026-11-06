@@ -566,6 +566,22 @@ class DownloadNotificationService {
     }
   }
 
+  /// The background_downloader fork pins its native notification ID to
+  /// Java's String.hashCode(taskId). Keep its quiet failure card when Dart
+  /// was killed; after our audible alert posts, remove the redundant card.
+  Future<void> dismissNativeFailureCard(String taskId) async {
+    if (!_initialized || !PlatformDetection.isAndroid) return;
+    try {
+      // The plugin queues terminal-state notifications asynchronously.
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      await _plugin
+          .cancel(id: androidNativeTaskNotificationId(taskId))
+          .timeout(const Duration(seconds: 4));
+    } catch (e) {
+      debugPrint('[DownloadNotification] Native error cleanup failed: $e');
+    }
+  }
+
   Future<void> _retryPendingCancellations() async {
     for (final id in _pendingCancellationIds.toList()) {
       if (_androidProgress.usesNotificationId(id) ||

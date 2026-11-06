@@ -310,6 +310,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   /// Contexts of media downloads running on the native plugin engine,
   /// keyed by itemId.
   final Map<String, _MediaDownloadContext> _pluginContexts = {};
+  // The plugin's Android notification ID is Java String.hashCode(taskId).
+  // Remember the task ID through failure cleanup so we can replace its
+  // low-importance error card with an audible Moonfin error notification.
+  final Map<String, String> _nativeNotificationTasks = {};
 
   final Map<String, DownloadProgress> _activeDownloads = {};
   Map<String, DownloadProgress> get activeDownloads =>
@@ -438,6 +442,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     String label,
     String error, {
     String? notificationKey,
+    String? nativeTaskId,
   }) async {
     // Errors during preflight or native recovery have no in-process progress
     // card. Never finish another server's transfer with the same itemId.
@@ -454,6 +459,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         (download) => !download.isComplete && download.error == null,
       ),
     );
+    if (nativeTaskId != null && PlatformDetection.isAndroid) {
+      // The native worker posts a quiet fallback if no Dart engine is alive.
+      // Once our audible alert succeeds, dismiss only that worker's card.
+      unawaited(_notificationService.dismissNativeFailureCard(nativeTaskId));
+    }
   }
 
   /// Batches still awaiting completion. Counters reset only when the last
@@ -1490,6 +1500,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     final task = await _buildMediaTask(url: url, ctx: ctx, headers: headers);
     ctx.currentTaskId = task.taskId;
     _pluginContexts[item.id] = ctx;
+    _nativeNotificationTasks[item.id] = task.taskId;
     cancelToken.whenCancel
         .then((_) => bgd.FileDownloader().cancelTaskWithId(ctx.currentTaskId))
         .ignore();
@@ -1751,10 +1762,15 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
               await _deleteFileArtifacts(savePath);
             } catch (_) {}
           }
+          final message = friendlyDownloadFailure(update.exception?.description);
           await _offlineRepo.updateDownloadStatus(
             itemId,
             3,
-            error: friendlyDownloadFailure(update.exception?.description),
+            error: message,
+          );
+          await _notifyDownloadError(
+            itemId, update.task.displayName, message,
+            nativeTaskId: update.task.taskId,
           );
           await bgd.FileDownloader().database.deleteRecordWithId(
             update.task.taskId,
@@ -3088,10 +3104,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           3,
           error: friendlyError,
         );
-        if (!pluginOwnsNotifications()) {
+        if (!pluginOwnsNotifications() || PlatformDetection.isAndroid) {
           await _notifyDownloadError(
             item.id, item.name, friendlyError,
             notificationKey: notificationKey,
+            nativeTaskId: _nativeNotificationTasks[item.id],
           );
         }
         _emitError('${item.name}: $friendlyError');
@@ -3112,6 +3129,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         await _notifyDownloadError(
             item.id, item.name, friendlyError,
             notificationKey: notificationKey,
+            nativeTaskId: _nativeNotificationTasks[item.id],
           );
       }
       _emitError('${item.name}: $friendlyError');
@@ -3135,6 +3153,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         await _notifyDownloadError(
             item.id, item.name, friendlyError,
             notificationKey: notificationKey,
+            nativeTaskId: _nativeNotificationTasks[item.id],
           );
       }
       _emitError('${item.name}: $friendlyError');
@@ -3151,6 +3170,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       }
       _downloadStartTimes.remove(item.id);
       _cancelTokens.remove(item.id);
+      _nativeNotificationTasks.remove(item.id);
       _lastPersistedProgress.remove(item.id);
       _lastNotifiedProgress.remove(item.id);
       _lastPublished.remove(item.id);
@@ -4369,10 +4389,15 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             await _deleteFileArtifacts(savePath);
           } catch (_) {}
         }
+        final message = friendlyDownloadFailure(record.exception?.description);
         await _offlineRepo.updateDownloadStatus(
           row.itemId,
           3,
-          error: friendlyDownloadFailure(record.exception?.description),
+          error: message,
+        );
+        await _notifyDownloadError(
+          row.itemId, record.task.displayName, message,
+          nativeTaskId: record.task.taskId,
         );
         await bgd.FileDownloader().database.deleteRecordWithId(
           record.task.taskId,
@@ -4481,6 +4506,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     );
     ctx.currentTaskId = record.task.taskId;
     _pluginContexts[itemId] = ctx;
+    _nativeNotificationTasks[itemId] = record.task.taskId;
 
     final cancelToken = CancelToken();
     _cancelTokens[itemId] = cancelToken;
@@ -4502,6 +4528,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         .then((_) async {
           _pluginContexts.remove(itemId);
           _cancelTokens.remove(itemId);
+          _nativeNotificationTasks.remove(itemId);
           try {
             await _persistCompletedFile(itemId, savePath, quality);
             _activeDownloads[itemId] = DownloadProgress(
@@ -4532,6 +4559,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         .catchError((Object e) async {
           _pluginContexts.remove(itemId);
           _cancelTokens.remove(itemId);
+          final nativeTaskId = _nativeNotificationTasks.remove(itemId);
           if (e is DioException && e.type == DioExceptionType.cancel) {
             _activeDownloads.remove(itemId);
             try {
@@ -4553,6 +4581,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
               quality: quality,
             );
             _emitError('${row.name}: $message');
+            await _notifyDownloadError(
+              itemId, row.name, message,
+              nativeTaskId: nativeTaskId,
+            );
           }
           notifyListeners();
         });

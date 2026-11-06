@@ -343,4 +343,20 @@ void main() {
     });
   });
 
+  group('native Android failure notification compatibility', () {
+    test('matches Java String.hashCode notification IDs', () {
+      expect(androidNativeTaskNotificationId(''), 0);
+      expect(androidNativeTaskNotificationId('abc'), 96354);
+      expect(androidNativeTaskNotificationId('moonfinMedia'),
+          'moonfinMedia'.codeUnits.fold<int>(
+            0, (value, unit) => (31 * value + unit).toSigned(32),
+          ));
+    });
+
+    test('does not use Moonfin progress IDs for native errors', () {
+      expect(androidNativeTaskNotificationId('episode::1'),
+          isNot(DownloadProgressNotificationRegistry.foregroundId));
+    });
+  });
+
 }

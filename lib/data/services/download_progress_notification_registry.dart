@@ -179,3 +179,14 @@ class DownloadProgressUpdateBuffer<T> {
   /// Does not clear scheduled: an already-queued worker still owns release.
   void clear() => _latest.clear();
 }
+
+/// Mirrors Java String.hashCode (UTF-16 units), used by the pinned
+/// background_downloader Android plugin for per-task notification IDs.
+/// Only used to dismiss a redundant, terminal native error card.
+int androidNativeTaskNotificationId(String taskId) {
+  var hash = 0;
+  for (final unit in taskId.codeUnits) {
+    hash = (31 * hash + unit) & 0xffffffff;
+  }
+  return hash.toSigned(32);
+}
