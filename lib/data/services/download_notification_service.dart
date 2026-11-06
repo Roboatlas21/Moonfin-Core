@@ -1,11 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../l10n/current_app_localizations.dart';
 import '../../util/platform_detection.dart';
-import 'local_notification_bootstrap.dart';
 import 'download_progress_notification_registry.dart';
+import 'local_notification_bootstrap.dart';
 
 class DownloadNotificationService {
   // Android doesn't allow an existing channel's sound or vibration to be
@@ -56,9 +57,21 @@ class DownloadNotificationService {
       DownloadProgressNotificationRegistry();
   final Map<String, DateTime> _lastAndroidUpdate = {};
   final Map<String, String> _lastAndroidSignature = {};
-  final Map<String, int> _progressGenerations = {};
-  final Set<String> _finishedProgress = {};
+  // The active generation map is cleared on completion/cancellation. Tokens
+  // never repeat, so stale updates cannot revive a finished transfer card.
+  final Map<String, int> _activeProgressGenerations = {};
+  int _nextProgressGeneration = 0;
+  final Map<String, ({
+    String itemName,
+    double progress,
+    int generation,
+    int dismissGeneration,
+    bool startNewTransfer,
+  })> _pendingAndroidProgress = {};
+  final Set<String> _queuedAndroidItems = {};
+  final Set<int> _pendingCancellationIds = {};
   int _dismissGeneration = 0;
+  Future<void>? _initializeFuture;
 
   // Serializes starts, updates, cancellation and owner promotion. A single
   // foreground-service notification must never be replaced out of order.
@@ -68,36 +81,65 @@ class DownloadNotificationService {
     _pendingNotification = completer.future;
     try {
       if (previous != null) await previous;
+      if (_pendingCancellationIds.isNotEmpty) {
+        await _retryPendingCancellations();
+      }
       await action();
     } finally {
       completer.complete();
     }
   }
 
-  Future<void> initialize() async {
+  Future<void> initialize() => _initializeFuture ??= _initialize();
+
+  Future<void> _initialize() async {
     if (_initialized) return;
-
     await LocalNotificationBootstrap.instance.initialize();
-    _initialized = true;
-
     if (PlatformDetection.isAndroid) {
       final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
-      // Register every channel before showing notifications. A separate
-      // channel keeps the progress card silent without muting errors.
-      try {
-        for (final channel in const [
-          progressChannel,
-          alertChannel,
-        ]) {
+      for (final channel in const [progressChannel, alertChannel]) {
+        try {
           await androidPlugin?.createNotificationChannel(channel);
+        } catch (e) {
+          debugPrint('[DownloadNotification] Channel registration failed: $e');
         }
-      } catch (_) {}
+      }
+      // In-process transcoding cannot survive process death. Remove only its
+      // stale progress cards; the native downloader uses another channel.
+      try {
+        final active = await _plugin.getActiveNotifications();
+        final stale = active
+            .where((notification) => isOwnProgressNotification(
+                  notification.id, notification.channelId))
+            .toList();
+        if (stale.any((notification) =>
+            notification.id == DownloadProgressNotificationRegistry.foregroundId)) {
+          try {
+            await androidPlugin
+                ?.stopForegroundService()
+                .timeout(const Duration(seconds: 5));
+          } catch (e) {
+            debugPrint('[DownloadNotification] Stale foreground stop failed: $e');
+          }
+        }
+        for (final notification in stale) {
+          await _cancelProgressId(notification.id);
+        }
+      } catch (e) {
+        debugPrint('[DownloadNotification] Stale progress cleanup failed: $e');
+      }
       try {
         await androidPlugin?.requestNotificationsPermission();
       } catch (_) {}
     }
+    _initialized = true;
   }
+
+  static bool isOwnProgressNotification(int id, String? channelId) =>
+      channelId == progressChannel.id &&
+      (id == DownloadProgressNotificationRegistry.foregroundId ||
+          id >= DownloadProgressNotificationRegistry.firstAdditionalId);
 
   bool _permissionRequested = false;
 
@@ -129,52 +171,72 @@ class DownloadNotificationService {
     if (!_initialized) return;
 
     if (PlatformDetection.isAndroid) {
-      // Mark a retry as a new lifetime. Late updates from an earlier transfer
-      // are rejected by its generation before they can recreate a card.
       if (startNewTransfer) {
-        _finishedProgress.remove(itemId);
-        _progressGenerations[itemId] =
-            (_progressGenerations[itemId] ?? 0) + 1;
-      } else if (_finishedProgress.contains(itemId)) {
+        _activeProgressGenerations[itemId] = ++_nextProgressGeneration;
+      } else if (!_activeProgressGenerations.containsKey(itemId)) {
         return;
       }
-      final generation = _progressGenerations[itemId] ?? 0;
-      final dismissGeneration = _dismissGeneration;
+      // Coalesce per episode before entering the native notification queue.
+      // Only the latest pending state for that episode is retained.
+      _pendingAndroidProgress[itemId] = (
+        itemName: itemName,
+        progress: progress,
+        generation: _activeProgressGenerations[itemId]!,
+        dismissGeneration: _dismissGeneration,
+        startNewTransfer: startNewTransfer,
+      );
+      if (!_queuedAndroidItems.add(itemId)) return;
+
       try {
         await _serializeNotification(() async {
-          if (_progressGenerations[itemId] != generation ||
-              _finishedProgress.contains(itemId) ||
-              _dismissGeneration != dismissGeneration) {
-            return;
-          }
+          try {
+            while (true) {
+              final next = _pendingAndroidProgress.remove(itemId);
+              if (next == null) break;
+              if (_activeProgressGenerations[itemId] != next.generation ||
+                  _dismissGeneration != next.dismissGeneration) {
+                continue;
+              }
 
-          final percent = progress >= 0 ? (progress * 100).round() : -1;
-          final signature = '$itemName/$percent';
-          if (_lastAndroidSignature[itemId] == signature) return;
-          final now = DateTime.now();
-          final last = _lastAndroidUpdate[itemId];
-          if (!startNewTransfer &&
-              last != null &&
-              now.difference(last).inMilliseconds < 1500) {
-            return;
+              final percent =
+                  next.progress >= 0 ? (next.progress * 100).round() : -1;
+              final signature = '${next.itemName}/$percent';
+              if (_lastAndroidSignature[itemId] == signature) continue;
+              final now = DateTime.now();
+              final last = _lastAndroidUpdate[itemId];
+              if (!next.startNewTransfer &&
+                  last != null &&
+                  now.difference(last).inMilliseconds < 1500) {
+                continue;
+              }
+              final l10n = currentAppLocalizations();
+              final body = percent >= 0
+                  ? l10n.downloadNotificationProgress(next.itemName, percent)
+                  : l10n.downloadNotificationStarting(next.itemName);
+              final snapshot = _androidProgress.update(
+                itemId: itemId,
+                title: l10n.downloadNotificationRunning,
+                body: body,
+                percent: percent,
+              );
+              try {
+                await _postAndroidProgress(snapshot);
+                _lastAndroidUpdate[itemId] = DateTime.now();
+                _lastAndroidSignature[itemId] = signature;
+              } catch (e) {
+                debugPrint(
+                  '[DownloadNotification] Progress failed for $itemId: $e',
+                );
+              }
+            }
+          } finally {
+            _queuedAndroidItems.remove(itemId);
           }
-
-          final l10n = currentAppLocalizations();
-          final body = percent >= 0
-              ? l10n.downloadNotificationProgress(itemName, percent)
-              : l10n.downloadNotificationStarting(itemName);
-          final snapshot = _androidProgress.update(
-            itemId: itemId,
-            title: l10n.downloadNotificationRunning,
-            body: body,
-            percent: percent,
-          );
-          await _postAndroidProgress(snapshot);
-          _lastAndroidUpdate[itemId] = now;
-          _lastAndroidSignature[itemId] = signature;
         });
-      } catch (_) {
-        // A notification failure must never fail a download.
+      } catch (e) {
+        _queuedAndroidItems.remove(itemId);
+        _pendingAndroidProgress.remove(itemId);
+        debugPrint('[DownloadNotification] Progress queue failed: $e');
       }
       return;
     }
@@ -214,9 +276,8 @@ class DownloadNotificationService {
     bool keepForegroundService = false,
   }) async {
     if (!_initialized || !PlatformDetection.isAndroid) return;
-    _finishedProgress.add(itemId);
-    _progressGenerations[itemId] =
-        (_progressGenerations[itemId] ?? 0) + 1;
+    _activeProgressGenerations.remove(itemId);
+    _pendingAndroidProgress.remove(itemId);
     _lastAndroidUpdate.remove(itemId);
     _lastAndroidSignature.remove(itemId);
     try {
@@ -226,8 +287,14 @@ class DownloadNotificationService {
         if (removal.wasForeground) {
           final promoted = removal.promoted;
           if (promoted != null) {
-            await _postAndroidProgress(promoted);
-            await _plugin.cancel(id: removal.promotedFromId!);
+            try {
+              await _postAndroidProgress(promoted);
+            } catch (e) {
+              debugPrint('[DownloadNotification] Foreground handoff failed: $e');
+            } finally {
+              // Do not leak the old ordinary card, even if promotion failed.
+              await _cancelProgressId(removal.promotedFromId!);
+            }
           } else if (keepForegroundService) {
             // Another transcoded transfer is queued or preparing. Android
             // may refuse to restart a dataSync foreground service from the
@@ -235,26 +302,32 @@ class DownloadNotificationService {
             // Replace the completed episode with a silent indeterminate card
             // until the next episode takes ownership of the same ID.
             final title = currentAppLocalizations().downloadNotificationRunning;
-            await _plugin.show(
-              id: DownloadProgressNotificationRegistry.foregroundId,
-              title: title,
-              body: '',
-              notificationDetails: NotificationDetails(
-                android: androidProgressDetails(-1),
-              ),
-            );
+            try {
+              await _plugin.show(
+                id: DownloadProgressNotificationRegistry.foregroundId,
+                title: title,
+                body: '',
+                notificationDetails: NotificationDetails(
+                  android: androidProgressDetails(-1),
+                ),
+              );
+            } catch (e) {
+              debugPrint('[DownloadNotification] Hold card failed: $e');
+            }
           } else {
             await _stopForegroundService();
-            await _plugin.cancel(
-              id: DownloadProgressNotificationRegistry.foregroundId,
-            );
+            if (!_foregroundServiceRunning) {
+              await _cancelProgressId(
+                DownloadProgressNotificationRegistry.foregroundId,
+              );
+            }
           }
         } else {
-          await _plugin.cancel(id: removal.removedId);
+          await _cancelProgressId(removal.removedId);
         }
       });
-    } catch (_) {
-      // Cleanup is best-effort: the transfer itself has already ended.
+    } catch (e) {
+      debugPrint('[DownloadNotification] Finish cleanup failed: $e');
     }
   }
 
@@ -358,30 +431,71 @@ class DownloadNotificationService {
     if (!_initialized) return;
     _dismissGeneration++;
     _lastProgressSignature = null;
-    _finishedProgress.addAll(_progressGenerations.keys);
+    _activeProgressGenerations.clear();
+    _pendingAndroidProgress.clear();
     _lastAndroidUpdate.clear();
     _lastAndroidSignature.clear();
     try {
       await _serializeNotification(() async {
-        final notificationIds = _androidProgress.clear();
-        for (final id in notificationIds) {
+        final ids = _androidProgress.clear();
+        for (final id in ids) {
           if (id != DownloadProgressNotificationRegistry.foregroundId) {
-            try {
-              await _plugin.cancel(id: id);
-            } catch (_) {
-              // A failed extra-card cancellation must not skip service stop.
-            }
+            await _cancelProgressId(id);
           }
         }
         await _stopForegroundService();
-        try {
-          await _plugin.cancel(
-            id: DownloadProgressNotificationRegistry.foregroundId,
+        if (!_foregroundServiceRunning) {
+          await _cancelProgressId(
+            DownloadProgressNotificationRegistry.foregroundId,
           );
-        } catch (_) {}
-
+        }
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[DownloadNotification] Dismiss failed: $e');
+    }
+  }
+
+  /// Ends a retained foreground-service placeholder after a batch, without
+  /// interrupting any other active standalone or concurrently queued work.
+  Future<void> releaseIdleForegroundService() async {
+    if (!_initialized || !PlatformDetection.isAndroid) return;
+    try {
+      await _serializeNotification(() async {
+        if (_activeProgressGenerations.isNotEmpty ||
+            _androidProgress.activeCount > 0) {
+          return;
+        }
+        await _stopForegroundService();
+        if (!_foregroundServiceRunning) {
+          await _cancelProgressId(
+            DownloadProgressNotificationRegistry.foregroundId,
+          );
+        }
+      });
+    } catch (e) {
+      debugPrint('[DownloadNotification] Idle release failed: $e');
+    }
+  }
+
+  Future<void> _cancelProgressId(int id) async {
+    try {
+      await _plugin.cancel(id: id);
+      _pendingCancellationIds.remove(id);
+    } catch (e) {
+      _pendingCancellationIds.add(id);
+      debugPrint('[DownloadNotification] Cancel $id failed: $e');
+    }
+  }
+
+  Future<void> _retryPendingCancellations() async {
+    for (final id in _pendingCancellationIds.toList()) {
+      if (_androidProgress.usesNotificationId(id) ||
+          (id == DownloadProgressNotificationRegistry.foregroundId &&
+              _foregroundServiceRunning)) {
+        continue;
+      }
+      await _cancelProgressId(id);
+    }
   }
 
   // Shared by foreground-service startup and later progress updates; both
@@ -515,16 +629,19 @@ class DownloadNotificationService {
     try {
       final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
+      if (androidPlugin == null) {
+        throw StateError('Android notification plugin unavailable');
+      }
       await androidPlugin
-          ?.stopForegroundService()
+          .stopForegroundService()
           .timeout(const Duration(seconds: 5));
-    } catch (_) {
-    }
-    _foregroundServiceRunning = false;
-    try {
-      await _plugin.cancel(id: _progressNotificationId)
-          .timeout(const Duration(seconds: 5));
-    } catch (_) {
+      _foregroundServiceRunning = false;
+      await _cancelProgressId(
+        DownloadProgressNotificationRegistry.foregroundId,
+      );
+    } catch (e) {
+      // Keep the running flag so a later cleanup attempt can retry the stop.
+      debugPrint('[DownloadNotification] Foreground stop failed: $e');
     }
   }
 }

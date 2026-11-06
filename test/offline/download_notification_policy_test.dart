@@ -57,6 +57,32 @@ void main() {
       expect(details.autoCancel, isTrue);
     });
 
+    test('startup cleanup isolates our own stale progress cards', () {
+      final own = DownloadNotificationService.progressChannel.id;
+      expect(
+        DownloadNotificationService.isOwnProgressNotification(1000, own),
+        isTrue,
+      );
+      expect(
+        DownloadNotificationService.isOwnProgressNotification(10000, own),
+        isTrue,
+      );
+      expect(
+        DownloadNotificationService.isOwnProgressNotification(
+          1000, 'background_downloader'),
+        isFalse,
+      );
+      expect(
+        DownloadNotificationService.isOwnProgressNotification(1001, own),
+        isFalse,
+      );
+      expect(
+        DownloadNotificationService.isOwnProgressNotification(
+          10000, DownloadNotificationService.alertChannel.id),
+        isFalse,
+      );
+    });
+
     test('server messages retain their pre-existing notification channel', () {
       expect(DownloadNotificationService.serverMessageChannel.id,
           'moonfin_downloads');
@@ -90,6 +116,7 @@ void main() {
           DownloadProgressNotificationRegistry.firstAdditionalId);
       expect(third.notificationId, second.notificationId + 1);
       expect(registry.activeCount, 3);
+      expect(registry.usesNotificationId(second.notificationId), isTrue);
       expect(registry.foregroundItemId, 'episode-1');
 
       final updated = registry.update(
@@ -168,6 +195,8 @@ void main() {
         DownloadProgressNotificationRegistry.firstAdditionalId,
       ]));
       expect(registry.activeCount, 0);
+      expect(registry.usesNotificationId(
+          DownloadProgressNotificationRegistry.foregroundId), isFalse);
       expect(registry.remove('a'), isNull);
 
       final restarted = registry.update(

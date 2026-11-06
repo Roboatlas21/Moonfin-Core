@@ -55,6 +55,8 @@ class DownloadProgressNotificationRegistry {
   int get activeCount => _active.length;
   String? get foregroundItemId => _foregroundItemId;
   int? idFor(String itemId) => _active[itemId]?.notificationId;
+  bool usesNotificationId(int id) =>
+      _active.values.any((snapshot) => snapshot.notificationId == id);
 
   DownloadProgressNotificationSnapshot update({
     required String itemId,
