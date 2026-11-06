@@ -74,6 +74,7 @@ class DownloadNotificationService {
   final Set<int> _pendingCancellationIds = {};
   int _dismissGeneration = 0;
   Future<void>? _initializeFuture;
+  bool _staleProgressReconciled = false;
 
   // Serializes starts, updates, cancellation and owner promotion. A single
   // foreground-service notification must never be replaced out of order.
@@ -122,30 +123,9 @@ class DownloadNotificationService {
           debugPrint('[DownloadNotification] Channel registration failed: $e');
         }
       }
-      // In-process transcoding cannot survive process death. Remove only its
-      // stale progress cards; the native downloader uses another channel.
-      try {
-        final active = await _plugin.getActiveNotifications();
-        final stale = active
-            .where((notification) => isOwnProgressNotification(
-                  notification.id, notification.channelId))
-            .toList();
-        if (stale.any((notification) =>
-            notification.id == DownloadProgressNotificationRegistry.foregroundId)) {
-          try {
-            await androidPlugin
-                ?.stopForegroundService()
-                .timeout(const Duration(seconds: 5));
-          } catch (e) {
-            debugPrint('[DownloadNotification] Stale foreground stop failed: $e');
-          }
-        }
-        for (final notification in stale) {
-          await _cancelProgressId(notification.id);
-        }
-      } catch (e) {
-        debugPrint('[DownloadNotification] Stale progress cleanup failed: $e');
-      }
+      // Stale progress cleanup is intentionally not performed here. A
+      // headless auto-download worker also initializes this service, and
+      // must never stop the main engine's active foreground download.
       try {
         await androidPlugin?.requestNotificationsPermission();
       } catch (_) {}
@@ -154,6 +134,30 @@ class DownloadNotificationService {
     if (PlatformDetection.isAndroid) {
       LocalNotificationBootstrap.instance.downloadCancelActionHandler =
           handleCancelAction;
+    }
+  }
+
+  /// Only the interactive app's cold startup calls this. A worker or second
+  /// Flutter engine must not interpret a live download as stale.
+  Future<void> reconcileStaleProgressOnColdStart() async {
+    if (!PlatformDetection.isAndroid || !_initialized ||
+        _staleProgressReconciled) return;
+    _staleProgressReconciled = true;
+    if (_foregroundServiceRunning || _androidProgress.activeCount != 0) return;
+    try {
+      final active = await _plugin
+          .getActiveNotifications()
+          .timeout(const Duration(seconds: 5));
+      for (final notification in active) {
+        if (isOwnProgressNotification(notification.id, notification.channelId)) {
+          // Cancel the obsolete Moonfin progress card, not the system's
+          // background_downloader channel or an unrelated alert. Do not call
+          // stopForegroundService here: a live engine might own it.
+          await _cancelProgressId(notification.id);
+        }
+      }
+    } catch (e) {
+      debugPrint('[DownloadNotification] Cold-start cleanup failed: $e');
     }
   }
 
