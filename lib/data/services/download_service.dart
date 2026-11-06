@@ -430,12 +430,17 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   Future<void> _notifyDownloadError(
     String itemId,
     String label,
-    String error,
-  ) async {
-    await _notificationService.finishProgress(
-      itemId,
-      keepForegroundService: _hasOtherTranscodedWork(itemId),
-    );
+    String error, {
+    String? notificationKey,
+  }) async {
+    // Errors during preflight or native recovery have no in-process progress
+    // card. Never finish another server's transfer with the same itemId.
+    if (notificationKey != null) {
+      await _notificationService.finishProgress(
+        notificationKey,
+        keepForegroundService: _hasOtherTranscodedWork(itemId),
+      );
+    }
     await _notificationService.showError(
       itemName: label,
       error: error,
@@ -2477,6 +2482,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       }
       return;
     }
+    // Item IDs are only unique within one server. The notification service
+    // outlives server switches, so isolate each transfer attempt as well.
+    final notificationKey =
+        '${item.serverId}::${item.id}::${const Uuid().v4()}';
     if (_cancelAllRequested) {
       if (_canClearCancelAllGate()) {
         _cancelAllRequested = false;
@@ -2717,7 +2726,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       if (!pluginOwnsNotifications()) {
         await _notificationService.showProgress(
-          itemId: item.id,
+          itemId: notificationKey,
           itemName: _notificationLabel(item),
           progress: initialProgress,
           startNewTransfer: true,
@@ -2822,7 +2831,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             _shouldUpdateSystemNotification(item.id, progress)) {
           unawaited(
             _notificationService.showProgress(
-              itemId: item.id,
+              itemId: notificationKey,
               itemName: _notificationLabel(item),
               progress: progress,
               batchTotal: _totalQueued,
@@ -2997,7 +3006,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       // The transfer has finished but post-download assets can still run.
       // Release only its progress card; concurrent transfers stay visible.
       await _notificationService.finishProgress(
-        item.id,
+        notificationKey,
         keepForegroundService: _hasOtherTranscodedWork(item.id),
       );
 
@@ -3019,7 +3028,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         await _offlineRepo.deleteItem(item.id);
         await _cleanupEpisodeContainers(item, imageDir);
         await _notificationService.finishProgress(
-          item.id,
+          notificationKey,
           keepForegroundService: _hasOtherTranscodedWork(item.id),
         );
         if (serverTicket != null) _forgetOnServer([item.id]);
@@ -3040,7 +3049,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           error: friendlyError,
         );
         if (!pluginOwnsNotifications()) {
-          await _notifyDownloadError(item.id, item.name, friendlyError);
+          await _notifyDownloadError(
+            item.id, item.name, friendlyError,
+            notificationKey: notificationKey,
+          );
         }
         _emitError('${item.name}: $friendlyError');
       }
@@ -3057,7 +3069,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       await _offlineRepo.updateDownloadStatus(item.id, 3, error: friendlyError);
       if (!pluginOwnsNotifications()) {
-        await _notifyDownloadError(item.id, item.name, friendlyError);
+        await _notifyDownloadError(
+            item.id, item.name, friendlyError,
+            notificationKey: notificationKey,
+          );
       }
       _emitError('${item.name}: $friendlyError');
     } catch (e) {
@@ -3077,7 +3092,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       await _offlineRepo.updateDownloadStatus(item.id, 3, error: friendlyError);
       if (!pluginOwnsNotifications()) {
-        await _notifyDownloadError(item.id, item.name, friendlyError);
+        await _notifyDownloadError(
+            item.id, item.name, friendlyError,
+            notificationKey: notificationKey,
+          );
       }
       _emitError('${item.name}: $friendlyError');
     } finally {
