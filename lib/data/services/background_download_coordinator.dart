@@ -170,6 +170,10 @@ class BackgroundDownloadCoordinator {
     // Read once at start-up: a language change applies to the plugin's
     // notifications from the next launch.
     final l10n = currentAppLocalizations();
+    // On Android the native downloader already uses its own low-importance
+    // background_downloader channel and onlyAlertOnce for running updates.
+    // Don't mirror these through Moonfin's Dart foreground notification:
+    // that would duplicate progress cards and potentially reintroduce alerts.
     FileDownloader().configureNotificationForGroup(
       mediaGroup,
       running: TaskNotification(

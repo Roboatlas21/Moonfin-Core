@@ -7,13 +7,39 @@ import '../../util/platform_detection.dart';
 import 'local_notification_bootstrap.dart';
 
 class DownloadNotificationService {
-  static const _channelId = 'moonfin_downloads';
-  static const _channelName = 'Downloads';
-  static const _channelDesc = 'Shows download progress for offline media';
+  // Android doesn't allow an existing channel's sound or vibration to be
+  // changed. The old moonfin_downloads channel mixed audible completion
+  // alerts with rapidly updated progress, so use a fresh silent channel ID.
+  static const progressChannel = AndroidNotificationChannel(
+    'moonfin_download_progress_silent_v1',
+    'Download progress',
+    description: 'Silent progress for offline media downloads',
+    importance: Importance.low,
+    playSound: false,
+    enableVibration: false,
+    showBadge: false,
+  );
+  static const completionChannel = AndroidNotificationChannel(
+    'moonfin_download_complete',
+    'Completed downloads',
+    description: 'Alerts when offline downloads finish',
+  );
+  static const errorChannel = AndroidNotificationChannel(
+    'moonfin_download_errors',
+    'Download problems',
+    description: 'Alerts for failed or blocked downloads',
+  );
+  static const serverMessageChannel = AndroidNotificationChannel(
+    'moonfin_server_messages',
+    'Server messages',
+    description: 'Messages sent by the media server',
+  );
+
   static const _progressNotificationId = 1000;
   static const _completionNotificationId = 1001;
   static const _remoteMessageNotificationId = 1002;
   static const _storageNotificationId = 1003;
+  static const _errorNotificationId = 1004;
 
   FlutterLocalNotificationsPlugin get _plugin =>
       LocalNotificationBootstrap.instance.plugin;
@@ -32,11 +58,22 @@ class DownloadNotificationService {
     _initialized = true;
 
     if (PlatformDetection.isAndroid) {
+      final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      // Register every channel before showing notifications. A separate
+      // channel keeps the progress card silent without muting errors.
       try {
-        await _plugin
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>()
-            ?.requestNotificationsPermission();
+        for (final channel in const [
+          progressChannel,
+          completionChannel,
+          errorChannel,
+          serverMessageChannel,
+        ]) {
+          await androidPlugin?.createNotificationChannel(channel);
+        }
+      } catch (_) {}
+      try {
+        await androidPlugin?.requestNotificationsPermission();
       } catch (_) {}
     }
   }
@@ -126,7 +163,12 @@ class DownloadNotificationService {
               ? l10n.downloadNotificationSeriesEpisodes(batchSeries, batchTotal)
               : l10n.downloadNotificationSavedCount(batchTotal)
         : l10n.downloadNotificationSaved(itemName);
-    await _showSimple(_completionNotificationId, title, body);
+    await _showSimple(
+      _completionNotificationId,
+      title,
+      body,
+      androidChannel: completionChannel,
+    );
   }
 
   /// [transfersRemain] keeps the foreground service up when other downloads
@@ -143,9 +185,10 @@ class DownloadNotificationService {
     if (!transfersRemain) await _stopForegroundService();
     final l10n = currentAppLocalizations();
     await _showSimple(
-      _completionNotificationId,
+      _errorNotificationId,
       l10n.downloadNotificationFailedTitle,
       l10n.downloadNotificationFailedBody(itemName, error),
+      androidChannel: errorChannel,
     );
   }
 
@@ -161,6 +204,7 @@ class DownloadNotificationService {
       _storageNotificationId,
       l10n.autoDownloadStorageFullTitle,
       l10n.autoDownloadStorageFullBody(count, firstLabel, firstSize),
+      androidChannel: errorChannel,
     );
   }
 
@@ -179,7 +223,12 @@ class DownloadNotificationService {
     final body = text.trim().isNotEmpty
         ? text.trim()
         : l10n.serverMessagesNotificationReceived;
-    await _showSimple(_remoteMessageNotificationId, title, body);
+    await _showSimple(
+      _remoteMessageNotificationId,
+      title,
+      body,
+      androidChannel: serverMessageChannel,
+    );
     return true;
   }
 
@@ -190,23 +239,33 @@ class DownloadNotificationService {
     await _plugin.cancel(id: _progressNotificationId);
   }
 
-  Future<void> _showAndroidForegroundProgress(
-      String title, String body, int percent) async {
-    final androidDetails = AndroidNotificationDetails(
-      _channelId,
-      _channelName,
-      channelDescription: _channelDesc,
+  // Shared by foreground-service startup and later progress updates; both
+  // must use the exact same silent channel and no-alert flags.
+  static AndroidNotificationDetails androidProgressDetails(int percent) {
+    return AndroidNotificationDetails(
+      progressChannel.id,
+      progressChannel.name,
+      channelDescription: progressChannel.description,
       importance: Importance.low,
       priority: Priority.low,
+      playSound: false,
+      enableVibration: false,
+      silent: true,
+      onlyAlertOnce: true,
       ongoing: true,
       autoCancel: false,
+      showWhen: false,
       showProgress: true,
       maxProgress: 100,
       progress: percent >= 0 ? percent : 0,
       indeterminate: percent < 0,
       category: AndroidNotificationCategory.progress,
     );
+  }
 
+  Future<void> _showAndroidForegroundProgress(
+      String title, String body, int percent) async {
+    final androidDetails = androidProgressDetails(percent);
     final details = NotificationDetails(android: androidDetails);
 
     if (!_foregroundServiceRunning) {
@@ -245,20 +304,33 @@ class DownloadNotificationService {
     );
   }
 
-  Future<void> _showSimple(int id, String title, String body) async {
+  static AndroidNotificationDetails androidAlertDetails(
+    AndroidNotificationChannel channel,
+  ) {
+    return AndroidNotificationDetails(
+      channel.id,
+      channel.name,
+      channelDescription: channel.description,
+      importance: channel.importance,
+      priority: Priority.defaultPriority,
+      playSound: channel.playSound,
+      enableVibration: channel.enableVibration,
+      autoCancel: true,
+    );
+  }
+
+  Future<void> _showSimple(
+    int id,
+    String title,
+    String body, {
+    required AndroidNotificationChannel androidChannel,
+  }) async {
     await _plugin.show(
       id: id,
       title: title,
       body: body,
       notificationDetails: NotificationDetails(
-        android: AndroidNotificationDetails(
-          _channelId,
-          _channelName,
-          channelDescription: _channelDesc,
-          importance: Importance.defaultImportance,
-          priority: Priority.defaultPriority,
-          autoCancel: true,
-        ),
+        android: androidAlertDetails(androidChannel),
         iOS: const DarwinNotificationDetails(),
         macOS: const DarwinNotificationDetails(),
         linux: const LinuxNotificationDetails(),
