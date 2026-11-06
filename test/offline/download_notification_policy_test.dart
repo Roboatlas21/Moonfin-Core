@@ -35,27 +35,25 @@ void main() {
       expect(details.onlyAlertOnce, isTrue);
     });
 
-    test('completion, errors and server messages have separate alert channels', () {
+    test('downloads use one silent progress and one audible alert channel', () {
       const progress = DownloadNotificationService.progressChannel;
-      const complete = DownloadNotificationService.completionChannel;
-      const errors = DownloadNotificationService.errorChannel;
-      const messages = DownloadNotificationService.serverMessageChannel;
+      const alerts = DownloadNotificationService.alertChannel;
 
-      expect(
-        {progress.id, complete.id, errors.id, messages.id}.length,
-        4,
-      );
+      expect(progress.id, isNot(alerts.id));
+      expect(alerts.importance, Importance.defaultImportance);
+      expect(alerts.playSound, isTrue);
+      expect(alerts.enableVibration, isTrue);
 
-      for (final channel in [complete, errors, messages]) {
-        expect(channel.importance, Importance.defaultImportance);
-        expect(channel.playSound, isTrue);
-        expect(channel.enableVibration, isTrue);
-        final details = DownloadNotificationService.androidAlertDetails(channel);
-        expect(details.channelId, channel.id);
-        expect(details.playSound, isTrue);
-        expect(details.enableVibration, isTrue);
-        expect(details.autoCancel, isTrue);
-      }
+      final details = DownloadNotificationService.androidAlertDetails(alerts);
+      expect(details.channelId, alerts.id);
+      expect(details.playSound, isTrue);
+      expect(details.enableVibration, isTrue);
+      expect(details.autoCancel, isTrue);
+    });
+
+    test('server messages retain their pre-existing notification channel', () {
+      expect(DownloadNotificationService.serverMessageChannel.id,
+          'moonfin_downloads');
     });
   });
 }

@@ -19,27 +19,24 @@ class DownloadNotificationService {
     enableVibration: false,
     showBadge: false,
   );
-  static const completionChannel = AndroidNotificationChannel(
-    'moonfin_download_complete',
-    'Completed downloads',
-    description: 'Alerts when offline downloads finish',
+  static const alertChannel = AndroidNotificationChannel(
+    'moonfin_download_alerts_v1',
+    'Download alerts',
+    description: 'Download completion, failure and storage alerts',
   );
-  static const errorChannel = AndroidNotificationChannel(
-    'moonfin_download_errors',
-    'Download problems',
-    description: 'Alerts for failed or blocked downloads',
-  );
+
+  // Preserve the existing channel for unrelated server messages. Only the
+  // download progress and alerts channels are new in this change.
   static const serverMessageChannel = AndroidNotificationChannel(
-    'moonfin_server_messages',
-    'Server messages',
-    description: 'Messages sent by the media server',
+    'moonfin_downloads',
+    'Downloads',
+    description: 'Shows download progress for offline media',
   );
 
   static const _progressNotificationId = 1000;
   static const _completionNotificationId = 1001;
   static const _remoteMessageNotificationId = 1002;
   static const _storageNotificationId = 1003;
-  static const _errorNotificationId = 1004;
 
   FlutterLocalNotificationsPlugin get _plugin =>
       LocalNotificationBootstrap.instance.plugin;
@@ -65,9 +62,7 @@ class DownloadNotificationService {
       try {
         for (final channel in const [
           progressChannel,
-          completionChannel,
-          errorChannel,
-          serverMessageChannel,
+          alertChannel,
         ]) {
           await androidPlugin?.createNotificationChannel(channel);
         }
@@ -167,7 +162,7 @@ class DownloadNotificationService {
       _completionNotificationId,
       title,
       body,
-      androidChannel: completionChannel,
+      androidChannel: alertChannel,
     );
   }
 
@@ -185,10 +180,10 @@ class DownloadNotificationService {
     if (!transfersRemain) await _stopForegroundService();
     final l10n = currentAppLocalizations();
     await _showSimple(
-      _errorNotificationId,
+      _completionNotificationId,
       l10n.downloadNotificationFailedTitle,
       l10n.downloadNotificationFailedBody(itemName, error),
-      androidChannel: errorChannel,
+      androidChannel: alertChannel,
     );
   }
 
@@ -204,7 +199,7 @@ class DownloadNotificationService {
       _storageNotificationId,
       l10n.autoDownloadStorageFullTitle,
       l10n.autoDownloadStorageFullBody(count, firstLabel, firstSize),
-      androidChannel: errorChannel,
+      androidChannel: alertChannel,
     );
   }
 
