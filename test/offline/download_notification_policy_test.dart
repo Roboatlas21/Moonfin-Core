@@ -414,4 +414,10 @@ void main() {
     });
   });
 
+  test('foreground cancel action is absent for unowned service placeholder', () {
+    final details = DownloadNotificationService.androidProgressDetails(-1);
+    expect(details.actions, isNull);
+    expect(details.silent, isTrue);
+  });
+
 }

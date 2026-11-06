@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../l10n/current_app_localizations.dart';
@@ -55,6 +56,9 @@ class DownloadNotificationService {
   Future<void>? _foregroundStartInFlight;
   bool _stopAfterForegroundStart = false;
   bool _retainForegroundBetweenTransfers = false;
+  String? _foregroundActionOwner;
+  static const _foregroundActionChannel =
+      MethodChannel('org.moonfin.androidtv/download_notifications');
   String? _lastProgressSignature;
 
   Future<void>? _pendingNotification;
@@ -380,12 +384,7 @@ class DownloadNotificationService {
                       title: promoted.title,
                       body: promoted.body,
                       notificationDetails: NotificationDetails(
-                        android: androidProgressDetails(
-                          promoted.percent,
-                          when: promoted.createdAtMillis,
-                          cancelActionId: promoted.cancelActionId,
-                          cancelLabel: currentAppLocalizations().cancel,
-                        ),
+                        android: await _progressDetailsFor(promoted),
                       ),
                     )
                     .timeout(_operationTimeout);
@@ -666,6 +665,45 @@ class DownloadNotificationService {
     );
   }
 
+  /// flutter_local_notifications assigns the same Android PendingIntent
+  /// request code to every action on notification ID 1000. Without explicitly
+  /// cancelling that token, FLAG_UPDATE_CURRENT could turn a late tap on the
+  /// previous episode into a cancellation of its newly promoted replacement.
+  ///
+  /// If the native bridge is unavailable, show progress without the Cancel
+  /// button until the action can be safely rebound on a later update.
+  Future<bool> _prepareForegroundCancelAction(String actionId) async {
+    if (_foregroundActionOwner == actionId) return true;
+    try {
+      final reset = await _foregroundActionChannel.invokeMethod<bool>(
+        'invalidateForegroundCancelAction',
+        {'notificationId': DownloadProgressNotificationRegistry.foregroundId},
+      ).timeout(const Duration(seconds: 2));
+      if (reset == true) {
+        _foregroundActionOwner = actionId;
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[DownloadNotification] Cancel action rebind failed: $e');
+    }
+    return false;
+  }
+
+  Future<AndroidNotificationDetails> _progressDetailsFor(
+    DownloadProgressNotificationSnapshot snapshot,
+  ) async {
+    final actionAllowed =
+        snapshot.notificationId !=
+            DownloadProgressNotificationRegistry.foregroundId ||
+        await _prepareForegroundCancelAction(snapshot.cancelActionId);
+    return androidProgressDetails(
+      snapshot.percent,
+      when: snapshot.createdAtMillis,
+      cancelActionId: actionAllowed ? snapshot.cancelActionId : null,
+      cancelLabel: currentAppLocalizations().cancel,
+    );
+  }
+
   Future<void> _reconcileForegroundStart(
     Future<void> attempt, {
     required bool succeeded,
@@ -714,12 +752,7 @@ class DownloadNotificationService {
   Future<void> _postAndroidProgress(
     DownloadProgressNotificationSnapshot snapshot,
   ) async {
-    final details = androidProgressDetails(
-      snapshot.percent,
-      when: snapshot.createdAtMillis,
-      cancelActionId: snapshot.cancelActionId,
-      cancelLabel: currentAppLocalizations().cancel,
-    );
+    final details = await _progressDetailsFor(snapshot);
     if (snapshot.notificationId !=
         DownloadProgressNotificationRegistry.foregroundId) {
       await _plugin
@@ -860,6 +893,7 @@ class DownloadNotificationService {
       _foregroundServiceRunning = false;
       _foregroundStartInFlight = null;
       _stopAfterForegroundStart = false;
+      _foregroundActionOwner = null;
       await _cancelProgressId(
         DownloadProgressNotificationRegistry.foregroundId,
       );
