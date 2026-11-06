@@ -3417,7 +3417,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         if (generation != _batchGeneration || _cancelAllRequested) {
           // Cancel All may have raced the async preference write. Do not
           // resurrect a batch manifest or start its canceled transfers.
-          await _batchNotificationLedger.consume(ledgerId);
+          try {
+            await _batchNotificationLedger.consume(ledgerId);
+          } catch (e) {
+            debugPrint('[Download] Canceled manifest cleanup failed: $e');
+          }
           return DownloadBatch(queued: const [], done: Future.value());
         }
         _activeBatchLedgerIds.add(ledgerId);
