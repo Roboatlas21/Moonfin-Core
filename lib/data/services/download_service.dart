@@ -4281,54 +4281,62 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       } catch (_) {}
     }
 
-    final allItems = await _offlineRepo.getItems();
+    try {
+      final allItems = await _offlineRepo.getItems();
 
-    for (final item in allItems) {
-      if (refused.contains(item.itemId)) continue;
-      if (item.downloadStatus == 1) {
-        final record = pluginRecords[item.itemId];
-        if (record != null && await _recoverFromTaskRecord(item, record)) {
-          if (record.status == bgd.TaskStatus.complete) {
-            recoveringCompletedIds.add(item.itemId);
+      for (final item in allItems) {
+        if (refused.contains(item.itemId)) continue;
+        if (item.downloadStatus == 1) {
+          final record = pluginRecords[item.itemId];
+          if (record != null && await _recoverFromTaskRecord(item, record)) {
+            if (record.status == bgd.TaskStatus.complete) {
+              recoveringCompletedIds.add(item.itemId);
+            }
+            continue;
           }
-          continue;
-        }
-        if (item.localFilePath != null) {
-          final file = File(item.localFilePath!);
-          if (await file.exists()) await file.delete();
-        }
-        if (item.metadataJson.isNotEmpty) {
-          final qualityName = item.qualityPreset;
-          final quality = DownloadQuality.fromName(qualityName);
-          final isStatic = !quality.isTranscoded;
-          if (isStatic) {
-            await _offlineRepo.updateDownloadStatus(item.itemId, 0);
+          if (item.localFilePath != null) {
+            final file = File(item.localFilePath!);
+            if (await file.exists()) await file.delete();
+          }
+          if (item.metadataJson.isNotEmpty) {
+            final qualityName = item.qualityPreset;
+            final quality = DownloadQuality.fromName(qualityName);
+            final isStatic = !quality.isTranscoded;
+            if (isStatic) {
+              await _offlineRepo.updateDownloadStatus(item.itemId, 0);
+            } else {
+              await _offlineRepo.updateDownloadStatus(
+                item.itemId,
+                3,
+                error: 'Interrupted. Transcoded downloads cannot be resumed.',
+              );
+            }
           } else {
             await _offlineRepo.updateDownloadStatus(
               item.itemId,
               3,
-              error: 'Interrupted. Transcoded downloads cannot be resumed.',
+              error: 'Interrupted',
             );
           }
-        } else {
-          await _offlineRepo.updateDownloadStatus(
-            item.itemId,
-            3,
-            error: 'Interrupted',
-          );
-        }
-      } else if (item.downloadStatus == 2) {
-        if (item.localFilePath != null) {
-          final file = File(item.localFilePath!);
-          if (!await file.exists()) {
-            await _offlineRepo.updateDownloadStatus(
-              item.itemId,
-              3,
-              error: 'File missing from disk',
-            );
+        } else if (item.downloadStatus == 2) {
+          if (item.localFilePath != null) {
+            final file = File(item.localFilePath!);
+            if (!await file.exists()) {
+              await _offlineRepo.updateDownloadStatus(
+                item.itemId,
+                3,
+                error: 'File missing from disk',
+              );
+            }
           }
         }
       }
+    } catch (e) {
+      // A failed DB reconciliation must not leave summary alerts suspended
+      // for the rest of this app session.
+      _recoveryScanInProgress = false;
+      _scheduleRecoveredCompletionAlert();
+      rethrow;
     }
 
     // Do not delay screen startup while recovered sidecars are processed.
