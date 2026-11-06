@@ -2791,7 +2791,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         progress: initialProgress,
         quality: quality,
       );
+      // The native downloader normally owns original-quality progress. When
+      // it falls back to the in-process legacy engine, ownership must change
+      // before that engine starts, or Android gets no foreground notification.
+      var localProgressStarted = false;
       if (!pluginOwnsNotifications()) {
+        localProgressStarted = true;
         _ownNotificationKeys[item.id] = notificationKey;
         await _notificationService.showProgress(
           itemId: notificationKey,
@@ -2895,7 +2900,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             ),
           );
         }
-        if (!pluginOwnsNotifications() &&
+        if (localProgressStarted &&
             _shouldUpdateSystemNotification(item.id, progress)) {
           unawaited(
             _notificationService.showProgress(
@@ -2914,6 +2919,22 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         transferQuality,
         destinationOnRemovableStorage: destinationOnRemovableStorage,
       );
+
+      Future<void> startLocalProgressAfterNativeFallback() async {
+        if (localProgressStarted) return;
+        localProgressStarted = true;
+        _ownNotificationKeys[item.id] = notificationKey;
+        final current = _activeDownloads[item.id];
+        await _notificationService.showProgress(
+          itemId: notificationKey,
+          itemName: _notificationLabel(item),
+          progress: current?.progress ?? initialProgress,
+          startNewTransfer: true,
+          onCancel: () => cancelDownload(item.id),
+          batchTotal: _totalQueued,
+          batchCompleted: _completedCount,
+        );
+      }
 
       Future<Response> engineDownload(String downloadUrl) async {
         // Fallback URLs are direct copies with their own seek index, so only
@@ -2959,6 +2980,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             usePluginEngine = false;
           }
         }
+        // Both native TLS rejection and never-started fallbacks must create
+        // Moonfin's foreground notification before the legacy transfer runs.
+        await startLocalProgressAfterNativeFallback();
         return _legacyEngine.downloadWithHangGuard(
           downloadUrl,
           savePath!,
