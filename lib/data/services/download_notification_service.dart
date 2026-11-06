@@ -61,14 +61,13 @@ class DownloadNotificationService {
   // never repeat, so stale updates cannot revive a finished transfer card.
   final Map<String, int> _activeProgressGenerations = {};
   int _nextProgressGeneration = 0;
-  final Map<String, ({
+  final DownloadProgressUpdateBuffer<({
     String itemName,
     double progress,
     int generation,
     int dismissGeneration,
     bool startNewTransfer,
-  })> _pendingAndroidProgress = {};
-  final Set<String> _queuedAndroidItems = {};
+  })> _pendingAndroidProgress = DownloadProgressUpdateBuffer();
   final Set<int> _pendingCancellationIds = {};
   int _dismissGeneration = 0;
   Future<void>? _initializeFuture;
@@ -90,7 +89,19 @@ class DownloadNotificationService {
     }
   }
 
-  Future<void> initialize() => _initializeFuture ??= _initialize();
+  Future<void> initialize() async {
+    final previous = _initializeFuture;
+    if (previous != null) return previous;
+    final task = _initialize();
+    _initializeFuture = task;
+    try {
+      await task;
+    } catch (_) {
+      // A failed initial bootstrap must be retryable on the next attempt.
+      if (identical(_initializeFuture, task)) _initializeFuture = null;
+      rethrow;
+    }
+  }
 
   Future<void> _initialize() async {
     if (_initialized) return;
@@ -178,20 +189,21 @@ class DownloadNotificationService {
       }
       // Coalesce per episode before entering the native notification queue.
       // Only the latest pending state for that episode is retained.
-      _pendingAndroidProgress[itemId] = (
+      if (!_pendingAndroidProgress.offer(itemId, (
         itemName: itemName,
         progress: progress,
         generation: _activeProgressGenerations[itemId]!,
         dismissGeneration: _dismissGeneration,
         startNewTransfer: startNewTransfer,
-      );
-      if (!_queuedAndroidItems.add(itemId)) return;
+      ))) {
+        return;
+      }
 
       try {
         await _serializeNotification(() async {
           try {
             while (true) {
-              final next = _pendingAndroidProgress.remove(itemId);
+              final next = _pendingAndroidProgress.take(itemId);
               if (next == null) break;
               if (_activeProgressGenerations[itemId] != next.generation ||
                   _dismissGeneration != next.dismissGeneration) {
@@ -230,12 +242,12 @@ class DownloadNotificationService {
               }
             }
           } finally {
-            _queuedAndroidItems.remove(itemId);
+            _pendingAndroidProgress.release(itemId);
           }
         });
       } catch (e) {
-        _queuedAndroidItems.remove(itemId);
-        _pendingAndroidProgress.remove(itemId);
+        _pendingAndroidProgress.release(itemId);
+        _pendingAndroidProgress.discard(itemId);
         debugPrint('[DownloadNotification] Progress queue failed: $e');
       }
       return;
@@ -277,7 +289,7 @@ class DownloadNotificationService {
   }) async {
     if (!_initialized || !PlatformDetection.isAndroid) return;
     _activeProgressGenerations.remove(itemId);
-    _pendingAndroidProgress.remove(itemId);
+    _pendingAndroidProgress.discard(itemId);
     _lastAndroidUpdate.remove(itemId);
     _lastAndroidSignature.remove(itemId);
     try {

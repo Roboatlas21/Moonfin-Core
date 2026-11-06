@@ -207,4 +207,41 @@ void main() {
     });
   });
 
+  group('latest progress update buffer', () {
+    test('coalesces repeated progress updates before the worker runs', () {
+      final buffer = DownloadProgressUpdateBuffer<int>();
+      expect(buffer.offer('episode-a', 1), isTrue);
+      expect(buffer.offer('episode-a', 50), isFalse);
+      expect(buffer.offer('episode-b', 25), isTrue);
+      expect(buffer.offer('episode-a', 91), isFalse);
+      expect(buffer.pendingCount, 2);
+      expect(buffer.take('episode-a'), 91);
+      expect(buffer.take('episode-b'), 25);
+      expect(buffer.pendingCount, 0);
+
+      buffer.release('episode-a');
+      buffer.release('episode-b');
+      expect(buffer.offer('episode-a', 99), isTrue);
+    });
+
+    test('finishing an episode discards pending updates', () {
+      final buffer = DownloadProgressUpdateBuffer<int>();
+      expect(buffer.offer('episode-a', 12), isTrue);
+      buffer.discard('episode-a');
+      expect(buffer.take('episode-a'), isNull);
+      buffer.release('episode-a');
+      expect(buffer.offer('episode-a', 0), isTrue);
+    });
+
+    test('clear invalidates pending updates without duplicating workers', () {
+      final buffer = DownloadProgressUpdateBuffer<int>();
+      expect(buffer.offer('episode-a', 10), isTrue);
+      buffer.clear();
+      expect(buffer.take('episode-a'), isNull);
+      expect(buffer.offer('episode-a', 15), isFalse);
+      buffer.release('episode-a');
+      expect(buffer.offer('episode-a', 20), isTrue);
+    });
+  });
+
 }

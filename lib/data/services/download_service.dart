@@ -390,6 +390,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   /// Series of the items finished in the current batch (null for a movie),
   /// so the completion notice can name the show when there is only one.
   final Set<String?> _completedSeries = {};
+  String? _lastCompletedNotificationLabel;
 
   // File transfers release their scheduler slots before subtitles and
   // artwork finish. Keep the post-processing future until its containing
@@ -401,6 +402,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _totalQueued = 0;
     _completedCount = 0;
     _completedSeries.clear();
+    _lastCompletedNotificationLabel = null;
   }
 
   /// "Series S1E1" or the item's name, for the system notifications.
@@ -1305,6 +1307,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       if (generation == _batchGeneration) {
         _completedCount++;
         _completedSeries.add(item.type == 'Episode' ? item.seriesName : null);
+        _lastCompletedNotificationLabel = _notificationLabel(item);
       }
     }
 
@@ -3244,6 +3247,8 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         final total = _totalQueued;
         final series =
             _completedSeries.length == 1 ? _completedSeries.single : null;
+        final itemName = _lastCompletedNotificationLabel ??
+            _notificationLabel(toQueue.last);
         _resetBatch();
         if (PlatformDetection.isAndroid) {
           await _notificationService.releaseIdleForegroundService();
@@ -3255,7 +3260,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           total: total,
         )) {
           await _notificationService.showComplete(
-            itemName: '',
+            itemName: itemName,
             batchTotal: total,
             batchSeries: series,
           );

@@ -123,3 +123,29 @@ class DownloadProgressNotificationRegistry {
     return ids;
   }
 }
+
+/// Stores only the latest pending update for each episode while its
+/// single worker is queued. A busy Android notification API therefore cannot
+/// accumulate one native call per progress callback.
+class DownloadProgressUpdateBuffer<T> {
+  final Map<String, T> _latest = {};
+  final Set<String> _scheduled = {};
+
+  int get pendingCount => _latest.length;
+
+  /// Returns true only when a worker must be scheduled for this item.
+  bool offer(String itemId, T update) {
+    _latest[itemId] = update;
+    return _scheduled.add(itemId);
+  }
+
+  T? take(String itemId) => _latest.remove(itemId);
+
+  void discard(String itemId) => _latest.remove(itemId);
+
+  /// Workers call release in their own finally block.
+  void release(String itemId) => _scheduled.remove(itemId);
+
+  /// Does not clear scheduled: an already-queued worker still owns release.
+  void clear() => _latest.clear();
+}
