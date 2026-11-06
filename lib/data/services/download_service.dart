@@ -2721,6 +2721,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           itemName: _notificationLabel(item),
           progress: initialProgress,
           startNewTransfer: true,
+          onCancel: () => cancelDownload(item.id),
           batchTotal: _totalQueued,
           batchCompleted: _completedCount,
         );

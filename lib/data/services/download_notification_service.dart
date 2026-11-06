@@ -55,6 +55,9 @@ class DownloadNotificationService {
   // of them promoted into the foreground slot when its owner finishes.
   final DownloadProgressNotificationRegistry _androidProgress =
       DownloadProgressNotificationRegistry();
+  // Captures the owner of each running download, even if the user switches
+  // Jellyfin servers while that transfer is still finishing.
+  final Map<String, void Function()> _androidCancelHandlers = {};
   final Map<String, DateTime> _lastAndroidUpdate = {};
   final Map<String, String> _lastAndroidSignature = {};
   // The active generation map is cleared on completion/cancellation. Tokens
@@ -148,6 +151,31 @@ class DownloadNotificationService {
       } catch (_) {}
     }
     _initialized = true;
+    if (PlatformDetection.isAndroid) {
+      LocalNotificationBootstrap.instance.downloadCancelActionHandler =
+          handleCancelAction;
+    }
+  }
+
+  /// Called on the main isolate after an Android notification action is
+  /// forwarded. Reject old actions; they cannot cancel a reused notification
+  /// ID, a different episode, or a retry of the same episode.
+  bool handleCancelAction(String actionId) {
+    if (!_initialized || !PlatformDetection.isAndroid) return false;
+    final target = _androidProgress.targetForCancelAction(actionId);
+    if (target == null ||
+        !_activeProgressGenerations.containsKey(target.itemId)) {
+      return false;
+    }
+    final cancel = _androidCancelHandlers[target.itemId];
+    if (cancel == null) return false;
+    try {
+      cancel();
+      return true;
+    } catch (e) {
+      debugPrint('[DownloadNotification] Cancel action failed: $e');
+      return false;
+    }
   }
 
   static bool isOwnProgressNotification(int id, String? channelId) =>
@@ -181,12 +209,18 @@ class DownloadNotificationService {
     int batchTotal = 0,
     int batchCompleted = 0,
     bool startNewTransfer = false,
+    void Function()? onCancel,
   }) async {
     if (!_initialized) return;
 
     if (PlatformDetection.isAndroid) {
       if (startNewTransfer) {
         _activeProgressGenerations[itemId] = ++_nextProgressGeneration;
+        if (onCancel != null) {
+          _androidCancelHandlers[itemId] = onCancel;
+        } else {
+          _androidCancelHandlers.remove(itemId);
+        }
       } else if (!_activeProgressGenerations.containsKey(itemId)) {
         return;
       }
@@ -292,6 +326,7 @@ class DownloadNotificationService {
   }) async {
     if (!_initialized || !PlatformDetection.isAndroid) return;
     _activeProgressGenerations.remove(itemId);
+    _androidCancelHandlers.remove(itemId);
     _pendingAndroidProgress.discard(itemId);
     _lastAndroidUpdate.remove(itemId);
     _lastAndroidSignature.remove(itemId);
@@ -319,6 +354,8 @@ class DownloadNotificationService {
                     android: androidProgressDetails(
                       promoted.percent,
                       when: promoted.createdAtMillis,
+                      cancelActionId: promoted.cancelActionId,
+                      cancelLabel: currentAppLocalizations().cancel,
                     ),
                   ),
                 );
@@ -469,6 +506,7 @@ class DownloadNotificationService {
     _dismissGeneration++;
     _lastProgressSignature = null;
     _activeProgressGenerations.clear();
+    _androidCancelHandlers.clear();
     _pendingAndroidProgress.clear();
     _lastAndroidUpdate.clear();
     _lastAndroidSignature.clear();
@@ -540,6 +578,8 @@ class DownloadNotificationService {
   static AndroidNotificationDetails androidProgressDetails(
     int percent, {
     int? when,
+    String? cancelActionId,
+    String cancelLabel = 'Cancel',
   }) {
     return AndroidNotificationDetails(
       progressChannel.id,
@@ -559,6 +599,18 @@ class DownloadNotificationService {
       maxProgress: 100,
       progress: percent >= 0 ? percent : 0,
       indeterminate: percent < 0,
+      actions: cancelActionId == null
+          ? null
+          : [
+              AndroidNotificationAction(
+                cancelActionId,
+                cancelLabel,
+                showsUserInterface: false,
+                // Leave the foreground service running until the transfer's
+                // normal cancellation cleanup removes or promotes its card.
+                cancelNotification: false,
+              ),
+            ],
       category: AndroidNotificationCategory.progress,
     );
   }
@@ -569,6 +621,8 @@ class DownloadNotificationService {
     final details = androidProgressDetails(
       snapshot.percent,
       when: snapshot.createdAtMillis,
+      cancelActionId: snapshot.cancelActionId,
+      cancelLabel: currentAppLocalizations().cancel,
     );
     if (snapshot.notificationId !=
         DownloadProgressNotificationRegistry.foregroundId) {

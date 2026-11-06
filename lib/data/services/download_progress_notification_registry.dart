@@ -9,6 +9,7 @@ class DownloadProgressNotificationSnapshot {
     required this.body,
     required this.percent,
     required this.createdAtMillis,
+    required this.cancelActionId,
   });
 
   final int notificationId;
@@ -19,6 +20,11 @@ class DownloadProgressNotificationSnapshot {
   // Keep Android's sorting timestamp stable when progress is updated.
   final int createdAtMillis;
 
+  // Per-transfer action identity, stable across progress updates and
+  // foreground promotion; an action from an earlier attempt won't cancel
+  // a later retry (or a different episode).
+  final String cancelActionId;
+
   DownloadProgressNotificationSnapshot withNotificationId(int id) =>
       DownloadProgressNotificationSnapshot(
         notificationId: id,
@@ -27,6 +33,7 @@ class DownloadProgressNotificationSnapshot {
         body: body,
         percent: percent,
         createdAtMillis: createdAtMillis,
+        cancelActionId: cancelActionId,
       );
 }
 
@@ -45,8 +52,17 @@ class DownloadProgressNotificationRemoval {
 }
 
 class DownloadProgressNotificationRegistry {
+  DownloadProgressNotificationRegistry()
+      : _cancelSession =
+            '${DateTime.now().microsecondsSinceEpoch}_${++_sessionCounter}';
+
   static const int foregroundId = 1000;
   static const int firstAdditionalId = 10000;
+  static const String cancelActionPrefix = 'moonfin.download.cancel.';
+  static int _sessionCounter = 0;
+
+  final String _cancelSession;
+  int _nextCancelAction = 0;
 
   final Map<String, DownloadProgressNotificationSnapshot> _active = {};
   String? _foregroundItemId;
@@ -57,6 +73,18 @@ class DownloadProgressNotificationRegistry {
   int? idFor(String itemId) => _active[itemId]?.notificationId;
   bool usesNotificationId(int id) =>
       _active.values.any((snapshot) => snapshot.notificationId == id);
+
+  /// Action tokens are the lookup key, not notification IDs. The foreground
+  /// notification ID is reused by other episodes when ownership transfers.
+  DownloadProgressNotificationSnapshot? targetForCancelAction(
+    String actionId,
+  ) {
+    if (!actionId.startsWith(cancelActionPrefix)) return null;
+    for (final snapshot in _active.values) {
+      if (snapshot.cancelActionId == actionId) return snapshot;
+    }
+    return null;
+  }
 
   DownloadProgressNotificationSnapshot update({
     required String itemId,
@@ -78,6 +106,8 @@ class DownloadProgressNotificationRegistry {
       percent: percent,
       createdAtMillis:
           existing?.createdAtMillis ?? DateTime.now().millisecondsSinceEpoch,
+      cancelActionId: existing?.cancelActionId ??
+          '${cancelActionPrefix}${_cancelSession}_${++_nextCancelAction}',
     );
     _active[itemId] = snapshot;
     return snapshot;

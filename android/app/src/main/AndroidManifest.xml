@@ -105,7 +105,7 @@
             android:foregroundServiceType="dataSync"
             android:stopWithTask="true" />
 
-        <!-- Delivers notification action-button taps (approve/deny) to the plugin. -->
+        <!-- Delivers Seerr and download cancellation action buttons to the plugin. -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
             android:exported="false" />

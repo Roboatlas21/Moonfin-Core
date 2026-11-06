@@ -32,6 +32,27 @@ void main() {
       expect(details.indeterminate, isFalse);
     });
 
+    test('active Android progress has a silent background cancel button', () {
+      const actionId = 'moonfin.download.cancel.example';
+      final details = DownloadNotificationService.androidProgressDetails(
+        42,
+        cancelActionId: actionId,
+        cancelLabel: 'Cancel',
+      );
+      expect(details.actions, hasLength(1));
+      final action = details.actions!.single;
+      expect(action.id, actionId);
+      expect(action.title, 'Cancel');
+      expect(action.showsUserInterface, isFalse);
+      expect(action.cancelNotification, isFalse);
+      expect(details.playSound, isFalse);
+      expect(details.enableVibration, isFalse);
+      expect(details.onlyAlertOnce, isTrue);
+
+      final idle = DownloadNotificationService.androidProgressDetails(-1);
+      expect(idle.actions, isNull);
+    });
+
     test('unknown progress remains a silent indeterminate notification', () {
       final details = DownloadNotificationService.androidProgressDetails(-1);
       expect(details.indeterminate, isTrue);
@@ -127,6 +148,7 @@ void main() {
       );
       expect(updated.notificationId, second.notificationId);
       expect(updated.createdAtMillis, second.createdAtMillis);
+      expect(updated.cancelActionId, second.cancelActionId);
       expect(updated.percent, 91);
       expect(registry.activeCount, 3);
     });
@@ -167,6 +189,7 @@ void main() {
       expect(removal.promoted?.itemId, 'b');
       expect(removal.promoted?.percent, 42);
       expect(removal.promoted?.createdAtMillis, oldExtra.createdAtMillis);
+      expect(removal.promoted?.cancelActionId, oldExtra.cancelActionId);
       expect(registry.activeCount, 2);
       expect(registry.foregroundItemId, 'b');
       expect(registry.idFor('c'),
@@ -241,6 +264,82 @@ void main() {
       expect(buffer.offer('episode-a', 15), isFalse);
       buffer.release('episode-a');
       expect(buffer.offer('episode-a', 20), isTrue);
+    });
+  });
+
+  group('per-transfer cancel action identity', () {
+    test('each active episode has a distinct resolvable action', () {
+      final registry = DownloadProgressNotificationRegistry();
+      final first = registry.update(
+        itemId: 'episode-a',
+        title: 'Downloading',
+        body: 'A',
+        percent: 20,
+      );
+      final second = registry.update(
+        itemId: 'episode-b',
+        title: 'Downloading',
+        body: 'B',
+        percent: 50,
+      );
+      expect(first.cancelActionId,
+          startsWith(DownloadProgressNotificationRegistry.cancelActionPrefix));
+      expect(first.cancelActionId, isNot(second.cancelActionId));
+      expect(registry.targetForCancelAction(first.cancelActionId)?.itemId,
+          'episode-a');
+      expect(registry.targetForCancelAction(second.cancelActionId)?.itemId,
+          'episode-b');
+      expect(registry.targetForCancelAction('approve'), isNull);
+    });
+
+    test('old action cannot cancel the retry or promoted episode', () {
+      final registry = DownloadProgressNotificationRegistry();
+      final first = registry.update(
+        itemId: 'episode-a',
+        title: 'Downloading',
+        body: 'A',
+        percent: 20,
+      );
+      final second = registry.update(
+        itemId: 'episode-b',
+        title: 'Downloading',
+        body: 'B',
+        percent: 50,
+      );
+      final removal = registry.remove('episode-a')!;
+      expect(removal.promoted?.cancelActionId, second.cancelActionId);
+      expect(registry.targetForCancelAction(first.cancelActionId), isNull);
+      expect(registry.targetForCancelAction(second.cancelActionId)?.itemId,
+          'episode-b');
+
+      final retry = registry.update(
+        itemId: 'episode-a',
+        title: 'Downloading',
+        body: 'Retry A',
+        percent: 0,
+      );
+      expect(retry.cancelActionId, isNot(first.cancelActionId));
+      expect(registry.targetForCancelAction(first.cancelActionId), isNull);
+      expect(registry.targetForCancelAction(retry.cancelActionId)?.itemId,
+          'episode-a');
+    });
+
+    test('cancel IDs are unique across notification service lifetimes', () {
+      final firstRegistry = DownloadProgressNotificationRegistry();
+      final secondRegistry = DownloadProgressNotificationRegistry();
+      final first = firstRegistry.update(
+        itemId: 'same-episode',
+        title: 'Downloading',
+        body: 'A',
+        percent: 10,
+      );
+      final second = secondRegistry.update(
+        itemId: 'same-episode',
+        title: 'Downloading',
+        body: 'A',
+        percent: 10,
+      );
+      expect(first.cancelActionId, isNot(second.cancelActionId));
     });
   });
 

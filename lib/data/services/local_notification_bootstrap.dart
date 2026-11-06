@@ -10,6 +10,7 @@ import '../../di/injection.dart';
 import '../../playback/headless_session_bootstrap.dart';
 import '../../ui/navigation/app_router.dart';
 import '../repositories/seerr_repository.dart';
+import 'download_progress_notification_registry.dart';
 import 'seerr/seerr_http_client.dart';
 import 'seerr/seerr_models.dart';
 
@@ -28,8 +29,8 @@ const String seerrNotificationChannelDesc =
 const String seerrApproveActionId = 'approve';
 const String seerrDeclineActionId = 'decline';
 
-/// IsolateNameServer name for forwarding request actions from the
-/// notification background isolate to the running app's main isolate.
+/// IsolateNameServer name for forwarding Seerr and download actions from
+/// the notification background isolate to the running app's main isolate.
 const String seerrActionPortName = 'moonfin.seerr.request_action';
 
 /// Notification tapped or actioned while the app is backgrounded/terminated.
@@ -43,6 +44,13 @@ void notificationTapBackground(NotificationResponse response) {
 /// request flow, anything else navigates to the payload's route.
 void _handleNotificationResponse(NotificationResponse response) {
   final actionId = response.actionId;
+  if (actionId != null &&
+      actionId.startsWith(DownloadProgressNotificationRegistry.cancelActionPrefix)) {
+    // Never navigate or spin up a new headless download. Transcoded
+    // in-process transfers cannot outlive the original main isolate.
+    unawaited(_forwardDownloadCancelAction(actionId));
+    return;
+  }
   if (actionId == seerrApproveActionId || actionId == seerrDeclineActionId) {
     final requestId = _requestIdFromPayload(response.payload);
     if (requestId != null) {
@@ -208,6 +216,26 @@ Future<bool> _forwardToMainIsolate({
   }
 }
 
+/// Action buttons are delivered to the plugin's background isolate even
+/// while Moonfin is running. Forward them to the main isolate that owns the
+/// live cancellation token. After process death there is nothing to cancel.
+Future<void> _forwardDownloadCancelAction(String actionId) async {
+  final mainPort = IsolateNameServer.lookupPortByName(seerrActionPortName);
+  if (mainPort == null) return;
+  final ack = ReceivePort();
+  try {
+    mainPort.send({
+      'downloadCancelActionId': actionId,
+      'ack': ack.sendPort,
+    });
+    await ack.first.timeout(const Duration(seconds: 3), onTimeout: () => false);
+  } catch (e) {
+    debugPrint('[DownloadNotification] Cancel handoff failed: $e');
+  } finally {
+    ack.close();
+  }
+}
+
 Future<void> showSeerrActionFailure({
   required bool approve,
   required String requestId,
@@ -254,11 +282,15 @@ class LocalNotificationBootstrap {
   bool _initialized = false;
   bool get isInitialized => _initialized;
 
+  /// Main-isolate delegate installed by DownloadNotificationService.
+  /// The background isolate has no access to the live transfer cancel tokens.
+  bool Function(String actionId)? downloadCancelActionHandler;
+
   ReceivePort? _actionPort;
 
   /// Main isolate only. Registers the port that lets the Android
-  /// notification-action background isolate hand approve/deny off to the
-  /// live session. Safe to call repeatedly (hot restart re-registers).
+  /// notification-action background isolate hand Seerr actions and download
+  /// cancellations off to the live session. Safe to call repeatedly.
   ///
   /// Deliberately not part of [initialize]: that also runs in the background
   /// isolate, which must never claim this mapping.
@@ -275,6 +307,17 @@ class LocalNotificationBootstrap {
     if (message is! Map) return;
     final ack = message['ack'];
     final reply = ack is SendPort ? ack : null;
+    final cancelActionId = message['downloadCancelActionId'];
+    if (cancelActionId is String) {
+      bool accepted = false;
+      try {
+        accepted = downloadCancelActionHandler?.call(cancelActionId) ?? false;
+      } catch (e) {
+        debugPrint('[DownloadNotification] Forwarded cancel failed: $e');
+      }
+      reply?.send(accepted);
+      return;
+    }
     final requestId = message['requestId'];
     final approve = message['approve'] == true;
     final notificationId = message['notificationId'];
