@@ -379,4 +379,39 @@ void main() {
     });
   });
 
+  group('late foreground start reconciliation', () {
+    test('stops service after final transfer finishes during startup', () {
+      expect(
+        shouldStopLateForegroundStart(
+          hasActiveProgress: false,
+          retainingBetweenTransfers: false,
+          stopRequested: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('retains service when another episode is active', () {
+      expect(
+        shouldStopLateForegroundStart(
+          hasActiveProgress: true,
+          retainingBetweenTransfers: false,
+          stopRequested: false,
+        ),
+        isFalse,
+      );
+    });
+
+    test('retains service across the gap between queued transcodes', () {
+      expect(
+        shouldStopLateForegroundStart(
+          hasActiveProgress: false,
+          retainingBetweenTransfers: true,
+          stopRequested: false,
+        ),
+        isFalse,
+      );
+    });
+  });
+
 }

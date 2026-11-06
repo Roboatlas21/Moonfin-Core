@@ -70,6 +70,8 @@ class DownloadProgressNotificationRegistry {
 
   int get activeCount => _active.length;
   String? get foregroundItemId => _foregroundItemId;
+  DownloadProgressNotificationSnapshot? get foregroundSnapshot =>
+      _foregroundItemId == null ? null : _active[_foregroundItemId];
   int? idFor(String itemId) => _active[itemId]?.notificationId;
   bool usesNotificationId(int id) =>
       _active.values.any((snapshot) => snapshot.notificationId == id);
@@ -190,3 +192,13 @@ int androidNativeTaskNotificationId(String taskId) {
   }
   return hash.toSigned(32);
 }
+
+/// A foreground-start RPC can finish after Dart's timeout. The final
+/// Android reply determines whether the service should be retained or
+/// stopped, based on the current transfer set rather than the old request.
+bool shouldStopLateForegroundStart({
+  required bool hasActiveProgress,
+  required bool retainingBetweenTransfers,
+  required bool stopRequested,
+}) =>
+    stopRequested || (!hasActiveProgress && !retainingBetweenTransfers);

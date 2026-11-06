@@ -49,6 +49,12 @@ class DownloadNotificationService {
   bool get isInitialized => _initialized;
   DateTime _lastUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   bool _foregroundServiceRunning = false;
+  // Future.timeout does not cancel the platform call. A late Android reply
+  // must be reconciled so a service that starts after the deadline is stopped
+  // (or updated with the current owner) rather than left running forever.
+  Future<void>? _foregroundStartInFlight;
+  bool _stopAfterForegroundStart = false;
+  bool _retainForegroundBetweenTransfers = false;
   String? _lastProgressSignature;
 
   Future<void>? _pendingNotification;
@@ -235,6 +241,8 @@ class DownloadNotificationService {
 
     if (PlatformDetection.isAndroid) {
       if (startNewTransfer) {
+        _retainForegroundBetweenTransfers = false;
+        _stopAfterForegroundStart = false;
         _activeProgressGenerations[itemId] = ++_nextProgressGeneration;
         if (onCancel != null) {
           _androidCancelHandlers[itemId] = onCancel;
@@ -392,6 +400,7 @@ class DownloadNotificationService {
               await _cancelProgressId(removal.promotedFromId!);
             }
           } else if (keepForegroundService) {
+            _retainForegroundBetweenTransfers = true;
             // Another transcoded transfer is queued or preparing. Android
             // may refuse to restart a dataSync foreground service from the
             // background, so hold its existing ID across this short gap.
@@ -414,7 +423,7 @@ class DownloadNotificationService {
             }
           } else {
             await _stopForegroundService();
-            if (!_foregroundServiceRunning) {
+            if (!_foregroundServiceRunning && _foregroundStartInFlight == null) {
               await _cancelProgressId(
                 DownloadProgressNotificationRegistry.foregroundId,
               );
@@ -528,6 +537,7 @@ class DownloadNotificationService {
   Future<void> dismiss() async {
     if (!_initialized) return;
     _dismissGeneration++;
+    _retainForegroundBetweenTransfers = false;
     _lastProgressSignature = null;
     _activeProgressGenerations.clear();
     _androidCancelHandlers.clear();
@@ -543,7 +553,7 @@ class DownloadNotificationService {
           }
         }
         await _stopForegroundService();
-        if (!_foregroundServiceRunning) {
+        if (!_foregroundServiceRunning && _foregroundStartInFlight == null) {
           await _cancelProgressId(
             DownloadProgressNotificationRegistry.foregroundId,
           );
@@ -558,6 +568,7 @@ class DownloadNotificationService {
   /// interrupting any other active standalone or concurrently queued work.
   Future<void> releaseIdleForegroundService() async {
     if (!_initialized || !PlatformDetection.isAndroid) return;
+    _retainForegroundBetweenTransfers = false;
     try {
       await _serializeNotification(() async {
         if (_activeProgressGenerations.isNotEmpty ||
@@ -565,7 +576,7 @@ class DownloadNotificationService {
           return;
         }
         await _stopForegroundService();
-        if (!_foregroundServiceRunning) {
+        if (!_foregroundServiceRunning && _foregroundStartInFlight == null) {
           await _cancelProgressId(
             DownloadProgressNotificationRegistry.foregroundId,
           );
@@ -655,6 +666,51 @@ class DownloadNotificationService {
     );
   }
 
+  Future<void> _reconcileForegroundStart(
+    Future<void> attempt, {
+    required bool succeeded,
+  }) async {
+    try {
+      await _serializeNotification(() async {
+        if (!identical(_foregroundStartInFlight, attempt)) return;
+        _foregroundStartInFlight = null;
+        _foregroundServiceRunning = succeeded;
+        if (!succeeded) {
+          debugPrint('[DownloadNotification] Late foreground start failed');
+          return;
+        }
+        if (shouldStopLateForegroundStart(
+          hasActiveProgress: _androidProgress.activeCount > 0,
+          retainingBetweenTransfers: _retainForegroundBetweenTransfers,
+          stopRequested: _stopAfterForegroundStart,
+        )) {
+          _stopAfterForegroundStart = false;
+          await _stopForegroundService();
+          return;
+        }
+        // A later episode may have taken the foreground slot while Android's
+        // original start was still pending. Restore the latest notification.
+        final current = _androidProgress.foregroundSnapshot;
+        if (current != null) {
+          await _postAndroidProgress(current);
+        } else if (_retainForegroundBetweenTransfers) {
+          await _plugin
+              .show(
+                id: DownloadProgressNotificationRegistry.foregroundId,
+                title: currentAppLocalizations().downloadNotificationRunning,
+                body: '',
+                notificationDetails: NotificationDetails(
+                  android: androidProgressDetails(-1),
+                ),
+              )
+              .timeout(_operationTimeout);
+        }
+      });
+    } catch (e) {
+      debugPrint('[DownloadNotification] Foreground reconciliation failed: $e');
+    }
+  }
+
   Future<void> _postAndroidProgress(
     DownloadProgressNotificationSnapshot snapshot,
   ) async {
@@ -677,33 +733,50 @@ class DownloadNotificationService {
       return;
     }
 
-    if (!_foregroundServiceRunning) {
+    if (!_foregroundServiceRunning && _foregroundStartInFlight == null) {
       try {
         final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
         if (androidPlugin == null) {
           throw StateError('Android notifications are unavailable');
         }
-        await androidPlugin
-            .startForegroundService(
-              id: DownloadProgressNotificationRegistry.foregroundId,
-              title: snapshot.title,
-              body: snapshot.body,
-              notificationDetails: details,
-              foregroundServiceTypes: {
-                AndroidServiceForegroundType.foregroundServiceTypeDataSync,
-              },
-            )
-            .timeout(_operationTimeout);
-        _foregroundServiceRunning = true;
-        return;
+        final start = androidPlugin.startForegroundService(
+          id: DownloadProgressNotificationRegistry.foregroundId,
+          title: snapshot.title,
+          body: snapshot.body,
+          notificationDetails: details,
+          foregroundServiceTypes: {
+            AndroidServiceForegroundType.foregroundServiceTypeDataSync,
+          },
+        );
+        _foregroundStartInFlight = start;
+        _stopAfterForegroundStart = false;
+        // Observe the actual platform reply, even if the bounded await below
+        // expires. This callback never runs inside the current queue entry.
+        unawaited(start.then<void>(
+          (_) => _reconcileForegroundStart(start, succeeded: true),
+          onError: (Object e, StackTrace stack) {
+            debugPrint('[DownloadNotification] Foreground start rejected: $e');
+            return _reconcileForegroundStart(start, succeeded: false);
+          },
+        ));
+        try {
+          await start.timeout(_operationTimeout);
+          _foregroundServiceRunning = true;
+          return;
+        } on TimeoutException {
+          debugPrint(
+            '[DownloadNotification] Foreground startup pending after timeout',
+          );
+          // Keep _foregroundStartInFlight until the real completion arrives.
+        }
       } catch (e) {
-        // Do not block a transfer forever on Android's notification IPC.
-        // A regular silent card remains visible if foreground startup fails.
         debugPrint('[DownloadNotification] Foreground start failed: $e');
       }
     }
 
+    // This is a display fallback while startup is pending or unavailable;
+    // it is not evidence that Android granted foreground service ownership.
     await _plugin
         .show(
           id: DownloadProgressNotificationRegistry.foregroundId,
@@ -767,7 +840,14 @@ class DownloadNotificationService {
   }
 
   Future<void> _stopForegroundService() async {
-    if (!_foregroundServiceRunning) return;
+    if (!_foregroundServiceRunning) {
+      if (_foregroundStartInFlight != null) {
+        // A timed-out platform call might still start the service. The late
+        // completion handler will stop it before it can remain orphaned.
+        _stopAfterForegroundStart = true;
+      }
+      return;
+    }
     try {
       final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
@@ -776,14 +856,16 @@ class DownloadNotificationService {
       }
       await androidPlugin
           .stopForegroundService()
-          .timeout(const Duration(seconds: 5));
+          .timeout(_operationTimeout);
       _foregroundServiceRunning = false;
+      _foregroundStartInFlight = null;
+      _stopAfterForegroundStart = false;
       await _cancelProgressId(
         DownloadProgressNotificationRegistry.foregroundId,
       );
     } catch (e) {
-      // Keep the running flag so a later cleanup attempt can retry the stop.
       debugPrint('[DownloadNotification] Foreground stop failed: $e');
     }
   }
+
 }
