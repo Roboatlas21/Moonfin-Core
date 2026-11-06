@@ -9,6 +9,8 @@ import 'download_progress_notification_registry.dart';
 import 'local_notification_bootstrap.dart';
 
 class DownloadNotificationService {
+  static const _operationTimeout = Duration(seconds: 5);
+
   // Android doesn't allow an existing channel's sound or vibration to be
   // changed. The old moonfin_downloads channel mixed audible completion
   // alerts with rapidly updated progress, so use a fresh silent channel ID.
@@ -44,6 +46,7 @@ class DownloadNotificationService {
       LocalNotificationBootstrap.instance.plugin;
 
   bool _initialized = false;
+  bool get isInitialized => _initialized;
   DateTime _lastUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   bool _foregroundServiceRunning = false;
   String? _lastProgressSignature;
@@ -118,7 +121,11 @@ class DownloadNotificationService {
           AndroidFlutterLocalNotificationsPlugin>();
       for (final channel in const [progressChannel, alertChannel]) {
         try {
-          await androidPlugin?.createNotificationChannel(channel);
+          if (androidPlugin != null) {
+            await androidPlugin
+                .createNotificationChannel(channel)
+                .timeout(_operationTimeout);
+          }
         } catch (e) {
           debugPrint('[DownloadNotification] Channel registration failed: $e');
         }
@@ -126,9 +133,18 @@ class DownloadNotificationService {
       // Stale progress cleanup is intentionally not performed here. A
       // headless auto-download worker also initializes this service, and
       // must never stop the main engine's active foreground download.
-      try {
-        await androidPlugin?.requestNotificationsPermission();
-      } catch (_) {}
+      // The Android permission prompt waits for user interaction. Do not
+      // block download startup while the prompt is open.
+      if (androidPlugin != null) {
+        unawaited(
+          androidPlugin.requestNotificationsPermission().then(
+            (_) {},
+            onError: (Object e) {
+              debugPrint('[DownloadNotification] Permission request failed: $e');
+            },
+          ),
+        );
+      }
     }
     _initialized = true;
     if (PlatformDetection.isAndroid) {
@@ -350,19 +366,21 @@ class DownloadNotificationService {
               _lastAndroidUpdate.remove(promoted.itemId);
               _lastAndroidSignature.remove(promoted.itemId);
               try {
-                await _plugin.show(
-                  id: DownloadProgressNotificationRegistry.foregroundId,
-                  title: promoted.title,
-                  body: promoted.body,
-                  notificationDetails: NotificationDetails(
-                    android: androidProgressDetails(
-                      promoted.percent,
-                      when: promoted.createdAtMillis,
-                      cancelActionId: promoted.cancelActionId,
-                      cancelLabel: currentAppLocalizations().cancel,
-                    ),
-                  ),
-                );
+                await _plugin
+                    .show(
+                      id: DownloadProgressNotificationRegistry.foregroundId,
+                      title: promoted.title,
+                      body: promoted.body,
+                      notificationDetails: NotificationDetails(
+                        android: androidProgressDetails(
+                          promoted.percent,
+                          when: promoted.createdAtMillis,
+                          cancelActionId: promoted.cancelActionId,
+                          cancelLabel: currentAppLocalizations().cancel,
+                        ),
+                      ),
+                    )
+                    .timeout(_operationTimeout);
               } catch (retryError) {
                 debugPrint(
                   '[DownloadNotification] Foreground fallback failed: '
@@ -381,14 +399,16 @@ class DownloadNotificationService {
             // until the next episode takes ownership of the same ID.
             final title = currentAppLocalizations().downloadNotificationRunning;
             try {
-              await _plugin.show(
-                id: DownloadProgressNotificationRegistry.foregroundId,
-                title: title,
-                body: '',
-                notificationDetails: NotificationDetails(
-                  android: androidProgressDetails(-1),
-                ),
-              );
+              await _plugin
+                  .show(
+                    id: DownloadProgressNotificationRegistry.foregroundId,
+                    title: title,
+                    body: '',
+                    notificationDetails: NotificationDetails(
+                      android: androidProgressDetails(-1),
+                    ),
+                  )
+                  .timeout(_operationTimeout);
             } catch (e) {
               debugPrint('[DownloadNotification] Hold card failed: $e');
             }
@@ -558,7 +578,7 @@ class DownloadNotificationService {
 
   Future<void> _cancelProgressId(int id) async {
     try {
-      await _plugin.cancel(id: id);
+      await _plugin.cancel(id: id).timeout(_operationTimeout);
       _pendingCancellationIds.remove(id);
     } catch (e) {
       _pendingCancellationIds.add(id);
@@ -646,12 +666,14 @@ class DownloadNotificationService {
     );
     if (snapshot.notificationId !=
         DownloadProgressNotificationRegistry.foregroundId) {
-      await _plugin.show(
-        id: snapshot.notificationId,
-        title: snapshot.title,
-        body: snapshot.body,
-        notificationDetails: NotificationDetails(android: details),
-      );
+      await _plugin
+          .show(
+            id: snapshot.notificationId,
+            title: snapshot.title,
+            body: snapshot.body,
+            notificationDetails: NotificationDetails(android: details),
+          )
+          .timeout(_operationTimeout);
       return;
     }
 
@@ -662,43 +684,50 @@ class DownloadNotificationService {
         if (androidPlugin == null) {
           throw StateError('Android notifications are unavailable');
         }
-        await androidPlugin.startForegroundService(
-          id: DownloadProgressNotificationRegistry.foregroundId,
-          title: snapshot.title,
-          body: snapshot.body,
-          notificationDetails: details,
-          foregroundServiceTypes: {
-            AndroidServiceForegroundType.foregroundServiceTypeDataSync,
-          },
-        );
+        await androidPlugin
+            .startForegroundService(
+              id: DownloadProgressNotificationRegistry.foregroundId,
+              title: snapshot.title,
+              body: snapshot.body,
+              notificationDetails: details,
+              foregroundServiceTypes: {
+                AndroidServiceForegroundType.foregroundServiceTypeDataSync,
+              },
+            )
+            .timeout(_operationTimeout);
         _foregroundServiceRunning = true;
         return;
-      } catch (_) {
-        // Keep a visible silent progress card even if Android rejects the
-        // foreground start. The next update can attempt the service again.
+      } catch (e) {
+        // Do not block a transfer forever on Android's notification IPC.
+        // A regular silent card remains visible if foreground startup fails.
+        debugPrint('[DownloadNotification] Foreground start failed: $e');
       }
     }
 
-    await _plugin.show(
-      id: DownloadProgressNotificationRegistry.foregroundId,
-      title: snapshot.title,
-      body: snapshot.body,
-      notificationDetails: NotificationDetails(android: details),
-    );
+    await _plugin
+        .show(
+          id: DownloadProgressNotificationRegistry.foregroundId,
+          title: snapshot.title,
+          body: snapshot.body,
+          notificationDetails: NotificationDetails(android: details),
+        )
+        .timeout(_operationTimeout);
   }
 
   Future<void> _showStandardProgress(
       String title, String body, int percent) async {
-    await _plugin.show(
-      id: _progressNotificationId,
-      title: title,
-      body: body,
-      notificationDetails: const NotificationDetails(
-        iOS: DarwinNotificationDetails(),
-        macOS: DarwinNotificationDetails(),
-        linux: LinuxNotificationDetails(),
-      ),
-    );
+    await _plugin
+        .show(
+          id: _progressNotificationId,
+          title: title,
+          body: body,
+          notificationDetails: const NotificationDetails(
+            iOS: DarwinNotificationDetails(),
+            macOS: DarwinNotificationDetails(),
+            linux: LinuxNotificationDetails(),
+          ),
+        )
+        .timeout(_operationTimeout);
   }
 
   static AndroidNotificationDetails androidAlertDetails(
@@ -722,17 +751,19 @@ class DownloadNotificationService {
     String body, {
     required AndroidNotificationChannel androidChannel,
   }) async {
-    await _plugin.show(
-      id: id,
-      title: title,
-      body: body,
-      notificationDetails: NotificationDetails(
-        android: androidAlertDetails(androidChannel),
-        iOS: const DarwinNotificationDetails(),
-        macOS: const DarwinNotificationDetails(),
-        linux: const LinuxNotificationDetails(),
-      ),
-    );
+    await _plugin
+        .show(
+          id: id,
+          title: title,
+          body: body,
+          notificationDetails: NotificationDetails(
+            android: androidAlertDetails(androidChannel),
+            iOS: const DarwinNotificationDetails(),
+            macOS: const DarwinNotificationDetails(),
+            linux: const LinuxNotificationDetails(),
+          ),
+        )
+        .timeout(_operationTimeout);
   }
 
   Future<void> _stopForegroundService() async {

@@ -455,17 +455,23 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         keepForegroundService: _hasOtherTranscodedWork(itemId),
       );
     }
-    await _notificationService.showError(
-      itemName: label,
-      error: error,
-      transfersRemain: _activeDownloads.values.any(
-        (download) => !download.isComplete && download.error == null,
-      ),
-    );
-    if (nativeTaskId != null && PlatformDetection.isAndroid) {
-      // The native worker posts a quiet fallback if no Dart engine is alive.
-      // Once our audible alert succeeds, dismiss only that worker's card.
-      unawaited(_notificationService.dismissNativeFailureCard(nativeTaskId));
+    try {
+      await _notificationService.showError(
+        itemName: label,
+        error: error,
+        transfersRemain: _activeDownloads.values.any(
+          (download) => !download.isComplete && download.error == null,
+        ),
+      );
+      if (nativeTaskId != null &&
+          PlatformDetection.isAndroid &&
+          _notificationService.isInitialized) {
+        // Only dismiss the native fallback once the audible post succeeded.
+        unawaited(_notificationService.dismissNativeFailureCard(nativeTaskId));
+      }
+    } catch (e) {
+      // Notification errors must not interrupt the download failure cleanup.
+      debugPrint('[Download] Error notification failed: $e');
     }
   }
 
@@ -3345,11 +3351,15 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           completed: completed,
           total: total,
         )) {
-          await _notificationService.showComplete(
-            itemName: itemName,
-            batchTotal: total,
-            batchSeries: series,
-          );
+          try {
+            await _notificationService.showComplete(
+              itemName: itemName,
+              batchTotal: total,
+              batchSeries: series,
+            );
+          } catch (e) {
+            debugPrint('[Download] Batch completion alert failed: $e');
+          }
         }
       }
       notifyListeners();
