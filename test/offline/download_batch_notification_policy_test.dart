@@ -50,4 +50,26 @@ void main() {
       await completion;
     });
   });
+  group('recovered download completion aggregation', () {
+    test('deduplicates the same recovered episode', () {
+      final buffer = RecoveredDownloadNotificationBuffer();
+      buffer.add('episode-a', 'Show S1E1');
+      buffer.add('episode-a', 'Show S1E1');
+      buffer.add('episode-b', 'Show S1E2');
+      expect(buffer.count, 2);
+      final notice = buffer.take();
+      expect(notice?.count, 2);
+      expect(notice?.itemName, 'Show S1E2');
+      expect(buffer.take(), isNull);
+    });
+
+    test('cancellation discards pending recovered notification', () {
+      final buffer = RecoveredDownloadNotificationBuffer();
+      buffer.add('episode-a', 'Show S1E1');
+      buffer.clear();
+      expect(buffer.count, 0);
+      expect(buffer.take(), isNull);
+    });
+  });
+
 }

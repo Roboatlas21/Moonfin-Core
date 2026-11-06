@@ -397,6 +397,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   // batch closes so the single completion alert cannot race batch cleanup.
   final Map<String, Future<void>> _postCompletionFutures = {};
   final Set<String> _batchedNotificationItems = {};
+  // Native transfers can finish after the Dart batch has disappeared.
+  // Consolidate recovered completions rather than alerting per episode.
+  final RecoveredDownloadNotificationBuffer _recoveredCompletions =
+      RecoveredDownloadNotificationBuffer();
+  Timer? _recoveredCompletionTimer;
+  bool _recoveryScanInProgress = false;
 
   void _resetBatch() {
     _totalQueued = 0;
@@ -1272,6 +1278,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     required Directory dir,
     required String fileName,
     ServerDownloadTicket? serverTicket,
+    bool recovered = false,
   }) {
     final work = _runPostCompletionTasks(
       item: item,
@@ -1279,6 +1286,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       dir: dir,
       fileName: fileName,
       serverTicket: serverTicket,
+      recovered: recovered,
     );
     _postCompletionFutures[item.id] = work;
     unawaited(
@@ -1303,6 +1311,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     required Directory dir,
     required String fileName,
     ServerDownloadTicket? serverTicket,
+    bool recovered = false,
   }) async {
     final generation = _batchGeneration;
     final isBatchItem = _batchedNotificationItems.contains(item.id);
@@ -1354,7 +1363,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     // Standalone downloads still alert individually. Batched episodes wait
     // for every post-processing future in queueDownloads, including when
     // another episode's subtitles take longer than its media transfer.
-    if (!isBatchItem &&
+    if (recovered) {
+      _recordRecoveredCompletion(item);
+    } else if (!isBatchItem &&
         generation == _batchGeneration &&
         !_cancelAllRequested &&
         !_disposed) {
@@ -1364,6 +1375,34 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         ),
         const Duration(seconds: 10),
       );
+    }
+  }
+
+  void _recordRecoveredCompletion(AggregatedItem item) {
+    if (_cancelAllRequested || _disposed) return;
+    _recoveredCompletions.add(item.id, _notificationLabel(item));
+    if (!_recoveryScanInProgress) _scheduleRecoveredCompletionAlert();
+  }
+
+  void _scheduleRecoveredCompletionAlert() {
+    if (_recoveredCompletions.count == 0 || _recoveryScanInProgress) return;
+    _recoveredCompletionTimer?.cancel();
+    _recoveredCompletionTimer = Timer(const Duration(seconds: 2), () {
+      unawaited(_flushRecoveredCompletionAlert());
+    });
+  }
+
+  Future<void> _flushRecoveredCompletionAlert() async {
+    if (_recoveryScanInProgress || _cancelAllRequested || _disposed) return;
+    final summary = _recoveredCompletions.take();
+    if (summary == null) return;
+    try {
+      await _notificationService.showComplete(
+        itemName: summary.itemName,
+        batchTotal: summary.count,
+      );
+    } catch (e) {
+      debugPrint('[Download] Recovered completion notification failed: $e');
     }
   }
 
@@ -1759,6 +1798,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       savePath: savePath,
       dir: file.parent,
       fileName: file.uri.pathSegments.last,
+      recovered: true,
     );
   }
 
@@ -4104,6 +4144,8 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     }
     _batchGeneration++;
     _openBatches = 0;
+    _recoveredCompletionTimer?.cancel();
+    _recoveredCompletions.clear();
     _batchItemsByOwner.clear();
     _batchedNotificationItems.clear();
     _postCompletionFutures.clear();
@@ -4161,6 +4203,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   }
 
   Future<void> recoverIncompleteDownloads() async {
+    // Hold one summary until all files already marked complete in the native
+    // task database have finished their subtitles/artwork.
+    _recoveryScanInProgress = true;
+    _recoveredCompletionTimer?.cancel();
+    final recoveringCompletedIds = <String>{};
     // Reconcile with the native engine's task database first: tasks may have
     // finished while the app was dead, still be running natively, or have
     // been rescheduled by the plugin at startup.
@@ -4188,6 +4235,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       if (item.downloadStatus == 1) {
         final record = pluginRecords[item.itemId];
         if (record != null && await _recoverFromTaskRecord(item, record)) {
+          if (record.status == bgd.TaskStatus.complete) {
+            recoveringCompletedIds.add(item.itemId);
+          }
           continue;
         }
         if (item.localFilePath != null) {
@@ -4227,6 +4277,22 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         }
       }
     }
+
+    // Do not delay screen startup while recovered sidecars are processed.
+    // All files already complete at startup produce one summary after their
+    // post-processing futures settle, not one alert per episode.
+    unawaited(() async {
+      try {
+        await DownloadBatchNotificationPolicy.awaitPostProcessing(
+          recoveringCompletedIds
+              .map((id) => _postCompletionFutures[id])
+              .whereType<Future<void>>(),
+        );
+      } finally {
+        _recoveryScanInProgress = false;
+        _scheduleRecoveredCompletionAlert();
+      }
+    }());
 
     // Killed transfers that still fit come back now; the plugin no longer
     // revives them on its own (see BackgroundDownloadCoordinator).
@@ -4502,6 +4568,8 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
 
   @override
   void dispose() {
+    _recoveredCompletionTimer?.cancel();
+    _recoveredCompletions.clear();
     _prefs.removeListener(_onPreferencesChanged);
     _coordinator?.detach(statusHandler: _onTaskStatus);
     cancelAll();

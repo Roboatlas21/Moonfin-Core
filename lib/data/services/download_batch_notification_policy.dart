@@ -26,3 +26,24 @@ class DownloadBatchNotificationPolicy {
     );
   }
 }
+
+/// De-duplicates the native transfers recovered after a restart. One
+/// notification summarises all completions observed during reconciliation.
+class RecoveredDownloadNotificationBuffer {
+  final Map<String, String> _completed = {};
+
+  int get count => _completed.length;
+
+  void add(String itemId, String label) {
+    _completed[itemId] = label;
+  }
+
+  ({int count, String itemName})? take() {
+    if (_completed.isEmpty) return null;
+    final result = (count: _completed.length, itemName: _completed.values.last);
+    _completed.clear();
+    return result;
+  }
+
+  void clear() => _completed.clear();
+}
