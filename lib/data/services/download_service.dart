@@ -404,6 +404,8 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   // artwork finish. Keep the post-processing future until its containing
   // batch closes so the single completion alert cannot race batch cleanup.
   final Map<String, Future<void>> _postCompletionFutures = {};
+  final Set<String> _postCompletionInProgress = {};
+  Future<void>? _ledgerSettleTail;
   final Set<String> _batchedNotificationItems = {};
   final DownloadBatchNotificationLedger _batchNotificationLedger =
       DownloadBatchNotificationLedger();
@@ -1303,6 +1305,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     ServerDownloadTicket? serverTicket,
     bool recovered = false,
   }) {
+    _postCompletionInProgress.add(item.id);
     final work = _runPostCompletionTasks(
       item: item,
       savePath: savePath,
@@ -1318,6 +1321,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             debugPrint('[Download] Postprocessing failed for ${item.id}: $e');
           })
           .whenComplete(() {
+            _postCompletionInProgress.remove(item.id);
+            // A recovered batch may have another episode's postprocessing
+            // running when its final media file reached status=2.
+            if (recovered && !_disposed) {
+              unawaited(_settlePersistedBatchNotifications());
+            }
             // Batch entries remain available until queueDownloads has
             // explicitly awaited their post-processing futures.
             if (!_batchedNotificationItems.contains(item.id) &&
@@ -1410,7 +1419,13 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     AggregatedItem? completed,
   }) async {
     if (!PlatformDetection.isAndroid) return false;
+    // Serialize reconciliation against concurrent task-completion callbacks;
+    // only the first observer consumes a manifest and posts its alert.
+    final prior = _ledgerSettleTail;
+    final completer = Completer<void>();
+    _ledgerSettleTail = completer.future;
     try {
+      if (prior != null) await prior;
       final batches = await _batchNotificationLedger.pending();
       final belongsToBatch = completed != null &&
           batches.any((batch) => batch.contains(completed.serverId, completed.id));
@@ -1419,6 +1434,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       final rows = await _offlineRepo.getItems();
       for (final batch in batches) {
         if (batch.serverId != _serverId) continue;
+        if (batch.itemIds.any(_postCompletionInProgress.contains)) {
+          continue;
+        }
         final status = {
           for (final item in rows)
             if (item.serverId == batch.serverId) item.itemId: item.downloadStatus,
@@ -1445,6 +1463,8 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       // Do not substitute a per-episode alert when a durable batch lookup
       // fails: doing so could recreate the repeated-season sound problem.
       return true;
+    } finally {
+      completer.complete();
     }
   }
 
@@ -4295,6 +4315,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _batchItemsByOwner.clear();
     _batchedNotificationItems.clear();
     _postCompletionFutures.clear();
+    _postCompletionInProgress.clear();
     _resetBatch();
     if (PlatformDetection.isAndroid) {
       final keys = _ownNotificationKeys.values.toList();

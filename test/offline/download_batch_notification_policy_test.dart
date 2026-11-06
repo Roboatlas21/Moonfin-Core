@@ -121,4 +121,15 @@ void main() {
     });
   });
 
+  test('pending postprocessing defers durable season completion', () {
+    const batch = PendingDownloadNotificationBatch(
+      id: 'batch-1', serverId: 'server-A',
+      itemIds: ['episode-1', 'episode-2'], itemName: 'Show',
+    );
+    final processing = <String>{'episode-2'};
+    expect(batch.itemIds.any(processing.contains), isTrue);
+    processing.remove('episode-2');
+    expect(batch.itemIds.any(processing.contains), isFalse);
+  });
+
 }
