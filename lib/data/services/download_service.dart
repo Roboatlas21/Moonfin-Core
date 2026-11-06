@@ -1436,7 +1436,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       final rows = await _offlineRepo.getItems();
       for (final batch in batches) {
         if (batch.serverId != _serverId) continue;
-        if (batch.itemIds.any(_postCompletionInProgress.contains)) {
+        if (batch.itemIds.any(_postCompletionInProgress.contains) ||
+            batch.itemIds.any(_batchedNotificationItems.contains)) {
+          // A fresh local batch can have no DB row yet. Missing rows are
+          // terminal only during restart recovery, not while newly queued.
           continue;
         }
         final status = {
@@ -3411,6 +3414,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           itemName: _notificationLabel(toQueue.last),
           series: series,
         );
+        if (generation != _batchGeneration || _cancelAllRequested) {
+          // Cancel All may have raced the async preference write. Do not
+          // resurrect a batch manifest or start its canceled transfers.
+          await _batchNotificationLedger.consume(ledgerId);
+          return DownloadBatch(queued: const [], done: Future.value());
+        }
         _activeBatchLedgerIds.add(ledgerId);
       } catch (e) {
         debugPrint('[Download] Could not persist season batch: $e');
