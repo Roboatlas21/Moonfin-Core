@@ -85,6 +85,8 @@ class DownloadNotificationService {
     bool startNewTransfer,
   })> _pendingAndroidProgress = DownloadProgressUpdateBuffer();
   final Set<int> _pendingCancellationIds = {};
+  Timer? _cancelRetryTimer;
+  int _cancelRetryAttempt = 0;
   int _dismissGeneration = 0;
   Future<void>? _initializeFuture;
   bool _staleProgressReconciled = false;
@@ -97,9 +99,8 @@ class DownloadNotificationService {
     _pendingNotification = completer.future;
     try {
       if (previous != null) await previous;
-      if (_pendingCancellationIds.isNotEmpty) {
-        await _retryPendingCancellations();
-      }
+      // Stale cancellation retries run on a separate backoff timer, never
+      // before a fresh transfer's foreground notification.
       await action();
     } finally {
       completer.complete();
@@ -588,38 +589,47 @@ class DownloadNotificationService {
 
   Future<void> _cancelProgressId(int id) async {
     try {
-      await _plugin.cancel(id: id).timeout(_operationTimeout);
+      await _plugin
+          .cancel(id: id)
+          .timeout(const Duration(seconds: 2));
       _pendingCancellationIds.remove(id);
+      if (_pendingCancellationIds.isEmpty) {
+        _cancelRetryTimer?.cancel();
+        _cancelRetryTimer = null;
+        _cancelRetryAttempt = 0;
+      }
     } catch (e) {
       _pendingCancellationIds.add(id);
       debugPrint('[DownloadNotification] Cancel $id failed: $e');
+      _scheduleCancellationRetry();
     }
   }
 
-  /// The background_downloader fork pins its native notification ID to
-  /// Java's String.hashCode(taskId). Keep its quiet failure card when Dart
-  /// was killed; after our audible alert posts, remove the redundant card.
-  Future<void> dismissNativeFailureCard(String taskId) async {
-    if (!_initialized || !PlatformDetection.isAndroid) return;
-    try {
-      // The plugin queues terminal-state notifications asynchronously.
-      await Future<void>.delayed(const Duration(milliseconds: 350));
-      await _plugin
-          .cancel(id: androidNativeTaskNotificationId(taskId))
-          .timeout(const Duration(seconds: 4));
-    } catch (e) {
-      debugPrint('[DownloadNotification] Native error cleanup failed: $e');
-    }
+  void _scheduleCancellationRetry() {
+    if (_pendingCancellationIds.isEmpty || _cancelRetryTimer != null) return;
+    final delay = cancellationRetryBackoff(_cancelRetryAttempt++);
+    _cancelRetryTimer = Timer(delay, () {
+      _cancelRetryTimer = null;
+      unawaited(_serializeNotification(() async {
+        await _retryPendingCancellations();
+      }).catchError((Object e) {
+        debugPrint('[DownloadNotification] Cancel retry failed: $e');
+      }).whenComplete(_scheduleCancellationRetry));
+    });
   }
 
   Future<void> _retryPendingCancellations() async {
+    // At most one stale cancellation attempt per timer tick, with a 2-second
+    // RPC cap and exponential backoff. Do not monopolize progress updates.
     for (final id in _pendingCancellationIds.toList()) {
       if (_androidProgress.usesNotificationId(id) ||
           (id == DownloadProgressNotificationRegistry.foregroundId &&
-              _foregroundServiceRunning)) {
+              (_foregroundServiceRunning ||
+                  _foregroundStartInFlight != null))) {
         continue;
       }
       await _cancelProgressId(id);
+      break;
     }
   }
 

@@ -202,3 +202,14 @@ bool shouldStopLateForegroundStart({
   required bool stopRequested,
 }) =>
     stopRequested || (!hasActiveProgress && !retainingBetweenTransfers);
+
+/// Retry delays for failed Android notification cancellations. The maximum
+/// is deliberately small enough for recovery but never on the download's
+/// critical path. 2, 4, 8, 16, 30, 30... seconds.
+Duration cancellationRetryBackoff(int attempt) {
+  const seconds = [2, 4, 8, 16, 30];
+  final index = attempt < 0
+      ? 0
+      : (attempt >= seconds.length ? seconds.length - 1 : attempt);
+  return Duration(seconds: seconds[index]);
+}

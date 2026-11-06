@@ -420,4 +420,13 @@ void main() {
     expect(details.silent, isTrue);
   });
 
+  group('stale notification cancellation retry budget', () {
+    test('uses a capped exponential backoff', () {
+      expect(cancellationRetryBackoff(0), const Duration(seconds: 2));
+      expect(cancellationRetryBackoff(1), const Duration(seconds: 4));
+      expect(cancellationRetryBackoff(4), const Duration(seconds: 30));
+      expect(cancellationRetryBackoff(100), const Duration(seconds: 30));
+    });
+  });
+
 }
