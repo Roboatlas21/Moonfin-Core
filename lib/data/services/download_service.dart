@@ -36,6 +36,7 @@ import '../repositories/offline_repository.dart';
 import '../utils/next_up_enrichment.dart';
 import 'background_download_coordinator.dart';
 import 'book_reader_service.dart';
+import 'download_batch_notification_policy.dart';
 import 'download_notification_service.dart';
 import 'legacy_download_engine.dart';
 import 'media3_transmux_downloader.dart';
@@ -389,6 +390,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   /// Series of the items finished in the current batch (null for a movie),
   /// so the completion notice can name the show when there is only one.
   final Set<String?> _completedSeries = {};
+
+  // File transfers release their scheduler slots before subtitles and
+  // artwork finish. Keep the post-processing future until its containing
+  // batch closes so the single completion alert cannot race batch cleanup.
+  final Map<String, Future<void>> _postCompletionFutures = {};
+  final Set<String> _batchedNotificationItems = {};
 
   void _resetBatch() {
     _totalQueued = 0;
@@ -1252,6 +1259,37 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     }
   }
 
+  void _startPostCompletionTasks({
+    required AggregatedItem item,
+    required String savePath,
+    required Directory dir,
+    required String fileName,
+    ServerDownloadTicket? serverTicket,
+  }) {
+    final work = _runPostCompletionTasks(
+      item: item,
+      savePath: savePath,
+      dir: dir,
+      fileName: fileName,
+      serverTicket: serverTicket,
+    );
+    _postCompletionFutures[item.id] = work;
+    unawaited(
+      work
+          .then<void>((_) {}, onError: (Object e, StackTrace stack) {
+            debugPrint('[Download] Postprocessing failed for ${item.id}: $e');
+          })
+          .whenComplete(() {
+            // Batch entries remain available until queueDownloads has
+            // explicitly awaited their post-processing futures.
+            if (!_batchedNotificationItems.contains(item.id) &&
+                identical(_postCompletionFutures[item.id], work)) {
+              _postCompletionFutures.remove(item.id);
+            }
+          }),
+    );
+  }
+
   Future<void> _runPostCompletionTasks({
     required AggregatedItem item,
     required String savePath,
@@ -1259,9 +1297,16 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     required String fileName,
     ServerDownloadTicket? serverTicket,
   }) async {
-    // Both engines finish here, so this is the one place a batch can be counted.
-    _completedCount++;
-    _completedSeries.add(item.type == 'Episode' ? item.seriesName : null);
+    final generation = _batchGeneration;
+    final isBatchItem = _batchedNotificationItems.contains(item.id);
+    if (isBatchItem) {
+      // Count this file once, before the best-effort sidecar work. A batch
+      // never posts its notice here; queueDownloads owns that decision.
+      if (generation == _batchGeneration) {
+        _completedCount++;
+        _completedSeries.add(item.type == 'Episode' ? item.seriesName : null);
+      }
+    }
 
     Future<void> runBestEffort(Future<void> task, Duration timeout) async {
       try {
@@ -1274,15 +1319,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         ? fileName.substring(0, extensionIndex)
         : fileName;
 
-    // Subtitles go first since iOS can suspend a backgrounded app before the
-    // later steps get their turn.
     await runBestEffort(
       serverTicket == null
           ? _downloadExternalSubtitles(item, dir, fileNameBase)
           : _downloadServerSubtitles(item, serverTicket, dir, fileNameBase),
       const Duration(seconds: 30),
     );
-
     await runBestEffort(
       _populateOfflineAssets(item, serverTicket: serverTicket),
       const Duration(seconds: 30),
@@ -1294,7 +1336,6 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         const Duration(seconds: 10),
       );
     }
-
     if (PlatformDetection.isAndroid && _storagePath.isUsingMediaStore) {
       await runBestEffort(
         MediaStoreService.scanFile(savePath),
@@ -1302,16 +1343,16 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
     }
 
-    // The plugin no longer posts its own, so this is the completion notice on
-    // every platform. Held back to the last of a batch so a season reports once.
-    if (_totalQueued <= 1 || _completedCount >= _totalQueued) {
+    // Standalone downloads still alert individually. Batched episodes wait
+    // for every post-processing future in queueDownloads, including when
+    // another episode's subtitles take longer than its media transfer.
+    if (!isBatchItem &&
+        generation == _batchGeneration &&
+        !_cancelAllRequested &&
+        !_disposed) {
       await runBestEffort(
         _notificationService.showComplete(
           itemName: _notificationLabel(item),
-          batchTotal: _totalQueued > 1 ? _completedCount : 0,
-          batchSeries: _completedSeries.length == 1
-              ? _completedSeries.single
-              : null,
         ),
         const Duration(seconds: 10),
       );
@@ -1705,13 +1746,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       serverId: row.serverId,
       rawData: _offlineRepo.rowToRawData(row),
     );
-    unawaited(
-      _runPostCompletionTasks(
-        item: item,
-        savePath: savePath,
-        dir: file.parent,
-        fileName: file.uri.pathSegments.last,
-      ),
+    _startPostCompletionTasks(
+      item: item,
+      savePath: savePath,
+      dir: file.parent,
+      fileName: file.uri.pathSegments.last,
     );
   }
 
@@ -2958,14 +2997,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         keepForegroundService: _hasOtherTranscodedWork(item.id),
       );
 
-      unawaited(
-        _runPostCompletionTasks(
-          item: fullItem,
-          savePath: savePath,
-          dir: dir,
-          fileName: fileName,
-          serverTicket: serverTicket,
-        ),
+      _startPostCompletionTasks(
+        item: fullItem,
+        savePath: savePath,
+        dir: dir,
+        fileName: fileName,
+        serverTicket: serverTicket,
       );
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel && !_isGuardTimeoutCancel(e)) {
@@ -3168,6 +3205,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _openBatches++;
     _totalQueued += toQueue.length;
     final queuedIds = {for (final item in toQueue) item.id};
+    _batchedNotificationItems.addAll(queuedIds);
     if (ownerId != null) {
       _batchItemsByOwner.putIfAbsent(ownerId, () => {}).addAll(queuedIds);
     }
@@ -3181,17 +3219,47 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         downloadItem(item, quality: quality, source: source).catchError((_) {}),
       );
     }
-    final done = Future.wait(downloads).then((_) {}).whenComplete(() async {
-      // A cancelled batch's counters were already cleared by cancelAll.
+    final done = Future.wait(downloads).then((_) async {
+      // All transfers have released their scheduler slots, but subtitle and
+      // artwork tasks may still be running. They must settle before either
+      // the batch counters reset or the success notification is posted.
+      await DownloadBatchNotificationPolicy.awaitPostProcessing(
+        queuedIds.map((id) => _postCompletionFutures[id])
+            .whereType<Future<void>>(),
+      );
       if (generation != _batchGeneration) return;
+
       final ids = _batchItemsByOwner[ownerId];
       if (ids != null && (ids..removeAll(queuedIds)).isEmpty) {
         _batchItemsByOwner.remove(ownerId);
       }
+      _batchedNotificationItems.removeAll(queuedIds);
+      for (final id in queuedIds) {
+        _postCompletionFutures.remove(id);
+      }
       _openBatches--;
+
       if (_openBatches == 0) {
+        final completed = _completedCount;
+        final total = _totalQueued;
+        final series =
+            _completedSeries.length == 1 ? _completedSeries.single : null;
         _resetBatch();
-        await _notificationService.dismiss();
+        if (PlatformDetection.isAndroid) {
+          await _notificationService.releaseIdleForegroundService();
+        } else {
+          await _notificationService.dismiss();
+        }
+        if (DownloadBatchNotificationPolicy.shouldNotifyComplete(
+          completed: completed,
+          total: total,
+        )) {
+          await _notificationService.showComplete(
+            itemName: '',
+            batchTotal: total,
+            batchSeries: series,
+          );
+        }
       }
       notifyListeners();
     });
@@ -4013,6 +4081,8 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _batchGeneration++;
     _openBatches = 0;
     _batchItemsByOwner.clear();
+    _batchedNotificationItems.clear();
+    _postCompletionFutures.clear();
     _resetBatch();
     _notificationService.dismiss();
     notifyListeners();
