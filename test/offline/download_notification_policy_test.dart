@@ -359,4 +359,24 @@ void main() {
     });
   });
 
+  group('cross-server notification ownership', () {
+    test('same media ID on different servers retains independent actions', () {
+      final registry = DownloadProgressNotificationRegistry();
+      final first = registry.update(
+        itemId: 'server-a::episode-1::attempt-1',
+        title: 'Downloading', body: 'A', percent: 12,
+      );
+      final second = registry.update(
+        itemId: 'server-b::episode-1::attempt-2',
+        title: 'Downloading', body: 'B', percent: 44,
+      );
+      expect(first.notificationId, isNot(second.notificationId));
+      expect(first.cancelActionId, isNot(second.cancelActionId));
+      registry.remove('server-a::episode-1::attempt-1');
+      expect(registry.targetForCancelAction(first.cancelActionId), isNull);
+      expect(registry.targetForCancelAction(second.cancelActionId)?.itemId,
+          'server-b::episode-1::attempt-2');
+    });
+  });
+
 }

@@ -314,6 +314,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   // Remember the task ID through failure cleanup so we can replace its
   // low-importance error card with an audible Moonfin error notification.
   final Map<String, String> _nativeNotificationTasks = {};
+  // In-process notification cards are shared across DownloadService instances.
+  // Track only the keys this server/attempt owns for scoped cancellation.
+  final Map<String, String> _ownNotificationKeys = {};
 
   final Map<String, DownloadProgress> _activeDownloads = {};
   Map<String, DownloadProgress> get activeDownloads =>
@@ -2781,6 +2784,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         quality: quality,
       );
       if (!pluginOwnsNotifications()) {
+        _ownNotificationKeys[item.id] = notificationKey;
         await _notificationService.showProgress(
           itemId: notificationKey,
           itemName: _notificationLabel(item),
@@ -3125,7 +3129,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         quality: quality,
       );
       await _offlineRepo.updateDownloadStatus(item.id, 3, error: friendlyError);
-      if (!pluginOwnsNotifications()) {
+      if (!pluginOwnsNotifications() || PlatformDetection.isAndroid) {
         await _notifyDownloadError(
             item.id, item.name, friendlyError,
             notificationKey: notificationKey,
@@ -3149,7 +3153,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         quality: quality,
       );
       await _offlineRepo.updateDownloadStatus(item.id, 3, error: friendlyError);
-      if (!pluginOwnsNotifications()) {
+      if (!pluginOwnsNotifications() || PlatformDetection.isAndroid) {
         await _notifyDownloadError(
             item.id, item.name, friendlyError,
             notificationKey: notificationKey,
@@ -3171,6 +3175,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       _downloadStartTimes.remove(item.id);
       _cancelTokens.remove(item.id);
       _nativeNotificationTasks.remove(item.id);
+      if (_ownNotificationKeys[item.id] == notificationKey) {
+        _ownNotificationKeys.remove(item.id);
+      }
       _lastPersistedProgress.remove(item.id);
       _lastNotifiedProgress.remove(item.id);
       _lastPublished.remove(item.id);
@@ -4170,7 +4177,18 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _batchedNotificationItems.clear();
     _postCompletionFutures.clear();
     _resetBatch();
-    _notificationService.dismiss();
+    if (PlatformDetection.isAndroid) {
+      final keys = _ownNotificationKeys.values.toList();
+      _ownNotificationKeys.clear();
+      unawaited(() async {
+        for (final key in keys) {
+          await _notificationService.finishProgress(key);
+        }
+        await _notificationService.releaseIdleForegroundService();
+      }());
+    } else {
+      unawaited(_notificationService.dismiss());
+    }
     notifyListeners();
   }
 
@@ -4218,7 +4236,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _cancelTokens.clear();
     _downloadStartTimes.clear();
     _resetBatch();
-    await _notificationService.dismiss();
+    // cancelAll already removed this service's Android progress cards.
+    if (!PlatformDetection.isAndroid) {
+      await _notificationService.dismiss();
+    }
     notifyListeners();
   }
 
