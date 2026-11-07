@@ -1075,7 +1075,11 @@ Future<void> _initDeferredStartupServices(UserPreferences prefs) async {
   await _detectAndApplyAudioCapabilities(prefs);
 
   try {
-    await GetIt.instance<DownloadNotificationService>().initialize();
+    final notifications = GetIt.instance<DownloadNotificationService>();
+    await notifications.initialize();
+    if (PlatformDetection.isAndroid) {
+      await notifications.removeStaleProgressOnAppStart();
+    }
   } catch (_) {}
 
   // Starts the native download engine and re-attaches to any downloads that

@@ -39,6 +39,18 @@ void main() {
       expect(episode.indeterminate, isTrue);
     });
 
+    test('stale cleanup selects only our ordinary progress cards', () {
+      final channel = DownloadNotificationService.progressChannel.id;
+      expect(DownloadNotificationService.isStaleProgressCard(23456, channel),
+          isTrue);
+      expect(DownloadNotificationService.isStaleProgressCard(1000, channel),
+          isFalse);
+      expect(DownloadNotificationService.isStaleProgressCard(
+          23456, 'background_downloader'), isFalse);
+      expect(DownloadNotificationService.isStaleProgressCard(
+          23456, DownloadNotificationService.alertChannel.id), isFalse);
+    });
+
     test('alerts remain audible and unrelated server messages unchanged', () {
       const progress = DownloadNotificationService.progressChannel;
       const alerts = DownloadNotificationService.alertChannel;

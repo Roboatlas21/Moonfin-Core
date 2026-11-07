@@ -85,6 +85,29 @@ class DownloadNotificationService {
         cancelFromNotification;
   }
 
+  /// Only the interactive app's startup calls this. Native downloader cards
+  /// belong to a different channel and are never touched. The headless
+  /// auto-download worker does not perform this cleanup.
+  Future<void> removeStaleProgressOnAppStart() async {
+    if (!PlatformDetection.isAndroid || !_initialized || _cards.count != 0) {
+      return;
+    }
+    try {
+      final active = await _plugin.getActiveNotifications();
+      for (final card in active) {
+        if (isStaleProgressCard(card.id, card.channelId)) {
+          await _plugin.cancel(id: card.id);
+        }
+      }
+    } catch (e) {
+      debugPrint('[DownloadNotification] Stale card cleanup failed: $e');
+    }
+  }
+
+  static bool isStaleProgressCard(int id, String? channelId) =>
+      channelId == progressChannel.id &&
+      id != DownloadProgressCards.foregroundId;
+
   Future<void> _serialize(Future<void> Function() action) {
     final task = _pendingNotification.then((_) => action());
     _pendingNotification = task.then<void>(
