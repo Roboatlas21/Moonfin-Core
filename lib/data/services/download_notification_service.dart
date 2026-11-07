@@ -201,8 +201,13 @@ class DownloadNotificationService {
           _cards.remove(itemId);
           _cancelCallbacks.remove(card.cancelActionId);
           _latest.remove(itemId);
+          _lastAndroidSignature.remove(itemId);
+          _lastAndroidUpdate.remove(itemId);
+          rethrow;
         }
-        rethrow;
+        // Progress updates are fire-and-forget. Losing one card refresh must
+        // never create an unhandled exception or interrupt the media transfer.
+        debugPrint('[DownloadNotification] Progress update failed: $e');
       }
       return;
     }
