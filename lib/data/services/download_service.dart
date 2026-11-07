@@ -424,6 +424,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   final Set<String> _postCompletionInProgress = {};
   Future<void>? _ledgerSettleTail;
   final Set<String> _batchedNotificationItems = {};
+  // A cancellation can arrive while SharedPreferences is saving the batch,
+  // before the scheduler has created a queued download placeholder.
+  final Set<String> _cancelledBeforeBatchEnqueue = {};
   final DownloadBatchNotificationLedger _batchNotificationLedger =
       DownloadBatchNotificationLedger();
   final Set<String> _activeBatchLedgerIds = {};
@@ -435,6 +438,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   bool _recoveryScanInProgress = false;
 
   void _resetBatch() {
+    _cancelledBeforeBatchEnqueue.clear();
     _totalQueued = 0;
     _completedCount = 0;
     _completedSeries.clear();
@@ -709,6 +713,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       // If the attempt escaped before creating its real progress entry, the
       // queued placeholder would be orphaned: uncancellable and unretryable.
       // Replace it with an error entry so the item stays actionable.
+      _recordExplicitBatchOutcome(queued.item.id, 'failed');
       final progress = _activeDownloads[queued.item.id];
       final repairedPlaceholder = progress != null && progress.isQueued;
       if (repairedPlaceholder) {
@@ -3421,6 +3426,13 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _openBatches++;
     _totalQueued += toQueue.length;
     final queuedIds = {for (final item in toQueue) item.id};
+    // Publish membership synchronously before awaiting the manifest write,
+    // so concurrent recovery cannot mistake not-yet-enqueued rows for a
+    // finished season.
+    _batchedNotificationItems.addAll(queuedIds);
+    if (ownerId != null) {
+      _batchItemsByOwner.putIfAbsent(ownerId, () => {}).addAll(queuedIds);
+    }
     if (PlatformDetection.isAndroid && toQueue.length > 1) {
       try {
         final series = toQueue.every(
@@ -3448,14 +3460,32 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         debugPrint('[Download] Could not persist season batch: $e');
       }
     }
-    _batchedNotificationItems.addAll(queuedIds);
-    if (ownerId != null) {
-      _batchItemsByOwner.putIfAbsent(ownerId, () => {}).addAll(queuedIds);
+    // Cancel Batch may have run while register() was awaiting storage.
+    // Do not start a transfer for an episode the user already cancelled.
+    final skipped = queuedIds.intersection(_cancelledBeforeBatchEnqueue);
+    for (final id in skipped) {
+      try {
+        await _batchNotificationLedger.markTerminal(
+          serverId: _serverId,
+          itemId: id,
+          outcome: 'cancelled',
+        );
+      } catch (e) {
+        debugPrint('[Download] Cancelled manifest entry not saved: $e');
+      }
     }
+    if (generation != _batchGeneration || _cancelAllRequested) {
+      return DownloadBatch(queued: const [], done: Future.value());
+    }
+    _totalQueued -= skipped.length;
+    final runnable = [
+      for (final item in toQueue)
+        if (!skipped.contains(item.id)) item,
+    ];
     notifyListeners();
 
     final downloads = <Future<void>>[];
-    for (final item in toQueue) {
+    for (final item in runnable) {
       // One failing item must not reject the whole batch; its failure is
       // already recorded as an error entry on the service.
       downloads.add(
@@ -3524,7 +3554,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       notifyListeners();
       _releaseRetiredServiceIfIdle();
     });
-    return DownloadBatch(queued: toQueue, done: done);
+    return DownloadBatch(queued: runnable, done: done);
   }
 
   /// [skipCompleted] keeps the auto-downloader from re-queueing what it
@@ -4277,7 +4307,39 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     );
   }
 
+  void _recordExplicitBatchOutcome(String itemId, String outcome) {
+    if (!PlatformDetection.isAndroid ||
+        !_batchedNotificationItems.contains(itemId) ||
+        _cancelAllRequested) {
+      return;
+    }
+    unawaited(
+      _batchNotificationLedger
+          .markTerminal(
+            serverId: _serverId,
+            itemId: itemId,
+            outcome: outcome,
+          )
+          .then<void>((_) async {
+            await _settlePersistedBatchNotifications();
+          })
+          .catchError((Object e) {
+            debugPrint('[Download] Terminal batch outcome not saved: $e');
+          }),
+    );
+  }
+
   void cancelDownload(String itemId) {
+    if (_batchedNotificationItems.contains(itemId)) {
+      // A batch can be cancelled during async manifest registration before
+      // the queued placeholder exists. Remember that intent synchronously.
+      if (!_pendingDownloadByItemId.containsKey(itemId) &&
+          !_cancelTokens.containsKey(itemId) &&
+          !_activeDownloads.containsKey(itemId)) {
+        _cancelledBeforeBatchEnqueue.add(itemId);
+      }
+      _recordExplicitBatchOutcome(itemId, 'cancelled');
+    }
     final pending = _pendingDownloadByItemId.remove(itemId);
     if (pending != null) {
       _pendingDownloads.remove(pending);
@@ -4301,7 +4363,13 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     final running = <String>[];
     for (final id in ids) {
       final progress = _activeDownloads[id];
-      if (progress == null || !progress.isInFlight) continue;
+      if (progress == null) {
+        if (_batchedNotificationItems.contains(id)) {
+          cancelDownload(id);
+        }
+        continue;
+      }
+      if (!progress.isInFlight) continue;
       (progress.isQueued ? queued : running).add(id);
     }
     // Cancelled items never complete, so drop them from the shared total or
