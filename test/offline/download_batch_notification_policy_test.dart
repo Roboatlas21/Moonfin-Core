@@ -109,7 +109,7 @@ void main() {
       );
       expect(batch.isSettled({'episode-1': 2, 'episode-2': 3}), isTrue);
       expect(batch.allSucceeded({'episode-1': 2, 'episode-2': 3}), isFalse);
-      expect(batch.isSettled({'episode-1': 2}), isTrue);
+      expect(batch.isSettled({'episode-1': 2}), isFalse);
       expect(batch.allSucceeded({'episode-1': 2}), isFalse);
     });
 
@@ -130,6 +130,42 @@ void main() {
     expect(batch.itemIds.any(processing.contains), isTrue);
     processing.remove('episode-2');
     expect(batch.itemIds.any(processing.contains), isFalse);
+  });
+
+  group('explicit durable terminal outcomes', () {
+    test('missing and not-started episodes remain pending', () {
+      const batch = PendingDownloadNotificationBatch(
+        id: 'batch', serverId: 'server',
+        itemIds: ['one', 'two'], itemName: 'Show',
+      );
+      expect(batch.isSettled({'one': 2}), isFalse);
+      expect(batch.isSettled({'one': 2, 'two': 0}), isFalse);
+      expect(batch.isSettled({'one': 2, 'two': 1}), isFalse);
+    });
+
+    test('explicit cancellation settles but does not count as success', () {
+      const batch = PendingDownloadNotificationBatch(
+        id: 'batch', serverId: 'server',
+        itemIds: ['one', 'two'], itemName: 'Show',
+      );
+      final cancelled = batch.withTerminalOutcome('two', 'cancelled');
+      expect(cancelled.isSettled({'one': 2}), isTrue);
+      expect(cancelled.allSucceeded({'one': 2}), isFalse);
+      final roundtrip = PendingDownloadNotificationBatch.fromJson(
+        cancelled.toJson(),
+      )!;
+      expect(roundtrip.terminalOutcomes['two'], 'cancelled');
+    });
+
+    test('explicit preflight failure settles a missing row', () {
+      const batch = PendingDownloadNotificationBatch(
+        id: 'batch', serverId: 'server',
+        itemIds: ['one', 'two'], itemName: 'Show',
+      );
+      final failed = batch.withTerminalOutcome('two', 'failed');
+      expect(failed.isSettled({'one': 2}), isTrue);
+      expect(failed.allSucceeded({'one': 2}), isFalse);
+    });
   });
 
 }

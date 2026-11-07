@@ -13,6 +13,7 @@ class PendingDownloadNotificationBatch {
     required this.itemIds,
     required this.itemName,
     this.series,
+    this.terminalOutcomes = const {},
   });
 
   final String id;
@@ -20,6 +21,25 @@ class PendingDownloadNotificationBatch {
   final List<String> itemIds;
   final String itemName;
   final String? series;
+  // Only explicit cancellation and failure are persisted here. DB status 2/3
+  // is authoritative for completed transfers. Missing rows and status 0 are
+  // never treated as terminal automatically.
+  final Map<String, String> terminalOutcomes;
+
+  PendingDownloadNotificationBatch withTerminalOutcome(
+    String itemId,
+    String outcome,
+  ) => PendingDownloadNotificationBatch(
+    id: id,
+    serverId: serverId,
+    itemIds: itemIds,
+    itemName: itemName,
+    series: series,
+    terminalOutcomes: {
+      ...terminalOutcomes,
+      itemId: outcome,
+    },
+  );
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -27,6 +47,7 @@ class PendingDownloadNotificationBatch {
     'itemIds': itemIds,
     'itemName': itemName,
     'series': series,
+    'terminalOutcomes': terminalOutcomes,
   };
 
   static PendingDownloadNotificationBatch? fromJson(dynamic value) {
@@ -48,19 +69,34 @@ class PendingDownloadNotificationBatch {
       itemIds: List<String>.from(ids),
       itemName: itemName,
       series: value['series'] is String ? value['series'] as String : null,
+      terminalOutcomes: {
+        if (value['terminalOutcomes'] is Map)
+          for (final entry in (value['terminalOutcomes'] as Map).entries)
+            if (entry.key is String &&
+                entry.value is String &&
+                ids.contains(entry.key) &&
+                (entry.value == 'cancelled' || entry.value == 'failed'))
+              entry.key as String: entry.value as String,
+      },
     );
   }
 
   bool contains(String itemServerId, String itemId) =>
       serverId == itemServerId && itemIds.contains(itemId);
 
-  /// Status 2 = fully downloaded. Status 1 = still in progress.
-  /// Missing/cancelled/failed rows terminate without a success alert.
+  /// Status 2 = success, status 3 = known failure. Missing/0/1 are pending.
+  /// A cancellation without an offline row must have an explicit terminal
+  /// outcome; otherwise a crash before enqueuing could falsely finish a batch.
   bool isSettled(Map<String, int> statuses) =>
-      itemIds.every((id) => statuses[id] != 1);
+      itemIds.every((id) =>
+          statuses[id] == 2 ||
+          statuses[id] == 3 ||
+          terminalOutcomes[id] == 'cancelled' ||
+          terminalOutcomes[id] == 'failed');
 
   bool allSucceeded(Map<String, int> statuses) =>
-      itemIds.every((id) => statuses[id] == 2);
+      itemIds.every((id) =>
+          statuses[id] == 2 && !terminalOutcomes.containsKey(id));
 }
 
 /// Separate shared-preferences entry per batch: concurrent server sessions
@@ -102,6 +138,24 @@ class DownloadBatchNotificationLedger {
       }
     }
     return results;
+  }
+
+  /// Record a terminal event for an item whose row may have been deleted
+  /// (cancellation) or never created (preflight failure).
+  Future<void> markTerminal({
+    required String serverId,
+    required String itemId,
+    required String outcome,
+  }) async {
+    if (outcome != 'cancelled' && outcome != 'failed') {
+      throw ArgumentError.value(outcome, 'outcome');
+    }
+    final batches = await pending();
+    for (final batch in batches) {
+      if (!batch.contains(serverId, itemId)) continue;
+      final next = batch.withTerminalOutcome(itemId, outcome);
+      await _prefs.setString('$_prefix${batch.id}', jsonEncode(next.toJson()));
+    }
   }
 
   Future<void> consume(String id) => _prefs.remove('$_prefix$id');
