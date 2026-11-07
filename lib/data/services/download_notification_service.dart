@@ -155,7 +155,15 @@ class DownloadNotificationService {
     bool startNewTransfer = false,
     void Function()? onCancel,
   }) async {
-    if (!_initialized) await initialize();
+    if (!_initialized) {
+      if (PlatformDetection.isAndroid && startNewTransfer) {
+        await initialize();
+      } else {
+        // Preserve the previous non-Android behaviour. Test and headless
+        // callers do not implicitly bootstrap OS notifications.
+        return;
+      }
+    }
     final rawPercent = (progress * 100).round();
     final percent = progress < 0
         ? -1
