@@ -303,6 +303,23 @@ class _QueuedDownload {
 }
 
 class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
+  // The notification service and native downloader outlive server switches.
+  // Retired DownloadService instances may still own in-process transcodes.
+  // Keep them reachable so the user-facing Cancel All is genuinely global.
+  static final Set<DownloadService> _liveDownloadServices = {};
+  bool _retiredFromActiveServer = false;
+
+  void _releaseRetiredServiceIfIdle() {
+    if (!_retiredFromActiveServer) return;
+    if (_runningDownloadCount != 0 ||
+        _pendingDownloads.isNotEmpty ||
+        _openBatches != 0 ||
+        _postCompletionInProgress.isNotEmpty) {
+      return;
+    }
+    _liveDownloadServices.remove(this);
+  }
+
   final MediaServerClient _client;
   final DownloadNotificationService _notificationService;
   late final Dio _downloadDio;
@@ -528,6 +545,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   }
 
   DownloadService(this._client, this._notificationService) {
+    _liveDownloadServices.add(this);
     _downloadDio = Dio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 30),
@@ -716,6 +734,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       _reservedStorageBytes.remove(queued.item.id);
       _runningDownloadCount--;
       _drainDownloadQueue();
+      _releaseRetiredServiceIfIdle();
     }
   }
 
@@ -3503,6 +3522,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         }
       }
       notifyListeners();
+      _releaseRetiredServiceIfIdle();
     });
     return DownloadBatch(queued: toQueue, done: done);
   }
@@ -4293,6 +4313,18 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   }
 
   void cancelAll() {
+    // Cancel every local transfer, including those still running from a
+    // server that is no longer selected. Native group cancellation and
+    // persisted-ledger cleanup remain global and happen only once.
+    final services = _liveDownloadServices.toList(growable: false);
+    for (final service in services) {
+      service._cancelAllOwnedTransfers(
+        performGlobalCleanup: identical(service, this),
+      );
+    }
+  }
+
+  void _cancelAllOwnedTransfers({required bool performGlobalCleanup}) {
     _cancelAllRequested = true;
     for (final pending in _pendingDownloads) {
       if (!pending.completer.isCompleted) pending.completer.complete();
@@ -4310,9 +4342,8 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       token.cancel();
     }
     _cancelTokens.clear();
-    if (_pluginEngineSupported) {
-      // Also cancels media-group tasks with no live context (adopted from a
-      // previous run or pre-server-switch).
+    if (performGlobalCleanup && _pluginEngineSupported) {
+      // Cancel All intentionally includes every server's native tasks.
       unawaited(
         bgd.FileDownloader()
             .cancelAll(group: BackgroundDownloadCoordinator.mediaGroup)
@@ -4324,9 +4355,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     _recoveredCompletionTimer?.cancel();
     _recoveredCompletions.clear();
     _activeBatchLedgerIds.clear();
-    unawaited(_batchNotificationLedger.clearAll().catchError((Object e) {
-      debugPrint('[Download] Cancel All ledger cleanup failed: $e');
-    }));
+    if (performGlobalCleanup) {
+      unawaited(_batchNotificationLedger.clearAll().catchError((Object e) {
+        debugPrint('[Download] Cancel All ledger cleanup failed: $e');
+      }));
+    }
     _batchItemsByOwner.clear();
     _batchedNotificationItems.clear();
     _postCompletionFutures.clear();
@@ -4345,6 +4378,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       unawaited(_notificationService.dismiss());
     }
     notifyListeners();
+    _releaseRetiredServiceIfIdle();
   }
 
   Future<void> clearAllDownloads() async {
@@ -4783,12 +4817,15 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
   /// server switch. Unlike [dispose], in-flight downloads are meant to keep
   /// running, so nothing is cancelled and the HTTP client stays open.
   void detachFromGlobalState() {
+    _retiredFromActiveServer = true;
     _prefs.removeListener(_onPreferencesChanged);
     _coordinator?.detach(statusHandler: _onTaskStatus);
+    _releaseRetiredServiceIfIdle();
   }
 
   @override
   void dispose() {
+    _liveDownloadServices.remove(this);
     _recoveredCompletionTimer?.cancel();
     _recoveredCompletions.clear();
     _prefs.removeListener(_onPreferencesChanged);
