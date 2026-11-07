@@ -384,26 +384,10 @@ class MainActivity : AudioServiceActivity(), GamepadsCompatibleActivity {
             },
         )
 
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            DownloadCancelPendingIntent.CHANNEL,
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "invalidateForegroundCancelAction" -> {
-                    val id = call.argument<Int>("notificationId")
-                    if (id == null || id != 1000) {
-                        result.error("INVALID_ID", "Unexpected download notification", null)
-                    } else {
-                        try {
-                            DownloadCancelPendingIntent.invalidate(this, id)
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.error("PENDING_INTENT", e.message, null)
-                        }
-                    }
-                }
-                else -> result.notImplemented()
-            }
+        // Engine-scoped: survives Activity destruction while a download's
+        // Flutter engine and foreground service continue to run.
+        if (!flutterEngine.plugins.has(DownloadCancelPendingIntentPlugin::class.java)) {
+            flutterEngine.plugins.add(DownloadCancelPendingIntentPlugin())
         }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
