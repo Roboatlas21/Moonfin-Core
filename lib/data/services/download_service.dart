@@ -405,6 +405,16 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         episode: item.indexNumber,
       );
 
+  // A queued or preparing transcode still needs the Android foreground
+  // service after the current episode finishes. Retaining one stable group
+  // summary avoids a forbidden restart from the background between episodes.
+  bool _hasOtherLocalWork(String itemId) =>
+      _pendingDownloads.any((task) => task.quality.isTranscoded) ||
+      _activeDownloads.entries.any((entry) =>
+          entry.key != itemId &&
+          entry.value.isTranscoded &&
+          entry.value.isInFlight);
+
   Future<void> _notifyDownloadError(String label, String error) =>
       _notificationService.showError(
         itemName: label,
@@ -2439,6 +2449,10 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       }
     }
 
+    // Each in-process transfer owns one notification card and one Cancel
+    // action, even if the user switches servers while the transfer is live.
+    final notificationKey = '${item.serverId}::${item.id}::${const Uuid().v4()}';
+
     // Reuses the token registered when the item left the scheduler queue (see
     // [_runQueuedDownload]) so cancellation also works before the transfer
     // starts, then hands the same token to whichever engine runs.
@@ -2468,6 +2482,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
     // no native side posts notifications, so the local notification path
     // has to stay on regardless of what the plugin engine would have done.
     var useTransmuxEngine = false;
+    var localProgressStarted = false;
     bool pluginOwnsNotifications() =>
         !useTransmuxEngine &&
         _pluginNotificationsFor(
@@ -2653,11 +2668,15 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       if (!pluginOwnsNotifications()) {
         await _notificationService.showProgress(
+          itemId: notificationKey,
           itemName: _notificationLabel(item),
           progress: initialProgress,
           batchTotal: _totalQueued,
           batchCompleted: _completedCount,
+          startNewTransfer: true,
+          onCancel: () => cancelDownload(item.id),
         );
+        localProgressStarted = true;
       }
       notifyListeners();
 
@@ -2751,10 +2770,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             ),
           );
         }
-        if (!pluginOwnsNotifications() &&
+        if (localProgressStarted &&
             _shouldUpdateSystemNotification(item.id, progress)) {
           unawaited(
             _notificationService.showProgress(
+              itemId: notificationKey,
               itemName: _notificationLabel(item),
               progress: progress,
               batchTotal: _totalQueued,
@@ -2769,6 +2789,20 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         transferQuality,
         destinationOnRemovableStorage: destinationOnRemovableStorage,
       );
+
+      Future<void> startLocalProgressOnFallback() async {
+        if (localProgressStarted) return;
+        await _notificationService.showProgress(
+          itemId: notificationKey,
+          itemName: _notificationLabel(item),
+          progress: _activeDownloads[item.id]?.progress ?? initialProgress,
+          batchTotal: _totalQueued,
+          batchCompleted: _completedCount,
+          startNewTransfer: true,
+          onCancel: () => cancelDownload(item.id),
+        );
+        localProgressStarted = true;
+      }
 
       Future<Response> engineDownload(String downloadUrl) async {
         // Fallback URLs are direct copies with their own seek index, so only
@@ -2813,6 +2847,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
             // the device is on rather than the server.
             usePluginEngine = false;
           }
+        }
+        // The native downloader has relinquished this transfer. Start a local
+        // foreground notification before the legacy in-process GET begins.
+        if (PlatformDetection.isAndroid) {
+          await startLocalProgressOnFallback();
         }
         return _legacyEngine.downloadWithHangGuard(
           downloadUrl,
@@ -2926,6 +2965,13 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       notifyListeners();
 
+      if (localProgressStarted && PlatformDetection.isAndroid) {
+        await _notificationService.finishProgress(
+          notificationKey,
+          keepForegroundService: _hasOtherLocalWork(item.id),
+        );
+      }
+
       unawaited(
         _runPostCompletionTasks(
           item: fullItem,
@@ -2945,7 +2991,14 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         await _deleteItemImages(item.id, imageDir);
         await _offlineRepo.deleteItem(item.id);
         await _cleanupEpisodeContainers(item, imageDir);
-        await _notificationService.dismiss();
+        if (localProgressStarted && PlatformDetection.isAndroid) {
+          await _notificationService.finishProgress(
+            notificationKey,
+            keepForegroundService: _hasOtherLocalWork(item.id),
+          );
+        } else if (!PlatformDetection.isAndroid) {
+          await _notificationService.dismiss();
+        }
         if (serverTicket != null) _forgetOnServer([item.id]);
       } else {
         final friendlyError = _friendlyDioError(e);
@@ -2963,7 +3016,13 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           3,
           error: friendlyError,
         );
-        if (!pluginOwnsNotifications()) {
+        if (localProgressStarted || !pluginOwnsNotifications()) {
+          if (localProgressStarted && PlatformDetection.isAndroid) {
+            await _notificationService.finishProgress(
+              notificationKey,
+              keepForegroundService: _hasOtherLocalWork(item.id),
+            );
+          }
           await _notifyDownloadError(item.name, friendlyError);
         }
         _emitError('${item.name}: $friendlyError');
@@ -3156,7 +3215,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       _openBatches--;
       if (_openBatches == 0) {
         _resetBatch();
-        await _notificationService.dismiss();
+        if (PlatformDetection.isAndroid) {
+          await _notificationService.releaseIdleForegroundService();
+        } else {
+          await _notificationService.dismiss();
+        }
       }
       notifyListeners();
     });
