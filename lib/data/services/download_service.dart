@@ -2965,13 +2965,6 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
       );
       notifyListeners();
 
-      if (localProgressStarted && PlatformDetection.isAndroid) {
-        await _notificationService.finishProgress(
-          notificationKey,
-          keepForegroundService: _hasOtherLocalWork(item.id),
-        );
-      }
-
       unawaited(
         _runPostCompletionTasks(
           item: fullItem,
@@ -2991,12 +2984,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         await _deleteItemImages(item.id, imageDir);
         await _offlineRepo.deleteItem(item.id);
         await _cleanupEpisodeContainers(item, imageDir);
-        if (localProgressStarted && PlatformDetection.isAndroid) {
-          await _notificationService.finishProgress(
-            notificationKey,
-            keepForegroundService: _hasOtherLocalWork(item.id),
-          );
-        } else if (!PlatformDetection.isAndroid) {
+        if (!PlatformDetection.isAndroid) {
           await _notificationService.dismiss();
         }
         if (serverTicket != null) _forgetOnServer([item.id]);
@@ -3017,12 +3005,6 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           error: friendlyError,
         );
         if (localProgressStarted || !pluginOwnsNotifications()) {
-          if (localProgressStarted && PlatformDetection.isAndroid) {
-            await _notificationService.finishProgress(
-              notificationKey,
-              keepForegroundService: _hasOtherLocalWork(item.id),
-            );
-          }
           await _notifyDownloadError(item.name, friendlyError);
         }
         _emitError('${item.name}: $friendlyError');
@@ -3039,7 +3021,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         quality: quality,
       );
       await _offlineRepo.updateDownloadStatus(item.id, 3, error: friendlyError);
-      if (!pluginOwnsNotifications()) {
+      if (localProgressStarted || !pluginOwnsNotifications()) {
         await _notifyDownloadError(item.name, friendlyError);
       }
       _emitError('${item.name}: $friendlyError');
@@ -3059,11 +3041,19 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         quality: quality,
       );
       await _offlineRepo.updateDownloadStatus(item.id, 3, error: friendlyError);
-      if (!pluginOwnsNotifications()) {
+      if (localProgressStarted || !pluginOwnsNotifications()) {
         await _notifyDownloadError(item.name, friendlyError);
       }
       _emitError('${item.name}: $friendlyError');
     } finally {
+      // Exactly one cleanup path for success, cancellation, network timeout
+      // and other errors. A failed DB write must not orphan a progress card.
+      if (localProgressStarted && PlatformDetection.isAndroid) {
+        await _notificationService.finishProgress(
+          notificationKey,
+          keepForegroundService: _hasOtherLocalWork(item.id),
+        );
+      }
       activityHeartbeat?.cancel();
       if (activityPlaySessionId != null) {
         _reportDownloadActivity(
