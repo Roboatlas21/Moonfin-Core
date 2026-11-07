@@ -2881,6 +2881,14 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
         serverNeedsLegacyTls: _serverNeedsLegacyTls,
       );
 
+      // The deferred app startup may still be initializing notifications
+      // when the user begins a transcode. Initialize here as well and fail
+      // explicitly if Android cannot establish foreground protection.
+      if (PlatformDetection.isAndroid && !pluginOwnsNotifications()) {
+        await _notificationService
+            .initialize()
+            .timeout(const Duration(seconds: 12));
+      }
       // Before the first transfer: iOS drops notifications, the plugin's
       // included, until the user has answered the permission prompt.
       await _notificationService.requestPermissionIfNeeded();
@@ -2907,6 +2915,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           batchTotal: _totalQueued,
           batchCompleted: _completedCount,
         );
+        if (PlatformDetection.isAndroid) {
+          await _notificationService.requireAndroidForegroundProtection();
+        }
       }
       notifyListeners();
 
@@ -3022,6 +3033,11 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
 
       Future<void> startLocalProgressAfterNativeFallback() async {
         if (localProgressStarted) return;
+        if (PlatformDetection.isAndroid) {
+          await _notificationService
+              .initialize()
+              .timeout(const Duration(seconds: 12));
+        }
         localProgressStarted = true;
         _ownNotificationKeys[item.id] = notificationKey;
         final current = _activeDownloads[item.id];
@@ -3034,6 +3050,9 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           batchTotal: _totalQueued,
           batchCompleted: _completedCount,
         );
+        if (PlatformDetection.isAndroid) {
+          await _notificationService.requireAndroidForegroundProtection();
+        }
       }
 
       Future<Response> engineDownload(String downloadUrl) async {

@@ -48,6 +48,42 @@ class DownloadNotificationService {
 
   bool _initialized = false;
   bool get isInitialized => _initialized;
+
+  /// An in-process Android transfer must not proceed with only an ordinary
+  /// notification: that card does not protect the engine in the background.
+  Future<void> requireAndroidForegroundProtection() async {
+    if (!PlatformDetection.isAndroid) return;
+    final starting = _foregroundStartInFlight;
+    if (starting != null) {
+      try {
+        await starting.timeout(_operationTimeout);
+      } catch (e) {
+        debugPrint('[DownloadNotification] Foreground readiness delayed: $e');
+      }
+    }
+    final stopping = _foregroundStopInFlight;
+    if (stopping != null) {
+      try {
+        await stopping.timeout(_operationTimeout);
+      } catch (e) {
+        debugPrint('[DownloadNotification] Foreground stop still pending: $e');
+      }
+    }
+    // Follow any completion reconciliation enqueued by the platform callbacks.
+    await _serializeNotification(() async {});
+    if (!androidForegroundProtectionReady(
+      running: _foregroundServiceRunning,
+      startInFlight: _foregroundStartInFlight != null,
+      stopInFlight: _foregroundStopInFlight != null,
+      stopUncertain: _foregroundStopUncertain,
+    )) {
+      throw StateError(
+        'Android could not establish a foreground service for the download. '
+        'Open Moonfin and retry the download.',
+      );
+    }
+  }
+
   DateTime _lastUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   bool _foregroundServiceRunning = false;
   // Future.timeout does not cancel the platform call. A late Android reply

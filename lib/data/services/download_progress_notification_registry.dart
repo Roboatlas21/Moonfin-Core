@@ -237,3 +237,13 @@ bool foregroundRestartRequired({
   required bool stopInFlight,
 }) =>
     (stopUncertain || !serviceRunning) && !startInFlight && !stopInFlight;
+
+/// True only when Android has acknowledged an active foreground service and
+/// there is no outstanding stop operation that could remove that protection.
+bool androidForegroundProtectionReady({
+  required bool running,
+  required bool startInFlight,
+  required bool stopInFlight,
+  required bool stopUncertain,
+}) =>
+    running && !startInFlight && !stopInFlight && !stopUncertain;

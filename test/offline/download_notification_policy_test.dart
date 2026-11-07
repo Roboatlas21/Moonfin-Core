@@ -471,4 +471,35 @@ void main() {
     });
   });
 
+  group('Android download foreground readiness', () {
+    test('rejects an ordinary card without a foreground service', () {
+      expect(androidForegroundProtectionReady(
+        running: false, startInFlight: false,
+        stopInFlight: false, stopUncertain: false,
+      ), isFalse);
+    });
+
+    test('rejects pending startup and shutdown operations', () {
+      expect(androidForegroundProtectionReady(
+        running: true, startInFlight: true,
+        stopInFlight: false, stopUncertain: false,
+      ), isFalse);
+      expect(androidForegroundProtectionReady(
+        running: true, startInFlight: false,
+        stopInFlight: true, stopUncertain: false,
+      ), isFalse);
+    });
+
+    test('requires a confirmed live foreground service', () {
+      expect(androidForegroundProtectionReady(
+        running: true, startInFlight: false,
+        stopInFlight: false, stopUncertain: false,
+      ), isTrue);
+      expect(androidForegroundProtectionReady(
+        running: true, startInFlight: false,
+        stopInFlight: false, stopUncertain: true,
+      ), isFalse);
+    });
+  });
+
 }
