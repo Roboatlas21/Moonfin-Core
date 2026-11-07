@@ -1346,6 +1346,7 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
           })
           .whenComplete(() {
             _postCompletionInProgress.remove(item.id);
+            _releaseRetiredServiceIfIdle();
             // A recovered batch may have another episode's postprocessing
             // running when its final media file reached status=2.
             if (recovered && !_disposed) {
@@ -4912,12 +4913,12 @@ class DownloadService extends ChangeNotifier implements AutoDownloadDownloader {
 
   @override
   void dispose() {
-    _liveDownloadServices.remove(this);
     _recoveredCompletionTimer?.cancel();
     _recoveredCompletions.clear();
     _prefs.removeListener(_onPreferencesChanged);
     _coordinator?.detach(statusHandler: _onTaskStatus);
     cancelAll();
+    _liveDownloadServices.remove(this);
     _disposed = true;
     _notifyTimer?.cancel();
     _notifyTimer = null;
