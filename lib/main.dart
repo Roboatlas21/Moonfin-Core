@@ -26,6 +26,7 @@ import 'background/auto_download_background_main.dart' as auto_download_bg;
 import 'data/services/auto_download_service.dart';
 import 'data/services/background_download_coordinator.dart';
 import 'data/services/download_notification_service.dart';
+import 'data/services/local_notification_bootstrap.dart';
 import 'data/services/push_messaging_service.dart';
 import 'data/services/seerr_notification_service.dart';
 import 'data/services/media_server_client_factory.dart';
@@ -957,6 +958,11 @@ void main() async {
   }
 
   await configureDependencies();
+  // The Android notification-action isolate can send a Cancel tap before
+  // deferred startup finishes. Reuse Seerr's existing live-isolate port.
+  if (PlatformDetection.isAndroid) {
+    LocalNotificationBootstrap.instance.attachMainIsolateActionHandler();
+  }
   _installCrashHandlers();
   if (PlatformDetection.isAndroid) _startProcessExitReporter();
   // When the system runs the auto-download refresh task against this
