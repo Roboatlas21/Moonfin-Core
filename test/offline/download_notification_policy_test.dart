@@ -446,4 +446,29 @@ void main() {
     });
   });
 
+  group('late Android foreground stop handling', () {
+    test('waits until stop resolves before trying to restart', () {
+      expect(foregroundRestartRequired(
+        serviceRunning: true, stopUncertain: false,
+        startInFlight: false, stopInFlight: true,
+      ), isFalse);
+    });
+    test('restarts after stop succeeds or errors', () {
+      expect(foregroundRestartRequired(
+        serviceRunning: false, stopUncertain: false,
+        startInFlight: false, stopInFlight: false,
+      ), isTrue);
+      expect(foregroundRestartRequired(
+        serviceRunning: true, stopUncertain: true,
+        startInFlight: false, stopInFlight: false,
+      ), isTrue);
+    });
+    test('avoids overlapping foreground starts', () {
+      expect(foregroundRestartRequired(
+        serviceRunning: false, stopUncertain: false,
+        startInFlight: true, stopInFlight: false,
+      ), isFalse);
+    });
+  });
+
 }

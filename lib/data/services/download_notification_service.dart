@@ -54,6 +54,8 @@ class DownloadNotificationService {
   // must be reconciled so a service that starts after the deadline is stopped
   // (or updated with the current owner) rather than left running forever.
   Future<void>? _foregroundStartInFlight;
+  Future<void>? _foregroundStopInFlight;
+  bool _foregroundStopUncertain = false;
   bool _stopAfterForegroundStart = false;
   bool _retainForegroundBetweenTransfers = false;
   String? _foregroundActionOwner;
@@ -423,7 +425,9 @@ class DownloadNotificationService {
             }
           } else {
             await _stopForegroundService();
-            if (!_foregroundServiceRunning && _foregroundStartInFlight == null) {
+            if (!_foregroundServiceRunning &&
+            _foregroundStartInFlight == null &&
+            _foregroundStopInFlight == null) {
               await _cancelProgressId(
                 DownloadProgressNotificationRegistry.foregroundId,
               );
@@ -553,7 +557,9 @@ class DownloadNotificationService {
           }
         }
         await _stopForegroundService();
-        if (!_foregroundServiceRunning && _foregroundStartInFlight == null) {
+        if (!_foregroundServiceRunning &&
+            _foregroundStartInFlight == null &&
+            _foregroundStopInFlight == null) {
           await _cancelProgressId(
             DownloadProgressNotificationRegistry.foregroundId,
           );
@@ -576,7 +582,9 @@ class DownloadNotificationService {
           return;
         }
         await _stopForegroundService();
-        if (!_foregroundServiceRunning && _foregroundStartInFlight == null) {
+        if (!_foregroundServiceRunning &&
+            _foregroundStartInFlight == null &&
+            _foregroundStopInFlight == null) {
           await _cancelProgressId(
             DownloadProgressNotificationRegistry.foregroundId,
           );
@@ -811,7 +819,12 @@ class DownloadNotificationService {
       return;
     }
 
-    if (!_foregroundServiceRunning && _foregroundStartInFlight == null) {
+    if (foregroundRestartRequired(
+      serviceRunning: _foregroundServiceRunning,
+      stopUncertain: _foregroundStopUncertain,
+      startInFlight: _foregroundStartInFlight != null,
+      stopInFlight: _foregroundStopInFlight != null,
+    )) {
       try {
         final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>();
@@ -841,6 +854,7 @@ class DownloadNotificationService {
         try {
           await start.timeout(_operationTimeout);
           _foregroundServiceRunning = true;
+          _foregroundStopUncertain = false;
           return;
         } on TimeoutException {
           debugPrint(
@@ -917,11 +931,46 @@ class DownloadNotificationService {
         .timeout(_operationTimeout);
   }
 
+  Future<void> _reconcileForegroundStop(
+    Future<void> attempt, {
+    required bool succeeded,
+  }) async {
+    try {
+      await _serializeNotification(() async {
+        if (!identical(_foregroundStopInFlight, attempt)) return;
+        _foregroundStopInFlight = null;
+        if (succeeded) {
+          _foregroundServiceRunning = false;
+          _foregroundStopUncertain = false;
+          _foregroundActionOwner = null;
+        } else {
+          // An exception is not proof that Android kept the old service.
+          // A future transfer must retry foreground startup.
+          _foregroundStopUncertain = true;
+        }
+        final current = _androidProgress.foregroundSnapshot;
+        if (current != null) {
+          await _postAndroidProgress(current);
+        } else if (succeeded) {
+          if (!_retainForegroundBetweenTransfers &&
+              _foregroundStartInFlight == null) {
+            await _cancelProgressId(
+              DownloadProgressNotificationRegistry.foregroundId,
+            );
+          }
+        } else if (!_retainForegroundBetweenTransfers) {
+          debugPrint('[DownloadNotification] Foreground stop not confirmed');
+        }
+      });
+    } catch (e) {
+      debugPrint('[DownloadNotification] Foreground stop reconciliation: $e');
+    }
+  }
+
   Future<void> _stopForegroundService() async {
+    if (_foregroundStopInFlight != null) return;
     if (!_foregroundServiceRunning) {
       if (_foregroundStartInFlight != null) {
-        // A timed-out platform call might still start the service. The late
-        // completion handler will stop it before it can remain orphaned.
         _stopAfterForegroundStart = true;
       }
       return;
@@ -932,19 +981,24 @@ class DownloadNotificationService {
       if (androidPlugin == null) {
         throw StateError('Android notification plugin unavailable');
       }
-      await androidPlugin
-          .stopForegroundService()
-          .timeout(_operationTimeout);
-      _foregroundServiceRunning = false;
-      _foregroundStartInFlight = null;
-      _stopAfterForegroundStart = false;
-      _foregroundActionOwner = null;
-      await _cancelProgressId(
-        DownloadProgressNotificationRegistry.foregroundId,
-      );
+      final stop = androidPlugin.stopForegroundService();
+      _foregroundStopInFlight = stop;
+      unawaited(stop.then<void>(
+        (_) => _reconcileForegroundStop(stop, succeeded: true),
+        onError: (Object e, StackTrace stack) {
+          debugPrint('[DownloadNotification] Foreground stop rejected: $e');
+          return _reconcileForegroundStop(stop, succeeded: false);
+        },
+      ));
+      try {
+        await stop.timeout(_operationTimeout);
+      } on TimeoutException {
+        // A Dart timeout cannot cancel the in-flight Android stop RPC.
+        debugPrint('[DownloadNotification] Foreground stop still pending');
+      }
     } catch (e) {
+      _foregroundStopUncertain = true;
       debugPrint('[DownloadNotification] Foreground stop failed: $e');
     }
   }
-
 }

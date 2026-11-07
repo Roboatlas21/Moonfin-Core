@@ -227,3 +227,13 @@ bool isNativeFailureCard({
     id == expectedId &&
     channelId == 'background_downloader' &&
     title == failureTitle;
+
+/// An ordinary notification cannot prove the foreground service is alive.
+/// Wait for a pending stop to resolve, then start again if needed.
+bool foregroundRestartRequired({
+  required bool serviceRunning,
+  required bool stopUncertain,
+  required bool startInFlight,
+  required bool stopInFlight,
+}) =>
+    (stopUncertain || !serviceRunning) && !startInFlight && !stopInFlight;
