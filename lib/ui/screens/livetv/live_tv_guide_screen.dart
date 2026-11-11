@@ -279,7 +279,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _guideHorizontalScrollController.addListener(_syncHorizontalFromGuide);
     _scheduleReanchor();
     _displayClockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      setState(() {});
+      if (!widget.miniPlayerMode &&
+          _categoryDisplay != LiveTvCategoryDisplay.groups &&
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+          (_pickerOpen || ModalRoute.of(context)?.isCurrent == true)) {
+        unawaited(_vm.refreshProgrammeCategories());
+      }
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {

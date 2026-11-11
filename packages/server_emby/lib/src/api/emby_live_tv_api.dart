@@ -12,6 +12,10 @@ class EmbyLiveTvApi implements LiveTvApi, ChannelGroupApi {
       ChannelGroupLineup.fetch(_dio);
 
   @override
+  Future<String?> getGuideRevision() =>
+      ChannelGroupLineup.fetchGuideRevision(_dio);
+
+  @override
   Future<Map<String, dynamic>> getChannels({
     int? startIndex,
     int? limit,

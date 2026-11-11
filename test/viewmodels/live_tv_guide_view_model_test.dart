@@ -140,6 +140,51 @@ void main() {
     }
   });
 
+  test('unconfirmed guide updates preserve only the current account’s last categories', () async {
+    final grouped = _GroupedLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(grouped);
+    when(() => client.baseUrl).thenReturn('fixture');
+    _stubChannels(grouped, [_channel('one')]);
+    when(() => _guide(grouped)).thenAnswer((_) async => {'Items': []});
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    void reply(ChannelGroupLineup lineup) =>
+        when(grouped.getChannelGroups).thenAnswer((_) async => lineup);
+
+    reply(
+      const ChannelGroupLineup(
+        {},
+        programmeCategories: {'sports'},
+        guideRevision: '1',
+      ),
+    );
+    await vm.load();
+    reply(const ChannelGroupLineup({}, guideRevision: 'pending'));
+    await vm.load();
+    expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+    when(grouped.getChannelGroups).thenThrow(TimeoutException('fixture'));
+    await vm.load();
+    expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+
+    final oldReply = Completer<ChannelGroupLineup>();
+    when(grouped.getGuideRevision).thenAnswer((_) async => '2');
+    when(grouped.getChannelGroups).thenAnswer((_) => oldReply.future);
+    final refresh = vm.refreshProgrammeCategories();
+    await Future<void>.delayed(Duration.zero);
+    when(() => client.userId).thenReturn('other-user');
+    reply(const ChannelGroupLineup({}, guideRevision: 'pending'));
+    await vm.load();
+    oldReply.complete(
+      const ChannelGroupLineup(
+        {},
+        programmeCategories: {'sports'},
+        guideRevision: '2',
+      ),
+    );
+    await refresh;
+    expect(vm.availableProgrammeCategories, isEmpty);
+  });
+
   test(
     'channel search pages the full scoped lineup by name or number without EPG',
     () async {

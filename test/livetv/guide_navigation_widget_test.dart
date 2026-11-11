@@ -367,23 +367,61 @@ void main() {
     expect(_focusedLabel(), 'GuideChannel:0');
   });
 
-  testWidgets('empty category metadata resets a selected category to All', (
-    tester,
-  ) async {
-    final pending = Completer<ChannelGroupLineup>();
-    when(liveTvApi.getChannelGroups).thenAnswer((_) => pending.future);
-    await pumpGuide(tester);
-    EpgFilterRail rail() =>
-        tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
-    final sports = rail().labels.indexOf('Sports');
-    rail().onSelect(sports);
-    await _pumpFrames(tester);
-    expect(rail().selectedIndex, sports);
-    pending.complete(const ChannelGroupLineup({}, programmeCategories: {}));
-    await _pumpFrames(tester);
-    expect(rail().labels, ['All', 'Favorites']);
-    expect(rail().selectedIndex, 0);
-  });
+  testWidgets(
+    'an open guide keeps categories during import and updates them when it finishes',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final pending = Completer<ChannelGroupLineup>();
+      when(liveTvApi.getChannelGroups).thenAnswer((_) => pending.future);
+      var revision = 'pending';
+      when(liveTvApi.getGuideRevision).thenAnswer((_) async => revision);
+      await pumpGuide(tester);
+      EpgFilterRail rail() =>
+          tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+      expect(rail().labels, ['All', 'Favorites']);
+      pending.complete(
+        const ChannelGroupLineup(
+          {},
+          guideRevision: '0',
+          programmeCategories: {},
+        ),
+      );
+      await _pumpFrames(tester);
+      expect(rail().labels, ['All', 'Favorites']);
+      Future<void> tick() async {
+        await tester.pump(const Duration(seconds: 15));
+        await _pumpFrames(tester);
+      }
+
+      when(liveTvApi.getChannelGroups).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {},
+          guideRevision: revision,
+          programmeCategories: revision == '2'
+              ? {'movies'}
+              : {'movies', 'sports'},
+        ),
+      );
+      revision = '1';
+      await tick();
+      expect(rail().labels, ['All', 'Movies', 'Sports', 'Favorites']);
+      final sports = rail().labels.indexOf('Sports');
+      rail().onSelect(sports);
+      await _pumpFrames(tester);
+      expect(rail().selectedIndex, sports);
+      revision = 'pending';
+      await tick();
+      expect(rail().selectedIndex, sports);
+      verify(liveTvApi.getChannelGroups).called(2);
+      revision = '2';
+      await tick();
+      expect(rail().labels, ['All', 'Movies', 'Favorites']);
+      expect(rail().selectedIndex, 0);
+      revision = '3';
+      await tick();
+      expect(rail().labels, ['All', 'Movies', 'Sports', 'Favorites']);
+    },
+  );
 
   /// Focuses a row-0 cell two hours into the window and then steps right once,
   /// which is the only move permitted to rewrite the anchor. Returns the

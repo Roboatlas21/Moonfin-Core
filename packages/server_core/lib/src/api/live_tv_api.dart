@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 /// Optional Moonbase capability. Other backends can keep their standard guide.
 abstract interface class ChannelGroupApi {
   Future<ChannelGroupLineup> getChannelGroups();
+  Future<String?> getGuideRevision();
 }
 
 class ChannelGroupLineup {
@@ -12,11 +13,29 @@ class ChannelGroupLineup {
   /// Null when the server could not determine availability or predates this field.
   final Set<String>? programmeCategories;
 
+  /// Last stable guide import, or "pending" while no reliable snapshot is available.
+  final String? guideRevision;
+
   const ChannelGroupLineup(
     this.groupsByChannelId, {
     this.partial = false,
     this.programmeCategories,
+    this.guideRevision,
   });
+
+  static Future<String?> fetchGuideRevision(Dio dio) async {
+    try {
+      final response = await dio.get(
+        '/Moonfin/LiveTv/ChannelGroups',
+        queryParameters: {'guideRevisionOnly': true},
+      );
+      final data = response.data;
+      return data is Map ? data['guideRevision'] as String? : null;
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404) return null;
+      rethrow;
+    }
+  }
 
   static Future<ChannelGroupLineup> fetch(Dio dio) async {
     try {
@@ -42,6 +61,7 @@ class ChannelGroupLineup {
               },
         },
         partial: data['partial'] == true,
+        guideRevision: data['guideRevision'] as String?,
         programmeCategories:
             categories is List && categories.every((c) => c is String)
             ? categories.cast<String>().toSet()
