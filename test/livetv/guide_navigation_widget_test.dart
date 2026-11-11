@@ -11,6 +11,7 @@ import 'package:playback_core/playback_core.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/preference/user_preferences.dart';
+import 'package:moonfin/preference/preference_constants.dart';
 import 'package:moonfin/ui/navigation/destinations.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_filter_rail.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_hero_preview.dart';
@@ -22,7 +23,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _MockMediaServerClient extends Mock implements MediaServerClient {}
 
-class _MockLiveTvApi extends Mock implements LiveTvApi {}
+class _MockLiveTvApi extends Mock implements LiveTvApi, ChannelGroupApi {}
 
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
 
@@ -172,6 +173,9 @@ void main() {
     liveTvApi = _MockLiveTvApi();
     when(() => client.liveTvApi).thenReturn(liveTvApi);
     when(() => client.serverType).thenReturn(ServerType.jellyfin);
+    when(() => client.baseUrl).thenReturn('fixture');
+    when(liveTvApi.getChannelGroups)
+        .thenAnswer((_) async => const ChannelGroupLineup({}));
     when(() => client.userId).thenReturn('user');
 
     when(
@@ -252,6 +256,41 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'a group and programme category named Kids are distinct rail choices',
+    (tester) async {
+      when(liveTvApi.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'ch1': {'Kids', 'US| SPORTS'},
+        }),
+      );
+      await pumpGuide(tester);
+      EpgFilterRail rail() =>
+          tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+      expect(rail().labels.take(4), ['All', 'Favorites', 'Kids', 'US| SPORTS']);
+      expect(rail().labels.where((label) => label == 'Kids').length, 2);
+      await tester.tap(find.text('US| SPORTS'));
+      await _pumpFrames(tester);
+      expect(rail().selectedIndex, 3);
+      expect(rail().groupIndices, contains(3));
+      final node = rail().focusNodeFor(3);
+      node.requestFocus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await _pumpFrames(tester);
+      expect(rail().focusNodeFor(2).hasFocus, true);
+      final prefs = GetIt.instance<UserPreferences>();
+      await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);
+      await _pumpFrames(tester);
+      expect(rail().labels, ['All', 'Favorites', 'Kids', 'US| SPORTS']);
+      await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.programmes);
+      await _pumpFrames(tester);
+      expect(rail().selectedIndex, 0);
+      expect(rail().groupIndices, isEmpty);
+      expect(rail().labels, contains('Sports'));
+    },
+  );
 
   /// Focuses a row-0 cell two hours into the window and then steps right once,
   /// which is the only move permitted to rewrite the anchor. Returns the

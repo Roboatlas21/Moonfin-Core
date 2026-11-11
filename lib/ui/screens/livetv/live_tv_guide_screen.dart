@@ -154,6 +154,8 @@ class _PendingVerticalMove {
   });
 }
 
+typedef _FilterChoice = (GuideFilter, String?);
+
 class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     with WidgetsBindingObserver {
   late final LiveTvGuideViewModel _vm;
@@ -164,7 +166,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final _guideHorizontalScrollController = ScrollController();
   final _miniPlayerFocusNode = FocusNode(debugLabel: 'GuideMiniPlayer');
   final Map<int, FocusNode> _channelFocusNodes = {};
-  final Map<int, FocusNode> _filterFocusNodes = {};
+  final Map<_FilterChoice, FocusNode> _filterFocusNodes = {};
+  late LiveTvCategoryDisplay _categoryDisplay;
   final Map<int, FocusNode> _windowBarFocusNodes = {};
 
   /// Where the controls row was left, so returning to it from either
@@ -242,6 +245,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       GetIt.instance<MediaServerClient>(),
       initialSortBy: _prefs.get(UserPreferences.liveTvChannelSortBy),
     );
+    _categoryDisplay = _prefs.get(UserPreferences.liveTvCategoryDisplay);
+    _prefs.addListener(_onCategoryDisplayChanged);
     _vm.addListener(_onChanged);
     userDataSync.addListener(_vm.syncChannelUserData);
     widget.backController?._onBackPressed = _consumeBackIfExploring;
@@ -362,6 +367,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   void _onChanged() {
     if (!mounted) return;
+    if (_categoryDisplay == LiveTvCategoryDisplay.groups &&
+        _vm.availableGroups.isNotEmpty &&
+        _vm.filter != GuideFilter.all &&
+        _vm.filter != GuideFilter.favorites) {
+      _vm.setFilter(GuideFilter.all);
+      return;
+    }
     if (_vm.state == GuideState.ready) _vm.scheduleBoundaryRefresh();
     final channelIds = _vm.filteredChannels
         .map((channel) => channel.id)
@@ -692,7 +704,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _focusFilterRail() {
     if (!_mayTakeFocus) return;
     _cancelPendingVerticalMove();
-    _filterFocusNodeFor(0).requestFocus();
+    _filterFocusNodeFor((_vm.filter, _vm.selectedGroup)).requestFocus();
   }
 
   /// Moves within the controls row, refusing a move off either end.
@@ -831,6 +843,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   @override
   void dispose() {
     userDataSync.removeListener(_vm.syncChannelUserData);
+    _prefs.removeListener(_onCategoryDisplayChanged);
     widget.backController?._onBackPressed = null;
     _reanchorTimer?.cancel();
     _displayClockTimer?.cancel();
@@ -1251,35 +1264,73 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
   }
 
+  void _onCategoryDisplayChanged() {
+    final mode = _prefs.get(UserPreferences.liveTvCategoryDisplay);
+    if (mode == _categoryDisplay) return;
+    setState(() => _categoryDisplay = mode);
+    if (!_filterChoices.contains((_vm.filter, _vm.selectedGroup))) {
+      _vm.setFilter(GuideFilter.all);
+    }
+  }
+
+  List<_FilterChoice> get _filterChoices {
+    final groups = _vm.availableGroups;
+    if (groups.isEmpty ||
+        _categoryDisplay == LiveTvCategoryDisplay.programmes) {
+      return [for (final filter in _vm.filters) (filter, null)];
+    }
+    return [
+      (GuideFilter.all, null),
+      (GuideFilter.favorites, null),
+      for (final group in groups) (GuideFilter.all, group),
+      if (_categoryDisplay == LiveTvCategoryDisplay.both)
+        for (final filter in _vm.filters)
+          if (filter != GuideFilter.all && filter != GuideFilter.favorites)
+            (filter, null),
+    ];
+  }
+
   Widget _buildFilterRail({
     EdgeInsetsGeometry padding = const EdgeInsets.fromLTRB(16, 6, 16, 6),
     VoidCallback? onNavigateDown,
   }) {
-    final filters = _vm.filters;
+    final filters = _filterChoices;
     return Padding(
       padding: padding,
       child: EpgFilterRail(
-        labels: [for (final f in filters) _filterLabel(f)],
-        selectedIndex: filters.indexOf(_vm.filter),
+        labels: [
+          for (final (filter, group) in filters) group ?? _filterLabel(filter),
+        ],
+        groupIndices: {
+          for (var i = 0; i < filters.length; i++)
+            if (filters[i].$2 != null) i,
+        },
+        selectedIndex: filters.indexOf((_vm.filter, _vm.selectedGroup)),
         onSelect: (i) {
           _cancelPendingVerticalMove();
-          if (_vm.filter != filters[i]) {
+          final (filter, group) = filters[i];
+          if ((_vm.filter, _vm.selectedGroup) != filters[i]) {
             _lastFocusedRowIndex = 0;
             _focusedChannel.value = null;
           }
-          _vm.setFilter(filters[i]);
+          if (group == null) {
+            _vm.setFilter(filter);
+          } else {
+            _vm.setGroup(group);
+          }
         },
         apple: _apple,
-        focusNodeFor: _filterFocusNodeFor,
+        focusNodeFor: (i) => _filterFocusNodeFor(filters[i]),
         onNavigateDown: onNavigateDown ?? _focusLastChannelRow,
       ),
     );
   }
 
-  FocusNode _filterFocusNodeFor(int index) {
+  FocusNode _filterFocusNodeFor(_FilterChoice choice) {
     return _filterFocusNodes.putIfAbsent(
-      index,
-      () => FocusNode(debugLabel: 'GuideFilter:$index'),
+      choice,
+      () =>
+          FocusNode(debugLabel: 'GuideFilter:${choice.$2 ?? choice.$1.index}'),
     );
   }
 

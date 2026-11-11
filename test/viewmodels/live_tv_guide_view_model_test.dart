@@ -12,6 +12,8 @@ class _MockClient extends Mock implements MediaServerClient {}
 
 class _MockLiveTvApi extends Mock implements LiveTvApi {}
 
+class _GroupedLiveTvApi extends _MockLiveTvApi implements ChannelGroupApi {}
+
 class _MockUserLibraryApi extends Mock implements UserLibraryApi {}
 
 Map<String, dynamic> _channel(String id, {String? number}) => {
@@ -114,6 +116,7 @@ void main() {
     client = _MockClient();
     liveTv = _MockLiveTvApi();
     when(() => client.liveTvApi).thenReturn(liveTv);
+    when(() => client.serverType).thenReturn(ServerType.jellyfin);
     when(() => client.userId).thenReturn('user');
     when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': <dynamic>[]});
   });
@@ -136,6 +139,92 @@ void main() {
       expect(LiveTvGuideViewModel(client).filters, GuideFilter.values);
     }
   });
+
+  test('channel groups page by channel and keep every programme', () async {
+    final grouped = _GroupedLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(grouped);
+    when(() => client.baseUrl).thenReturn('fixture');
+    final channels = [
+      for (var i = 0; i < 200; i++) _channel('c$i', number: '$i'),
+    ];
+    _stubChannels(grouped, channels);
+    when(grouped.getChannelGroups).thenAnswer(
+      (_) async => ChannelGroupLineup({
+        for (var i = 100; i < 162; i++) 'c$i': {'US| SPORTS', 'Kids'},
+        'invisible': {'private group'},
+      }),
+    );
+    final pages = <List<String>>[];
+    when(() => _guide(grouped)).thenAnswer((inv) async {
+      final ids = _requestedIds(inv);
+      pages.add(ids);
+      return {
+        'Items': [
+          for (final id in ids) ...[
+            _program('news-$id', id),
+            _program('sport-$id', id, isSports: true),
+          ],
+        ],
+      };
+    });
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    expect(vm.availableGroups, ['Kids', 'US| SPORTS']);
+    vm.setGroup('US| SPORTS');
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      vm.filteredChannels.map((c) => c.id),
+      channels.skip(100).take(62).map((c) => c['Id']),
+    );
+    expect(vm.programsForChannel('c100').map((p) => p.name), [
+      'news-c100',
+      'sport-c100',
+    ]);
+    expect(vm.programsHighWater, 50);
+    await vm.loadMorePrograms();
+    expect(vm.hasMorePrograms, false);
+    expect(pages.map((p) => p.length), [50, 50, 12]);
+    expect(pages.last.first, 'c150');
+    vm.setGroup('Kids');
+    await Future<void>.delayed(Duration.zero);
+    expect(pages.length, 3);
+    verify(grouped.getChannelGroups).called(1);
+    when(grouped.getChannelGroups)
+        .thenAnswer((_) async => const ChannelGroupLineup({}));
+    await vm.load();
+    expect(vm.selectedGroup, isNull);
+    expect(vm.filteredChannels.length, 200);
+  });
+
+  test(
+    'a failed or superseded group lookup leaves the current guide usable',
+    () async {
+      final grouped = _GroupedLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(grouped);
+      when(() => client.baseUrl).thenReturn('fixture');
+      _stubChannels(grouped, [_channel('one')]);
+      when(() => _guide(grouped)).thenAnswer((_) async => {'Items': []});
+      final pending = Completer<ChannelGroupLineup>();
+      when(grouped.getChannelGroups).thenAnswer((_) => pending.future);
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      expect(vm.state, GuideState.ready);
+      when(() => client.userId).thenReturn('other');
+      when(grouped.getChannelGroups).thenThrow(StateError('forbidden'));
+      await vm.load();
+      pending.complete(
+        const ChannelGroupLineup({
+          'one': {'old group'},
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.availableGroups, isEmpty);
+      expect(vm.filteredChannels.single.id, 'one');
+      expect(vm.state, GuideState.ready);
+    },
+  );
 
   test('load() fetches only the first batch; loadMorePrograms() paginates the rest', () async {
     // 120 channels → batches of 50 (never one giant all-channels request).

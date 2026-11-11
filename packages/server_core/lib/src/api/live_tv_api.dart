@@ -1,3 +1,46 @@
+import 'package:dio/dio.dart';
+
+/// Optional Moonbase capability. Other backends can keep their standard guide.
+abstract interface class ChannelGroupApi {
+  Future<ChannelGroupLineup> getChannelGroups();
+}
+
+class ChannelGroupLineup {
+  final Map<String, Set<String>> groupsByChannelId;
+  final bool partial;
+
+  const ChannelGroupLineup(this.groupsByChannelId, {this.partial = false});
+
+  static Future<ChannelGroupLineup> fetch(Dio dio) async {
+    try {
+      final response = await dio.get('/Moonfin/LiveTv/ChannelGroups');
+      final data = response.data;
+      if (data is! Map || data['version'] != 1) {
+        throw const FormatException('Unknown channel group response');
+      }
+      if (data['supported'] == false) {
+        return ChannelGroupLineup(const {}, partial: data['partial'] == true);
+      }
+      final raw = data['groupsByChannelId'];
+      if (data['supported'] != true || raw is! Map) {
+        throw const FormatException('Invalid channel group response');
+      }
+      return ChannelGroupLineup({
+        for (final entry in raw.entries)
+          if (entry.key is String && entry.value is List)
+            entry.key as String: {
+              for (final label in entry.value as List)
+                if (label is String && label.trim().isNotEmpty) label.trim(),
+            },
+      }, partial: data['partial'] == true);
+    } on DioException catch (error) {
+      if (error.response?.statusCode == 404)
+        return const ChannelGroupLineup({});
+      rethrow;
+    }
+  }
+}
+
 abstract class LiveTvApi {
   Future<Map<String, dynamic>> getChannels({
     int? startIndex,
