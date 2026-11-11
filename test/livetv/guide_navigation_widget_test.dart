@@ -389,6 +389,32 @@ void main() {
     expect(_focusedLabel(), 'GuideChannel:0');
   });
 
+  testWidgets('group-only picker recovers on the next guide clock tick', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.groups,
+    );
+    var lookups = 0;
+    when(liveTvApi.getChannelGroups).thenAnswer((_) async {
+      if (++lookups == 1) throw TimeoutException('lineup');
+      return const ChannelGroupLineup({
+        'ch1': {'Canadian'},
+      }, guideRevision: '1');
+    });
+    when(liveTvApi.getGuideRevision).thenAnswer((_) async => '1');
+    await pumpGuide(tester, surface: const Size(390, 700));
+    await tester.tap(find.text('All channels'));
+    await _pumpFrames(tester);
+    expect(find.text('Canadian'), findsNothing);
+    await tester.pump(const Duration(seconds: 15));
+    await _pumpFrames(tester);
+    expect(find.text('Canadian'), findsOneWidget);
+    expect(lookups, 2);
+  });
+
   testWidgets(
     'an open guide keeps categories during import and updates them when it finishes',
     (tester) async {

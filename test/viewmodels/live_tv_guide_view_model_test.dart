@@ -140,6 +140,199 @@ void main() {
     }
   });
 
+  group('automatic lineup refresh', () {
+    late _GroupedLiveTvApi api;
+    late LiveTvGuideViewModel vm;
+    var revision = '1';
+
+    setUp(() {
+      revision = '1';
+      api = _GroupedLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => client.baseUrl).thenReturn('fixture');
+      when(api.getGuideRevision).thenAnswer((_) async => revision);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+    });
+
+    test('replaces channel IDs and group memberships together', () async {
+      _stubChannels(api, [_channel('old'), _channel('outside')]);
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => ChannelGroupLineup({
+          'old': {'Canadian'},
+        }, guideRevision: revision),
+      );
+      await vm.load();
+      vm.setGroup('Canadian');
+      final date = vm.guideDate.add(const Duration(days: 1));
+      await vm.setDate(date);
+      revision = '2';
+      _stubChannels(api, [_channel('new'), _channel('outside')]);
+      final membership = Completer<ChannelGroupLineup>();
+      when(api.getChannelGroups).thenAnswer((_) => membership.future);
+      final refresh = vm.refreshProgrammeCategories();
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.filteredChannels.single.id, 'old');
+      membership.complete(
+        ChannelGroupLineup({
+          'new': {'Canadian'},
+        }, guideRevision: revision),
+      );
+      await refresh;
+      expect(vm.selectedGroup, 'Canadian');
+      expect(vm.filteredChannels.single.id, 'new');
+      expect(vm.channelForId('old'), isNull);
+      expect(vm.hasProgramsFor('new'), isTrue);
+      expect(vm.guideDate, date);
+      expect(vm.atLivePosition, isFalse);
+    });
+
+    test(
+      'defers a group change when a second import overtakes the lookup',
+      () async {
+        _stubChannels(api, [_channel('old')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup({
+            'old': {'Canadian'},
+          }, guideRevision: '1'),
+        );
+        await vm.load();
+        vm.setGroup('Canadian');
+        revision = '2';
+        _stubChannels(api, [_channel('intermediate')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup({
+            'new': {'Canadian'},
+          }, guideRevision: '3'),
+        );
+        await vm.refreshProgrammeCategories();
+        expect(vm.selectedGroup, 'Canadian');
+        expect(vm.filteredChannels.single.id, 'old');
+        revision = '3';
+        _stubChannels(api, [_channel('new')]);
+        await vm.refreshProgrammeCategories();
+        expect(vm.filteredChannels.single.id, 'new');
+      },
+    );
+
+    for (final leaveSports in [false, true]) {
+      test(
+        'refreshes Sports results when Sports is ${leaveSports ? 'closed' : 'open'}',
+        () async {
+          _stubChannels(api, [_channel('one'), _channel('two')]);
+          when(api.getChannelGroups).thenAnswer(
+            (_) async => ChannelGroupLineup(
+              {},
+              guideRevision: revision,
+              programmeCategories: {'sports'},
+            ),
+          );
+          var sports = 'one';
+          when(() => _guide(api, category: GuideFilter.sports))
+              .thenAnswer(_serverFiltered((id) => id == sports));
+          await vm.load();
+          vm.setFilter(GuideFilter.sports);
+          await Future<void>.delayed(Duration.zero);
+          expect(vm.filteredChannels.single.id, 'one');
+          if (leaveSports) vm.setFilter(GuideFilter.all);
+          revision = '2';
+          sports = 'two';
+          await vm.refreshProgrammeCategories();
+          vm.setFilter(GuideFilter.sports);
+          await Future<void>.delayed(Duration.zero);
+          expect(vm.filteredChannels.single.id, 'two');
+        },
+      );
+    }
+
+    test(
+      'retries a partial lineup once it recovers at the same revision',
+      () async {
+        _stubChannels(api, [_channel('a'), _channel('b')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => ChannelGroupLineup(
+            {
+              'a': {'US'},
+            },
+            partial: true,
+            guideRevision: revision,
+          ),
+        );
+        await vm.load();
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => ChannelGroupLineup({
+            'a': {'US'},
+            'b': {'Canada'},
+          }, guideRevision: revision),
+        );
+        await vm.refreshProgrammeCategories();
+        expect(vm.availableGroups, ['Canada', 'US']);
+        await vm.refreshProgrammeCategories();
+        verify(api.getChannelGroups).called(2);
+      },
+    );
+  });
+
+  test('clearing a failed channel search restores the loaded guide', () async {
+    _stubChannels(
+      liveTv,
+      List.generate(90, (i) => _channel('c$i', number: '$i')),
+    );
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    when(() => _guide(liveTv)).thenThrow(TimeoutException('search listings'));
+    vm.setChannelQuery('c80');
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.state, GuideState.error);
+    when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+    vm.setChannelQuery('');
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.state, GuideState.ready);
+    expect(vm.error, isNull);
+    expect(vm.filteredChannels, hasLength(90));
+    expect(vm.hasProgramsFor('c0'), isTrue);
+  });
+
+  for (final fails in [false, true]) {
+    test(
+      'Sports owns the guide when the superseded date reload ${fails ? 'fails' : 'succeeds'}',
+      () async {
+        _stubChannels(
+          liveTv,
+          List.generate(120, (i) => _channel('c$i', number: '$i')),
+        );
+        final vm = LiveTvGuideViewModel(client);
+        addTearDown(vm.dispose);
+        await vm.load();
+        vm.setChannelQuery('c110');
+        await Future<void>.delayed(Duration.zero);
+        final all = Completer<Map<String, dynamic>>();
+        final sports = Completer<Map<String, dynamic>>();
+        when(() => _guide(liveTv)).thenAnswer((_) => all.future);
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer((_) => sports.future);
+        final change = vm.setDate(vm.guideDate.add(const Duration(days: 1)));
+        vm.setFilter(GuideFilter.sports);
+        if (fails) {
+          all.completeError(TimeoutException('old listings'));
+        } else {
+          all.complete({'Items': []});
+        }
+        await change;
+        expect(vm.state, GuideState.loading);
+        sports.complete({
+          'Items': [_program('game', 'c110', isSports: true)],
+        });
+        await Future<void>.delayed(Duration.zero);
+        expect(vm.state, GuideState.ready);
+        expect(vm.error, isNull);
+        expect(vm.filteredChannels.single.id, 'c110');
+      },
+    );
+  }
+
   test('unconfirmed guide updates preserve only the current account’s last categories', () async {
     final grouped = _GroupedLiveTvApi();
     when(() => client.liveTvApi).thenReturn(grouped);

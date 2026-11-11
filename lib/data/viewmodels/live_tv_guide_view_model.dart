@@ -269,6 +269,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   int? _loadingMorePage;
   int _pageGeneration = 0;
+  int? _listingsStatePage;
 
   // Category filters walk the lineup in larger server-filtered batches so a
   // sparse genre can surface channels beyond the first All-view page.
@@ -352,7 +353,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void setSortBy(ChannelSortBy value) {
     if (_sortBy == value) return;
     _programGeneration++;
-    _pageGeneration++;
+    _advancePage();
     _sortBy = value;
     _channels = List<GuideChannel>.from(_channels)..sort(comparatorFor(value));
     _updatePageRows();
@@ -437,6 +438,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String? _guideRevision;
   int? _loadedLineupRequest;
   bool _checkingGuideRevision = false;
+  bool _lineupIncomplete = false;
   Iterable<GuideFilter> get availableProgrammeCategories =>
       filters.where(
         (filter) =>
@@ -494,8 +496,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  void _resetPageCursor() {
+  void _advancePage() {
+    // A loading state or error from the previous page cannot own the new view.
+    if (_listingsStatePage == _pageGeneration) {
+      _state = GuideState.ready;
+      _error = null;
+      _listingsStatePage = null;
+    }
     _pageGeneration++;
+  }
+
+  void _resetPageCursor() {
+    _advancePage();
     _programsHighWater = 0;
     final rows = _pageChannels;
     while (_programsHighWater < rows.length &&
@@ -677,7 +689,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     channels[at] = updated;
     final resort = _sortReadsFavorite;
     if (resort) {
-      _pageGeneration++;
+      _advancePage();
       channels.sort(comparatorFor(_sortBy));
       // The lazy-load prefix follows list order, so walk it again from the top.
       // Already-fetched channels are skipped in _loadNextBatch.
@@ -792,6 +804,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final recordingRevision = liveTvRecordingRevision.value;
     final lineupRequest = ++_lineupRequest;
     if (window != null) _guideWindow = window;
+    _listingsStatePage = null;
+    _error = null;
     _state = GuideState.loading;
     _notifyListeners();
 
@@ -855,7 +869,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } else {
       // All and the program categories share channel order, but their
       // pending pages and errors belong to the filter that requested them.
-      _pageGeneration++;
+      _advancePage();
     }
     _categoryRequest++;
     if (_categoryFetchInFlight) {
@@ -867,13 +881,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
     _notifyListeners();
-    if (scopeChanged && !_isCategory(value)) unawaited(loadMorePrograms());
+    if (!_isCategory(value) && (scopeChanged || _programsHighWater == 0)) {
+      unawaited(loadMorePrograms());
+    }
   }
 
   Future<void> _loadCategoryPrograms({int minHighWater = 0}) async {
     _resetCategory();
     final request = _categoryRequest;
     _categoryFetchInFlight = true;
+    _listingsStatePage = null;
+    _error = null;
     _state = GuideState.loading;
     _notifyListeners();
     try {
@@ -883,6 +901,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _state = GuideState.ready;
     } catch (e) {
       if (request != _categoryRequest) return;
+      _listingsStatePage = _pageGeneration;
       _error = e;
       _state = GuideState.error;
     }
@@ -992,28 +1011,38 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> _reloadPrograms() async {
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
+    // Keep the depth the viewer had reached, but only while reloading this page.
+    final target = max(_programsHighWater, _programBatchSize);
+    final categoryTarget = _categoryHighWater;
+    _resetPrograms();
+    if (_isCategory(_filter)) {
+      await _loadCategoryPrograms(minHighWater: categoryTarget);
+      return;
+    }
+    final page = _pageGeneration;
+    _listingsStatePage = page;
+    _error = null;
     _state = GuideState.loading;
     _notifyListeners();
 
+    bool current() =>
+        !_disposed &&
+        loadGeneration == _loadGeneration &&
+        page == _pageGeneration;
     try {
-      // Re-fetch as many channels as were already loaded (at least the first
-      // batch) so the user keeps the rows they had scrolled to.
-      final target = max(_programsHighWater, _programBatchSize);
-      final categoryTarget = _categoryHighWater;
-      _resetPrograms();
-      if (_isCategory(_filter)) {
-        await _loadCategoryPrograms(minHighWater: categoryTarget);
-        return;
-      }
-      while (_programsHighWater < target && hasMorePrograms) {
+      while (current() &&
+          _programsHighWater < target &&
+          _programsHighWater < _pageChannels.length) {
+        final before = _programsHighWater;
         await _loadNextBatch();
-        if (_disposed || loadGeneration != _loadGeneration) return;
+        if (_programsHighWater <= before) break;
       }
-      if (_disposed || loadGeneration != _loadGeneration) return;
+      if (!current()) return;
+      _listingsStatePage = null;
       _state = GuideState.ready;
       _loadedRecordingRevision = recordingRevision;
     } catch (e) {
-      if (_disposed || loadGeneration != _loadGeneration) return;
+      if (!current()) return;
       _error = e;
       _state = GuideState.error;
     }
@@ -1066,19 +1095,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _channelGroups = {};
       _programmeCategories = null;
       _guideRevision = null;
+      _lineupIncomplete = false;
       _legacyProgrammeCategories = false;
       _availableGroups = const [];
       _groupCounts = const {};
       _selectedGroup = null;
       _updatePageRows();
     }
-    final response = await _client.liveTvApi.getChannels(
-      sortBy: 'SortName',
-      sortOrder: 'Ascending',
-      fields: 'ImageTags,UserData',
-      enableTotalRecordCount: false,
-      userId: _client.userId,
-    );
+    final response = await _readChannels();
     // A user switch while this was out would publish the old user's favorites.
     if (_disposed ||
         loadGeneration != _loadGeneration ||
@@ -1089,6 +1113,31 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       unawaited(load());
       return false;
     }
+    _publishChannels(response, revision);
+    if (api is ChannelGroupApi && account != null) {
+      _channelGroups = {
+        for (final c in _channels)
+          if (_channelGroups.containsKey(c.id)) c.id: _channelGroups[c.id]!,
+      };
+      _rebuildGroupChoices(complete: false);
+      unawaited(
+        _loadChannelGroups(api as ChannelGroupApi, lineupRequest, account),
+      );
+    } else {
+      _updatePageRows();
+    }
+    return true;
+  }
+
+  Future<Map<String, dynamic>> _readChannels() => _client.liveTvApi.getChannels(
+    sortBy: 'SortName',
+    sortOrder: 'Ascending',
+    fields: 'ImageTags,UserData',
+    enableTotalRecordCount: false,
+    userId: _client.userId,
+  );
+
+  void _publishChannels(Map<String, dynamic> response, int revision) {
     final items = (response['Items'] as List?) ?? [];
     final fresh = <String, Map<String, dynamic>>{};
     for (final item in items.cast<Map<String, dynamic>>()) {
@@ -1116,19 +1165,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             .map((channel) => channel.withSyncedUserData())
             .toList()
           ..sort(comparatorFor(_sortBy));
-    if (api is ChannelGroupApi && account != null) {
-      _channelGroups = {
-        for (final c in _channels)
-          if (_channelGroups.containsKey(c.id)) c.id: _channelGroups[c.id]!,
-      };
-      _rebuildGroupChoices(complete: false);
-      unawaited(
-        _loadChannelGroups(api as ChannelGroupApi, lineupRequest, account),
-      );
-    } else {
-      _updatePageRows();
-    }
-    return true;
   }
 
   void _rebuildGroupChoices({required bool complete}) {
@@ -1152,20 +1188,24 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _updatePageRows();
   }
 
-  /// Called by the visible guide. A revision check reads only the task status
-  /// until the server has finished a different import.
+  /// Polls the import revision while the guide is visible. A new import replaces
+  /// both the user's channels and their group memberships before reloading EPG.
   Future<void> refreshProgrammeCategories() async {
-    final revision = _guideRevision;
     final account = _groupAccount;
     final request = _lineupRequest;
+    final session = userDataSync.session;
     final api = _client.liveTvApi;
-    if (_disposed ||
+    bool current() =>
+        !_disposed &&
+        request == _lineupRequest &&
+        session == userDataSync.session &&
+        account == (_client.baseUrl, _client.userId);
+    if (account == null ||
+        api is! ChannelGroupApi ||
+        !current() ||
         _checkingGuideRevision ||
         _loadedLineupRequest != request ||
-        revision == null ||
-        account == null ||
-        api is! ChannelGroupApi ||
-        account != (_client.baseUrl, _client.userId)) {
+        (_guideRevision == null && !_lineupIncomplete)) {
       return;
     }
 
@@ -1173,20 +1213,30 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     try {
       final groups = api as ChannelGroupApi;
       final latest = await groups.getGuideRevision();
-      if (_disposed ||
-          request != _lineupRequest ||
-          account != (_client.baseUrl, _client.userId) ||
-          latest == 'pending' ||
-          latest == revision) {
+      if (!current()) return;
+      if (!_lineupIncomplete && (latest == _guideRevision || latest == 'pending')) {
         return;
       }
-      await _loadChannelGroups(groups, request, account);
+      final newImport =
+          latest != null && latest != 'pending' && latest != _guideRevision;
+
+      final userRevision = userDataSync.revision;
+      final channels = newImport ? await _readChannels() : null;
+      if (!current()) return;
+      final lineup = await groups.getChannelGroups();
+      if (!current()) return;
+      // Another import may have started or finished after the channel lookup.
+      if (lineup.guideRevision != latest) {
+        _lineupIncomplete = true;
+        return;
+      }
+      if (channels != null) _publishChannels(channels, userRevision);
+      _applyChannelGroupLineup(lineup, reloadingPrograms: channels != null);
+      if (channels != null) await _reloadPrograms();
     } catch (error) {
-      debugPrint('Live TV guide revision unavailable (${error.runtimeType})');
-      if (_accessDenied(error) &&
-          !_disposed &&
-          request == _lineupRequest &&
-          account == (_client.baseUrl, _client.userId)) {
+      if (!current()) return;
+      debugPrint('Live TV guide refresh unavailable (${error.runtimeType})');
+      if (_accessDenied(error)) {
         _applyChannelGroupLineup(
           const ChannelGroupLineup({}, programmeCategories: {}),
         );
@@ -1205,6 +1255,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     int request,
     (String, String?) account,
   ) async {
+    final session = userDataSync.session;
     ChannelGroupLineup? lineup;
     try {
       lineup = await api.getChannelGroups();
@@ -1220,29 +1271,37 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     if (_disposed ||
         request != _lineupRequest ||
+        session != userDataSync.session ||
         account != (_client.baseUrl, _client.userId)) {
       return;
     }
     _loadedLineupRequest = request;
     if (lineup == null) {
       // Retry on the guide clock, including when the very first lookup failed.
-      _guideRevision = 'pending';
+      _lineupIncomplete = true;
       return;
     }
     _applyChannelGroupLineup(lineup);
   }
 
-  void _applyChannelGroupLineup(ChannelGroupLineup lineup) {
+  void _applyChannelGroupLineup(
+    ChannelGroupLineup lineup, {
+    bool reloadingPrograms = false,
+  }) {
     final previous = _pageChannels;
     final hadGroup = _selectedGroup != null;
+    _lineupIncomplete = lineup.partial;
     _guideRevision = lineup.guideRevision;
     _legacyProgrammeCategories = _guideRevision == null;
     _programmeCategories = lineup.programmeCategories ?? _programmeCategories;
     _channelGroups = {
       for (final channel in _channels)
-        channel.id: ?lineup.groupsByChannelId[channel.id],
+        channel.id:
+            ?(lineup.groupsByChannelId[channel.id] ??
+            (lineup.partial ? _channelGroups[channel.id] : null)),
     };
     _rebuildGroupChoices(complete: !lineup.partial);
+    if (reloadingPrograms) return;
     if (hadGroup &&
         (_selectedGroup == null || !listEquals(previous, _pageChannels))) {
       _resetPageCursor();
@@ -1252,6 +1311,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   void _resetPrograms() {
+    _advancePage();
     _programGeneration++;
     _programsByChannel.clear();
     _programsLoadedIds.clear();
@@ -1288,6 +1348,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!_disposed &&
           generation == _programGeneration &&
           pageGeneration == _pageGeneration) {
+        _listingsStatePage = pageGeneration;
         _error = error;
         _state = GuideState.error;
       }

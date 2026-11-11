@@ -282,7 +282,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       if (!mounted) return;
       setState(() {});
       if (!widget.miniPlayerMode &&
-          _categoryDisplay != LiveTvCategoryDisplay.groups &&
           WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
           (_pickerOpen || ModalRoute.of(context)?.isCurrent == true)) {
         unawaited(_vm.refreshProgrammeCategories());
