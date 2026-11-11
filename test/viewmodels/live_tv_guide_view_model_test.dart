@@ -8,7 +8,7 @@ import 'package:server_core/server_core.dart';
 
 class _MockClient extends Mock implements MediaServerClient {}
 
-class _MockLiveTvApi extends Mock implements LiveTvApi {}
+class _MockLiveTvApi extends Mock implements LiveTvApi, LiveTvChannelGroupApi {}
 
 class _MockUserLibraryApi extends Mock implements UserLibraryApi {}
 
@@ -113,6 +113,57 @@ void main() {
     when(() => client.liveTvApi).thenReturn(liveTv);
     when(() => client.userId).thenReturn('user');
     when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': <dynamic>[]});
+    when(() => liveTv.getChannelGroupMetadata()).thenAnswer((_) async => null);
+  });
+
+  test('channel-group filters use original tuner groups and preserve the full guide', () async {
+    _stubChannels(liveTv, [
+      {'Id': 'c1', 'Name': 'ESPN', 'Tags': ['US', ' SPORTS']},
+      {'Id': 'c2', 'Name': 'CNN', 'Tags': ['US', ' NEWS']},
+      {'Id': 'c3', 'Name': 'Other'},
+    ]);
+    when(() => liveTv.getChannelGroupMetadata()).thenAnswer((_) async => {
+      'Channels': [
+        {'ChannelId': 'c1', 'Group': 'US| SPORTS'},
+        {'ChannelId': 'c2', 'Group': 'US| NEWS'},
+      ],
+    });
+
+    final vm = LiveTvGuideViewModel(client);
+    await vm.load();
+    expect(vm.channelGroupNames, ['US| NEWS', 'US| SPORTS']);
+
+    vm.setChannelGroup('US| SPORTS');
+    await pumpEventQueue(times: 10);
+    expect(vm.selectedChannelGroup, 'US| SPORTS');
+    expect(vm.filteredChannels.map((c) => c.id), ['c1']);
+    expect(vm.programsHighWater, 1);
+    expect(vm.hasMorePrograms, false);
+
+    vm.setFilter(GuideFilter.all);
+    expect(vm.selectedChannelGroup, isNull);
+    expect(vm.filteredChannels.map((c) => c.id), ['c1', 'c2', 'c3']);
+    vm.dispose();
+  });
+
+  test('group paging limits guide requests to the normal 50-channel batches', () async {
+    final channels = [
+      for (var i = 0; i < 120; i++)
+        {'Id': 'c$i', 'Name': 'Channel $i', 'Tags': ['Sports']},
+    ];
+    _stubChannels(liveTv, channels);
+    final vm = LiveTvGuideViewModel(client);
+    await vm.load();
+    vm.setChannelGroup('Sports');
+    await pumpEventQueue(times: 10);
+    expect(vm.programsHighWater, 50);
+    expect(vm.hasMorePrograms, true);
+    await vm.loadMorePrograms();
+    expect(vm.programsHighWater, 100);
+    await vm.loadMorePrograms();
+    expect(vm.programsHighWater, 120);
+    expect(vm.hasMorePrograms, false);
+    vm.dispose();
   });
 
   test('load() fetches only the first batch; loadMorePrograms() paginates the rest', () async {

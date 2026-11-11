@@ -1,11 +1,23 @@
 import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
-class JellyfinLiveTvApi implements LiveTvApi {
+class JellyfinLiveTvApi implements LiveTvApi, LiveTvChannelGroupApi {
   final Dio _dio;
   static const _postChannelIdsThreshold = 1800;
 
   JellyfinLiveTvApi(this._dio);
+
+  @override
+  Future<Map<String, dynamic>?> getChannelGroupMetadata() async {
+    try {
+      final response = await _dio.get('/Moonfin/LiveTv/ChannelGroups');
+      return Map<String, dynamic>.from(response.data as Map);
+    } on DioException catch (e) {
+      // Old Moonbase installations do not implement channel groups.
+      if ([404, 405, 501].contains(e.response?.statusCode)) return null;
+      rethrow;
+    }
+  }
 
   @override
   Future<Map<String, dynamic>> getChannels({

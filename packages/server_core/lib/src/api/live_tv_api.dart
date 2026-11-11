@@ -1,3 +1,9 @@
+/// Optional tuner-group capability implemented by backends exposing original
+/// source groups via Moonbase. Native channel tags need no extra API.
+abstract interface class LiveTvChannelGroupApi {
+  Future<Map<String, dynamic>?> getChannelGroupMetadata();
+}
+
 abstract class LiveTvApi {
   Future<Map<String, dynamic>> getChannels({
     int? startIndex,

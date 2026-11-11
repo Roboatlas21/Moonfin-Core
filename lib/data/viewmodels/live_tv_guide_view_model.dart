@@ -8,6 +8,7 @@ import 'package:server_core/server_core.dart';
 
 import '../../preference/preference_constants.dart';
 import '../../preference/user_preferences.dart';
+import 'live_tv_channel_groups.dart';
 
 class GuideChannel {
   final String id;
@@ -251,13 +252,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   bool get atLivePosition => _atLivePosition;
 
   /// True while more channels remain to lazily load in scroll order.
-  bool get hasMorePrograms => _isCategory(_filter)
+  bool get hasMorePrograms => _selectedChannelGroup != null
+      ? _groupHighWater < filteredChannels.length
+      : _isCategory(_filter)
       ? _categoryHighWater < _channels.length
       : _programsHighWater < _channels.length;
 
   /// How many channels (in list order) have been requested so far.
-  int get programsHighWater =>
-      _isCategory(_filter) ? _categoryPrograms.length : _programsHighWater;
+  int get programsHighWater => _selectedChannelGroup != null
+      ? _groupHighWater
+      : _isCategory(_filter)
+      ? _categoryPrograms.length
+      : _programsHighWater;
 
   /// The fetch state for a single channel's programs. Programs are fetched in
   /// batches whose failure surfaces as the guide-wide [GuideState.error], so
@@ -306,6 +312,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // The lazy-load prefix follows list order, so walk it again from the top.
     // Already-fetched channels are skipped in _loadNextBatch.
     _programsHighWater = 0;
+    _groupHighWater = 0;
     _categoryHighWater = 0;
     _categoryRequest++;
     _notifyListeners();
@@ -377,6 +384,31 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   GuideFilter _filter = GuideFilter.all;
   GuideFilter get filter => _filter;
 
+  final Map<String, List<String>> _channelGroups = {};
+  final Map<String, Set<String>> _groupIds = {};
+  String? _selectedChannelGroup;
+  int _groupHighWater = 0;
+
+  String? get selectedChannelGroup => _selectedChannelGroup;
+  List<String> get channelGroupNames => _groupIds.keys.toList()
+    ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+  /// A channel group shows every programme on its matching channels.
+  void setChannelGroup(String name) {
+    if (_selectedChannelGroup == name || !_groupIds.containsKey(name)) return;
+    _selectedChannelGroup = name;
+    _filter = GuideFilter.all;
+    _groupHighWater = 0;
+    _programGeneration++;
+    if (_categoryFetchInFlight) {
+      _categoryFetchInFlight = false;
+      _state = GuideState.ready;
+    }
+    _resetCategory();
+    _notifyListeners();
+    unawaited(loadMorePrograms());
+  }
+
   // Seeded from the injected clock in the constructor, so the initial value
   // is testable rather than tied to the real wall clock.
   DateTime _guideDate;
@@ -389,6 +421,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   DateTime get windowEnd => _windowEnd;
 
   List<GuideChannel> get filteredChannels {
+    if (_selectedChannelGroup != null) {
+      final ids = _groupIds[_selectedChannelGroup] ?? const <String>{};
+      return _channels.where((ch) => ids.contains(ch.id)).toList();
+    }
     if (_filter == GuideFilter.all) return _channels;
     if (_filter == GuideFilter.favorites) {
       return _channels.where((ch) => ch.isFavorite).toList();
@@ -402,7 +438,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   List<GuideProgram> programsForChannel(String channelId) {
     if (_isCategory(_filter)) return _categoryPrograms[channelId] ?? const [];
     final all = _programsByChannel[channelId] ?? [];
-    if (_filter == GuideFilter.all || _filter == GuideFilter.favorites) {
+    if (_selectedChannelGroup != null ||
+        _filter == GuideFilter.all || _filter == GuideFilter.favorites) {
       return all;
     }
     return all.where(_matchesFilter).toList();
@@ -600,7 +637,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   void setFilter(GuideFilter value) {
-    if (_filter == value) return;
+    if (_filter == value && _selectedChannelGroup == null) return;
+    _selectedChannelGroup = null;
+    _groupHighWater = 0;
     _filter = value;
     _categoryRequest++;
     if (_categoryFetchInFlight) {
@@ -749,13 +788,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     try {
       // Re-fetch as many channels as were already loaded (at least the first
       // batch) so the user keeps the rows they had scrolled to.
-      final target = max(_programsHighWater, _programBatchSize);
+      final target = max(programsHighWater, _programBatchSize);
       final categoryTarget = _categoryHighWater;
       _resetPrograms();
       if (_isCategory(_filter)) {
         await _walkCategory(minHighWater: categoryTarget);
       } else {
-        while (_programsHighWater < target && hasMorePrograms) {
+        while (programsHighWater < target && hasMorePrograms) {
           await _loadNextBatch();
           if (_disposed || loadGeneration != _loadGeneration) return;
         }
@@ -804,15 +843,44 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<bool> _fetchChannels(int loadGeneration) async {
-    final response = await _client.liveTvApi.getChannels(
+    final liveTvApi = _client.liveTvApi;
+    // Fetch alongside the normal channel lineup so group discovery does not
+    // add another full network round trip to the guide's startup time.
+    final Future<Map<String, dynamic>?> groupsFuture =
+        liveTvApi is LiveTvChannelGroupApi
+        ? liveTvApi
+            .getChannelGroupMetadata()
+            .timeout(const Duration(seconds: 12))
+            .catchError((_) => null)
+        : Future<Map<String, dynamic>?>.value(null);
+    final response = await liveTvApi.getChannels(
       sortBy: 'SortName',
       sortOrder: 'Ascending',
-      fields: 'ImageTags,UserData',
+      fields: 'ImageTags,UserData,Tags',
       enableTotalRecordCount: false,
       userId: _client.userId,
     );
     if (_disposed || loadGeneration != _loadGeneration) return false;
     final items = (response['Items'] as List?) ?? [];
+    // Failure, absence or timeout leaves channel Tags as a fallback.
+    final originalGroups = await groupsFuture;
+    if (_disposed || loadGeneration != _loadGeneration) return false;
+    _channelGroups
+      ..clear()
+      ..addAll(resolveLiveTvChannelGroups(
+        items.cast<Map<String, dynamic>>(),
+        originalGroups,
+      ));
+    _groupIds.clear();
+    for (final entry in _channelGroups.entries) {
+      for (final name in entry.value) {
+        _groupIds.putIfAbsent(name, () => <String>{}).add(entry.key);
+      }
+    }
+    if (!_groupIds.containsKey(_selectedChannelGroup)) {
+      _selectedChannelGroup = null;
+    }
+    _groupHighWater = 0;
     _channels =
         items
             .cast<Map<String, dynamic>>()
@@ -827,6 +895,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programsByChannel.clear();
     _programsLoadedIds.clear();
     _programsHighWater = 0;
+    _groupHighWater = 0;
     _processedBoundaries.clear();
     _resetCategory();
   }
@@ -864,16 +933,26 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadNextBatch() async {
-    if (_programsHighWater >= _channels.length) return;
-    final end = min(_programsHighWater + _programBatchSize, _channels.length);
+    final requestedGroup = _selectedChannelGroup;
+    final ordered = requestedGroup == null ? _channels : filteredChannels;
+    final highWater = requestedGroup == null
+        ? _programsHighWater
+        : _groupHighWater;
+    if (highWater >= ordered.length) return;
+    final end = min(highWater + _programBatchSize, ordered.length);
     // A re-sort can move already-fetched channels back into the unwalked
     // suffix. Fetching them again would append duplicate programs.
-    final batch = _channels
-        .sublist(_programsHighWater, end)
+    final batch = ordered
+        .sublist(highWater, end)
         .where((c) => !_programsLoadedIds.contains(c.id))
         .toList();
-    if (await _loadProgramsBatch(batch)) {
-      _programsHighWater = end;
+    if (await _loadProgramsBatch(batch) &&
+        requestedGroup == _selectedChannelGroup) {
+      if (requestedGroup == null) {
+        _programsHighWater = end;
+      } else {
+        _groupHighWater = end;
+      }
     }
   }
 

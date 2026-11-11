@@ -1227,14 +1227,25 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     VoidCallback? onNavigateDown,
   }) {
     final filters = GuideFilter.values;
+    final groups = _vm.channelGroupNames;
+    final selectedGroup = _vm.selectedChannelGroup;
     return Padding(
       padding: padding,
       child: EpgFilterRail(
-        labels: [for (final f in filters) _filterLabel(f)],
-        selectedIndex: filters.indexOf(_vm.filter),
+        labels: [
+          for (final f in filters) _filterLabel(f),
+          for (final group in groups) group,
+        ],
+        selectedIndex: selectedGroup == null
+            ? filters.indexOf(_vm.filter)
+            : filters.length + groups.indexOf(selectedGroup),
         onSelect: (i) {
           _cancelPendingVerticalMove();
-          _vm.setFilter(filters[i]);
+          if (i < filters.length) {
+            _vm.setFilter(filters[i]);
+          } else {
+            _vm.setChannelGroup(groups[i - filters.length]);
+          }
         },
         apple: _apple,
         focusNodeFor: _filterFocusNodeFor,
