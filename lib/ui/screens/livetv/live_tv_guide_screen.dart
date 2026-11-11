@@ -367,10 +367,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   void _onChanged() {
     if (!mounted) return;
-    if (_categoryDisplay == LiveTvCategoryDisplay.groups &&
-        _vm.availableGroups.isNotEmpty &&
-        _vm.filter != GuideFilter.all &&
-        _vm.filter != GuideFilter.favorites) {
+    if (_vm.filter != GuideFilter.all &&
+        _vm.filter != GuideFilter.favorites &&
+        (!_vm.availableProgrammeCategories.contains(_vm.filter) ||
+            (_categoryDisplay == LiveTvCategoryDisplay.groups &&
+                _vm.availableGroups.isNotEmpty))) {
       _vm.setFilter(GuideFilter.all);
       return;
     }
@@ -1277,16 +1278,18 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final groups = _vm.availableGroups;
     if (groups.isEmpty ||
         _categoryDisplay == LiveTvCategoryDisplay.programmes) {
-      return [for (final filter in _vm.filters) (filter, null)];
+      return [
+        (GuideFilter.all, null),
+        for (final filter in _vm.availableProgrammeCategories) (filter, null),
+        (GuideFilter.favorites, null),
+      ];
     }
     return [
       (GuideFilter.all, null),
       (GuideFilter.favorites, null),
       for (final group in groups) (GuideFilter.all, group),
       if (_categoryDisplay == LiveTvCategoryDisplay.both)
-        for (final filter in _vm.filters)
-          if (filter != GuideFilter.all && filter != GuideFilter.favorites)
-            (filter, null),
+        for (final filter in _vm.availableProgrammeCategories) (filter, null),
     ];
   }
 

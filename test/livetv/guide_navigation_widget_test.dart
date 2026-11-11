@@ -199,6 +199,7 @@ void main() {
         startDate: any(named: 'startDate'),
         endDate: any(named: 'endDate'),
         channelIds: any(named: 'channelIds'),
+        isSports: any(named: 'isSports'),
         fields: any(named: 'fields'),
         enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
         enableImages: any(named: 'enableImages'),
@@ -291,6 +292,55 @@ void main() {
       expect(rail().labels, contains('Sports'));
     },
   );
+
+  testWidgets('guide shows only reported programme categories in each mode', (
+    tester,
+  ) async {
+    when(liveTvApi.getChannelGroups).thenAnswer(
+      (_) async => const ChannelGroupLineup(
+        {
+          'ch1': {'Sports'},
+        },
+        programmeCategories: {'movies'},
+      ),
+    );
+    await pumpGuide(tester);
+    EpgFilterRail rail() =>
+        tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+    expect(rail().labels, ['All', 'Favorites', 'Sports', 'Movies']);
+    expect(rail().groupIndices, {2});
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.programmes,
+    );
+    await _pumpFrames(tester);
+    expect(rail().labels, ['All', 'Movies', 'Favorites']);
+    await prefs.set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.groups,
+    );
+    await _pumpFrames(tester);
+    expect(rail().labels, ['All', 'Favorites', 'Sports']);
+  });
+
+  testWidgets('empty category metadata resets a selected category to All', (
+    tester,
+  ) async {
+    final pending = Completer<ChannelGroupLineup>();
+    when(liveTvApi.getChannelGroups).thenAnswer((_) => pending.future);
+    await pumpGuide(tester);
+    EpgFilterRail rail() =>
+        tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+    final sports = rail().labels.indexOf('Sports');
+    rail().onSelect(sports);
+    await _pumpFrames(tester);
+    expect(rail().selectedIndex, sports);
+    pending.complete(const ChannelGroupLineup({}, programmeCategories: {}));
+    await _pumpFrames(tester);
+    expect(rail().labels, ['All', 'Favorites']);
+    expect(rail().selectedIndex, 0);
+  });
 
   /// Focuses a row-0 cell two hours into the window and then steps right once,
   /// which is the only move permitted to rewrite the anchor. Returns the

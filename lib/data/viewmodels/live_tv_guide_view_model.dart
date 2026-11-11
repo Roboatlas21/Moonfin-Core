@@ -427,6 +427,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Map<String, List<GuideProgram>> _programsByChannel = {};
 
   Map<String, Set<String>> _channelGroups = {};
+  Set<String>? _programmeCategories;
+  Iterable<GuideFilter> get availableProgrammeCategories =>
+      filters.where(
+        (filter) =>
+            _isCategory(filter) &&
+            (_programmeCategories?.contains(filter.name) ?? true),
+      );
   List<String> _availableGroups = const [];
   List<String> get availableGroups => _availableGroups;
   String? _selectedGroup;
@@ -1014,6 +1021,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (account != _groupAccount) {
       _groupAccount = account;
       _channelGroups = {};
+      _programmeCategories = null;
       _availableGroups = const [];
       _selectedGroup = null;
       _updateGroupRows();
@@ -1105,6 +1113,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     final previous = _groupChannels;
     final hadGroup = _selectedGroup != null;
+    _programmeCategories = lineup.programmeCategories;
     _channelGroups = {
       for (final channel in _channels)
         channel.id: ?lineup.groupsByChannelId[channel.id],

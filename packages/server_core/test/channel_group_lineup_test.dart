@@ -53,8 +53,30 @@ void main() {
         'seven': {'US| SPORTS', 'US|SPORTS', 'Kids'},
       });
       expect(result.partial, true);
+      expect(result.programmeCategories, isNull);
     },
   );
+
+  test('programme categories are independent of tuner group support', () async {
+    Future<Set<String>?> read(Object? categories) async {
+      final response = await ChannelGroupLineup.fetch(
+        fixture(
+          200,
+          body: {
+            'version': 1,
+            'supported': false,
+            'programmeCategories': categories,
+          },
+        ),
+      );
+      return response.programmeCategories;
+    }
+
+    expect(await read(['movies', 'premiere']), {'movies', 'premiere'});
+    expect(await read([]), isEmpty);
+    expect(await read(null), isNull);
+    expect(await read(['movies', 123]), isNull);
+  });
 
   test(
     'older Moonbase is optional and authorization failures reach the caller',

@@ -9,7 +9,14 @@ class ChannelGroupLineup {
   final Map<String, Set<String>> groupsByChannelId;
   final bool partial;
 
-  const ChannelGroupLineup(this.groupsByChannelId, {this.partial = false});
+  /// Null when the server could not determine availability or predates this field.
+  final Set<String>? programmeCategories;
+
+  const ChannelGroupLineup(
+    this.groupsByChannelId, {
+    this.partial = false,
+    this.programmeCategories,
+  });
 
   static Future<ChannelGroupLineup> fetch(Dio dio) async {
     try {
@@ -18,24 +25,32 @@ class ChannelGroupLineup {
       if (data is! Map || data['version'] != 1) {
         throw const FormatException('Unknown channel group response');
       }
-      if (data['supported'] == false) {
-        return ChannelGroupLineup(const {}, partial: data['partial'] == true);
-      }
-      final raw = data['groupsByChannelId'];
-      if (data['supported'] != true || raw is! Map) {
+      final raw = data['supported'] == false
+          ? const {}
+          : data['groupsByChannelId'];
+      if (data['supported'] is! bool || raw is! Map) {
         throw const FormatException('Invalid channel group response');
       }
-      return ChannelGroupLineup({
-        for (final entry in raw.entries)
-          if (entry.key is String && entry.value is List)
-            entry.key as String: {
-              for (final label in entry.value as List)
-                if (label is String && label.trim().isNotEmpty) label.trim(),
-            },
-      }, partial: data['partial'] == true);
+      final categories = data['programmeCategories'];
+      return ChannelGroupLineup(
+        {
+          for (final entry in raw.entries)
+            if (entry.key is String && entry.value is List)
+              entry.key as String: {
+                for (final label in entry.value as List)
+                  if (label is String && label.trim().isNotEmpty) label.trim(),
+              },
+        },
+        partial: data['partial'] == true,
+        programmeCategories:
+            categories is List && categories.every((c) => c is String)
+            ? categories.cast<String>().toSet()
+            : null,
+      );
     } on DioException catch (error) {
-      if (error.response?.statusCode == 404)
+      if (error.response?.statusCode == 404) {
         return const ChannelGroupLineup({});
+      }
       rethrow;
     }
   }
