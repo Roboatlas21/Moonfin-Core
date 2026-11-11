@@ -1003,7 +1003,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Widget _buildContent(BuildContext context) {
     final body = LayoutBuilder(
       builder: (context, constraints) {
-        final landscape = _isLandscapeConstraints(constraints);
+        final landscape = _isLandscapeSize(MediaQuery.sizeOf(context));
         final topInset = _contentTopInset(landscape: landscape);
         final area = guideAvailableArea(
           maxWidth: constraints.maxWidth,
@@ -1080,12 +1080,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       PlatformDetection.isTV ||
       PlatformDetection.useDesktopUi ||
       size.width >= size.height;
-
-  bool _isLandscapeConstraints(BoxConstraints constraints) =>
-      widget.miniPlayerMode ||
-      PlatformDetection.isTV ||
-      PlatformDetection.useDesktopUi ||
-      constraints.maxWidth >= constraints.maxHeight;
 
   void _scheduleGuideWindowUpdate(Duration window) {
     if (_vm.state != GuideState.ready ||

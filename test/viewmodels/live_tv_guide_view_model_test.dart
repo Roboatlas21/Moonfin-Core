@@ -313,6 +313,69 @@ void main() {
   });
 
   test(
+    'a group survives new channel IDs until a complete lineup removes it',
+    () async {
+      final api = _GroupedLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => client.baseUrl).thenReturn('fixture');
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [_channel('old'), _channel('outside')]);
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'old': {'Canadian'},
+        }),
+      );
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setGroup('Canadian');
+
+      when(api.getChannelGroups).thenThrow(TimeoutException('lineup'));
+      await vm.goToNow();
+      expect(vm.filteredChannels.map((c) => c.id), ['old']);
+      expect(vm.selectedGroup, 'Canadian');
+
+      _stubChannels(api, [_channel('new'), _channel('outside')]);
+      final pending = Completer<ChannelGroupLineup>();
+      when(api.getChannelGroups).thenAnswer((_) => pending.future);
+      await vm.goToNow();
+      expect(vm.selectedGroup, 'Canadian');
+      expect(vm.availableGroups, contains('Canadian'));
+      expect(vm.filteredChannels, isEmpty);
+      pending.complete(
+        const ChannelGroupLineup({
+          'outside': {'News'},
+        }, partial: true),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.selectedGroup, 'Canadian');
+      expect(vm.filteredChannels, isEmpty);
+      expect(vm.channelCountForGroup('News'), 1);
+
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'new': {'Canadian'},
+        }),
+      );
+      await vm.goToNow();
+      expect(vm.selectedGroup, 'Canadian');
+      expect(vm.filteredChannels.map((c) => c.id), ['new']);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.hasProgramsFor('new'), isTrue);
+
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'outside': {'News'},
+        }),
+      );
+      await vm.goToNow();
+      expect(vm.selectedGroup, isNull);
+      expect(vm.availableGroups, ['News']);
+      expect(vm.filteredChannels.map((c) => c.id), ['new', 'outside']);
+    },
+  );
+
+  test(
     'a failed or superseded group lookup leaves the current guide usable',
     () async {
       final grouped = _GroupedLiveTvApi();
@@ -320,12 +383,19 @@ void main() {
       when(() => client.baseUrl).thenReturn('fixture');
       _stubChannels(grouped, [_channel('one')]);
       when(() => _guide(grouped)).thenAnswer((_) async => {'Items': []});
-      final pending = Completer<ChannelGroupLineup>();
-      when(grouped.getChannelGroups).thenAnswer((_) => pending.future);
+      when(grouped.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'one': {'old group'},
+        }),
+      );
       final vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);
       await vm.load();
-      expect(vm.state, GuideState.ready);
+      vm.setGroup('old group');
+      final pending = Completer<ChannelGroupLineup>();
+      when(grouped.getChannelGroups).thenAnswer((_) => pending.future);
+      await vm.goToNow();
+      expect(vm.selectedGroup, 'old group');
       when(() => client.userId).thenReturn('other');
       when(grouped.getChannelGroups).thenThrow(StateError('forbidden'));
       await vm.load();
@@ -336,6 +406,7 @@ void main() {
       );
       await Future<void>.delayed(Duration.zero);
       expect(vm.availableGroups, isEmpty);
+      expect(vm.selectedGroup, isNull);
       expect(vm.filteredChannels.single.id, 'one');
       expect(vm.state, GuideState.ready);
     },
@@ -1358,6 +1429,77 @@ void main() {
   });
 
   group('category filters', () {
+    for (final changeSort in [true, false]) {
+      final action = changeSort
+          ? 'changing sort'
+          : 'leaving and reopening Sports';
+      test('a pending Sports search finishes after $action', () async {
+        _stubChannels(liveTv, [
+          _channel('fox2', number: '1'),
+          _channel('fox1', number: '2'),
+          _channel('other', number: '3'),
+        ]);
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer(_serverFiltered((_) => true));
+        final vm = LiveTvGuideViewModel(client);
+        addTearDown(vm.dispose);
+        await vm.load();
+        vm.setFilter(GuideFilter.sports);
+        await Future<void>.delayed(Duration.zero);
+
+        final stale = Completer<Map<String, dynamic>>();
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer((_) => stale.future);
+        vm.setChannelQuery('fox');
+        expect(vm.state, GuideState.loading);
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer(_serverFiltered((_) => true));
+        if (changeSort) {
+          vm.setSortBy(ChannelSortBy.name);
+        } else {
+          vm.setFilter(GuideFilter.all);
+          vm.setFilter(GuideFilter.sports);
+        }
+        await Future<void>.delayed(Duration.zero);
+        expect(vm.state, GuideState.ready);
+        stale.complete({'Items': []});
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          vm.filteredChannels.map((c) => c.id),
+          changeSort ? ['fox1', 'fox2'] : ['fox2', 'fox1'],
+        );
+      });
+    }
+
+    test(
+      'a Sports page that times out after switching to All is ignored',
+      () async {
+        _stubChannels(
+          liveTv,
+          List.generate(250, (i) => _channel('c$i', number: '$i')),
+        );
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer(_serverFiltered((_) => true));
+        final vm = LiveTvGuideViewModel(client);
+        addTearDown(vm.dispose);
+        await vm.load();
+        vm.setFilter(GuideFilter.sports);
+        await Future<void>.delayed(Duration.zero);
+        final pending = Completer<Map<String, dynamic>>();
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer((_) => pending.future);
+        final page = vm.loadMorePrograms();
+        vm.setFilter(GuideFilter.all);
+        await vm.loadMorePrograms();
+        expect(vm.hasProgramsFor('c99'), isTrue);
+        pending.completeError(TimeoutException('Sports page'));
+        await page;
+        expect(vm.state, GuideState.ready);
+        expect(vm.error, isNull);
+        expect(vm.filteredChannels, hasLength(250));
+      },
+    );
+
     test('a category chip walks the lineup in flagged batches', () async {
       final channels = List.generate(120, (i) => _channel('c$i', number: '$i'));
       _stubChannels(liveTv, channels);

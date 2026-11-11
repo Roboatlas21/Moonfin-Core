@@ -267,6 +267,28 @@ void main() {
   }
 
   testWidgets(
+    'portrait channel search keeps its cards and focus above the keyboard',
+    (tester) async {
+      await GetIt.instance<UserPreferences>().set(
+        UserPreferences.liveTvCategoryDisplay,
+        LiveTvCategoryDisplay.both,
+      );
+      await pumpGuide(tester, surface: const Size(390, 700));
+      final field = find.byType(TextField);
+      await tester.enterText(field, 'Channel 47');
+      final focus = tester.widget<TextField>(field).focusNode!;
+
+      tester.view.viewInsets = const FakeViewPadding(bottom: 330);
+      await _pumpFrames(tester);
+      expect(tester.takeException(), isNull);
+      expect(focus.hasFocus, isTrue);
+      expect(find.text('Guide Timeline'), findsOneWidget);
+      expect(find.text('Channel 47'), findsNWidgets(2)); // Query and card.
+      expect(find.text('Channel 0'), findsNothing);
+    },
+  );
+
+  testWidgets(
     'mobile picker filters groups and keeps channel search in the guide',
     (tester) async {
       final prefs = GetIt.instance<UserPreferences>();
