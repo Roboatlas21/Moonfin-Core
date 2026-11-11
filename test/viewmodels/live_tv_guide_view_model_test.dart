@@ -140,6 +140,76 @@ void main() {
     }
   });
 
+  test(
+    'channel search pages the full scoped lineup by name or number without EPG',
+    () async {
+      final grouped = _GroupedLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(grouped);
+      when(() => client.baseUrl).thenReturn('fixture');
+      _stubChannels(grouped, [
+        for (var i = 0; i < 100; i++) _channel('c$i', number: '$i'),
+        {
+          ..._channel('fox', number: '7002'),
+          'UserData': {'IsFavorite': true},
+        },
+        _channel('fox plus', number: '7041'),
+      ]);
+      when(grouped.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'fox': {'US'},
+          'fox plus': {'CA'},
+        }),
+      );
+      final pages = <List<String>>[];
+      when(() => _guide(grouped)).thenAnswer((inv) async {
+        pages.add(_requestedIds(inv));
+        return {'Items': []};
+      });
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setChannelQuery(' FOX ');
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.filteredChannels.map((c) => c.id), ['fox', 'fox plus']);
+      expect(pages.last, ['fox', 'fox plus']);
+      vm.setGroup('CA');
+      expect(vm.filteredChannels.single.id, 'fox plus');
+      vm.setChannelQuery('7002');
+      expect(vm.filteredChannels, isEmpty);
+      vm.setFilter(GuideFilter.favorites);
+      expect(vm.filteredChannels.single.id, 'fox');
+      vm.setFilter(GuideFilter.all);
+      vm.setChannelQuery('');
+      expect(vm.filteredChannels.length, 102);
+    },
+  );
+
+  test(
+    'category search checks matching channels beyond the first category page',
+    () async {
+      _stubChannels(liveTv, [
+        for (var i = 0; i < 480; i++) _channel('c$i', number: '$i'),
+      ]);
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer(_serverFiltered((id) => id != 'c476'));
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.filteredChannels.any((c) => c.id == 'c475'), false);
+      vm.setChannelQuery('47');
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.filteredChannels.map((c) => c.id), contains('c475'));
+      expect(vm.filteredChannels.map((c) => c.id), isNot(contains('c476')));
+      vm.setFilter(GuideFilter.all);
+      vm.setChannelQuery('310');
+      vm.setFilter(GuideFilter.sports);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.filteredChannels.single.id, 'c310');
+    },
+  );
+
   test('channel groups page by channel and keep every programme', () async {
     final grouped = _GroupedLiveTvApi();
     when(() => client.liveTvApi).thenReturn(grouped);

@@ -14,7 +14,6 @@ import '../../../../widgets/focus/focusable_wrapper.dart';
 class EpgFilterRail extends StatefulWidget {
   final List<String> labels;
   final int selectedIndex;
-  final Set<int> groupIndices;
   final ValueChanged<int> onSelect;
   final bool apple;
   final FocusNode Function(int index) focusNodeFor;
@@ -24,7 +23,6 @@ class EpgFilterRail extends StatefulWidget {
     super.key,
     required this.labels,
     required this.selectedIndex,
-    this.groupIndices = const {},
     required this.onSelect,
     required this.apple,
     required this.focusNodeFor,
@@ -53,8 +51,7 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
   @override
   void didUpdateWidget(EpgFilterRail oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!listEquals(oldWidget.labels, widget.labels) ||
-        !setEquals(oldWidget.groupIndices, widget.groupIndices)) {
+    if (!listEquals(oldWidget.labels, widget.labels)) {
       final focused = FocusManager.instance.primaryFocus;
       final hadFocus = _focusListeners.containsKey(focused);
       _detachFocusListeners();
@@ -233,21 +230,12 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
         borderRadius: AppRadius.circular(13),
         border: Border.all(color: borderColor, width: 2),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (widget.groupIndices.contains(i)) ...[
-            Icon(Icons.folder_outlined, size: 15, color: fg),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            widget.labels[i],
-            style: textTheme.labelLarge?.copyWith(
-              color: fg,
-              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
-        ],
+      child: Text(
+        widget.labels[i],
+        style: textTheme.labelLarge?.copyWith(
+          color: fg,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        ),
       ),
     );
   }
