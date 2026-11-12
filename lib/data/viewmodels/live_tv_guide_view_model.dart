@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:math';
 
+import 'package:collection/collection.dart' show IterableEquality;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
@@ -792,6 +793,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final recordingRevision = liveTvRecordingRevision.value;
     final lineupRequest = ++_lineupRequest;
     if (window != null) _guideWindow = window;
+    _windowStart =
+        windowStart ??
+        DateTime(
+          _guideDate.year,
+          _guideDate.month,
+          _guideDate.day,
+          _now().hour,
+        );
+    _windowEnd = _windowStart.add(_guideWindow);
+    _atLivePosition = livePosition;
     _listingsStatePage = null;
     _error = null;
     _state = GuideState.loading;
@@ -801,7 +812,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     bool current() =>
         !_disposed &&
         loadGeneration == _loadGeneration &&
-        (listingsPage == null || listingsPage == _pageGeneration);
+        (listingsPage == null
+            ? lineupRequest == _lineupRequest
+            : listingsPage == _pageGeneration);
     try {
       if (!await _fetchChannels(lineupRequest) ||
           _disposed ||
@@ -814,17 +827,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         await _reloadPrograms();
         return;
       }
-
-      _windowStart =
-          windowStart ??
-          DateTime(
-            _guideDate.year,
-            _guideDate.month,
-            _guideDate.day,
-            _now().hour,
-          );
-      _windowEnd = _windowStart.add(_guideWindow);
-      _atLivePosition = livePosition;
 
       final initial = loadInitialPrograms(channelIds: initialChannelIds);
       listingsPage = _pageGeneration;
@@ -1187,7 +1189,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final api = _client.liveTvApi;
     final account = _groupAccount;
     if (_disposed || api is! ChannelGroupApi || account == null) return;
-    if (account != (_client.baseUrl, _client.userId) || _channels.isEmpty) {
+    // A replacement for a foreground channel load also owns its loading and error state.
+    if (account != (_client.baseUrl, _client.userId) ||
+        _channels.isEmpty ||
+        (_state == GuideState.loading &&
+            _listingsStatePage == null &&
+            !_categoryFetchInFlight)) {
       await load(windowStart: _windowStart, livePosition: _atLivePosition);
       return;
     }
@@ -1203,10 +1210,27 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     try {
       final channels = await _readChannels();
       if (!current()) return;
-      final lineup = await (api as ChannelGroupApi).getChannelGroups();
-      if (!current() || lineup.guideRevision == 'pending') return;
+      final lineup = await _readChannelGroups(api as ChannelGroupApi);
+      if (!current()) return;
+      final previousRows = _pageChannels;
       _publishChannels(channels, revision);
-      _applyChannelGroupLineup(lineup, reloadingPrograms: true);
+      // Native channels and listings remain available while the plugin imports
+      // or is offline. Keep previously confirmed memberships during that time.
+      if (lineup == null) {
+        _rebuildGroupChoices(complete: false);
+        _notifyListeners();
+      } else {
+        _applyChannelGroupLineup(lineup, reloadingPrograms: true);
+      }
+      // During an import a rename can update the same rows without replacing
+      // their known listings with an incomplete EPG.
+      if (lineup?.guideRevision == 'pending' &&
+          const IterableEquality<String>().equals(
+            previousRows.map((c) => c.id),
+            _pageChannels.map((c) => c.id),
+          )) {
+        return;
+      }
       await _replaceProgramPages(current, replaceCache: true);
       if (current()) _finishGuideRead(lineup);
     } catch (error) {
@@ -1228,10 +1252,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _retryAttempt = 0;
   }
 
-  void _finishGuideRead(ChannelGroupLineup lineup) {
-    if (lineup.partial &&
-        lineup.guideRevision != 'pending' &&
-        lineup.unresolvedChannelIds?.isEmpty != true) {
+  void _finishGuideRead(ChannelGroupLineup? lineup) {
+    if (lineup == null ||
+        (lineup.partial &&
+            lineup.guideRevision != 'pending' &&
+            lineup.unresolvedChannelIds?.isEmpty != true)) {
       _retryGuideAfterFailure();
     } else {
       _cancelGuideRetry();
@@ -1314,37 +1339,33 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       error is DioException &&
       (error.response?.statusCode == 401 || error.response?.statusCode == 403);
 
+  Future<ChannelGroupLineup?> _readChannelGroups(ChannelGroupApi api) async {
+    try {
+      return await api.getChannelGroups();
+    } catch (error) {
+      // Dio errors may contain signed URLs. Log only the error type.
+      debugPrint('Live TV channel groups unavailable (${error.runtimeType})');
+      return _accessDenied(error)
+          ? const ChannelGroupLineup({}, programmeCategories: {})
+          : null;
+    }
+  }
+
   Future<void> _loadChannelGroups(
     ChannelGroupApi api,
     int request,
     (String, String?) account,
   ) async {
     final session = userDataSync.session;
-    ChannelGroupLineup? lineup;
-    try {
-      lineup = await api.getChannelGroups();
-      if (lineup.partial) {
-        debugPrint('Live TV channel groups: partial tuner lineup');
-      }
-    } catch (error) {
-      // Dio errors may contain signed URLs. Log only the error type.
-      debugPrint('Live TV channel groups unavailable (${error.runtimeType})');
-      if (_accessDenied(error)) {
-        lineup = const ChannelGroupLineup({}, programmeCategories: {});
-      }
-    }
+    final lineup = await _readChannelGroups(api);
     if (_disposed ||
         request != _lineupRequest ||
         session != userDataSync.session ||
         account != (_client.baseUrl, _client.userId)) {
       return;
     }
-    if (lineup == null) {
-      _retryGuideAfterFailure();
-      return;
-    }
     _finishGuideRead(lineup);
-    _applyChannelGroupLineup(lineup);
+    if (lineup != null) _applyChannelGroupLineup(lineup);
   }
 
   void _applyChannelGroupLineup(

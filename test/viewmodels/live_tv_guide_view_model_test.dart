@@ -297,6 +297,70 @@ void main() {
       },
     );
 
+    test('a late native timeout leaves a newer import ready', () async {
+      when(api.getChannelGroups)
+          .thenAnswer((_) async => const ChannelGroupLineup({}));
+      _stubChannels(api, [_channel('old')]);
+      await vm.load();
+      final slow = Completer<Map<String, dynamic>>();
+      when(
+        () => api.getChannels(
+          sortBy: any(named: 'sortBy'),
+          sortOrder: any(named: 'sortOrder'),
+          fields: any(named: 'fields'),
+          enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+          userId: any(named: 'userId'),
+        ),
+      ).thenAnswer((_) => slow.future);
+      final window = vm.windowStart.add(const Duration(hours: 2));
+      final returning = vm.load(windowStart: window, livePosition: false);
+      _stubChannels(api, [_channel('current')]);
+      await vm.refreshGuide();
+      expect(vm.state, GuideState.ready);
+      slow.completeError(TimeoutException('superseded native read'));
+      await returning;
+      expect(vm.state, GuideState.ready);
+      expect(vm.error, isNull);
+      expect(vm.filteredChannels.single.id, 'current');
+      expect(vm.windowStart, window);
+      expect(vm.atLivePosition, isFalse);
+    });
+
+    test(
+      'a native channel edit is visible while group metadata is pending',
+      () async {
+        _stubChannels(api, [_channel('old')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup(
+            {
+              'old': {'UK'},
+            },
+            programmeCategories: {'sports'},
+            guideRevision: '1',
+          ),
+        );
+        when(() => _guide(api)).thenAnswer(
+          (_) async => {
+            'Items': [_program('The game', 'old')],
+          },
+        );
+        await vm.load();
+        vm.setGroup('UK');
+        _stubChannels(api, [
+          {..._channel('old'), 'Name': 'Studio B'},
+        ]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup({}, guideRevision: 'pending'),
+        );
+        when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+        await vm.refreshGuide();
+        expect(vm.filteredChannels.single.name, 'Studio B');
+        expect(vm.selectedGroup, 'UK');
+        expect(vm.programsForChannel('old').single.name, 'The game');
+        expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+      },
+    );
+
     test('replaces channel IDs and group memberships together', () async {
       _stubChannels(api, [_channel('old'), _channel('outside')]);
       when(api.getChannelGroups).thenAnswer(

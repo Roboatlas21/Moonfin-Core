@@ -1394,6 +1394,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (!mounted) return;
     setState(() => _pickerOpen = false);
     if (choice == null || !_usesPicker) return;
+    final previous = (_vm.filter, _vm.selectedGroup);
     final (filter, group) = choice;
     if (group != null) {
       _vm.setGroup(group);
@@ -1401,6 +1402,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         filter == GuideFilter.favorites ||
         _vm.availableProgrammeCategories.contains(filter)) {
       _vm.setFilter(filter);
+    }
+    if (!panel && previous != (_vm.filter, _vm.selectedGroup)) {
+      _selection = null;
+      _lastFocusedRowIndex = null;
+      _scrollToRow(0, animate: false);
     }
     if (panel) {
       _selection = null;

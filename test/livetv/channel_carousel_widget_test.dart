@@ -369,7 +369,7 @@ void main() {
     expect(vm.listening, isFalse);
   });
 
-  testWidgets('prewarm loads every carousel channel and arms its boundary', (
+  testWidgets('prewarm loads only nearby listings and arms their boundary', (
     tester,
   ) async {
     final client = _CarouselClient();
@@ -395,7 +395,11 @@ void main() {
     await tester.pump();
 
     expect(vm.requests, hasLength(1));
-    expect(vm.requests.single, channels.map((channel) => channel.id));
+    expect(vm.requests.single, [for (var i = 2; i <= 10; i++) 'ch$i']);
+    await prewarm.ensureVisibleChannels(
+      carouselNeighborhood(channels, 'ch0', 5),
+    );
+    expect(vm.requests.last, containsAll(['ch0', 'ch11']));
     expect(vm.schedules, greaterThanOrEqualTo(1));
     expect(prewarm.hourlyDueAt, now.add(const Duration(seconds: 2)));
     prewarm.dispose();
@@ -492,7 +496,10 @@ void main() {
       await tester.pump();
 
       expect(vm.requests, hasLength(2));
-      expect(vm.requests.last, channels.map((channel) => channel.id));
+      expect(
+        vm.requests.last,
+        unorderedEquals(channels.map((channel) => channel.id)),
+      );
       expect(vm.refreshCalls, 0);
       prewarm.dispose();
     },

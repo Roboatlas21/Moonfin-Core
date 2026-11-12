@@ -589,6 +589,41 @@ void main() {
     },
   );
 
+  testWidgets('choosing a group resets both portrait grid columns', (
+    tester,
+  ) async {
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.both,
+    );
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.epgMobileView,
+      EpgMobileView.grid,
+    );
+    channelCount = 220;
+    when(liveTvApi.getChannelGroups).thenAnswer(
+      (_) async => ChannelGroupLineup({
+        for (var i = 0; i < 220; i++) 'ch$i': {i.isEven ? 'Even' : 'Odd'},
+      }),
+    );
+    await pumpGuide(tester, surface: const Size(390, 740));
+    Iterable<ScrollPosition> positions() => tester
+        .stateList<ScrollableState>(find.byType(Scrollable))
+        .map((s) => s.position)
+        .where((p) => p.axis == Axis.vertical && p.maxScrollExtent > 4400);
+    expect(positions(), hasLength(2));
+    for (final p in positions().toList()) {
+      p.jumpTo(4400);
+    }
+    await _pumpFrames(tester);
+    await tester.tap(find.text('All channels'));
+    await _pumpFrames(tester);
+    await tester.tap(find.text('Even'));
+    await _pumpFrames(tester);
+    expect(positions().map((position) => position.pixels), [0.0, 0.0]);
+    expect(find.text('Channel 0').hitTestable(), findsOneWidget);
+  });
+
   testWidgets('TV Left opens the picker, OK selects and Back keeps the group', (
     tester,
   ) async {

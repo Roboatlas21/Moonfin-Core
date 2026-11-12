@@ -56,8 +56,7 @@ List<String> carouselNeighborhood(
 /// entries a closed overlay could produce are mostly placeholders that the
 /// neighbourhood fetch invalidates a moment later anyway.
 class ChannelCarouselPrewarm {
-  /// A tune is often one step of channel surfing, so the complete channel
-  /// program fetch waits for the lineup to settle rather than firing per step.
+  /// Wait for channel surfing to settle before requesting nearby listings.
   static const Duration settleDelay = Duration(seconds: 1);
 
   final LiveTvGuideViewModel viewModel;
@@ -102,16 +101,19 @@ class ChannelCarouselPrewarm {
   @visibleForTesting
   DateTime? get hourlyDueAt => _hourlyDueAt;
 
-  /// Called when a channel is tuned. The delayed load covers the complete
-  /// carousel lineup after rapid channel changes settle.
+  /// Warm the cards around the tuned channel. Browsing loads further cards.
   void tuned(List<GuideChannel> channels, String channelId) {
     if (_disposed || channels.isEmpty) return;
-    _channels = List<GuideChannel>.of(channels);
+    _channelIds = carouselNeighborhood(
+      channels,
+      channelId,
+      _defaultVisibleCards,
+    );
     _timer?.cancel();
     _timer = Timer(settleDelay, () => _requestWarm());
   }
 
-  List<GuideChannel> _channels = const [];
+  List<String> _channelIds = const [];
 
   void _requestWarm() {
     if (_disposed) return;
@@ -123,8 +125,8 @@ class ChannelCarouselPrewarm {
   }
 
   Future<void> _warm() async {
-    if (_disposed || _channels.isEmpty) return;
-    final ids = _channels.map((channel) => channel.id).toSet().toList();
+    if (_disposed || _channelIds.isEmpty) return;
+    final ids = _channelIds;
     final wasCold = !isWarm;
     await _runExclusive(() async {
       await _warmPrograms(ids);
@@ -226,10 +228,11 @@ class ChannelCarouselPrewarm {
   }
 
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
-    if (_disposed) return;
-    if (_inFlight != null) return;
-    await _runExclusive(() => viewModel.ensureProgramsForChannels(channelIds));
-    if (!_disposed) viewModel.scheduleBoundaryRefresh();
+    if (_disposed || channelIds.isEmpty) return;
+    _timer?.cancel();
+    _channelIds = channelIds;
+    _requestWarm();
+    await _waitForExclusiveWork();
   }
 
   Future<void> ensureReady() async {

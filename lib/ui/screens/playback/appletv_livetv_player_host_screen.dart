@@ -928,6 +928,12 @@ class _AppleTvLiveTvPlayerHostScreenState
         unawaited(
           _manager.changeBitrate(mbps == null || mbps < 0 ? null : mbps),
         );
+      case 'visibleChannels':
+        final ids = (action['channelIds'] as List)
+            .cast<String>()
+            .toSet()
+            .toList();
+        unawaited(_carouselPrewarm?.ensureVisibleChannels(ids));
       case 'selectChannel':
         final id = action['channelId']?.toString();
         if (id != null && id.isNotEmpty) {
