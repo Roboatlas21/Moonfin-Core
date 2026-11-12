@@ -61,6 +61,7 @@ void main() {
             'version': 1,
             'supported': true,
             'partial': true,
+            'unresolvedChannelIds': ['offline'],
             'groupsByChannelId': {
               'seven': ['US| SPORTS', 'US|SPORTS', 'Kids', 'Kids', ' '],
             },
@@ -71,6 +72,7 @@ void main() {
         'seven': {'US| SPORTS', 'US|SPORTS', 'Kids'},
       });
       expect(result.partial, true);
+      expect(result.unresolvedChannelIds, {'offline'});
       expect(result.programmeCategories, isNull);
     },
   );

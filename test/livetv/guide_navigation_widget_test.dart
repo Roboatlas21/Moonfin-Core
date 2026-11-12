@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:custom_tv_text_field/custom_tv_text_field.dart'
+    show KeyboardStyle;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -265,6 +267,123 @@ void main() {
     // Focused TV labels can marquee continuously.
     await _pumpFrames(tester);
   }
+
+  testWidgets(
+    'landscape phone keeps channel search and results above the keyboard',
+    (tester) async {
+      await GetIt.instance<UserPreferences>().set(
+        UserPreferences.liveTvCategoryDisplay,
+        LiveTvCategoryDisplay.both,
+      );
+      await pumpGuide(tester, surface: const Size(844, 390));
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byType(TextField));
+      await tester.enterText(find.byType(TextField), 'Channel 1');
+      tester.view.viewInsets = const FakeViewPadding(bottom: 200);
+      await _pumpFrames(tester);
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus,
+        isTrue,
+      );
+      expect(find.byType(EpgHeroPreview), findsNothing);
+      expect(find.byType(EpgChannelCell), findsWidgets);
+    },
+  );
+
+  testWidgets('TV focuses the first category row when its listings arrive', (
+    tester,
+  ) async {
+    PlatformDetection.setTvMode(true);
+    addTearDown(() => PlatformDetection.setTvMode(false));
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.both,
+    );
+    when(liveTvApi.getChannelGroups).thenAnswer(
+      (_) async => const ChannelGroupLineup(
+        {},
+        programmeCategories: {'sports'},
+        guideRevision: '1',
+      ),
+    );
+    final sports = Completer<Map<String, dynamic>>();
+    when(
+      () => liveTvApi.getGuide(
+        startDate: any(named: 'startDate'),
+        endDate: any(named: 'endDate'),
+        channelIds: any(named: 'channelIds'),
+        isSports: true,
+        fields: any(named: 'fields'),
+        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+        enableImages: any(named: 'enableImages'),
+        enableUserData: any(named: 'enableUserData'),
+        userId: any(named: 'userId'),
+      ),
+    ).thenAnswer((_) => sports.future);
+    await pumpGuide(tester);
+    _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
+    await _pumpFrames(tester);
+    for (final key in [
+      LogicalKeyboardKey.arrowLeft,
+      LogicalKeyboardKey.arrowDown,
+      LogicalKeyboardKey.arrowDown,
+      LogicalKeyboardKey.select,
+    ]) {
+      await tester.sendKeyEvent(key);
+      await _pumpFrames(tester);
+    }
+    sports.complete({
+      'Items': [
+        {..._programsFor('ch0').first, 'IsSports': true},
+      ],
+    });
+    await _pumpFrames(tester);
+    expect(find.byType(GuideFilterPicker), findsNothing);
+    expect(find.byType(EpgChannelCell), findsOneWidget);
+    expect(_focusedLabel(), 'GuideChannel:0');
+  });
+
+  testWidgets('the first native Apple TV channel search applies', (
+    tester,
+  ) async {
+    PlatformDetection.setTvMode(true);
+    addTearDown(() => PlatformDetection.setTvMode(false));
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.both,
+    );
+    await prefs.set(UserPreferences.keyboardStyle, KeyboardStyle.native);
+    const kb = MethodChannel('moonfin/appletv_system');
+    int shown = 0;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(kb, (
+      call,
+    ) async {
+      if (call.method == 'showTextInput') {
+        shown++;
+        return 'Channel 47';
+      }
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        kb,
+        null,
+      ),
+    );
+    await pumpGuide(tester);
+    _nodeLabelled(tester, 'GuideSearch').requestFocus();
+    await _pumpFrames(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await _pumpFrames(tester);
+    final cells = tester
+        .widgetList<EpgChannelCell>(find.byType(EpgChannelCell))
+        .map((w) => w.name)
+        .toList();
+    expect(shown, 1);
+    expect(cells, ['Channel 47']);
+  }, skip: !PlatformDetection.isAppleTV);
 
   testWidgets(
     'portrait channel search keeps its cards and focus above the keyboard',

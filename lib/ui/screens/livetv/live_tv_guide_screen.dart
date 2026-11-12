@@ -173,6 +173,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final _channelSearch = TextEditingController();
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
+  GuideFilter? _pendingPickerFocus;
   bool get _usesPicker =>
       !widget.miniPlayerMode &&
       _vm.supportsGroupPicker &&
@@ -414,6 +415,19 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       });
     }
     _scheduleInitialChannelFocus();
+    final pending = _pendingPickerFocus;
+    if (pending != null && _vm.state != GuideState.loading) {
+      _pendingPickerFocus = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_mayTakeFocus &&
+            !_pickerOpen &&
+            _browseFocus.hasFocus &&
+            _vm.filter == pending &&
+            _vm.filteredChannels.isNotEmpty) {
+          _focusChannelRow(0, animate: false);
+        }
+      });
+    }
     if (_pendingVerticalMove == null) return;
     // The target row can only be focused once the notification's rebuild has
     // mounted it, so resolve the intent after this frame.
@@ -1000,6 +1014,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   Widget _buildContent(BuildContext context) {
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
     final body = LayoutBuilder(
       builder: (context, constraints) {
         final landscape = _isLandscapeSize(MediaQuery.sizeOf(context));
@@ -1016,7 +1031,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           textScaleFactor: MediaQuery.textScalerOf(context).scale(1),
         );
         _layoutProfile = profile;
-        final heroVisible = landscape && !widget.miniPlayerMode;
+        final compactSearch =
+            landscape && !_sidePanel && !widget.miniPlayerMode && keyboardOpen;
+        final heroVisible =
+            landscape && !widget.miniPlayerMode && !compactSearch;
         if (heroVisible != _heroVisible) {
           _heroVisible = heroVisible;
           // Deferred because this runs during build: gaining the hero has
@@ -1043,7 +1061,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             right: landscape ? 24 : 8,
             bottom: 16,
           ),
-          child: landscape ? _buildLandscape() : _buildMobile(),
+          child: landscape
+              ? _buildLandscape(compactSearch: compactSearch)
+              : _buildMobile(),
         );
       },
     );
@@ -1099,15 +1119,15 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     });
   }
 
-  Widget _buildLandscape() {
+  Widget _buildLandscape({required bool compactSearch}) {
     return Column(
       children: [
-        _buildTopSection(),
+        _buildTopSection(showHero: !compactSearch),
         SizedBox(height: widget.miniPlayerMode ? 8 : 2),
         // The window control sits directly above the grid. The tick strip's
         // left region is only channel-column wide and 22-24 px tall, so it
         // can't hold the chevrons and the range text at the narrowest size.
-        if (!widget.miniPlayerMode) _buildGuideWindowBar(),
+        if (!widget.miniPlayerMode && !compactSearch) _buildGuideWindowBar(),
         Expanded(child: _buildBody()),
       ],
     );
@@ -1130,7 +1150,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
   }
 
-  Widget _buildTopSection() {
+  Widget _buildTopSection({required bool showHero}) {
     if (widget.miniPlayerMode) {
       return ListenableBuilder(
         listenable: Listenable.merge([
@@ -1160,7 +1180,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [_buildToolbar(), const SizedBox(height: 2), _buildHero()],
+      children: [
+        _buildToolbar(),
+        if (showHero) ...[const SizedBox(height: 2), _buildHero()],
+      ],
     );
   }
 
@@ -1329,6 +1352,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Future<void> _openFilterPicker() async {
     if (_pickerOpen || !_mayTakeFocus) return;
     _cancelPendingVerticalMove();
+    _pendingPickerFocus = null;
     final panel = _sidePanel;
     final width = _panelWidth;
     final l10n = AppLocalizations.of(context);
@@ -1372,8 +1396,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       _selection = null;
       _lastFocusedRowIndex = null;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_mayTakeFocus) return;
+        if (!_mayTakeFocus ||
+            _vm.filter != filter ||
+            _vm.selectedGroup != group) {
+          return;
+        }
         if (_vm.filteredChannels.isEmpty) {
+          if (_vm.state == GuideState.loading) _pendingPickerFocus = filter;
           _browseFocus.requestFocus();
         } else {
           _focusChannelRow(0, animate: false);

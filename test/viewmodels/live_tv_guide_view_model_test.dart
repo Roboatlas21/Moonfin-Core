@@ -156,6 +156,170 @@ void main() {
       addTearDown(vm.dispose);
     });
 
+    test(
+      'keeps listings after a timeout and retries the same import',
+      () async {
+        _stubChannels(api, [_channel('one')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => ChannelGroupLineup({}, guideRevision: revision),
+        );
+        void show(String title) => when(() => _guide(api)).thenAnswer(
+          (_) async => {
+            'Items': [_program(title, 'one')],
+          },
+        );
+        show('old');
+        await vm.load();
+        revision = '2';
+        when(() => _guide(api)).thenThrow(TimeoutException('guide'));
+        await vm.refreshProgrammeCategories();
+        expect(vm.state, GuideState.ready);
+        expect(vm.programsForChannel('one').single.name, 'old');
+        show('new');
+        await vm.refreshProgrammeCategories();
+        expect(vm.programsForChannel('one').single.name, 'new');
+        verify(api.getChannelGroups).called(2);
+      },
+    );
+
+    test(
+      'Now keeps its group when an import finishes after the channel lookup',
+      () async {
+        _stubChannels(api, [_channel('old')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup({
+            'old': {'Canadian'},
+          }, guideRevision: '1'),
+        );
+        await vm.load();
+        vm.setGroup('Canadian');
+        final metadata = Completer<ChannelGroupLineup>();
+        when(api.getChannelGroups).thenAnswer((_) => metadata.future);
+        await vm.goToNow();
+        revision = '2';
+        _stubChannels(api, [_channel('new')]);
+        metadata.complete(
+          const ChannelGroupLineup({
+            'new': {'Canadian'},
+          }, guideRevision: '2'),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(vm.selectedGroup, 'Canadian');
+        expect(vm.filteredChannels.single.id, 'new');
+      },
+    );
+
+    test('an old All failure leaves the selected group ready', () async {
+      _stubChannels(
+        api,
+        List.generate(100, (i) => _channel('c$i', number: '$i')),
+      );
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'c95': {'Canadian'},
+        }, guideRevision: '1'),
+      );
+      final all = Completer<Map<String, dynamic>>();
+      when(() => _guide(api)).thenAnswer((invocation) async {
+        if (_requestedIds(invocation).contains('c95')) {
+          return {
+            'Items': [_program('Game', 'c95')],
+          };
+        }
+        return all.future;
+      });
+      final opening = vm.load();
+      await Future<void>.delayed(Duration.zero);
+      vm.setGroup('Canadian');
+      await Future<void>.delayed(Duration.zero);
+      all.completeError(TimeoutException('initial All page'));
+      await opening;
+      expect(vm.state, GuideState.ready);
+      expect(vm.programsForChannel('c95').single.name, 'Game');
+      expect(vm.error, isNull);
+    });
+
+    test(
+      'removes a healthy tuner’s old group while another tuner is offline',
+      () async {
+        _stubChannels(api, [_channel('healthy'), _channel('offline')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup({
+            'healthy': {'Sports'},
+            'offline': {'UK'},
+          }, guideRevision: '1'),
+        );
+        await vm.load();
+        vm.setGroup('Sports');
+        revision = '2';
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup(
+            {},
+            partial: true,
+            unresolvedChannelIds: {'offline'},
+            guideRevision: '2',
+          ),
+        );
+        await vm.refreshProgrammeCategories();
+        expect(vm.availableGroups, ['UK']);
+        expect(vm.selectedGroup, isNull);
+        vm.setGroup('UK');
+        expect(vm.filteredChannels.single.id, 'offline');
+      },
+    );
+
+    test('polls only the revision while an import is pending', () async {
+      _stubChannels(api, [_channel('one')]);
+      revision = 'pending';
+      when(api.getChannelGroups).thenAnswer(
+        (_) async =>
+            ChannelGroupLineup({}, partial: true, guideRevision: revision),
+      );
+      await vm.load();
+      for (var i = 0; i < 10; i++) {
+        await vm.refreshProgrammeCategories();
+      }
+      verify(api.getChannelGroups).called(1);
+      revision = '2';
+      await vm.refreshProgrammeCategories();
+      verify(api.getChannelGroups).called(1);
+    });
+
+    test(
+      'a date change during Now keeps the new window and revision polling',
+      () async {
+        _stubChannels(api, [_channel('one')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => ChannelGroupLineup({
+            'one': {revision},
+          }, guideRevision: revision),
+        );
+        await vm.load();
+        final channels = Completer<Map<String, dynamic>>();
+        when(
+          () => api.getChannels(
+            sortBy: any(named: 'sortBy'),
+            sortOrder: any(named: 'sortOrder'),
+            fields: any(named: 'fields'),
+            enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+            userId: any(named: 'userId'),
+          ),
+        ).thenAnswer((_) => channels.future);
+        final pending = vm.goToNow();
+        final tomorrow = vm.guideDate.add(const Duration(days: 1));
+        await vm.setDate(tomorrow);
+        channels.complete({
+          'Items': [_channel('one')],
+        });
+        await pending;
+        revision = '2';
+        await vm.refreshProgrammeCategories();
+        expect(vm.availableGroups, ['2']);
+        expect(vm.guideDate, tomorrow);
+        expect(vm.atLivePosition, isFalse);
+      },
+    );
+
     test('replaces channel IDs and group memberships together', () async {
       _stubChannels(api, [_channel('old'), _channel('outside')]);
       when(api.getChannelGroups).thenAnswer(

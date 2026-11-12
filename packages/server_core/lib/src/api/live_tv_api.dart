@@ -10,6 +10,10 @@ class ChannelGroupLineup {
   final Map<String, Set<String>> groupsByChannelId;
   final bool partial;
 
+  /// Visible channel IDs the tuner could not resolve in a partial response.
+  /// Older plugins and imports in progress leave this unknown.
+  final Set<String>? unresolvedChannelIds;
+
   /// Null when the server could not determine availability or predates this field.
   final Set<String>? programmeCategories;
 
@@ -19,6 +23,7 @@ class ChannelGroupLineup {
   const ChannelGroupLineup(
     this.groupsByChannelId, {
     this.partial = false,
+    this.unresolvedChannelIds,
     this.programmeCategories,
     this.guideRevision,
   });
@@ -51,6 +56,7 @@ class ChannelGroupLineup {
         throw const FormatException('Invalid channel group response');
       }
       final categories = data['programmeCategories'];
+      final unresolved = data['unresolvedChannelIds'];
       return ChannelGroupLineup(
         {
           for (final entry in raw.entries)
@@ -61,6 +67,10 @@ class ChannelGroupLineup {
               },
         },
         partial: data['partial'] == true,
+        unresolvedChannelIds:
+            unresolved is List && unresolved.every((id) => id is String)
+            ? unresolved.cast<String>().toSet()
+            : null,
         guideRevision: data['guideRevision'] as String?,
         programmeCategories:
             categories is List && categories.every((c) => c is String)
