@@ -30,7 +30,7 @@ Map<String, List<String>> resolveLiveTvChannelGroups(
       if (channel['Id'] != null)
         channel['Id'].toString(): [
           ...(fromMoonbase[channel['Id'].toString()] ??
-              _channelGroupsFromTags(channel['Tags'])),
+              _channelGroupsFromTags(channel)),
         ],
   }..removeWhere((_, groups) => groups.isEmpty);
 }
@@ -38,8 +38,18 @@ Map<String, List<String>> resolveLiveTvChannelGroups(
 String _groupChannelId(String value) =>
     value.replaceAll('-', '').toLowerCase();
 
-List<String> _channelGroupsFromTags(Object? value) {
-  if (value is! List) return const [];
+List<String> _channelGroupsFromTags(Map<String, dynamic> channel) {
+  final value = channel['Tags'];
+  if (value is! List) {
+    // Emby exposes complete group names in TagItems when Tags is absent.
+    final items = channel['TagItems'];
+    if (items is! List) return const [];
+    return {
+      for (final item in items)
+        if (item is Map && item['Name'] is String)
+          (item['Name'] as String).trim(),
+    }.where((name) => name.isNotEmpty).toList();
+  }
   final tags = <String>[];
   for (final raw in value) {
     if (raw is! String || raw.trim().isEmpty) continue;

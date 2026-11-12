@@ -39,6 +39,8 @@ void main() {
         {'Id': 'c2', 'Tags': ['US ', ' NEWS']},
         {'Id': 'c3', 'Tags': ['US', 'SPORTS']},
         {'Id': 'c4', 'Tags': ['Sports', 'News']},
+        {'Id': 'c5', 'TagItems': [{'Name': 'US| SPORTS'}, {'Name': 'News'}]},
+        {'Id': 'c6', 'Tags': ['Sports'], 'TagItems': [{'Name': 'Ignored'}]},
       ],
       null,
     );
@@ -47,6 +49,8 @@ void main() {
     expect(resolved['c2'], ['US | NEWS']);
     expect(resolved['c3'], ['US', 'SPORTS']);
     expect(resolved['c4'], ['Sports', 'News']);
+    expect(resolved['c5'], ['US| SPORTS', 'News']);
+    expect(resolved['c6'], ['Sports']);
   });
 
   test('unknown plugin IDs are ignored and empty tags yield no groups', () {
