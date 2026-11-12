@@ -795,11 +795,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
               tag: channel.imageTag,
             ),
       isFavorite: channel.isFavorite,
-      programTitle:
-          program?.name ??
-          (state == GuideChannelLoadState.failed
-              ? AppLocalizations.of(context).guideListingsUnavailable
-              : null),
+      programTitle: program?.name,
       timeLabel: program == null ? null : _timeRange(program),
       rating: program?.officialRating,
       tags: program == null ? const [] : _categoryLabels(program),

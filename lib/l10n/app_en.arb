@@ -3495,10 +3495,6 @@
   "@noChannelsFound": {
     "description": "Empty state when no TV channels match the filter"
   },
-  "guideListingsUnavailable": "Listings unavailable",
-  "@guideListingsUnavailable": {
-    "description": "Message shown on a Live TV channel card when programme listings could not be loaded, rather than when no programme is scheduled."
-  },
   "noProgramData": "No program data",
   "@noProgramData": {
     "description": "Guide cell label for a real EPG schedule gap, not a genre-filtered program"

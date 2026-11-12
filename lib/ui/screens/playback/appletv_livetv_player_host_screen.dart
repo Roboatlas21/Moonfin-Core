@@ -608,9 +608,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   ) {
     if (program == null) {
       return {
-        'programName': state == GuideChannelLoadState.failed
-            ? l10n.guideListingsUnavailable
-            : '',
+        'programName': '',
         'episodeTitle': '',
         'overview': '',
         'seasonEpisode': '',
