@@ -3495,6 +3495,7 @@
   "@noChannelsFound": {
     "description": "Empty state when no TV channels match the filter"
   },
+  "guideListingsUnavailable": "Listings unavailable",
   "noProgramData": "No program data",
   "@noProgramData": {
     "description": "Guide cell label for a real EPG schedule gap, not a genre-filtered program"

@@ -230,9 +230,20 @@ class ChannelCarouselPrewarm {
 
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
     if (_disposed || channelIds.isEmpty) return;
+    final wasWarm = isWarm;
     await ensureReady();
     if (!_disposed && isWarm) {
-      await viewModel.ensureProgramsForChannels(channelIds);
+      // A cold open already attempted the tuned neighbourhood, including its retry.
+      final ids = wasWarm
+          ? channelIds
+          : channelIds
+                .where(
+                  (id) =>
+                      viewModel.loadStateFor(id) ==
+                      GuideChannelLoadState.loading,
+                )
+                .toList();
+      if (ids.isNotEmpty) await viewModel.ensureProgramsForChannels(ids);
     }
   }
 
@@ -481,11 +492,12 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
 
   Future<void> _load() async {
     final prewarm = widget.prewarm;
+    final initialIds = _neighborhood();
     if (prewarm != null) {
-      await prewarm.ensureReady();
+      await prewarm.ensureVisibleChannels(initialIds);
     } else {
       await _vm.load(
-        initialChannelIds: _neighborhood(),
+        initialChannelIds: initialIds,
         windowStart: guideLeftEdge(DateTime.now()),
         livePosition: true,
       );
@@ -505,7 +517,9 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     }
     if (_ownsViewModel) _vm.scheduleBoundaryRefresh();
     _scheduleHeader();
-    _scheduleVisibleLoad();
+    if (_neighborhood().any((id) => !initialIds.contains(id))) {
+      _scheduleVisibleLoad();
+    }
   }
 
   List<String> _neighborhood() =>
@@ -768,6 +782,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
 
   ChannelCarouselEntry _entry(GuideChannel channel, DateTime now) {
     final program = _currentProgram(channel.id, now);
+    final state = _vm.loadStateFor(channel.id);
     return ChannelCarouselEntry(
       channelId: channel.id,
       channelNumber: channel.number,
@@ -780,7 +795,11 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
               tag: channel.imageTag,
             ),
       isFavorite: channel.isFavorite,
-      programTitle: program?.name,
+      programTitle:
+          program?.name ??
+          (state == GuideChannelLoadState.failed
+              ? AppLocalizations.of(context).guideListingsUnavailable
+              : null),
       timeLabel: program == null ? null : _timeRange(program),
       rating: program?.officialRating,
       tags: program == null ? const [] : _categoryLabels(program),
@@ -789,9 +808,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
       progress: program?.progressAt(now) ?? 0,
       hasTimer: program?.hasTimer == true,
       hasSeriesTimer: program?.hasSeriesTimer == true,
-      programLoading:
-          program == null &&
-          _vm.loadStateFor(channel.id) == GuideChannelLoadState.loading,
+      programLoading: program == null && state == GuideChannelLoadState.loading,
     );
   }
 

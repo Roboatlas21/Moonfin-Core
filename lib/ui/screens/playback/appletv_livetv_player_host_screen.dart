@@ -591,9 +591,8 @@ class _AppleTvLiveTvPlayerHostScreenState
           'selected': channel.id == currentId,
           ..._programPayload(
             _nowPlayingByChannel[channel.id],
-            viewModel != null &&
-                viewModel.loadStateFor(channel.id) !=
-                    GuideChannelLoadState.loading,
+            viewModel?.loadStateFor(channel.id) ??
+                GuideChannelLoadState.loading,
             l10n,
             now,
           ),
@@ -603,13 +602,15 @@ class _AppleTvLiveTvPlayerHostScreenState
 
   Map<String, dynamic> _programPayload(
     GuideProgram? program,
-    bool scheduleLoaded,
+    GuideChannelLoadState state,
     AppLocalizations l10n,
     DateTime now,
   ) {
     if (program == null) {
       return {
-        'programName': '',
+        'programName': state == GuideChannelLoadState.failed
+            ? l10n.guideListingsUnavailable
+            : '',
         'episodeTitle': '',
         'overview': '',
         'seasonEpisode': '',
@@ -620,7 +621,7 @@ class _AppleTvLiveTvPlayerHostScreenState
         'isLive': false,
         'progress': 0.0,
         'hasTimer': false,
-        'programLoading': !scheduleLoaded,
+        'programLoading': state == GuideChannelLoadState.loading,
       };
     }
     final seasonEpisode = program.seasonEpisodeLabel;

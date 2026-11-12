@@ -9,6 +9,7 @@ import 'package:server_core/server_core.dart';
 
 import '../../preference/preference_constants.dart';
 import '../../preference/user_preferences.dart';
+import '../../util/settings_save_retry.dart';
 import '../repositories/item_mutation_repository.dart';
 import '../services/user_data_sync.dart';
 import '../models/live_tv_recording_state.dart';
@@ -261,6 +262,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // plus any ensured-loaded set like favorites), so rows can show a placeholder
   // until their programs arrive.
   final Set<String> _programsLoadedIds = <String>{};
+  final Set<String> _failedCarouselIds = <String>{};
 
   // Channel ids with a program request out, the generation it belongs to and
   // when it's done.
@@ -324,7 +326,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   GuideChannelLoadState loadStateFor(String channelId) {
     if (hasProgramsFor(channelId)) return GuideChannelLoadState.loaded;
-    return listingsAccessDenied
+    return listingsAccessDenied || _failedCarouselIds.contains(channelId)
         ? GuideChannelLoadState.failed
         : GuideChannelLoadState.loading;
   }
@@ -451,6 +453,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final ids = channels.map((channel) => channel.id).toSet();
     _programsByChannel.removeWhere((id, _) => !ids.contains(id));
     _programsLoadedIds.retainAll(ids);
+    _failedCarouselIds.retainAll(ids);
   }
 
   final Map<String, List<GuideProgram>> _programsByChannel = {};
@@ -1318,6 +1321,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programGeneration++;
     _programsByChannel.clear();
     _programsLoadedIds.clear();
+    _failedCarouselIds.clear();
     _programsHighWater = 0;
     _processedBoundaries.clear();
     _resetCategory();
@@ -2125,6 +2129,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// merges them into the cache.
   Future<bool> _loadProgramsBatch(List<GuideChannel> batch) async {
     final generation = _programGeneration;
+    final session = userDataSync.session;
+    bool current() =>
+        !_disposed &&
+        generation == _programGeneration &&
+        session == userDataSync.session;
     // Two requests out for one channel would append its programs twice, so a
     // channel already asked for waits on that request instead.
     final ids = <String>[];
@@ -2148,20 +2157,40 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         final now = _usesPlaybackLineup && _state == GuideState.ready
             ? _now()
             : null;
-        final response = await _fetchGuide(
-          channelIds: ids,
-          from: now?.subtract(rollingRefreshLookback) ?? _windowStart,
-          to: now?.add(rollingRefreshHorizon) ?? _windowEnd,
-        );
-        if (_disposed || generation != _programGeneration) return false;
+        Future<Map<String, dynamic>?> read() async {
+          if (!current()) return null;
+          return _fetchGuide(
+            channelIds: ids,
+            from: now?.subtract(rollingRefreshLookback) ?? _windowStart,
+            to: now?.add(rollingRefreshHorizon) ?? _windowEnd,
+          );
+        }
+
+        // Keep the retry inside the shared request so overlapping cards await it.
+        final response = _usesPlaybackLineup
+            ? await retryOnTransientFailure(
+                read,
+                backoff: const [Duration(milliseconds: 250)],
+              )
+            : await read();
+        if (response == null || !current()) return false;
 
         final parsed = _parsePrograms(response);
+        _failedCarouselIds.removeAll(ids);
         for (final id in ids) {
           // A page replacement can finish while a targeted request is in flight.
           if (_programsLoadedIds.add(id)) {
             _programsByChannel[id] = parsed[id] ?? <GuideProgram>[];
           }
         }
+      } on DioException catch (error) {
+        if (!_usesPlaybackLineup ||
+            _accessDenied(error) ||
+            error.type == DioExceptionType.cancel) {
+          rethrow;
+        }
+        if (!current()) return false;
+        _failedCarouselIds.addAll(ids);
       } finally {
         for (final id in ids) {
           if (_programsPending[id]?.done == done.future) {

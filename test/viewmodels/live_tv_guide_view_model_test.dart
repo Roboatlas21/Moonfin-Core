@@ -451,6 +451,52 @@ void main() {
     },
   );
 
+  test(
+    'carousel cards share one retry and can recover on a later visit',
+    () async {
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      vm.usePlaybackLineup([
+        for (final id in ['tuned', 'next', 'radio'])
+          GuideChannel(id: id, name: id, rawData: const {}),
+      ]);
+      await vm.load(initialChannelIds: ['tuned']);
+      var attempts = 0;
+      when(() => _guide(liveTv)).thenAnswer((call) async {
+        expect(_requestedIds(call), ['next', 'radio']);
+        if (++attempts <= 3) {
+          final request = RequestOptions(path: '/LiveTv/Programs');
+          throw DioException.badResponse(
+            statusCode: 503,
+            requestOptions: request,
+            response: Response(requestOptions: request, statusCode: 503),
+          );
+        }
+        return {
+          'Items': [_program('show', 'next')],
+        };
+      });
+
+      const cards = ['next', 'radio'];
+      await Future.wait([
+        vm.ensureProgramsForChannels(cards),
+        vm.ensureProgramsForChannels(cards),
+      ]);
+      expect(attempts, 2);
+      expect(vm.state, GuideState.ready);
+      expect(vm.loadStateFor('tuned'), GuideChannelLoadState.loaded);
+      for (final id in cards) {
+        expect(vm.loadStateFor(id), GuideChannelLoadState.failed);
+      }
+
+      await vm.ensureProgramsForChannels(cards);
+      expect(attempts, 4);
+      expect(vm.programsForChannel('next').single.name, 'show');
+      expect(vm.loadStateFor('radio'), GuideChannelLoadState.loaded);
+      expect(vm.programsForChannel('radio'), isEmpty);
+    },
+  );
+
   test('clearing a failed channel search restores the loaded guide', () async {
     _stubChannels(
       liveTv,

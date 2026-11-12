@@ -5,6 +5,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/models/live_tv_recording_state.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
+import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/ui/theme/app_theme.dart';
 import 'package:moonfin/ui/widgets/live_tv/channel_carousel.dart';
 import 'package:moonfin/ui/widgets/live_tv/channel_carousel_card.dart';
@@ -24,6 +25,13 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   bool ready = false;
   bool get listening => hasListeners;
   String titleSuffix = '';
+  String? failedChannel;
+
+  @override
+  GuideChannelLoadState loadStateFor(String channelId) =>
+      channelId == failedChannel
+      ? GuideChannelLoadState.failed
+      : super.loadStateFor(channelId);
 
   void changeProgram() {
     titleSuffix = ' updated';
@@ -40,6 +48,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   @override
   List<GuideProgram> unfilteredProgramsForChannel(String channelId) {
     programLookups++;
+    if (channelId == failedChannel) return const [];
     final now = DateTime.now();
     return [
       GuideProgram(
@@ -216,6 +225,7 @@ void main() {
     final vm = _CarouselGuide(client, channels);
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
         theme: AppTheme.buildTheme(ThemeRegistry.active),
         home: Scaffold(
           body: ChannelCarouselOverlay(
@@ -235,6 +245,22 @@ void main() {
     await tester.pump();
     return vm;
   }
+
+  testWidgets('a failed card shows a message and can show listings again', (
+    tester,
+  ) async {
+    final vm = await pumpOverlay(tester);
+    vm.failedChannel = 'ch10';
+    vm.changeProgram();
+    await tester.pump();
+    expect(find.text('Listings unavailable'), findsOneWidget);
+    vm.failedChannel = null;
+    vm.changeProgram();
+    await tester.pump();
+    expect(find.text('Listings unavailable'), findsNothing);
+    expect(find.text('Show ch10 updated'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('open carousel cards follow favorite changes', (tester) async {
     userDataSync.reset();
