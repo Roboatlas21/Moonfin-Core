@@ -383,6 +383,39 @@ void main() {
       await updating;
       expect(vm.hasProgramsFor('c80'), true);
     });
+
+    test(
+      'an import during a date change restores every browsed page',
+      () async {
+        _stubChannels(
+          api,
+          List.generate(120, (i) => _channel('c$i', number: '$i')),
+        );
+        when(api.getChannelGroups)
+            .thenAnswer((_) async => const ChannelGroupLineup({}));
+        await vm.load();
+        await vm.loadMorePrograms();
+        expect(vm.programsHighWater, 100);
+
+        final slow = Completer<Map<String, dynamic>>();
+        when(() => _guide(api)).thenAnswer((_) => slow.future);
+        final changingDate = vm.setDate(
+          vm.guideDate.add(const Duration(days: 1)),
+        );
+        when(() => _guide(api)).thenAnswer(
+          (inv) async => {
+            'Items': [for (final id in _requestedIds(inv)) _program('new', id)],
+          },
+        );
+        await vm.refreshGuide();
+        slow.complete({'Items': []});
+        await changingDate;
+
+        expect(vm.programsHighWater, 100);
+        expect(vm.programsForChannel('c99').single.name, 'new');
+        expect(vm.state, GuideState.ready);
+      },
+    );
     test('import notification replaces first-open listings even when all channel IDs match', () async {
       _stubChannels(api, [_channel('one')]);
       final oldGroups = Completer<ChannelGroupLineup>();
