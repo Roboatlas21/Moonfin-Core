@@ -269,7 +269,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Map<String, ({int generation, Future<void> done})> _programsPending =
       {};
 
-  int? _loadingMorePage;
+  (GuideFilter?, int)? _loadingMorePage;
   int _pageGeneration = 0;
   int? _listingsStatePage;
   // A second refresh of this page must also reach the rows the first one promised.
@@ -498,6 +498,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       );
     }
     _pageChannels = identical(rows, _channels) ? _channels : rows.toList();
+    _categoryHighWater = 0;
+    _advanceCategoryCursor();
+  }
+
+  // Favorites can move a channel across the page boundary during a request.
+  // Resume at the first unchecked ID in the current display order.
+  void _advanceCategoryCursor() {
+    while (_categoryHighWater < _pageChannels.length &&
+        _categoryQueriedIds.contains(_pageChannels[_categoryHighWater].id)) {
+      _categoryHighWater++;
+    }
   }
 
   void setChannelQuery(String text) {
@@ -947,7 +958,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final fetched = await _fetchPrograms(batch, category: filter);
       if (request != _categoryRequest) return;
       _categoryQueriedIds.addAll(batch.map((c) => c.id));
-      _categoryHighWater = end;
+      _advanceCategoryCursor();
       if (fetched.isEmpty) continue;
       _categoryPrograms.addAll(fetched);
       _notifyListeners();
@@ -1340,15 +1351,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> loadMorePrograms() async {
     final generation = _programGeneration;
     final pageGeneration = _pageGeneration;
+    final page = _isCategory(_filter)
+        ? (_filter, _categoryRequest)
+        : (null, pageGeneration);
     if (listingsAccessDenied ||
-        _loadingMorePage == pageGeneration ||
+        _loadingMorePage == page ||
         _categoryFetchInFlight ||
         (_state == GuideState.loading &&
             _listingsStatePage == pageGeneration) ||
         !hasMorePrograms) {
       return;
     }
-    _loadingMorePage = pageGeneration;
+    _loadingMorePage = page;
     try {
       if (_isCategory(_filter)) {
         await _walkCategory();
@@ -1364,7 +1378,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _state = GuideState.error;
       }
     } finally {
-      if (_loadingMorePage == pageGeneration) {
+      if (_loadingMorePage == page) {
         _loadingMorePage = null;
         // A reload owns the first batch until the guide is ready.
         if (!_disposed &&

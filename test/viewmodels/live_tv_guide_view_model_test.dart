@@ -2084,6 +2084,53 @@ void main() {
       },
     );
 
+    test(
+      'favorites moving between and during category pages skip no channels',
+      () async {
+        _stubChannels(liveTv, [
+          for (var i = 0; i < 216; i++)
+            {
+              ..._channel('c$i', number: '$i'),
+              if (i == 215) 'UserData': {'IsFavorite': true},
+            },
+        ]);
+        final requests = <List<String>>[];
+        final resume = Completer<void>();
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((
+          inv,
+        ) async {
+          requests.add(_requestedIds(inv));
+          if (requests.length > 1) await resume.future;
+          return _serverFiltered((_) => true)(inv);
+        });
+        final vm = LiveTvGuideViewModel(
+          client,
+          initialSortBy: ChannelSortBy.favoritesFirst,
+        );
+        addTearDown(vm.dispose);
+        await vm.load();
+        vm.setFilter(GuideFilter.sports);
+        await pumpEventQueue();
+        expect(vm.filteredChannels, hasLength(200));
+
+        userDataSync.publish('c215', {'IsFavorite': false});
+        vm.syncChannelUserData();
+        expect(requests.last, contains('c199'));
+
+        final library = _MockUserLibraryApi();
+        when(() => client.userLibraryApi).thenReturn(library);
+        when(() => library.markFavorite('c201')).thenAnswer((_) async {});
+        await vm.toggleChannelFavorite('c201');
+        resume.complete();
+        await pumpEventQueue();
+        expect(requests, hasLength(2));
+        expect(requests.expand((ids) => ids), hasLength(216));
+        expect(vm.filteredChannels.first.id, 'c201');
+        expect(vm.filteredChannels, hasLength(216));
+        expect(vm.hasMorePrograms, isFalse);
+      },
+    );
+
     test('a sparse category keeps walking until it finds rows', () async {
       _stubChannels(
         liveTv,
