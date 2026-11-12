@@ -335,6 +335,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   LiveTvGuideViewModel(
     this._client, {
     ChannelSortBy? initialSortBy,
+    this._showProgrammeCategories = true,
     DateTime Function()? now,
   }) : _sortBy = initialSortBy ?? _savedSortBy(),
        _now = now ?? DateTime.now,
@@ -443,6 +444,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Map<String, Set<String>> _channelGroups = {};
   Set<String>? _programmeCategories;
   bool _legacyProgrammeCategories = false;
+  bool _programmeCategoriesMissing = false;
+  bool _showProgrammeCategories;
+
+  void setProgrammeCategoriesVisible(bool visible) {
+    if (_showProgrammeCategories == visible) return;
+    _showProgrammeCategories = visible;
+    if (visible && _programmeCategoriesMissing) {
+      _retryGuideAfterFailure(categoriesOnly: true);
+    }
+  }
+
   Timer? _guideRetry;
   int _retryAttempt = 0;
   Iterable<GuideFilter> get availableProgrammeCategories => filters.where(
@@ -1092,6 +1104,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _groupAccount = account;
       _channelGroups = {};
       _programmeCategories = null;
+      _programmeCategoriesMissing = false;
       _cancelGuideRetry();
       _legacyProgrammeCategories = false;
       _availableGroups = const [];
@@ -1099,7 +1112,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _selectedGroup = null;
       _updatePageRows();
     }
-    final response = await _readChannels();
+    final response = await _readChannels(lineupRequest);
     // A user switch while this was out would publish the old user's favorites.
     if (_disposed ||
         lineupRequest != _lineupRequest ||
@@ -1110,6 +1123,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       unawaited(load());
       return false;
     }
+    if (response == null) return false;
     _publishChannels(response, revision);
     if (api is ChannelGroupApi && account != null) {
       // Keep the previous membership until the plugin has accounted for IDs
@@ -1124,13 +1138,44 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     return true;
   }
 
-  Future<Map<String, dynamic>> _readChannels() => _client.liveTvApi.getChannels(
-    sortBy: 'SortName',
-    sortOrder: 'Ascending',
-    fields: 'ImageTags,UserData',
-    enableTotalRecordCount: false,
-    userId: _client.userId,
-  );
+  Future<Map<String, dynamic>?> _readChannels(int request) async {
+    final session = userDataSync.session;
+    final account = _groupAccount;
+    try {
+      return await _client.liveTvApi.getChannels(
+        sortBy: 'SortName',
+        sortOrder: 'Ascending',
+        fields: 'ImageTags,UserData',
+        enableTotalRecordCount: false,
+        userId: _client.userId,
+      );
+    } on DioException catch (error) {
+      if (!_accessDenied(error)) rethrow;
+      if (!_disposed &&
+          request == _lineupRequest &&
+          session == userDataSync.session &&
+          (account == null || account == (_client.baseUrl, _client.userId))) {
+        // A native denial invalidates both the channel list and any listings
+        // still in flight. The optional plugin has its own permission handling.
+        _loadGeneration++;
+        _cancelGuideRetry();
+        cancelBoundaryRefresh();
+        _channels = const [];
+        _channelGroups = {};
+        _programmeCategories = null;
+        _programmeCategoriesMissing = false;
+        _legacyProgrammeCategories = false;
+        _filter = GuideFilter.all;
+        _rebuildGroupChoices(complete: true);
+        _resetPrograms();
+        _error = error;
+        _state = GuideState.error;
+        _reloadOnEntry = true;
+        _notifyListeners();
+      }
+      return null;
+    }
+  }
 
   void _publishChannels(Map<String, dynamic> response, int revision) {
     final items = (response['Items'] as List?) ?? [];
@@ -1208,8 +1253,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         session == userDataSync.session &&
         account == (_client.baseUrl, _client.userId);
     try {
-      final channels = await _readChannels();
-      if (!current()) return;
+      final channels = await _readChannels(request);
+      if (channels == null || !current()) return;
       final lineup = await _readChannelGroups(api as ChannelGroupApi);
       if (!current()) return;
       final previousRows = _pageChannels;
@@ -1258,12 +1303,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             lineup.guideRevision != 'pending' &&
             lineup.unresolvedChannelIds?.isEmpty != true)) {
       _retryGuideAfterFailure();
+    } else if (_showProgrammeCategories && _programmeCategoriesMissing) {
+      _retryGuideAfterFailure(categoriesOnly: true);
     } else {
       _cancelGuideRetry();
     }
   }
 
-  void _retryGuideAfterFailure() {
+  void _retryGuideAfterFailure({bool categoriesOnly = false}) {
     const delays = [3, 15, 60];
     if (_disposed ||
         !supportsGroupPicker ||
@@ -1271,9 +1318,26 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _retryAttempt >= delays.length) {
       return;
     }
+    final request = _lineupRequest;
     _guideRetry = Timer(Duration(seconds: delays[_retryAttempt++]), () {
       _guideRetry = null;
-      unawaited(refreshGuide());
+      final api = _client.liveTvApi;
+      final account = _groupAccount;
+      if (categoriesOnly &&
+          request == _lineupRequest &&
+          api is ChannelGroupApi &&
+          account != null &&
+          account == (_client.baseUrl, _client.userId)) {
+        if (_showProgrammeCategories) {
+          unawaited(
+            _loadChannelGroups(api as ChannelGroupApi, request, account),
+          );
+        } else {
+          _cancelGuideRetry();
+        }
+      } else {
+        unawaited(refreshGuide());
+      }
     });
   }
 
@@ -1364,8 +1428,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         account != (_client.baseUrl, _client.userId)) {
       return;
     }
-    _finishGuideRead(lineup);
     if (lineup != null) _applyChannelGroupLineup(lineup);
+    _finishGuideRead(lineup);
   }
 
   void _applyChannelGroupLineup(
@@ -1389,7 +1453,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     };
     final hadMembers = oldMembers.isNotEmpty;
     _legacyProgrammeCategories = lineup.guideRevision == null;
-    _programmeCategories = lineup.programmeCategories ?? _programmeCategories;
+    _programmeCategoriesMissing =
+        !_legacyProgrammeCategories &&
+        !pending &&
+        lineup.programmeCategories == null;
+    if (_legacyProgrammeCategories || lineup.programmeCategories != null) {
+      _programmeCategories = lineup.programmeCategories;
+    }
     final updated = <String, Set<String>>{};
     for (final channel in _channels) {
       final id = channel.id;

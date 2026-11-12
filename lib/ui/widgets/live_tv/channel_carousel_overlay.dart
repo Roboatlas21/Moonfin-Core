@@ -78,7 +78,8 @@ class ChannelCarouselPrewarm {
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now,
        viewModel =
-           viewModelFactory?.call(client) ?? LiveTvGuideViewModel(client) {
+           viewModelFactory?.call(client) ??
+           LiveTvGuideViewModel(client, showProgrammeCategories: false) {
     liveTvRecordingRevision.addListener(_onRecordingsChanged);
     userDataSync.addListener(viewModel.syncChannelUserData);
   }
@@ -372,7 +373,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     _vm =
         warm?.viewModel ??
         widget.viewModelFactory?.call(widget.client) ??
-        LiveTvGuideViewModel(widget.client);
+        LiveTvGuideViewModel(widget.client, showProgrammeCategories: false);
     _slide = AnimationController(
       vsync: this,
       duration: kCarouselEnterDuration,

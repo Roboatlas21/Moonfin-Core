@@ -152,6 +152,8 @@ void main() {
 
   /// Overridable per test so a lineup can outgrow a single program batch.
   late int channelCount;
+  late Map<String, dynamic> Function(int) channelRow;
+  late List<Map<String, dynamic>> Function(String) listings;
 
   /// When set, any guide request covering this channel is held open until the
   /// test releases it, so its row can be observed mid-load.
@@ -179,6 +181,8 @@ void main() {
       LiveTvCategoryDisplay.programmes,
     );
     channelCount = _channelCount;
+    channelRow = _channelRaw;
+    listings = _programsFor;
     _fixtureWindowStart = guideLeftEdge(DateTime.now());
     deferredChannelId = null;
     releaseDeferredGuide = <VoidCallback>[];
@@ -210,7 +214,7 @@ void main() {
       ),
     ).thenAnswer(
       (_) async => <String, dynamic>{
-        'Items': [for (var i = 0; i < channelCount; i++) _channelRaw(i)],
+        'Items': [for (var i = 0; i < channelCount; i++) channelRow(i)],
       },
     );
 
@@ -231,7 +235,7 @@ void main() {
           (invocation.namedArguments[#channelIds] as List?)?.cast<String>() ??
           const <String>[];
       final payload = <String, dynamic>{
-        'Items': [for (final id in ids) ..._programsFor(id)],
+        'Items': [for (final id in ids) ...listings(id)],
       };
       final gate = deferredChannelId;
       if (gate == null || !ids.contains(gate)) return payload;
@@ -279,6 +283,49 @@ void main() {
     // Focused TV labels can marquee continuously.
     await _pumpFrames(tester);
   }
+
+  testWidgets(
+    'the focused header follows channel and programme edits in place',
+    (tester) async {
+      channelCount = 2;
+      await pumpGuide(tester);
+      EpgHeroPreview header() =>
+          tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview));
+      Future<void> refresh() async {
+        events.add(const LiveTvGuideChangedMessage());
+        await _pumpFrames(tester);
+      }
+
+      _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
+      await _pumpFrames(tester);
+      expect(header().title, 'Channel 0');
+      channelRow = (i) => {
+        ..._channelRaw(i),
+        if (i == 0) 'Name': 'Renamed Sports',
+      };
+      await refresh();
+      expect(_focusedLabel(), 'GuideChannel:0');
+      expect(header().title, 'Renamed Sports');
+
+      _nodeLabelled(tester, 'GuideProgramRow0:0').requestFocus();
+      await _pumpFrames(tester);
+      final title = header().programTitle!;
+      for (final replaceId in [false, true]) {
+        final prefix = replaceId ? 'Replacement' : 'Updated';
+        listings = (id) => [
+          for (final item in _programsFor(id))
+            {
+              ...item,
+              'Name': '$prefix ${item['Name']}',
+              if (replaceId) 'Id': 'new-${item['Id']}',
+            },
+        ];
+        await refresh();
+        expect(_focusedLabel(), 'GuideProgramRow0:0');
+        expect(header().programTitle, '$prefix $title');
+      }
+    },
+  );
 
   testWidgets('searched playback can tune a channel shown in its mini guide', (
     tester,
@@ -698,6 +745,28 @@ void main() {
       expect(find.text('Canadian'), findsOneWidget);
       await tester.pump(const Duration(minutes: 3));
       expect(lookups, 2);
+
+      // Enabling programme filters on the open guide should recover them.
+      await tester.tap(find.text('Canadian'));
+      await _pumpFrames(tester);
+      when(liveTvApi.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup(
+          {
+            'ch1': {'Canadian'},
+          },
+          guideRevision: '1',
+          programmeCategories: {'news'},
+        ),
+      );
+      await GetIt.instance<UserPreferences>().set(
+        UserPreferences.liveTvCategoryDisplay,
+        LiveTvCategoryDisplay.both,
+      );
+      await tester.pump(const Duration(seconds: 3));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Canadian'));
+      await _pumpFrames(tester);
+      expect(find.text('News'), findsOneWidget);
     },
   );
 

@@ -174,6 +174,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
   GuideFilter? _pendingPickerFocus;
+  bool get _showsProgrammeCategories =>
+      !widget.miniPlayerMode &&
+      _categoryDisplay != LiveTvCategoryDisplay.groups;
   bool get _usesPicker =>
       !widget.miniPlayerMode &&
       _vm.supportsGroupPicker &&
@@ -259,11 +262,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   @override
   void initState() {
     super.initState();
+    _categoryDisplay = _prefs.get(UserPreferences.liveTvCategoryDisplay);
     _vm = LiveTvGuideViewModel(
       GetIt.instance<MediaServerClient>(),
       initialSortBy: _prefs.get(UserPreferences.liveTvChannelSortBy),
+      showProgrammeCategories: _showsProgrammeCategories,
     );
-    _categoryDisplay = _prefs.get(UserPreferences.liveTvCategoryDisplay);
     _prefs.addListener(_onCategoryDisplayChanged);
     _vm.addListener(_onChanged);
     userDataSync.addListener(_vm.syncChannelUserData);
@@ -1169,21 +1173,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           _channelRailFocused,
         ]),
         builder: (context, _) {
-          final focusedProgram = _focusedProgram.value;
-          final focusedChannel =
-              !_channelRailFocused.value && focusedProgram != null
-              ? _vm.channelForId(focusedProgram.channelId)
-              : (_focusedChannel.value ?? widget.currentChannel);
-          // On the channel column, what that channel is airing, as the full
-          // guide's hero shows.
-          return _buildProgramInfoHeader(
-            program:
-                focusedProgram ??
-                (focusedChannel == null
-                    ? null
-                    : _vm.nowNextForChannel(focusedChannel.id).now),
-            channel: focusedChannel,
-          );
+          final (:channel, :program) = _currentPreview();
+          return _buildProgramInfoHeader(program: program, channel: channel);
         },
       );
     }
@@ -1197,16 +1188,30 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
   }
 
-  /// The program the hero (and its artwork lookup) is currently previewing:
-  /// the focused program cell, or — when focus is on the channel column
-  /// instead — whatever that channel is airing now.
-  GuideProgram? _currentPreviewProgram() {
-    final program = _focusedProgram.value;
-    final channel = !_channelRailFocused.value && program != null
-        ? _vm.channelForId(program.channelId)
-        : _focusedChannel.value;
-    return program ??
-        (channel == null ? null : _vm.nowNextForChannel(channel.id).now);
+  /// Resolve focus against the displayed guide. A server edit can replace
+  /// either object while the same row or time slot keeps keyboard focus.
+  ({GuideChannel? channel, GuideProgram? program}) _currentPreview() {
+    final focused = _channelRailFocused.value ? null : _focusedProgram.value;
+    final id =
+        focused?.channelId ??
+        _focusedChannel.value?.id ??
+        (widget.miniPlayerMode ? widget.currentChannel?.id : null);
+    final channel = id == null ? null : _vm.channelForId(id);
+    if (channel == null) return (channel: null, program: null);
+
+    if (focused != null) {
+      final programs = _vm.programsForChannel(channel.id);
+      final match = programs.where((p) => p.id == focused.id).firstOrNull;
+      if (match != null) return (channel: channel, program: match);
+      final anchor = _selection?.anchorTime ?? focused.startDate;
+      final replacement = programs
+          .where(
+            (p) => !anchor.isBefore(p.startDate) && anchor.isBefore(p.endDate),
+          )
+          .firstOrNull;
+      return (channel: channel, program: replacement);
+    }
+    return (channel: channel, program: _vm.nowNextForChannel(channel.id).now);
   }
 
   /// The bulk guide fetch disables images to keep its payload small (issue
@@ -1219,7 +1224,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _scheduleArtworkLookup() {
     _artworkLookupDebounce?.cancel();
     if (!_heroVisible) return;
-    final preview = _currentPreviewProgram();
+    final preview = _currentPreview().program;
     if (preview == null ||
         preview.artworkSource != null ||
         _vm.hasArtworkResult(preview.id)) {
@@ -1231,7 +1236,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       // the whole guide anyway would cost a frame per focus move on any
       // server whose programs carry no artwork.
       if (await _vm.artworkSourceFor(preview) == null) return;
-      if (mounted && _currentPreviewProgram()?.id == programId) {
+      if (mounted && _currentPreview().program?.id == programId) {
         setState(() {});
       }
     });
@@ -1245,11 +1250,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         _channelRailFocused,
       ]),
       builder: (context, _) {
-        final program = _focusedProgram.value;
-        final channel = !_channelRailFocused.value && program != null
-            ? _vm.channelForId(program.channelId)
-            : _focusedChannel.value;
-        final preview = _currentPreviewProgram();
+        final (:channel, program: preview) = _currentPreview();
         final now = DateTime.now();
         final isLive =
             preview != null &&
@@ -1299,7 +1300,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             ? ' (${preview!.seasonEpisodeLabel})'
             : '';
         final l10n = AppLocalizations.of(context);
-        final recordingState = _latestProgram(preview);
         final badgeLabel = preview == null
             ? null
             : preview.isPremiere
@@ -1322,8 +1322,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           badgeLabel: badgeLabel,
           synopsis: preview?.overview,
           isLive: isLive,
-          hasTimer: recordingState?.hasTimer ?? false,
-          hasSeriesTimer: recordingState?.hasSeriesTimer ?? false,
+          hasTimer: preview?.hasTimer ?? false,
+          hasSeriesTimer: preview?.hasSeriesTimer ?? false,
           apple: _apple,
           compact: true,
         );
@@ -1349,6 +1349,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final mode = _prefs.get(UserPreferences.liveTvCategoryDisplay);
     if (mode == _categoryDisplay) return;
     setState(() => _categoryDisplay = mode);
+    _vm.setProgrammeCategoriesVisible(_showsProgrammeCategories);
     if (!_usesPicker) _channelSearch.clear();
     if ((_vm.selectedGroup != null && !_usesPicker) ||
         (_usesPicker &&
@@ -1691,25 +1692,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     return m == 0 ? l10n.guideHoursLeft(h) : l10n.guideHoursMinutesLeft(h, m);
   }
 
-  /// The focused program is the object focus last handed over, so a reload
-  /// after a recording change leaves its timer state stale until focus moves.
-  GuideProgram? _latestProgram(GuideProgram? program) {
-    if (program == null) return null;
-    return _vm
-            .programsForChannel(program.channelId)
-            .where((p) => p.id == program.id)
-            .firstOrNull ??
-        program;
-  }
-
   Widget _buildProgramInfoHeader({
     required GuideProgram? program,
     required GuideChannel? channel,
   }) {
     final l10n = AppLocalizations.of(context);
-    final recordingState = _latestProgram(program);
-    final hasTimer = recordingState?.hasTimer ?? false;
-    final hasSeriesTimer = recordingState?.hasSeriesTimer ?? false;
+    final hasTimer = program?.hasTimer ?? false;
+    final hasSeriesTimer = program?.hasSeriesTimer ?? false;
     final title = program?.name ?? channel?.name ?? l10n.guideTimeline;
     final episodeLine = program?.episodeLine ?? '';
     final timeRange = program == null

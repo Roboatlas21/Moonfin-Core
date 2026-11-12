@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/models/live_tv_recording_state.dart';
@@ -95,16 +96,17 @@ Future<Map<String, dynamic>> _guide(
   );
 }
 
-void _stubChannels(LiveTvApi liveTv, List<Map<String, dynamic>> channels) {
-  when(
-    () => liveTv.getChannels(
-      sortBy: any(named: 'sortBy'),
-      sortOrder: any(named: 'sortOrder'),
-      fields: any(named: 'fields'),
-      enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-      userId: any(named: 'userId'),
-    ),
-  ).thenAnswer((_) async => {'Items': channels});
+Future<Map<String, dynamic>> _channelsRequest(LiveTvApi api) => api.getChannels(
+  sortBy: any(named: 'sortBy'),
+  sortOrder: any(named: 'sortOrder'),
+  fields: any(named: 'fields'),
+  enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+  userId: any(named: 'userId'),
+);
+
+void _stubChannels(LiveTvApi api, List<Map<String, dynamic>> channels) {
+  when(() => _channelsRequest(api))
+      .thenAnswer((_) async => {'Items': channels});
 }
 
 void main() {
@@ -297,34 +299,203 @@ void main() {
       },
     );
 
-    test('a late native timeout leaves a newer import ready', () async {
-      when(api.getChannelGroups)
-          .thenAnswer((_) async => const ChannelGroupLineup({}));
-      _stubChannels(api, [_channel('old')]);
-      await vm.load();
-      final slow = Completer<Map<String, dynamic>>();
-      when(
-        () => api.getChannels(
-          sortBy: any(named: 'sortBy'),
-          sortOrder: any(named: 'sortOrder'),
-          fields: any(named: 'fields'),
-          enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-          userId: any(named: 'userId'),
+    for (final refresh in [true, false]) {
+      test(
+        'native denial clears cached guide data on ${refresh ? 'refresh' : 'load'}',
+        () async {
+          _stubChannels(api, [_channel('one'), _channel('two')]);
+          when(api.getChannelGroups).thenAnswer(
+            (_) async => const ChannelGroupLineup(
+              {
+                'one': {'Kids'},
+              },
+              programmeCategories: {'kids'},
+              guideRevision: '1',
+            ),
+          );
+          when(() => _guide(api)).thenAnswer(
+            (_) async => {
+              'Items': [_program('Kids show', 'one')],
+            },
+          );
+          await vm.load();
+          vm.setGroup('Kids');
+          expect(vm.filteredChannels.single.id, 'one');
+          expect(vm.programsForChannel('one'), isNotEmpty);
+
+          final request = RequestOptions(path: '/LiveTv/Channels');
+          final denied = DioException(
+            requestOptions: request,
+            response: Response(
+              requestOptions: request,
+              statusCode: refresh ? 403 : 401,
+            ),
+          );
+          when(() => _channelsRequest(api)).thenThrow(denied);
+          await (refresh ? vm.refreshGuide() : vm.load());
+          expect(vm.state, GuideState.error);
+          expect(vm.error, same(denied));
+          expect(vm.playbackChannels, isEmpty);
+          expect(vm.filteredChannels, isEmpty);
+          expect(vm.programsForChannel('one'), isEmpty);
+          expect(vm.availableGroups, isEmpty);
+          expect(vm.availableProgrammeCategories, isEmpty);
+
+          _stubChannels(api, [_channel('one')]);
+          await vm.refreshGuide();
+          expect(vm.state, GuideState.ready);
+          expect(vm.filteredChannels.single.id, 'one');
+        },
+      );
+    }
+
+    test('a plugin-only denial keeps native channels available', () async {
+      _stubChannels(api, [_channel('one')]);
+      final request = RequestOptions(path: '/Moonfin/LiveTv/ChannelGroups');
+      when(api.getChannelGroups).thenThrow(
+        DioException(
+          requestOptions: request,
+          response: Response(requestOptions: request, statusCode: 403),
         ),
-      ).thenAnswer((_) => slow.future);
-      final window = vm.windowStart.add(const Duration(hours: 2));
-      final returning = vm.load(windowStart: window, livePosition: false);
-      _stubChannels(api, [_channel('current')]);
+      );
+      await vm.load();
       await vm.refreshGuide();
       expect(vm.state, GuideState.ready);
-      slow.completeError(TimeoutException('superseded native read'));
-      await returning;
-      expect(vm.state, GuideState.ready);
-      expect(vm.error, isNull);
-      expect(vm.filteredChannels.single.id, 'current');
-      expect(vm.windowStart, window);
-      expect(vm.atLivePosition, isFalse);
+      expect(vm.playbackChannels.single.id, 'one');
+      expect(vm.availableProgrammeCategories, isEmpty);
     });
+
+    testWidgets(
+      'a missing category list retries metadata and stops on an answer',
+      (tester) async {
+        _stubChannels(api, [_channel('one')]);
+        const groups = {
+          'one': {'Kids'},
+        };
+        var reads = 0;
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => ChannelGroupLineup(
+            groups,
+            guideRevision: '1',
+            programmeCategories: ++reads == 3 ? {'kids'} : null,
+          ),
+        );
+        await vm.load();
+        await tester.pump();
+        expect(vm.availableGroups, ['Kids']);
+        expect(vm.availableProgrammeCategories, isEmpty);
+        await tester.pump(const Duration(seconds: 3));
+        await tester.pump(const Duration(seconds: 15));
+        expect(vm.availableProgrammeCategories, [GuideFilter.kids]);
+        await tester.pump(const Duration(minutes: 2));
+        expect(reads, 3);
+        verify(() => _channelsRequest(api)).called(1);
+        verify(() => _guide(api)).called(1);
+      },
+    );
+
+    testWidgets(
+      'showing categories rechecks a missing answer even with cached filters',
+      (tester) async {
+        _stubChannels(api, [_channel('one')]);
+        Set<String>? categories = {'news'};
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => ChannelGroupLineup(
+            const {},
+            guideRevision: '1',
+            programmeCategories: categories,
+          ),
+        );
+        await vm.load();
+        vm.setProgrammeCategoriesVisible(false);
+        categories = null;
+        await vm.refreshGuide();
+        await tester.pump(const Duration(minutes: 2));
+        expect(vm.availableProgrammeCategories, [GuideFilter.news]);
+        categories = {'sports'};
+        vm.setProgrammeCategoriesVisible(true);
+        await tester.pump(const Duration(seconds: 3));
+        expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+        verify(api.getChannelGroups).called(3);
+      },
+    );
+
+    testWidgets(
+      'category retries are bounded when the server keeps omitting them',
+      (tester) async {
+        _stubChannels(api, [_channel('one')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup({}, guideRevision: '1'),
+        );
+        await vm.load();
+        for (final seconds in [3, 15, 60, 120]) {
+          await tester.pump(Duration(seconds: seconds));
+        }
+        verify(api.getChannelGroups).called(4);
+      },
+    );
+
+    test(
+      'the legacy fallback restores programme filters after a plugin change',
+      () async {
+        _stubChannels(api, [_channel('one')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup(
+            {},
+            programmeCategories: {'sports'},
+            guideRevision: '1',
+          ),
+        );
+        await vm.load();
+        expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+        when(api.getChannelGroups)
+            .thenAnswer((_) async => const ChannelGroupLineup({}));
+        await vm.refreshGuide();
+        expect(
+          vm.availableProgrammeCategories,
+          vm.filters.where(
+            (f) => f != GuideFilter.all && f != GuideFilter.favorites,
+          ),
+        );
+      },
+    );
+
+    for (final denied in [false, true]) {
+      test(
+        'a late native ${denied ? 'denial' : 'timeout'} leaves a newer import ready',
+        () async {
+          when(api.getChannelGroups)
+              .thenAnswer((_) async => const ChannelGroupLineup({}));
+          _stubChannels(api, [_channel('old')]);
+          await vm.load();
+          final slow = Completer<Map<String, dynamic>>();
+          when(() => _channelsRequest(api)).thenAnswer((_) => slow.future);
+          final window = vm.windowStart.add(const Duration(hours: 2));
+          final returning = vm.load(windowStart: window, livePosition: false);
+          _stubChannels(api, [_channel('current')]);
+          await vm.refreshGuide();
+          expect(vm.state, GuideState.ready);
+          final request = RequestOptions(path: '/LiveTv/Channels');
+          slow.completeError(
+            denied
+                ? DioException(
+                    requestOptions: request,
+                    response: Response(
+                      requestOptions: request,
+                      statusCode: 403,
+                    ),
+                  )
+                : TimeoutException('superseded native read'),
+          );
+          await returning;
+          expect(vm.state, GuideState.ready);
+          expect(vm.error, isNull);
+          expect(vm.filteredChannels.single.id, 'current');
+          expect(vm.windowStart, window);
+          expect(vm.atLivePosition, isFalse);
+        },
+      );
+    }
 
     test(
       'a native channel edit is visible while group metadata is pending',
