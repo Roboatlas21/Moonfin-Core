@@ -38,7 +38,6 @@ class ChannelGroupLineup {
       );
       final data = response.data;
       if (data is! Map ||
-          data['version'] != 2 ||
           data['supported'] is! bool ||
           data['channels'] is! List) {
         throw const FormatException('Invalid channel group response');

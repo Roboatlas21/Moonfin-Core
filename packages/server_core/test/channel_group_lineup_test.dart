@@ -39,12 +39,12 @@ void main() {
       {'Id': 'two', 'Name': 'Two', 'groups': <String>[]},
     ];
     final result = await ChannelGroupLineup.fetch(
-      fixture(200, body: {'version': 2, 'supported': true, 'channels': rows}),
+      fixture(200, body: {'supported': true, 'channels': rows}),
     );
     expect(result.channels, rows);
     expect(result.groupsByChannelId, {'one': {'News'}});
     final ungrouped = await ChannelGroupLineup.fetch(
-      fixture(200, body: {'version': 2, 'supported': false, 'channels': [rows.last]}),
+      fixture(200, body: {'supported': false, 'channels': [rows.last]}),
     );
     expect(ungrouped.channels, hasLength(1));
     expect(ungrouped.groupsByChannelId, isEmpty);
@@ -56,7 +56,6 @@ void main() {
         fixture(
           200,
           body: {
-            'version': 2,
             'supported': true,
             'partial': true,
             'unresolvedChannelIds': ['offline'],
