@@ -4,6 +4,7 @@ import 'package:custom_tv_text_field/custom_tv_text_field.dart'
     show KeyboardStyle;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -21,6 +22,7 @@ import 'package:moonfin/ui/screens/livetv/guide/guide_filter_picker.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_filter_rail.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_channel_cell.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_hero_preview.dart';
+import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_program_cell.dart';
 import 'package:moonfin/ui/screens/livetv/guide/guide_window.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
 import 'package:moonfin/util/platform_detection.dart';
@@ -326,6 +328,35 @@ void main() {
       }
     },
   );
+
+  testWidgets('a listings denial keeps authorized channels browsable', (
+    tester,
+  ) async {
+    channelCount = 2;
+    await pumpGuide(tester);
+    _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
+    await _pumpFrames(tester);
+    final request = RequestOptions(path: '/LiveTv/Programs');
+    var failedReads = 0;
+    listings = (_) {
+      failedReads++;
+      throw DioException(
+        requestOptions: request,
+        response: Response(requestOptions: request, statusCode: 403),
+      );
+    };
+    events.add(const LiveTvGuideChangedMessage());
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideChannel:0');
+    expect(find.byType(EpgChannelCell), findsNWidgets(2));
+    expect(
+      tester
+          .widgetList<EpgProgramCell>(find.byType(EpgProgramCell))
+          .every((cell) => cell.failed),
+      isTrue,
+    );
+    expect(failedReads, 1);
+  });
 
   testWidgets('searched playback can tune a channel shown in its mini guide', (
     tester,

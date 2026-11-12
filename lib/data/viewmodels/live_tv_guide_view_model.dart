@@ -318,15 +318,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int get programsHighWater =>
       _isCategory(_filter) ? _categoryPrograms.length : _programsHighWater;
 
-  /// The fetch state for a single channel's programs. Programs are fetched in
-  /// batches whose failure surfaces as the guide-wide [GuideState.error], so
-  /// this never reports [GuideChannelLoadState.failed] today.
-  GuideChannelLoadState loadStateFor(String channelId) =>
-      (_isCategory(_filter)
-          ? _categoryPrograms.containsKey(channelId)
-          : _programsLoadedIds.contains(channelId))
-      ? GuideChannelLoadState.loaded
-      : GuideChannelLoadState.loading;
+  bool get listingsAccessDenied =>
+      _state == GuideState.error &&
+      _listingsStatePage == _pageGeneration &&
+      _accessDenied(_error);
+
+  GuideChannelLoadState loadStateFor(String channelId) {
+    if (hasProgramsFor(channelId)) return GuideChannelLoadState.loaded;
+    return listingsAccessDenied
+        ? GuideChannelLoadState.failed
+        : GuideChannelLoadState.loading;
+  }
 
   bool hasProgramsFor(String channelId) => _isCategory(_filter)
       ? _categoryPrograms.containsKey(channelId)
@@ -438,6 +440,20 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   List<GuideChannel> _channels = const [];
   List<GuideChannel> get playbackChannels => _channels;
+  bool _usesPlaybackLineup = false;
+
+  /// The player supplies the authorized, ordered lineup for its carousel.
+  /// Keep listings for surviving channels and discard late reads for old IDs.
+  void usePlaybackLineup(List<GuideChannel> channels) {
+    if (_usesPlaybackLineup && identical(_channels, channels)) return;
+    _usesPlaybackLineup = true;
+    _programGeneration++;
+    _channels = channels;
+    _updatePageRows();
+    final ids = channels.map((channel) => channel.id).toSet();
+    _programsByChannel.removeWhere((id, _) => !ids.contains(id));
+    _programsLoadedIds.retainAll(ids);
+  }
 
   final Map<String, List<GuideProgram>> _programsByChannel = {};
 
@@ -640,7 +656,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         }),
       );
     }
-    if (_sortReadsFavorite && _state == GuideState.ready) {
+    if (!_usesPlaybackLineup &&
+        _sortReadsFavorite &&
+        _state == GuideState.ready) {
       unawaited(loadMorePrograms());
     }
   }
@@ -744,8 +762,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (_isCategory(_filter)) await _refreshCategoryRows();
       await _refreshLoadedChannels(_now());
       _loadedRecordingRevision = recordingRevision;
-    } catch (_) {
-      await _reloadPrograms();
+    } catch (error) {
+      if (!_accessDenied(error)) await _reloadPrograms();
     }
   }
 
@@ -828,7 +846,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             ? lineupRequest == _lineupRequest
             : listingsPage == _pageGeneration);
     try {
-      if (!await _fetchChannels(lineupRequest) ||
+      if ((!_usesPlaybackLineup && !await _fetchChannels(lineupRequest)) ||
           _disposed ||
           lineupRequest != _lineupRequest) {
         return;
@@ -1230,7 +1248,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   /// A guide import, lineup change or socket reconnection invalidates the user's
   /// native channels, group memberships and listings together.
-  Future<void> refreshGuide() async {
+  Future<void> refreshGuide() {
+    _cancelGuideRetry();
+    return _refreshGuide();
+  }
+
+  Future<void> _refreshGuide() async {
     final api = _client.liveTvApi;
     final account = _groupAccount;
     if (_disposed || api is! ChannelGroupApi || account == null) return;
@@ -1281,13 +1304,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } catch (error) {
       if (!current()) return;
       debugPrint('Live TV guide refresh unavailable (${error.runtimeType})');
-      if (_accessDenied(error)) {
-        _applyChannelGroupLineup(
-          const ChannelGroupLineup({}, programmeCategories: {}),
-        );
-      } else {
-        _retryGuideAfterFailure();
-      }
+      if (!_accessDenied(error)) _retryGuideAfterFailure();
     }
   }
 
@@ -1336,7 +1353,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           _cancelGuideRetry();
         }
       } else {
-        unawaited(refreshGuide());
+        unawaited(_refreshGuide());
       }
     });
   }
@@ -1372,8 +1389,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             break;
           }
         }
-      } catch (_) {
-        if (samePage()) rethrow;
+      } catch (error) {
+        // A current denial already invalidated the old listings generation.
+        if (samePage() || (current() && identical(error, _error))) rethrow;
       }
       if (!samePage()) continue;
       if (replaceCache) _resetPrograms();
@@ -1399,7 +1417,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  bool _accessDenied(Object error) =>
+  bool _accessDenied(Object? error) =>
       error is DioException &&
       (error.response?.statusCode == 401 || error.response?.statusCode == 403);
 
@@ -1513,7 +1531,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> loadMorePrograms() async {
     final generation = _programGeneration;
     final pageGeneration = _pageGeneration;
-    if (_loadingMorePage == pageGeneration ||
+    if (listingsAccessDenied ||
+        _loadingMorePage == pageGeneration ||
         _categoryFetchInFlight ||
         (_state == GuideState.loading &&
             _listingsStatePage == pageGeneration) ||
@@ -1781,10 +1800,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _boundaryRefreshInFlight = false;
         return;
       }
-    } catch (_) {
-      // Keep the data we hold. A failed refresh must not blank the guide.
+    } catch (error) {
       _boundaryRefreshInFlight = false;
-      _armRetry(failureBackoff);
+      if (!_accessDenied(error)) _armRetry(failureBackoff);
       return;
     }
 
@@ -1822,9 +1840,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _rearmBoundaryIfEnabled();
         return;
       }
-    } catch (_) {
-      // Preserve the existing cache when the rolling request fails.
-      if (_boundarySchedulingEnabled) _armRetry(failureBackoff);
+    } catch (error) {
+      if (_boundarySchedulingEnabled && !_accessDenied(error)) {
+        _armRetry(failureBackoff);
+      }
       return;
     }
 
@@ -1935,21 +1954,63 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     required DateTime from,
     required DateTime to,
     GuideFilter? category,
-  }) => _client.liveTvApi.getGuide(
-    startDate: from,
-    endDate: to,
-    channelIds: channelIds,
-    isMovie: category == GuideFilter.movies ? true : null,
-    isSeries: category == GuideFilter.series ? true : null,
-    isSports: category == GuideFilter.sports ? true : null,
-    isNews: category == GuideFilter.news ? true : null,
-    isKids: category == GuideFilter.kids ? true : null,
-    fields: _fields,
-    enableTotalRecordCount: false,
-    enableImages: false,
-    enableUserData: false,
-    userId: _client.userId,
-  );
+  }) async {
+    final generation = _programGeneration;
+    final lineup = _lineupRequest;
+    final page = _pageGeneration;
+    final session = userDataSync.session;
+    try {
+      return await _client.liveTvApi.getGuide(
+        startDate: from,
+        endDate: to,
+        channelIds: channelIds,
+        isMovie: category == GuideFilter.movies ? true : null,
+        isSeries: category == GuideFilter.series ? true : null,
+        isSports: category == GuideFilter.sports ? true : null,
+        isNews: category == GuideFilter.news ? true : null,
+        isKids: category == GuideFilter.kids ? true : null,
+        fields: _fields,
+        enableTotalRecordCount: false,
+        enableImages: false,
+        enableUserData: false,
+        userId: _client.userId,
+      );
+    } on DioException catch (error) {
+      if (_accessDenied(error) &&
+          !_disposed &&
+          generation == _programGeneration &&
+          lineup == _lineupRequest &&
+          page == _pageGeneration &&
+          session == userDataSync.session &&
+          (_groupAccount == null ||
+              _groupAccount == (_client.baseUrl, _client.userId))) {
+        _discardDeniedListings(channelIds, error);
+      }
+      rethrow;
+    }
+  }
+
+  void _discardDeniedListings(List<String> ids, DioException error) {
+    _loadGeneration++;
+    _programGeneration++;
+    _categoryRequest++;
+    _categoryFetchInFlight = false;
+    _categoryLoadedFor = null;
+    for (final id in ids) {
+      _programsByChannel.remove(id);
+      _programsLoadedIds.remove(id);
+      _categoryPrograms.remove(id);
+      _categoryQueriedIds.remove(id);
+    }
+    _programsHighWater = 0;
+    _categoryHighWater = 0;
+    cancelBoundaryRefresh();
+    _listingsStatePage = _pageGeneration;
+    _reloadOnEntry = true;
+    _error = error;
+    _state = GuideState.error;
+    _notifyListeners();
+  }
 
   Future<Map<String, List<GuideProgram>>> _fetchPrograms(
     List<GuideChannel> batch, {

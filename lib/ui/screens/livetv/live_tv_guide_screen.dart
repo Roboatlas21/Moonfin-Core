@@ -1611,7 +1611,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     switch (_vm.state) {
       case GuideState.loading:
         return const Center(child: CircularProgressIndicator());
-      case GuideState.error:
+      case GuideState.error
+          when !_vm.listingsAccessDenied || _vm.filteredChannels.isEmpty:
         final l10n = AppLocalizations.of(context);
         return Center(
           child: Text(
@@ -1619,7 +1620,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             style: TextStyle(color: Colors.white.withAlpha(179)),
           ),
         );
-      case GuideState.ready:
+      case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
         if (channels.isEmpty) {
           return Center(
@@ -2007,7 +2008,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     switch (_vm.state) {
       case GuideState.loading:
         return const Center(child: CircularProgressIndicator());
-      case GuideState.error:
+      case GuideState.error
+          when !_vm.listingsAccessDenied || _vm.filteredChannels.isEmpty:
         final l10n = AppLocalizations.of(context);
         return Center(
           child: Text(
@@ -2015,7 +2017,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             style: TextStyle(color: Colors.white.withAlpha(179)),
           ),
         );
-      case GuideState.ready:
+      case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
         if (channels.isEmpty) {
           return Center(

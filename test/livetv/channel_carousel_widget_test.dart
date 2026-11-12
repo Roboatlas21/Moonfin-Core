@@ -16,7 +16,6 @@ import 'package:server_core/server_core.dart';
 class _CarouselClient extends Mock implements MediaServerClient {}
 
 class _CarouselGuide extends LiveTvGuideViewModel {
-  final List<GuideChannel> lineup;
   final List<List<String>> requests = [];
   bool disposed = false;
   int schedules = 0;
@@ -31,17 +30,12 @@ class _CarouselGuide extends LiveTvGuideViewModel {
     notifyListeners();
   }
 
-  _CarouselGuide(super.client, this.lineup);
-
-  @override
-  List<GuideChannel> get filteredChannels => lineup;
+  _CarouselGuide(super.client, List<GuideChannel> lineup) {
+    usePlaybackLineup(lineup);
+  }
 
   @override
   GuideState get state => ready ? GuideState.ready : GuideState.loading;
-
-  @override
-  GuideChannel? channelForId(String channelId) =>
-      lineup.where((channel) => channel.id == channelId).firstOrNull;
 
   @override
   List<GuideProgram> unfilteredProgramsForChannel(String channelId) {
@@ -614,6 +608,54 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'an open carousel keeps the tuned channel centered after a lineup replacement',
+    (tester) async {
+      final client = _CarouselClient();
+      GuideChannel channel(String id) =>
+          GuideChannel(id: id, name: id, rawData: const {});
+      var channels = [channel('A'), channel('B'), channel('C')];
+      var current = 'B';
+      final vm = _CarouselGuide(client, channels);
+      late StateSetter update;
+      String? selected;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.buildTheme(ThemeRegistry.active),
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) {
+                update = setState;
+                return ChannelCarouselOverlay(
+                  client: client,
+                  channels: channels,
+                  currentChannelId: current,
+                  onChannelSelected: (id) => selected = id,
+                  onDismiss: () {},
+                  onShowControls: () {},
+                  viewModelFactory: (_) => vm,
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      update(() {
+        channels = [channel('New'), channel('B')];
+        current = 'New';
+      });
+      await tester.pumpAndSettle();
+      final card = find.byWidgetPredicate(
+        (w) => w is ChannelCarouselCard && w.centered,
+      );
+      expect(tester.widget<ChannelCarouselCard>(card).channelName, 'New');
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      expect(selected, 'New');
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('overlay follows a restored current channel after tune failure', (
     tester,

@@ -104,7 +104,8 @@ class ChannelCarouselPrewarm {
 
   /// Warm the cards around the tuned channel. Browsing loads further cards.
   void tuned(List<GuideChannel> channels, String channelId) {
-    if (_disposed || channels.isEmpty) return;
+    if (_disposed) return;
+    viewModel.usePlaybackLineup(channels);
     _channelIds = carouselNeighborhood(
       channels,
       channelId,
@@ -388,16 +389,17 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     );
     _slide.addStatusListener(_onSlideStatus);
     _slide.forward();
-    _channels = List.of(widget.channels)
-      ..sort(LiveTvGuideViewModel.comparatorFor(_vm.sortBy));
+    _channels = widget.channels;
+    _vm.usePlaybackLineup(_channels);
     _centeredId = widget.currentChannelId;
     if (_channels.isNotEmpty &&
         !_channels.any((channel) => channel.id == _centeredId)) {
       _centeredId = _channels.first.id;
     }
-    // Warm data is adopted by assignment only. Nothing here builds entries, so
-    // no localised formatting runs before the first build has a context.
-    if (warm?.isWarm == true) _adoptWarmChannels();
+    if (warm?.isWarm == true) {
+      _ready = true;
+      _updateHeader();
+    }
     _vm.addListener(_onDataChanged);
     userDataSync.addListener(_onChannelUserDataChanged);
     if (warm?.isWarm == true) unawaited(warm!.ensureReady());
@@ -419,25 +421,6 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     }
   }
 
-  /// Takes the lineup straight off the warmed view model so the first frame
-  /// renders real cards. Field assignment only, so it is safe in `initState`.
-  void _adoptWarmChannels() {
-    final playbackIds = widget.channels.map((channel) => channel.id).toSet();
-    final warmed = _vm.filteredChannels
-        .where((channel) => playbackIds.contains(channel.id))
-        .toList();
-    if (warmed.isEmpty) return;
-    _channels = warmed;
-    if (!_channels.any((channel) => channel.id == _centeredId)) {
-      _centeredId = _channels.first.id;
-    }
-    // Both lookups are context-free, so the header is on screen from the
-    // first frame instead of after the debounce.
-    _headerChannel = _vm.channelForId(_centeredId);
-    _headerProgram = _currentProgram(_centeredId);
-    _ready = true;
-  }
-
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -448,14 +431,22 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
   void didUpdateWidget(covariant ChannelCarouselOverlay oldWidget) {
     super.didUpdateWidget(oldWidget);
     _restoreCarouselFocus();
-    if (oldWidget.currentChannelId == widget.currentChannelId &&
-        oldWidget.selectionRevision == widget.selectionRevision) {
-      return;
+    final lineupChanged = !identical(oldWidget.channels, widget.channels);
+    if (lineupChanged) {
+      _channels = widget.channels;
+      _vm.usePlaybackLineup(_channels);
+      _invalidateEntries();
     }
-    if (!_channels.any((channel) => channel.id == widget.currentChannelId)) {
-      return;
+    final tuneChanged =
+        oldWidget.currentChannelId != widget.currentChannelId ||
+        oldWidget.selectionRevision != widget.selectionRevision;
+    if ((!lineupChanged && !tuneChanged) || _channels.isEmpty) return;
+    if (tuneChanged || !_channels.any((channel) => channel.id == _centeredId)) {
+      _centeredId =
+          _channels.any((channel) => channel.id == widget.currentChannelId)
+          ? widget.currentChannelId
+          : _channels.first.id;
     }
-    _centeredId = widget.currentChannelId;
     _scheduleHeader();
     _scheduleVisibleLoad();
   }
@@ -501,11 +492,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
       );
     }
     if (!mounted) return;
-    final playbackIds = widget.channels.map((channel) => channel.id).toSet();
     setState(() {
-      _channels = _vm.filteredChannels
-          .where((channel) => playbackIds.contains(channel.id))
-          .toList();
       _ready = true;
       if (_channels.isNotEmpty &&
           !_channels.any((channel) => channel.id == _centeredId)) {
@@ -805,7 +792,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
       hasSeriesTimer: program?.hasSeriesTimer == true,
       programLoading:
           program == null &&
-          _vm.loadStateFor(channel.id) != GuideChannelLoadState.loaded,
+          _vm.loadStateFor(channel.id) == GuideChannelLoadState.loading,
     );
   }
 

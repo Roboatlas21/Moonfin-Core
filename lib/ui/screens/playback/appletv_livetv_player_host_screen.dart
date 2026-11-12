@@ -382,7 +382,16 @@ class _AppleTvLiveTvPlayerHostScreenState
     final alreadyPlaying = _currentChannel.id == channelId;
     _syncedChannels = channels;
     _currentIndex = index;
-    if (alreadyPlaying) return;
+    if (lineup != null) {
+      _logoUrlCache.clear();
+      _nowPlayingByChannel.clear();
+      _warmSchedule();
+    }
+    if (alreadyPlaying) {
+      _readSchedule();
+      _pushMetadata();
+      return;
+    }
     _switching = true;
     try {
       _readSchedule();
@@ -531,7 +540,12 @@ class _AppleTvLiveTvPlayerHostScreenState
     final currentId = _currentChannel.id;
     for (final channel in _syncedChannels) {
       final program = viewModel.nowNextForChannel(channel.id).now;
-      if (program != null) _nowPlayingByChannel[channel.id] = program;
+      if (program != null) {
+        _nowPlayingByChannel[channel.id] = program;
+      } else if (viewModel.loadStateFor(channel.id) !=
+          GuideChannelLoadState.loading) {
+        _nowPlayingByChannel.remove(channel.id);
+      }
       if (channel.id == currentId) _currentProgram = program;
     }
   }
@@ -575,7 +589,9 @@ class _AppleTvLiveTvPlayerHostScreenState
           'selected': channel.id == currentId,
           ..._programPayload(
             _nowPlayingByChannel[channel.id],
-            viewModel?.loadStateFor(channel.id) == GuideChannelLoadState.loaded,
+            viewModel != null &&
+                viewModel.loadStateFor(channel.id) !=
+                    GuideChannelLoadState.loading,
             l10n,
             now,
           ),
