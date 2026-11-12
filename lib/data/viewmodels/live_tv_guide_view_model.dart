@@ -1099,26 +1099,52 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _selectedGroup = null;
       _updatePageRows();
     }
-    final response = await _readChannels(lineupRequest);
-    // A user switch while this was out would publish the old user's favorites.
-    if (_disposed ||
-        lineupRequest != _lineupRequest ||
-        session != userDataSync.session) {
-      return false;
+    bool current() {
+      if (_disposed ||
+          lineupRequest != _lineupRequest ||
+          session != userDataSync.session) {
+        return false;
+      }
+      if (account != null && account != (_client.baseUrl, _client.userId)) {
+        unawaited(load());
+        return false;
+      }
+      return true;
     }
-    if (account != null && account != (_client.baseUrl, _client.userId)) {
-      unawaited(load());
-      return false;
+
+    ChannelGroupLineup? lineup;
+    if (api is ChannelGroupApi) {
+      try {
+        lineup = await (api as ChannelGroupApi).getChannelGroups();
+      } catch (error) {
+        debugPrint('Live TV channel groups unavailable (${error.runtimeType})');
+        if (_accessDenied(error)) {
+          lineup = const ChannelGroupLineup({}, endpointAvailable: false);
+        }
+      }
+      if (!current()) return false;
+      if (lineup?.endpointAvailable == false) {
+        _programmeCategories = null;
+        _channelGroups = {};
+        _rebuildGroupChoices(complete: true);
+      }
     }
-    if (response == null) return false;
-    _publishChannels(response, revision);
-    if (api is ChannelGroupApi && account != null) {
-      // Keep the previous membership until the plugin has accounted for IDs
-      // that disappeared. The picker counts only currently visible channels.
+    var items = lineup?.channels;
+    if (items == null) {
+      final response = await _readChannels(lineupRequest);
+      if (!current() || response == null) return false;
+      items = (response['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    }
+    _publishChannels(items, revision);
+    if (lineup != null) {
+      if (lineup.programmeCategories != null) {
+        _programmeCategories = lineup.programmeCategories;
+      }
+      _applyChannelGroupLineup(lineup);
+    } else if (account != null) {
+      final visible = _channels.map((channel) => channel.id).toSet();
+      _channelGroups.removeWhere((id, _) => !visible.contains(id));
       _rebuildGroupChoices(complete: false);
-      unawaited(
-        _loadChannelGroups(api as ChannelGroupApi, lineupRequest, account),
-      );
     } else {
       _updatePageRows();
     }
@@ -1161,10 +1187,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  void _publishChannels(Map<String, dynamic> response, int revision) {
-    final items = (response['Items'] as List?) ?? [];
+  void _publishChannels(List<Map<String, dynamic>> items, int revision) {
     final fresh = <String, Map<String, dynamic>>{};
-    for (final item in items.cast<Map<String, dynamic>>()) {
+    for (final item in items) {
       final id = item['Id']?.toString();
       final data = item['UserData'];
       if (id != null &&
@@ -1184,7 +1209,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _channels =
         items
-            .cast<Map<String, dynamic>>()
             .map(GuideChannel.fromRawItem)
             .map((channel) => channel.withSyncedUserData())
             .toList()
@@ -1203,7 +1227,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (complete) {
         _selectedGroup = null;
       } else {
-        // Channel IDs can change before the corresponding group lookup returns.
+        // A partial or unavailable group response can leave the selection unresolved.
         counts[selected] = 0;
       }
     }
@@ -1270,65 +1294,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       error is DioException &&
       (error.response?.statusCode == 401 || error.response?.statusCode == 403);
 
-  Future<void> _loadChannelGroups(
-    ChannelGroupApi api,
-    int request,
-    (String, String?) account,
-  ) async {
-    final session = userDataSync.session;
-    ChannelGroupLineup? lineup;
-    try {
-      lineup = await api.getChannelGroups();
-    } catch (error) {
-      // Dio errors may contain signed URLs. Log only the error type.
-      debugPrint('Live TV channel groups unavailable (${error.runtimeType})');
-      if (!_accessDenied(error)) return;
-    }
-    bool current() =>
-        !_disposed &&
-        request == _lineupRequest &&
-        session == userDataSync.session &&
-        account == (_client.baseUrl, _client.userId);
-    if (!current()) return;
-    var channelsReplaced = false;
-    final selected = _selectedGroup;
-    if (selected != null && lineup != null) {
-      final members = lineup.groupsByChannelId.entries
-          .where((entry) => entry.value.contains(selected))
-          .map((entry) => entry.key)
-          .toSet();
-      if (members.isNotEmpty && !_channels.any((c) => members.contains(c.id))) {
-        // An import can replace channel IDs between the native and plugin reads.
-        // Reconcile once against the viewer's current native lineup.
-        final revision = userDataSync.revision;
-        Map<String, dynamic>? response;
-        try {
-          response = await _readChannels(request);
-        } catch (_) {
-          return;
-        }
-        if (!current() || response == null) return;
-        _publishChannels(response, revision);
-        channelsReplaced = true;
-      }
-    }
-    if (lineup == null || !lineup.endpointAvailable) {
-      _programmeCategories = null;
-    } else if (lineup.programmeCategories != null) {
-      _programmeCategories = lineup.programmeCategories;
-    }
-    _applyChannelGroupLineup(
-      lineup ?? const ChannelGroupLineup({}),
-      channelsReplaced: channelsReplaced,
-    );
-  }
-
-  void _applyChannelGroupLineup(
-    ChannelGroupLineup lineup, {
-    required bool channelsReplaced,
-  }) {
-    final previous = _pageChannels;
-    final selected = _selectedGroup;
+  void _applyChannelGroupLineup(ChannelGroupLineup lineup) {
     final unresolved = lineup.unresolvedChannelIds;
     final partial = lineup.partial;
     final updated = <String, Set<String>>{};
@@ -1345,16 +1311,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // Explicit unresolved IDs have already kept their memberships above.
     // Only older partial responses leave the selection open without any visible members.
     _rebuildGroupChoices(complete: !partial || unresolved != null);
-    if (channelsReplaced) {
-      unawaited(_reloadPrograms());
-      return;
-    }
-    if (selected != null &&
-        (_selectedGroup == null || !listEquals(previous, _pageChannels))) {
-      _resetPageCursor();
-      unawaited(loadMorePrograms());
-    }
-    _notifyListeners();
   }
 
   void _resetPrograms() {

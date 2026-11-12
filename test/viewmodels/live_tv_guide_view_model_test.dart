@@ -295,7 +295,7 @@ void main() {
         expect(vm.playbackChannels, isEmpty);
         expect(vm.availableGroups, isEmpty);
         expect(vm.programsForChannel('one'), isEmpty);
-        verify(api.getChannelGroups).called(1);
+        verify(api.getChannelGroups).called(2);
       },
     );
 
@@ -618,16 +618,16 @@ void main() {
       _stubChannels(api, [_channel('new'), _channel('outside')]);
       final pending = Completer<ChannelGroupLineup>();
       when(api.getChannelGroups).thenAnswer((_) => pending.future);
-      await vm.load();
+      final reload = vm.load();
       expect(vm.selectedGroup, 'Canadian');
       expect(vm.availableGroups, contains('Canadian'));
-      expect(vm.filteredChannels, isEmpty);
+      expect(vm.filteredChannels.single.id, 'old');
       pending.complete(
         const ChannelGroupLineup({
           'outside': {'News'},
         }, partial: true),
       );
-      await Future<void>.delayed(Duration.zero);
+      await reload;
       expect(vm.selectedGroup, 'Canadian');
       expect(vm.filteredChannels, isEmpty);
       expect(vm.channelCountForGroup('News'), 1);
@@ -655,92 +655,77 @@ void main() {
     },
   );
 
-  for (final replacementVisible in [true, false]) {
-    test(
-      'reload reconciles a replaced group member once (visible: $replacementVisible)',
-      () async {
-        final api = _GroupedLiveTvApi();
-        when(() => client.liveTvApi).thenReturn(api);
-        when(() => client.baseUrl).thenReturn('fixture');
-        when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
-        var nativeReads = 0;
-        when(() => _channelsRequest(api)).thenAnswer((_) async {
-          nativeReads++;
-          return {
-            'Items': [
-              if (nativeReads < 3) _channel('old'),
-              if (nativeReads == 3 && replacementVisible) _channel('new'),
-              _channel('outside'),
-            ],
-          };
-        });
-        var groupReads = 0;
-        when(api.getChannelGroups).thenAnswer(
-          (_) async => ChannelGroupLineup({
-            (++groupReads == 1 ? 'old' : 'new'): {'Canadian'},
-          }),
-        );
-        final vm = LiveTvGuideViewModel(client);
-        addTearDown(vm.dispose);
-        await vm.load();
-        vm.setGroup('Canadian');
-        await vm.load();
-        await Future<void>.delayed(Duration.zero);
-        expect(nativeReads, 3);
-        expect(groupReads, 2);
-        expect(vm.selectedGroup, replacementVisible ? 'Canadian' : null);
-        expect(vm.filteredChannels.map((c) => c.id), [
-          replacementVisible ? 'new' : 'outside',
-        ]);
-        expect(vm.hasProgramsFor(vm.filteredChannels.single.id), isTrue);
-        expect(vm.state, GuideState.ready);
-      },
+  test('one lineup read replaces one of two selected group members', () async {
+    final api = _GroupedLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => client.baseUrl).thenReturn('fixture');
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    var member = 'old';
+    when(api.getChannelGroups).thenAnswer(
+      (_) async => ChannelGroupLineup(
+        {
+          'stable': {'Canadian'},
+          member: {'Canadian'},
+        },
+        channels: [_channel('stable'), _channel(member), _channel('outside')],
+      ),
     );
-  }
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    vm.setGroup('Canadian');
 
-  test(
-    'a selection made during channel reconciliation owns the refreshed rows',
-    () async {
-      final api = _GroupedLiveTvApi();
-      when(() => client.liveTvApi).thenReturn(api);
-      when(() => client.baseUrl).thenReturn('fixture');
-      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
-      _stubChannels(api, [_channel('old')]);
-      when(api.getChannelGroups).thenAnswer(
-        (_) async => const ChannelGroupLineup({
+    member = 'new';
+    await vm.load();
+    expect(vm.selectedGroup, 'Canadian');
+    expect(
+      vm.filteredChannels.map((c) => c.id),
+      unorderedEquals(['stable', 'new']),
+    );
+    expect(vm.hasProgramsFor('new'), isTrue);
+    expect(vm.hasProgramsFor('old'), isFalse);
+    expect(vm.playbackChannels.length, 3);
+    verify(api.getChannelGroups).called(2);
+    verifyNever(() => _channelsRequest(api));
+  });
+
+  test('selection during a pending reload applies to the new lineup', () async {
+    final api = _GroupedLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => client.baseUrl).thenReturn('fixture');
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    when(api.getChannelGroups).thenAnswer(
+      (_) async => ChannelGroupLineup(
+        {
           'old': {'Canadian'},
-        }),
-      );
-      final vm = LiveTvGuideViewModel(client);
-      addTearDown(vm.dispose);
-      await vm.load();
-      vm.setGroup('Canadian');
-      final fresh = Completer<Map<String, dynamic>>();
-      var reads = 0;
-      when(() => _channelsRequest(api)).thenAnswer((_) async {
-        if (++reads == 2) return fresh.future;
-        return {
-          'Items': [_channel('old')],
-        };
-      });
-      when(api.getChannelGroups).thenAnswer(
-        (_) async => const ChannelGroupLineup({
+        },
+        channels: [_channel('old')],
+      ),
+    );
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    vm.setGroup('Canadian');
+
+    final fresh = Completer<ChannelGroupLineup>();
+    when(api.getChannelGroups).thenAnswer((_) => fresh.future);
+    final reload = vm.load();
+    vm.setFilter(GuideFilter.all);
+    fresh.complete(
+      ChannelGroupLineup(
+        {
           'new': {'Canadian'},
-        }),
-      );
-      await vm.load();
-      expect(reads, 2);
-      vm.setFilter(GuideFilter.all);
-      fresh.complete({
-        'Items': [_channel('new'), _channel('outside')],
-      });
-      await Future<void>.delayed(Duration.zero);
-      expect(vm.selectedGroup, isNull);
-      expect(vm.filteredChannels.map((c) => c.id), ['new', 'outside']);
-      expect(vm.hasProgramsFor('old'), isFalse);
-      expect(vm.hasProgramsFor('outside'), isTrue);
-    },
-  );
+        },
+        channels: [_channel('new'), _channel('outside')],
+      ),
+    );
+    await reload;
+    expect(vm.selectedGroup, isNull);
+    expect(vm.filteredChannels.map((c) => c.id), ['new', 'outside']);
+    expect(vm.hasProgramsFor('old'), isFalse);
+    expect(vm.hasProgramsFor('outside'), isTrue);
+    verifyNever(() => _channelsRequest(api));
+  });
 
   test(
     'a failed or superseded group lookup leaves the current guide usable',
@@ -761,7 +746,7 @@ void main() {
       vm.setGroup('old group');
       final pending = Completer<ChannelGroupLineup>();
       when(grouped.getChannelGroups).thenAnswer((_) => pending.future);
-      await vm.load();
+      final oldRead = vm.load();
       expect(vm.selectedGroup, 'old group');
       when(() => client.userId).thenReturn('other');
       when(grouped.getChannelGroups).thenThrow(StateError('forbidden'));
@@ -771,7 +756,7 @@ void main() {
           'one': {'old group'},
         }),
       );
-      await Future<void>.delayed(Duration.zero);
+      await oldRead;
       expect(vm.availableGroups, isEmpty);
       expect(vm.selectedGroup, isNull);
       expect(vm.filteredChannels.single.id, 'one');

@@ -9,7 +9,7 @@ Dio fixture(int status, {Object? body}) {
       onRequest: (request, handler) {
         expect(request.method, 'GET');
         expect(request.path, '/Moonfin/LiveTv/ChannelGroups');
-        expect(request.queryParameters, isEmpty);
+        expect(request.queryParameters, {'includeChannels': true});
         final response = Response(
           requestOptions: request,
           data: body,
@@ -33,6 +33,42 @@ Dio fixture(int status, {Object? body}) {
 }
 
 void main() {
+  test('reads grouped and ungrouped channels in one response', () async {
+    final rows = [
+      {
+        'Id': 'one',
+        'Name': 'One',
+        'groups': ['News'],
+      },
+      {'Id': 'two', 'Name': 'Two', 'groups': <String>[]},
+    ];
+    final result = await ChannelGroupLineup.fetch(
+      fixture(200, body: {'version': 2, 'supported': true, 'channels': rows}),
+    );
+    expect(result.channels, rows);
+    expect(result.groupsByChannelId, {
+      'one': {'News'},
+    });
+    final empty = await ChannelGroupLineup.fetch(
+      fixture(200, body: {'version': 2, 'supported': false, 'channels': []}),
+    );
+    expect(empty.channels, isEmpty);
+    await expectLater(
+      ChannelGroupLineup.fetch(
+        fixture(
+          200,
+          body: {
+            'version': 2,
+            'supported': true,
+            'channels': [
+              {'Name': 'Missing ID'},
+            ],
+          },
+        ),
+      ),
+      throwsFormatException,
+    );
+  });
   test(
     'reads exact labels, removes blanks and preserves partial results',
     () async {
