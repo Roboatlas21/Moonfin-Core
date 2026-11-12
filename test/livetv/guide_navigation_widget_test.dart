@@ -4,15 +4,12 @@ import 'package:custom_tv_text_field/custom_tv_text_field.dart'
     show KeyboardStyle;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playback_core/playback_core.dart';
-import 'package:moonfin/data/services/socket_handler.dart';
-import 'package:moonfin/data/services/websocket_message_parser.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/preference/user_preferences.dart';
@@ -28,8 +25,6 @@ import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
 import 'package:moonfin/util/platform_detection.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-class _MockSocket extends Mock implements SocketHandler {}
 
 class _MockMediaServerClient extends Mock implements MediaServerClient {}
 
@@ -154,24 +149,14 @@ void main() {
 
   /// Overridable per test so a lineup can outgrow a single program batch.
   late int channelCount;
-  late Map<String, dynamic> Function(int) channelRow;
-  late List<Map<String, dynamic>> Function(String) listings;
 
   /// When set, any guide request covering this channel is held open until the
   /// test releases it, so its row can be observed mid-load.
   String? deferredChannelId;
   late List<VoidCallback> releaseDeferredGuide;
 
-  late StreamController<ServerWebSocketMessage> events;
   setUp(() async {
     await GetIt.instance.reset();
-    final socket = _MockSocket();
-    events = StreamController<ServerWebSocketMessage>.broadcast();
-    when(() => socket.events).thenAnswer((_) => events.stream);
-    when(() => socket.connections)
-        .thenAnswer((_) => const Stream<void>.empty());
-    GetIt.instance.registerSingleton<SocketHandler>(socket);
-    addTearDown(events.close);
     SharedPreferences.setMockInitialValues(const {});
     final store = PreferenceStore();
     await store.init();
@@ -183,8 +168,6 @@ void main() {
       LiveTvCategoryDisplay.programmes,
     );
     channelCount = _channelCount;
-    channelRow = _channelRaw;
-    listings = _programsFor;
     _fixtureWindowStart = guideLeftEdge(DateTime.now());
     deferredChannelId = null;
     releaseDeferredGuide = <VoidCallback>[];
@@ -216,7 +199,7 @@ void main() {
       ),
     ).thenAnswer(
       (_) async => <String, dynamic>{
-        'Items': [for (var i = 0; i < channelCount; i++) channelRow(i)],
+        'Items': [for (var i = 0; i < channelCount; i++) _channelRaw(i)],
       },
     );
 
@@ -237,7 +220,7 @@ void main() {
           (invocation.namedArguments[#channelIds] as List?)?.cast<String>() ??
           const <String>[];
       final payload = <String, dynamic>{
-        'Items': [for (final id in ids) ...listings(id)],
+        'Items': [for (final id in ids) ..._programsFor(id)],
       };
       final gate = deferredChannelId;
       if (gate == null || !ids.contains(gate)) return payload;
@@ -285,78 +268,6 @@ void main() {
     // Focused TV labels can marquee continuously.
     await _pumpFrames(tester);
   }
-
-  testWidgets(
-    'the focused header follows channel and programme edits in place',
-    (tester) async {
-      channelCount = 2;
-      await pumpGuide(tester);
-      EpgHeroPreview header() =>
-          tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview));
-      Future<void> refresh() async {
-        events.add(const LiveTvGuideChangedMessage());
-        await _pumpFrames(tester);
-      }
-
-      _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
-      await _pumpFrames(tester);
-      expect(header().title, 'Channel 0');
-      channelRow = (i) => {
-        ..._channelRaw(i),
-        if (i == 0) 'Name': 'Renamed Sports',
-      };
-      await refresh();
-      expect(_focusedLabel(), 'GuideChannel:0');
-      expect(header().title, 'Renamed Sports');
-
-      _nodeLabelled(tester, 'GuideProgramRow0:0').requestFocus();
-      await _pumpFrames(tester);
-      final title = header().programTitle!;
-      for (final replaceId in [false, true]) {
-        final prefix = replaceId ? 'Replacement' : 'Updated';
-        listings = (id) => [
-          for (final item in _programsFor(id))
-            {
-              ...item,
-              'Name': '$prefix ${item['Name']}',
-              if (replaceId) 'Id': 'new-${item['Id']}',
-            },
-        ];
-        await refresh();
-        expect(_focusedLabel(), 'GuideProgramRow0:0');
-        expect(header().programTitle, '$prefix $title');
-      }
-    },
-  );
-
-  testWidgets('a listings denial keeps authorized channels browsable', (
-    tester,
-  ) async {
-    channelCount = 2;
-    await pumpGuide(tester);
-    _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
-    await _pumpFrames(tester);
-    final request = RequestOptions(path: '/LiveTv/Programs');
-    var failedReads = 0;
-    listings = (_) {
-      failedReads++;
-      throw DioException(
-        requestOptions: request,
-        response: Response(requestOptions: request, statusCode: 403),
-      );
-    };
-    events.add(const LiveTvGuideChangedMessage());
-    await _pumpFrames(tester);
-    expect(_focusedLabel(), 'GuideChannel:0');
-    expect(find.byType(EpgChannelCell), findsNWidgets(2));
-    expect(
-      tester
-          .widgetList<EpgProgramCell>(find.byType(EpgProgramCell))
-          .every((cell) => cell.failed),
-      isTrue,
-    );
-    expect(failedReads, 1);
-  });
 
   testWidgets('searched playback can tune a channel shown in its mini guide', (
     tester,
@@ -509,13 +420,8 @@ void main() {
       UserPreferences.liveTvCategoryDisplay,
       LiveTvCategoryDisplay.both,
     );
-    when(liveTvApi.getChannelGroups).thenAnswer(
-      (_) async => const ChannelGroupLineup(
-        {},
-        programmeCategories: {'sports'},
-        guideRevision: '1',
-      ),
-    );
+    when(liveTvApi.getChannelGroups)
+        .thenAnswer((_) async => const ChannelGroupLineup({}));
     final sports = Completer<Map<String, dynamic>>();
     when(
       () => liveTvApi.getGuide(
@@ -535,6 +441,9 @@ void main() {
     await _pumpFrames(tester);
     for (final key in [
       LogicalKeyboardKey.arrowLeft,
+      // From All channels, pass Favorites, Movies and Series to reach Sports.
+      LogicalKeyboardKey.arrowDown,
+      LogicalKeyboardKey.arrowDown,
       LogicalKeyboardKey.arrowDown,
       LogicalKeyboardKey.arrowDown,
       LogicalKeyboardKey.select,
@@ -625,14 +534,11 @@ void main() {
         LiveTvCategoryDisplay.both,
       );
       when(liveTvApi.getChannelGroups).thenAnswer(
-        (_) async => const ChannelGroupLineup(
-          {
-            'ch1': {'Sports'},
-            'ch2': {'Sports'},
-            'ch47': {'US | PRIME'},
-          },
-          programmeCategories: {'sports', 'movies'},
-        ),
+        (_) async => const ChannelGroupLineup({
+          'ch1': {'Sports'},
+          'ch2': {'Sports'},
+          'ch47': {'US | PRIME'},
+        }),
       );
       await pumpGuide(tester, surface: const Size(390, 844));
       await tester.tap(find.text('All channels'));
@@ -643,7 +549,7 @@ void main() {
           find.descendant(of: picker, matching: match);
       expect(inside(find.text('Sports')), findsNWidgets(2));
       expect(inside(find.text('2')), findsOneWidget);
-      expect(inside(find.text('News')), findsNothing);
+      expect(inside(find.text('News')), findsOneWidget);
       await tester.enterText(inside(find.byType(TextField)), 'prime');
       await _pumpFrames(tester);
       expect(inside(find.text('Sports')), findsNothing);
@@ -662,7 +568,10 @@ void main() {
       );
       await _pumpFrames(tester);
       final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
-      expect(rail.labels, ['All', 'Movies', 'Sports', 'Favorites']);
+      expect(
+        rail.labels,
+        containsAll(['All', 'Movies', 'Sports', 'News', 'Favorites']),
+      );
       expect(rail.selectedIndex, 0);
     },
   );
@@ -712,12 +621,9 @@ void main() {
       LiveTvCategoryDisplay.groups,
     );
     when(liveTvApi.getChannelGroups).thenAnswer(
-      (_) async => const ChannelGroupLineup(
-        {
-          'ch1': {'Sports'},
-        },
-        programmeCategories: {'movies'},
-      ),
+      (_) async => const ChannelGroupLineup({
+        'ch1': {'Sports'},
+      }),
     );
     await pumpGuide(tester);
     Future<void> key(LogicalKeyboardKey key) async {
@@ -751,121 +657,6 @@ void main() {
     expect(find.text('Sports'), findsOneWidget);
     expect(_focusedLabel(), 'GuideChannel:0');
   });
-
-  testWidgets(
-    'group-only picker retries a failed request and then stays quiet',
-    (tester) async {
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await GetIt.instance<UserPreferences>().set(
-        UserPreferences.liveTvCategoryDisplay,
-        LiveTvCategoryDisplay.groups,
-      );
-      var lookups = 0;
-      when(liveTvApi.getChannelGroups).thenAnswer((_) async {
-        if (++lookups == 1) throw TimeoutException('lineup');
-        return const ChannelGroupLineup({
-          'ch1': {'Canadian'},
-        }, guideRevision: '1');
-      });
-      await pumpGuide(tester, surface: const Size(390, 700));
-      await tester.tap(find.text('All channels'));
-      await _pumpFrames(tester);
-      expect(find.text('Canadian'), findsNothing);
-      await tester.pump(const Duration(seconds: 15));
-      await _pumpFrames(tester);
-      expect(find.text('Canadian'), findsOneWidget);
-      await tester.pump(const Duration(minutes: 3));
-      expect(lookups, 2);
-
-      // Enabling programme filters on the open guide should recover them.
-      await tester.tap(find.text('Canadian'));
-      await _pumpFrames(tester);
-      when(liveTvApi.getChannelGroups).thenAnswer(
-        (_) async => const ChannelGroupLineup(
-          {
-            'ch1': {'Canadian'},
-          },
-          guideRevision: '1',
-          programmeCategories: {'news'},
-        ),
-      );
-      await GetIt.instance<UserPreferences>().set(
-        UserPreferences.liveTvCategoryDisplay,
-        LiveTvCategoryDisplay.both,
-      );
-      await tester.pump(const Duration(seconds: 3));
-      await _pumpFrames(tester);
-      await tester.tap(find.text('Canadian'));
-      await _pumpFrames(tester);
-      expect(find.text('News'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    'an open guide keeps categories during import and updates them when it finishes',
-    (tester) async {
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      final pending = Completer<ChannelGroupLineup>();
-      when(liveTvApi.getChannelGroups).thenAnswer((_) => pending.future);
-      var revision = 'pending';
-      await pumpGuide(tester);
-      EpgFilterRail rail() =>
-          tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
-      expect(rail().labels, ['All', 'Favorites']);
-      pending.complete(
-        const ChannelGroupLineup(
-          {},
-          guideRevision: '0',
-          programmeCategories: {},
-        ),
-      );
-      await _pumpFrames(tester);
-      expect(rail().labels, ['All', 'Favorites']);
-      Future<void> imported() async {
-        final wire = revision == '1'
-            ? {
-                'MessageType': 'LibraryChanged',
-                'Data': {'MoonfinLiveTvGuideChanged': true},
-              }
-            : {
-                'MessageType': 'MoonfinEvent',
-                'Data': {'Type': 'liveTvGuideChanged'},
-              };
-        events.add(WebSocketMessageParser.parseJson(wire)!);
-
-        await _pumpFrames(tester);
-      }
-
-      when(liveTvApi.getChannelGroups).thenAnswer(
-        (_) async => ChannelGroupLineup(
-          {},
-          guideRevision: revision,
-          programmeCategories: revision == '2'
-              ? {'movies'}
-              : {'movies', 'sports'},
-        ),
-      );
-      revision = '1';
-      await imported();
-      expect(rail().labels, ['All', 'Movies', 'Sports', 'Favorites']);
-      final sports = rail().labels.indexOf('Sports');
-      rail().onSelect(sports);
-      await _pumpFrames(tester);
-      expect(rail().selectedIndex, sports);
-      revision = 'pending';
-      await tester.pump(const Duration(minutes: 1));
-      await _pumpFrames(tester);
-      expect(rail().selectedIndex, sports);
-      verify(liveTvApi.getChannelGroups).called(2);
-      revision = '2';
-      await imported();
-      expect(rail().labels, ['All', 'Movies', 'Favorites']);
-      expect(rail().selectedIndex, 0);
-      revision = '3';
-      await imported();
-      expect(rail().labels, ['All', 'Movies', 'Sports', 'Favorites']);
-    },
-  );
 
   /// Focuses a row-0 cell two hours into the window and then steps right once,
   /// which is the only move permitted to rewrite the anchor. Returns the

@@ -11,7 +11,6 @@ import 'package:server_core/server_core.dart';
 import '../../../data/models/series_recording_episodes.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../data/services/user_data_sync.dart';
-import '../../../data/services/socket_handler.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../widgets/emby_premiere_dialog.dart';
 import '../../util/error_message.dart';
@@ -174,9 +173,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
   GuideFilter? _pendingPickerFocus;
-  bool get _showsProgrammeCategories =>
-      !widget.miniPlayerMode &&
-      _categoryDisplay != LiveTvCategoryDisplay.groups;
   bool get _usesPicker =>
       !widget.miniPlayerMode &&
       _vm.supportsGroupPicker &&
@@ -238,8 +234,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// One-shot timer to the next half hour. Rescheduled when it fires.
   Timer? _reanchorTimer;
   Timer? _displayClockTimer;
-  StreamSubscription<ServerWebSocketMessage>? _guideEvents;
-  StreamSubscription<void>? _guideConnections;
 
   /// When the last d-pad event arrived, or null before the first one.
   DateTime? _lastDpadEventAt;
@@ -266,7 +260,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _vm = LiveTvGuideViewModel(
       GetIt.instance<MediaServerClient>(),
       initialSortBy: _prefs.get(UserPreferences.liveTvChannelSortBy),
-      showProgrammeCategories: _showsProgrammeCategories,
     );
     _prefs.addListener(_onCategoryDisplayChanged);
     _vm.addListener(_onChanged);
@@ -289,18 +282,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       if (!mounted) return;
       setState(() {});
     });
-    if (_vm.supportsGroupPicker &&
-        GetIt.instance.isRegistered<SocketHandler>()) {
-      final socket = GetIt.instance<SocketHandler>();
-      _guideEvents = socket.events.listen((event) {
-        if (event is LiveTvGuideChangedMessage) unawaited(_vm.refreshGuide());
-      });
-      // A disconnected client can miss an import while the guide is open.
-      _guideConnections = socket.connections.listen(
-        (_) => unawaited(_vm.refreshGuide()),
-      );
-    }
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final mediaQuery = MediaQuery.of(context);
@@ -907,8 +888,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     widget.backController?._onBackPressed = null;
     _reanchorTimer?.cancel();
     _displayClockTimer?.cancel();
-    _guideEvents?.cancel();
-    _guideConnections?.cancel();
     _artworkLookupDebounce?.cancel();
     _artworkPrefetchScrollDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -1349,7 +1328,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final mode = _prefs.get(UserPreferences.liveTvCategoryDisplay);
     if (mode == _categoryDisplay) return;
     setState(() => _categoryDisplay = mode);
-    _vm.setProgrammeCategoriesVisible(_showsProgrammeCategories);
     if (!_usesPicker) _channelSearch.clear();
     if ((_vm.selectedGroup != null && !_usesPicker) ||
         (_usesPicker &&

@@ -29,7 +29,6 @@ private let carouselInactivity: TimeInterval = 120
 /// Flutter overlay, so the two surfaces behave the same way.
 @MainActor
 final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayerNavigable {
-    var onVisibleChannelsChanged: (([String]) -> Void)?
     var onChannelSelected: ((String) -> Void)?
 
     /// DOWN leaves the carousel and hands the player its controls.
@@ -251,7 +250,6 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     func update(entries: [ChannelCarouselEntry], theme: ChannelCarouselTheme) {
         let previousId = self.entries.indices.contains(centeredIndex)
             ? self.entries[centeredIndex].channelId : ""
-        let oldVisibleIds = visibleChannelIds
         self.theme = theme
         let countChanged = entries.count != self.entries.count
         self.entries = entries
@@ -262,7 +260,6 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
             for card in cards { card.applyTheme(theme) }
             bindCards()
         }
-        if oldVisibleIds != visibleChannelIds { requestVisibleListings() }
         updateHeader()
     }
 
@@ -277,7 +274,6 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
             x: 0, y: Self.glowMargin,
             width: stripWidth, height: ChannelCarouselMetrics.cardHeight)
         rebuildCards()
-        requestVisibleListings()
     }
 
     private var centerOffset: CGFloat { (stripClip.bounds.width - cardWidth) / 2 }
@@ -302,23 +298,12 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
         bindCards()
     }
 
-    private func entry(forSlot slot: Int) -> ChannelCarouselEntry {
-        entries[CarouselIndex.channelIndex(for: centerIndex + slot - halfSpan, count: count)]
-    }
-
-    private var visibleChannelIds: [String] {
-        count == 0 ? [] : cards.indices.map { entry(forSlot: $0).channelId }
-    }
-
-    private func requestVisibleListings() {
-        if !dismissed { onVisibleChannelsChanged?(visibleChannelIds) }
-    }
-
     private func bindCards() {
         guard count > 0 else { return }
         for (slot, card) in cards.enumerated() {
             let offset = slot - halfSpan
-            card.configure(entry(forSlot: slot), centered: offset == 0)
+            let index = CarouselIndex.channelIndex(for: centerIndex + offset, count: count)
+            card.configure(entries[index], centered: offset == 0)
         }
     }
 
@@ -356,10 +341,7 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
         headerTimer = Timer.scheduledTimer(
             withTimeInterval: Self.headerDebounce, repeats: false
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.requestVisibleListings()
-                self?.updateHeader()
-            }
+            Task { @MainActor in self?.updateHeader() }
         }
     }
 

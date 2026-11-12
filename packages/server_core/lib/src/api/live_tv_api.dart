@@ -13,18 +13,10 @@ class ChannelGroupLineup {
   /// Older plugins and imports in progress leave this unknown.
   final Set<String>? unresolvedChannelIds;
 
-  /// Null when the server could not determine availability or predates this field.
-  final Set<String>? programmeCategories;
-
-  /// Last stable guide import, or "pending" while no reliable snapshot is available.
-  final String? guideRevision;
-
   const ChannelGroupLineup(
     this.groupsByChannelId, {
     this.partial = false,
     this.unresolvedChannelIds,
-    this.programmeCategories,
-    this.guideRevision,
   });
 
   static Future<ChannelGroupLineup> fetch(Dio dio) async {
@@ -40,7 +32,6 @@ class ChannelGroupLineup {
       if (data['supported'] is! bool || raw is! Map) {
         throw const FormatException('Invalid channel group response');
       }
-      final categories = data['programmeCategories'];
       final unresolved = data['unresolvedChannelIds'];
       return ChannelGroupLineup(
         {
@@ -55,11 +46,6 @@ class ChannelGroupLineup {
         unresolvedChannelIds:
             unresolved is List && unresolved.every((id) => id is String)
             ? unresolved.cast<String>().toSet()
-            : null,
-        guideRevision: data['guideRevision'] as String?,
-        programmeCategories:
-            categories is List && categories.every((c) => c is String)
-            ? categories.cast<String>().toSet()
             : null,
       );
     } on DioException catch (error) {

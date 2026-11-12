@@ -29,7 +29,7 @@ const Duration kCarouselExitDuration = Duration(milliseconds: 140);
 const int _defaultVisibleCards = 5;
 
 /// The run of channels around [centeredId] the strip can show, wrapping at
-/// both ends. Shared so a warm fetch asks for exactly what an open one would.
+/// both ends.
 List<String> carouselNeighborhood(
   List<GuideChannel> channels,
   String centeredId,
@@ -56,7 +56,7 @@ List<String> carouselNeighborhood(
 /// entries a closed overlay could produce are mostly placeholders that the
 /// neighbourhood fetch invalidates a moment later anyway.
 class ChannelCarouselPrewarm {
-  /// Wait for channel surfing to settle before requesting nearby listings.
+  /// Wait for channel surfing to settle before loading the lineup’s listings.
   static const Duration settleDelay = Duration(seconds: 1);
 
   final LiveTvGuideViewModel viewModel;
@@ -78,8 +78,7 @@ class ChannelCarouselPrewarm {
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now,
        viewModel =
-           viewModelFactory?.call(client) ??
-           LiveTvGuideViewModel(client, showProgrammeCategories: false) {
+           viewModelFactory?.call(client) ?? LiveTvGuideViewModel(client) {
     liveTvRecordingRevision.addListener(_onRecordingsChanged);
     userDataSync.addListener(viewModel.syncChannelUserData);
   }
@@ -102,20 +101,13 @@ class ChannelCarouselPrewarm {
   @visibleForTesting
   DateTime? get hourlyDueAt => _hourlyDueAt;
 
-  /// Warm the cards around the tuned channel. Browsing loads further cards.
+  /// Warm the entire playback lineup once channel surfing settles.
   void tuned(List<GuideChannel> channels, String channelId) {
     if (_disposed) return;
     viewModel.usePlaybackLineup(channels);
-    _channelIds = carouselNeighborhood(
-      channels,
-      channelId,
-      _defaultVisibleCards,
-    );
     _timer?.cancel();
-    _timer = Timer(settleDelay, () => _requestWarm());
+    if (channels.isNotEmpty) _timer = Timer(settleDelay, _requestWarm);
   }
-
-  List<String> _channelIds = const [];
 
   void _requestWarm() {
     if (_disposed) return;
@@ -127,8 +119,9 @@ class ChannelCarouselPrewarm {
   }
 
   Future<void> _warm() async {
-    if (_disposed || _channelIds.isEmpty) return;
-    final ids = _channelIds;
+    final channels = viewModel.playbackChannels;
+    if (_disposed || channels.isEmpty) return;
+    final ids = channels.map((channel) => channel.id).toSet().toList();
     final wasCold = !isWarm;
     await _runExclusive(() async {
       await _warmPrograms(ids);
@@ -231,10 +224,10 @@ class ChannelCarouselPrewarm {
 
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
     if (_disposed || channelIds.isEmpty) return;
-    _timer?.cancel();
-    _channelIds = channelIds;
-    _requestWarm();
-    await _waitForExclusiveWork();
+    await ensureReady();
+    if (!_disposed && isWarm) {
+      await viewModel.ensureProgramsForChannels(channelIds);
+    }
   }
 
   Future<void> ensureReady() async {
@@ -374,7 +367,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     _vm =
         warm?.viewModel ??
         widget.viewModelFactory?.call(widget.client) ??
-        LiveTvGuideViewModel(widget.client, showProgrammeCategories: false);
+        LiveTvGuideViewModel(widget.client);
     _slide = AnimationController(
       vsync: this,
       duration: kCarouselEnterDuration,

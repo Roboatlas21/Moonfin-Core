@@ -4,10 +4,6 @@ sealed class ServerWebSocketMessage {
   const ServerWebSocketMessage();
 }
 
-class LiveTvGuideChangedMessage extends ServerWebSocketMessage {
-  const LiveTvGuideChangedMessage();
-}
-
 class LibraryChangedMessage extends ServerWebSocketMessage {
   final List<String> itemsAdded;
   final List<String> itemsUpdated;
