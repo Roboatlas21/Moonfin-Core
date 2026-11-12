@@ -329,32 +329,36 @@ void main() {
       expect(vm.error, isNull);
     });
 
-    test(
-      'removes a healthy tuner’s old group while another tuner is offline',
-      () async {
-        _stubChannels(api, [_channel('healthy'), _channel('offline')]);
-        when(api.getChannelGroups).thenAnswer(
-          (_) async => const ChannelGroupLineup({
-            'healthy': {'Sports'},
-            'offline': {'UK'},
-          }),
-        );
-        await vm.load();
-        vm.setGroup('Sports');
-        when(api.getChannelGroups).thenAnswer(
-          (_) async => const ChannelGroupLineup(
-            {},
-            partial: true,
-            unresolvedChannelIds: {'offline'},
-          ),
-        );
-        await vm.load();
-        expect(vm.availableGroups, ['UK']);
-        expect(vm.selectedGroup, isNull);
-        vm.setGroup('UK');
-        expect(vm.filteredChannels.single.id, 'offline');
-      },
-    );
+    for (final removeChannel in [false, true]) {
+      test(
+        'clears the selected group when its last channel is ${removeChannel ? 'deleted' : 'ungrouped'} and another tuner is offline',
+        () async {
+          _stubChannels(api, [_channel('healthy'), _channel('offline')]);
+          when(api.getChannelGroups).thenAnswer(
+            (_) async => const ChannelGroupLineup({
+              'healthy': {'Sports'},
+              'offline': {'UK'},
+            }),
+          );
+          await vm.load();
+          vm.setGroup('Sports');
+          if (removeChannel) _stubChannels(api, [_channel('offline')]);
+          when(api.getChannelGroups).thenAnswer(
+            (_) async => const ChannelGroupLineup(
+              {},
+              partial: true,
+              unresolvedChannelIds: {'offline'},
+            ),
+          );
+          await vm.load();
+          expect(vm.availableGroups, ['UK']);
+          expect(vm.selectedGroup, isNull);
+          expect(vm.filteredChannels, isNotEmpty);
+          vm.setGroup('UK');
+          expect(vm.filteredChannels.single.id, 'offline');
+        },
+      );
+    }
   });
 
   testWidgets(

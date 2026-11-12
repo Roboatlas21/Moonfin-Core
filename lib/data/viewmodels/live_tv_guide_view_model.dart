@@ -1303,17 +1303,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final selected = _selectedGroup;
     final unresolved = lineup.unresolvedChannelIds;
     final partial = lineup.partial;
-    // A removed group can be confirmed during a partial lookup if every
-    // channel that used to belong to it received a definitive answer.
-    final oldMembers = <String>{
-      if (selected != null &&
-          partial &&
-          unresolved != null &&
-          unresolved.isNotEmpty)
-        for (final entry in _channelGroups.entries)
-          if (entry.value.contains(selected)) entry.key,
-    };
-    final hadMembers = oldMembers.isNotEmpty;
     final updated = <String, Set<String>>{};
     for (final channel in _channels) {
       final id = channel.id;
@@ -1323,15 +1312,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           ? {...?_channelGroups[id], ...?known}
           : known;
       if (groups != null) updated[id] = groups;
-      if (!unknown && hadMembers) oldMembers.remove(id);
     }
     _channelGroups = updated;
-    _rebuildGroupChoices(
-      complete:
-          !partial ||
-          unresolved?.isEmpty == true ||
-          (hadMembers && oldMembers.isEmpty),
-    );
+    // Explicit unresolved IDs have already kept their memberships above.
+    // Only older partial responses leave the selection open without any visible members.
+    _rebuildGroupChoices(complete: !partial || unresolved != null);
     if (selected != null &&
         (_selectedGroup == null || !listEquals(previous, _pageChannels))) {
       _resetPageCursor();
