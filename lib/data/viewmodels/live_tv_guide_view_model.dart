@@ -294,6 +294,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int _categoryHighWater = 0;
   final Set<String> _categoryQueriedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
+  // Rows kept on screen until the replacement window is ready.
+  GuideFilter? _previousWindowCategory;
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
 
@@ -578,9 +580,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   DateTime _windowEnd;
   DateTime get windowEnd => _windowEnd;
 
+  bool get _showingPreviousCategory => _previousWindowCategory == _filter;
+
   List<GuideChannel> get filteredChannels {
     if (!_isCategory(_filter)) return _pageChannels;
-    if (_categoryLoadedFor != _filter) return const [];
+    if (_categoryLoadedFor != _filter && !_showingPreviousCategory) {
+      return const [];
+    }
     return _pageChannels
         .where((ch) => _categoryPrograms.containsKey(ch.id))
         .toList();
@@ -760,7 +766,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> _refreshRecordingState() async {
     final recordingRevision = liveTvRecordingRevision.value;
     try {
-      if (_isCategory(_filter)) await _refreshCategoryRows();
+      if (_isCategory(_filter) && !_showingPreviousCategory) {
+        await _refreshCategoryRows();
+      }
       await _refreshLoadedChannels(_now());
       _loadedRecordingRevision = recordingRevision;
     } catch (error) {
@@ -969,9 +977,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  void _resetCategory() {
-    _categoryFetchInFlight = false;
-    _categoryPrograms.clear();
+  void _resetCategory({bool keepRows = false}) {
+    _previousWindowCategory = keepRows ? _filter : null;
+    _categoryFetchInFlight = keepRows;
+    if (!keepRows) _categoryPrograms.clear();
     _categoryQueriedIds.clear();
     _categoryHighWater = 0;
     _categoryLoadedFor = null;
@@ -1003,6 +1012,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_disposed) return;
     if (start == _windowStart) {
       _atLivePosition = livePosition;
+      if (_showingPreviousCategory && !_categoryFetchInFlight) {
+        await _reloadPrograms(keepCategoryRows: true);
+      }
       return;
     }
 
@@ -1013,7 +1025,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _guideDate = start;
     _atLivePosition = livePosition;
     if (_isCategory(_filter)) {
-      await _reloadPrograms();
+      await _reloadPrograms(keepCategoryRows: true);
       return;
     }
     _resetCategory();
@@ -1039,17 +1051,23 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     await _reloadPrograms();
   }
 
-  Future<void> _reloadPrograms() async {
+  Future<void> _reloadPrograms({bool keepCategoryRows = false}) async {
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final depth = _requestedPageDepth;
-    _resetPrograms();
+    final alreadyShowingPrevious = _showingPreviousCategory;
+    final keepRows =
+        keepCategoryRows &&
+        _state == GuideState.ready &&
+        _categoryPrograms.isNotEmpty &&
+        (_categoryLoadedFor == _filter || alreadyShowingPrevious);
+    _resetPrograms(keepCategoryRows: keepRows);
     _reloadDepth = depth;
     final page = _pageGeneration;
     _listingsStatePage = page;
     _error = null;
-    _state = GuideState.loading;
-    _notifyListeners();
+    _state = keepRows ? GuideState.ready : GuideState.loading;
+    if (!alreadyShowingPrevious || !keepRows) _notifyListeners();
 
     bool current() =>
         !_disposed &&
@@ -1061,6 +1079,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _loadedRecordingRevision = recordingRevision;
     } catch (e) {
       if (!current()) return;
+      if (keepRows && !_accessDenied(e)) {
+        // Keep the previous page usable. A subsequent request retries this window.
+        _categoryFetchInFlight = false;
+        return;
+      }
       _error = e;
       _state = GuideState.error;
       _notifyListeners();
@@ -1294,7 +1317,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _programsLoadedIds.addAll(ids);
         _programsHighWater = end;
       } else {
-        _categoryPrograms.addAll(fetched);
+        _categoryPrograms
+          ..clear()
+          ..addAll(fetched);
+        _previousWindowCategory = null;
+        _categoryFetchInFlight = false;
         _categoryQueriedIds.addAll(ids);
         _advanceCategoryCursor();
         _categoryLoadedFor = category;
@@ -1331,7 +1358,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _rebuildGroupChoices(complete: !partial || unresolved != null);
   }
 
-  void _resetPrograms() {
+  void _resetPrograms({bool keepCategoryRows = false}) {
     _advancePage();
     _programGeneration++;
     _programsByChannel.clear();
@@ -1339,7 +1366,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _failedCarouselIds.clear();
     _programsHighWater = 0;
     _processedBoundaries.clear();
-    _resetCategory();
+    _resetCategory(keepRows: keepCategoryRows);
   }
 
   /// Clears the current window's cached programs and loads its first page.
@@ -1366,6 +1393,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         !hasMorePrograms) {
       return;
     }
+    if (_showingPreviousCategory) {
+      await _reloadPrograms(keepCategoryRows: true);
+      return;
+    }
+    bool current() =>
+        !_disposed &&
+        generation == _programGeneration &&
+        pageGeneration == _pageGeneration;
     _loadingMorePage = page;
     try {
       if (_isCategory(_filter)) {
@@ -1373,10 +1408,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       } else {
         await _loadNextBatch();
       }
+      if (current() &&
+          _listingsStatePage == pageGeneration &&
+          _state == GuideState.error) {
+        if (_isCategory(_filter)) _categoryLoadedFor = _filter;
+        _listingsStatePage = null;
+        _error = null;
+        _state = GuideState.ready;
+      }
     } catch (error) {
-      if (!_disposed &&
-          generation == _programGeneration &&
-          pageGeneration == _pageGeneration) {
+      if (current()) {
+        // Let the next scroll retry. Notifying here would make the visible row
+        // request the failed page again on every rebuild.
+        if (_state == GuideState.ready &&
+            _pageChannels.any((channel) => hasProgramsFor(channel.id))) {
+          return;
+        }
         _listingsStatePage = pageGeneration;
         _error = error;
         _state = GuideState.error;
@@ -1837,6 +1884,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programGeneration++;
     _categoryRequest++;
     _categoryFetchInFlight = false;
+    _previousWindowCategory = null;
     _categoryLoadedFor = null;
     for (final id in ids) {
       _programsByChannel.remove(id);

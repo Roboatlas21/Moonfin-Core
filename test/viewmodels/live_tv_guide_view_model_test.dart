@@ -497,6 +497,77 @@ void main() {
     },
   );
 
+  for (final category in [false, true]) {
+    final view = category ? 'Sports' : 'All';
+    test(
+      'a failed later page keeps $view usable and retries the missing rows',
+      () async {
+        final size = category ? 200 : 50;
+        _stubChannels(
+          liveTv,
+          List.generate(size + 1, (i) => _channel('c$i', number: '$i')),
+        );
+        when(() => _guide(liveTv)).thenAnswer(_serverFiltered((_) => true));
+        final vm = LiveTvGuideViewModel(client);
+        addTearDown(vm.dispose);
+        await vm.load();
+        if (category) {
+          vm.setFilter(GuideFilter.sports);
+          await pumpEventQueue();
+        }
+
+        when(() => _guide(liveTv)).thenThrow(TimeoutException('listings'));
+        var notifications = 0;
+        vm.addListener(() => notifications++);
+        await vm.loadMorePrograms();
+        expect(vm.state, GuideState.ready);
+        expect(vm.error, isNull);
+        expect(vm.programsForChannel('c0').single.id, 'p-c0');
+        expect(vm.hasProgramsFor('c$size'), isFalse);
+        expect(notifications, 0);
+
+        when(() => _guide(liveTv)).thenAnswer(_serverFiltered((_) => true));
+        await vm.loadMorePrograms();
+        expect(vm.state, GuideState.ready);
+        expect(vm.hasMorePrograms, isFalse);
+        expect(vm.programsForChannel('c$size').single.id, 'p-c$size');
+      },
+    );
+  }
+
+  test('a category keeps its rows until the new window succeeds', () async {
+    _stubChannels(liveTv, [_channel('a'), _channel('b')]);
+    when(() => _guide(liveTv, category: GuideFilter.sports))
+        .thenAnswer(_serverFiltered((id) => id == 'a'));
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    vm.setFilter(GuideFilter.sports);
+    await pumpEventQueue();
+
+    final pending = Completer<Map<String, dynamic>>();
+    when(() => _guide(liveTv, category: GuideFilter.sports))
+        .thenAnswer((_) => pending.future);
+    final start = vm.windowStart.add(const Duration(minutes: 30));
+    final shift = vm.setWindowStart(start);
+    expect(vm.state, GuideState.ready);
+    expect(vm.filteredChannels.single.id, 'a');
+    expect(vm.programsForChannel('a').single.id, 'p-a');
+    await vm.loadMorePrograms();
+    pending.completeError(TimeoutException('window'));
+    await shift;
+    expect(vm.state, GuideState.ready);
+    expect(vm.filteredChannels.single.id, 'a');
+
+    when(() => _guide(liveTv, category: GuideFilter.sports))
+        .thenAnswer(_serverFiltered((id) => id == 'b'));
+    await vm.setWindowStart(start);
+    expect(vm.filteredChannels.single.id, 'b');
+    expect(vm.programsForChannel('a'), isEmpty);
+    expect(vm.programsForChannel('b').single.id, 'p-b');
+    expect(vm.hasMorePrograms, isFalse);
+  });
+
   test('clearing a failed channel search restores the loaded guide', () async {
     _stubChannels(
       liveTv,
