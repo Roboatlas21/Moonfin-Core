@@ -11,6 +11,7 @@ import 'package:server_core/server_core.dart';
 import '../../../data/models/series_recording_episodes.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../data/services/user_data_sync.dart';
+import '../../../data/services/socket_handler.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../widgets/emby_premiere_dialog.dart';
 import '../../util/error_message.dart';
@@ -99,10 +100,9 @@ class LiveTvGuideScreen extends StatefulWidget {
   /// of [Navigator] pops.
   final bool embedded;
 
-  /// Called with the selected channel id instead of `Navigator.pop(channelId)`
-  /// when [embedded]. Required for the in-player overlay; null on the standalone
-  /// route (where the pop result is used).
-  final ValueChanged<String>? onChannelSelected;
+  /// Gives the player the same user-visible lineup that produced this selection.
+  /// A channel can have been added or reordered since playback started.
+  final void Function(String, List<GuideChannel>)? onChannelSelected;
 
   /// Called when the user dismisses the embedded guide (activates the
   /// mini-player frame) instead of `Navigator.pop()`.
@@ -235,6 +235,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// One-shot timer to the next half hour. Rescheduled when it fires.
   Timer? _reanchorTimer;
   Timer? _displayClockTimer;
+  StreamSubscription<ServerWebSocketMessage>? _guideEvents;
+  StreamSubscription<void>? _guideConnections;
 
   /// When the last d-pad event arrived, or null before the first one.
   DateTime? _lastDpadEventAt;
@@ -282,12 +284,18 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _displayClockTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!mounted) return;
       setState(() {});
-      if (!widget.miniPlayerMode &&
-          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
-          (_pickerOpen || ModalRoute.of(context)?.isCurrent == true)) {
-        unawaited(_vm.refreshProgrammeCategories());
-      }
     });
+    if (_vm.supportsGroupPicker &&
+        GetIt.instance.isRegistered<SocketHandler>()) {
+      final socket = GetIt.instance<SocketHandler>();
+      _guideEvents = socket.events.listen((event) {
+        if (event is LiveTvGuideChangedMessage) unawaited(_vm.refreshGuide());
+      });
+      // A disconnected client can miss an import while the guide is open.
+      _guideConnections = socket.connections.listen(
+        (_) => unawaited(_vm.refreshGuide()),
+      );
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -895,6 +903,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     widget.backController?._onBackPressed = null;
     _reanchorTimer?.cancel();
     _displayClockTimer?.cancel();
+    _guideEvents?.cancel();
+    _guideConnections?.cancel();
     _artworkLookupDebounce?.cancel();
     _artworkPrefetchScrollDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -1620,6 +1630,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildNowNextList(List<GuideChannel> channels) {
     return ListView.builder(
+      key: ValueKey((_vm.filter, _vm.selectedGroup)),
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
       itemCount: channels.length,
       itemBuilder: (context, index) {
@@ -2758,16 +2769,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Future<void> _watchChannel(String channelId) async {
     unawaited(_prefs.set(UserPreferences.liveTvLastChannelId, channelId));
-    if (widget.embedded && widget.onChannelSelected != null) {
-      widget.onChannelSelected!(channelId);
-      return;
-    }
-    if (widget.miniPlayerMode) {
+    if (widget.embedded || widget.miniPlayerMode) {
+      widget.onChannelSelected?.call(channelId, _vm.playbackChannels);
+      if (widget.embedded) return;
       Navigator.of(context).pop(channelId);
       return;
     }
 
-    final channels = _vm.filteredChannels;
+    final channels = _vm.playbackChannels;
     final index = channels.indexWhere((channel) => channel.id == channelId);
     if (index < 0) return;
     _vm.resetWindowOnExit(windowStart: guideLeftEdge(DateTime.now()));

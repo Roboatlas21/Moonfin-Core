@@ -371,13 +371,20 @@ class _AppleTvLiveTvPlayerHostScreenState
     }
   }
 
-  Future<void> _switchChannel(String channelId) async {
+  Future<void> _switchChannel(
+    String channelId, {
+    List<GuideChannel>? lineup,
+  }) async {
     if (_switching) return;
-    final index = _syncedChannels.indexWhere((c) => c.id == channelId);
-    if (index < 0 || index == _currentIndex) return;
+    final channels = lineup ?? _syncedChannels;
+    final index = channels.indexWhere((c) => c.id == channelId);
+    if (index < 0) return;
+    final alreadyPlaying = _currentChannel.id == channelId;
+    _syncedChannels = channels;
+    _currentIndex = index;
+    if (alreadyPlaying) return;
     _switching = true;
     try {
-      _currentIndex = index;
       _readSchedule();
       _pushMetadata();
       await _playCurrentChannel();
@@ -401,6 +408,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     }
 
     String? selectedId;
+    List<GuideChannel>? lineup;
     try {
       selectedId = await Navigator.of(context).push<String>(
         MaterialPageRoute(
@@ -408,6 +416,7 @@ class _AppleTvLiveTvPlayerHostScreenState
             miniPlayerMode: true,
             currentChannel: _currentChannel,
             appleTvTextureId: _guideTexture,
+            onChannelSelected: (_, channels) => lineup = channels,
           ),
         ),
       );
@@ -418,7 +427,7 @@ class _AppleTvLiveTvPlayerHostScreenState
 
     if (!mounted || _exiting) return;
     await backend.resumePlayer();
-    if (selectedId != null) await _switchChannel(selectedId);
+    if (selectedId != null) await _switchChannel(selectedId, lineup: lineup);
   }
 
   /// The recording dialogs are the Flutter player's own, so the native player

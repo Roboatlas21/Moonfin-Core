@@ -2,17 +2,14 @@ import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 import 'package:test/test.dart';
 
-Dio fixture(int status, {Object? body, bool revisionOnly = false}) {
+Dio fixture(int status, {Object? body}) {
   final dio = Dio();
   dio.interceptors.add(
     InterceptorsWrapper(
       onRequest: (request, handler) {
         expect(request.method, 'GET');
         expect(request.path, '/Moonfin/LiveTv/ChannelGroups');
-        expect(
-          request.queryParameters,
-          revisionOnly ? {'guideRevisionOnly': true} : isEmpty,
-        );
+        expect(request.queryParameters, isEmpty);
         final response = Response(
           requestOptions: request,
           data: body,
@@ -36,21 +33,6 @@ Dio fixture(int status, {Object? body, bool revisionOnly = false}) {
 }
 
 void main() {
-  test('the revision check accepts a task-status-only response', () async {
-    expect(
-      await ChannelGroupLineup.fetchGuideRevision(
-        fixture(200, body: {'guideRevision': '42'}, revisionOnly: true),
-      ),
-      '42',
-    );
-    expect(
-      await ChannelGroupLineup.fetchGuideRevision(
-        fixture(404, revisionOnly: true),
-      ),
-      isNull,
-    );
-  });
-
   test(
     'reads exact labels, removes blanks and preserves partial results',
     () async {

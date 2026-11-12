@@ -1346,7 +1346,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   void _warmChannelCarousel() {
-    if (!PlatformDetection.isTV || widget.channels.length < 2) return;
+    if (!PlatformDetection.isTV || _syncedChannels.length < 2) return;
     final prewarm = _carouselPrewarm ??= ChannelCarouselPrewarm(_client);
     prewarm.tuned(_syncedChannels, _currentChannel.id);
   }
@@ -1406,7 +1406,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   Future<void> _onCarouselChannelSelected(String channelId) async {
-    final selectedIndex = widget.channels.indexWhere(
+    final selectedIndex = _syncedChannels.indexWhere(
       (channel) => channel.id == channelId,
     );
     if (selectedIndex < 0 || !_isCarouselOpen) return;
@@ -1826,15 +1826,20 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     }
   }
 
-  Future<void> _onGuideChannelSelected(String channelId) async {
+  Future<void> _onGuideChannelSelected(
+    String channelId,
+    List<GuideChannel> lineup,
+  ) async {
     _closeGuideOverlay();
-    if (channelId == _currentChannel.id) return;
-    final selectedIndex = widget.channels.indexWhere(
-      (channel) => channel.id == channelId,
-    );
-    if (selectedIndex >= 0) {
-      await _switchChannel(selectedIndex);
-    }
+    if (_isSwitching) return;
+    final index = lineup.indexWhere((channel) => channel.id == channelId);
+    if (index < 0) return;
+    final alreadyPlaying = _currentChannel.id == channelId;
+    setState(() {
+      _syncedChannels = lineup;
+      _currentIndex = index;
+    });
+    if (!alreadyPlaying) await _switchChannel(index);
   }
 
   Future<void> _exitPlayback() async {
@@ -1973,7 +1978,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
               ? 1
               : -1;
           // Follows the guide's order, like the carousel, and wraps around.
-          final next = (_currentIndex + delta) % widget.channels.length;
+          final next = (_currentIndex + delta) % _syncedChannels.length;
           if (next != _currentIndex) unawaited(_switchChannel(next));
         }
         return KeyEventResult.handled;

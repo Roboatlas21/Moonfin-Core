@@ -21,6 +21,13 @@ class WebSocketMessageParser {
     }
 
     return switch (type) {
+      'LibraryChanged'
+          when data is Map && data['MoonfinLiveTvGuideChanged'] == true =>
+        const LiveTvGuideChangedMessage(),
+      'MoonfinEvent'
+          when data is Map &&
+              (data['type'] ?? data['Type']) == 'liveTvGuideChanged' =>
+        const LiveTvGuideChangedMessage(),
       'LibraryChanged' => _parseLibraryChanged(data),
       'UserDataChanged' => _parseUserDataChanged(data),
       'Play' => _parsePlay(data),

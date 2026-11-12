@@ -150,7 +150,6 @@ void main() {
       api = _GroupedLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);
       when(() => client.baseUrl).thenReturn('fixture');
-      when(api.getGuideRevision).thenAnswer((_) async => revision);
       when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
       vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);
@@ -172,42 +171,37 @@ void main() {
         await vm.load();
         revision = '2';
         when(() => _guide(api)).thenThrow(TimeoutException('guide'));
-        await vm.refreshProgrammeCategories();
+        await vm.refreshGuide();
         expect(vm.state, GuideState.ready);
         expect(vm.programsForChannel('one').single.name, 'old');
         show('new');
-        await vm.refreshProgrammeCategories();
+        await vm.refreshGuide();
         expect(vm.programsForChannel('one').single.name, 'new');
-        verify(api.getChannelGroups).called(2);
+        verify(api.getChannelGroups).called(3);
       },
     );
 
-    test(
-      'Now keeps its group when an import finishes after the channel lookup',
-      () async {
-        _stubChannels(api, [_channel('old')]);
-        when(api.getChannelGroups).thenAnswer(
-          (_) async => const ChannelGroupLineup({
-            'old': {'Canadian'},
-          }, guideRevision: '1'),
-        );
-        await vm.load();
-        vm.setGroup('Canadian');
-        final metadata = Completer<ChannelGroupLineup>();
-        when(api.getChannelGroups).thenAnswer((_) => metadata.future);
-        await vm.goToNow();
-        revision = '2';
-        _stubChannels(api, [_channel('new')]);
-        metadata.complete(
-          const ChannelGroupLineup({
-            'new': {'Canadian'},
-          }, guideRevision: '2'),
-        );
-        await Future<void>.delayed(Duration.zero);
-        expect(vm.selectedGroup, 'Canadian');
-        expect(vm.filteredChannels.single.id, 'new');
-      },
-    );
+    test('Now uses the loaded channels while a server notification refreshes their IDs', () async {
+      _stubChannels(api, [_channel('old')]);
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'old': {'Canadian'},
+        }),
+      );
+      await vm.load();
+      vm.setGroup('Canadian');
+      await vm.goToNow();
+      verify(api.getChannelGroups).called(1);
+      _stubChannels(api, [_channel('new')]);
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'new': {'Canadian'},
+        }),
+      );
+      await vm.refreshGuide();
+      expect(vm.selectedGroup, 'Canadian');
+      expect(vm.filteredChannels.single.id, 'new');
+    });
 
     test('an old All failure leaves the selected group ready', () async {
       _stubChannels(
@@ -260,7 +254,7 @@ void main() {
             guideRevision: '2',
           ),
         );
-        await vm.refreshProgrammeCategories();
+        await vm.refreshGuide();
         expect(vm.availableGroups, ['UK']);
         expect(vm.selectedGroup, isNull);
         vm.setGroup('UK');
@@ -268,25 +262,8 @@ void main() {
       },
     );
 
-    test('polls only the revision while an import is pending', () async {
-      _stubChannels(api, [_channel('one')]);
-      revision = 'pending';
-      when(api.getChannelGroups).thenAnswer(
-        (_) async =>
-            ChannelGroupLineup({}, partial: true, guideRevision: revision),
-      );
-      await vm.load();
-      for (var i = 0; i < 10; i++) {
-        await vm.refreshProgrammeCategories();
-      }
-      verify(api.getChannelGroups).called(1);
-      revision = '2';
-      await vm.refreshProgrammeCategories();
-      verify(api.getChannelGroups).called(1);
-    });
-
     test(
-      'a date change during Now keeps the new window and revision polling',
+      'a date change during a lineup refresh keeps the new window',
       () async {
         _stubChannels(api, [_channel('one')]);
         when(api.getChannelGroups).thenAnswer(
@@ -305,7 +282,7 @@ void main() {
             userId: any(named: 'userId'),
           ),
         ).thenAnswer((_) => channels.future);
-        final pending = vm.goToNow();
+        final pending = vm.refreshGuide();
         final tomorrow = vm.guideDate.add(const Duration(days: 1));
         await vm.setDate(tomorrow);
         channels.complete({
@@ -313,7 +290,7 @@ void main() {
         });
         await pending;
         revision = '2';
-        await vm.refreshProgrammeCategories();
+        await vm.refreshGuide();
         expect(vm.availableGroups, ['2']);
         expect(vm.guideDate, tomorrow);
         expect(vm.atLivePosition, isFalse);
@@ -335,7 +312,7 @@ void main() {
       _stubChannels(api, [_channel('new'), _channel('outside')]);
       final membership = Completer<ChannelGroupLineup>();
       when(api.getChannelGroups).thenAnswer((_) => membership.future);
-      final refresh = vm.refreshProgrammeCategories();
+      final refresh = vm.refreshGuide();
       await Future<void>.delayed(Duration.zero);
       expect(vm.filteredChannels.single.id, 'old');
       membership.complete(
@@ -352,33 +329,109 @@ void main() {
       expect(vm.atLivePosition, isFalse);
     });
 
-    test(
-      'defers a group change when a second import overtakes the lookup',
-      () async {
-        _stubChannels(api, [_channel('old')]);
-        when(api.getChannelGroups).thenAnswer(
-          (_) async => const ChannelGroupLineup({
-            'old': {'Canadian'},
-          }, guideRevision: '1'),
-        );
-        await vm.load();
-        vm.setGroup('Canadian');
-        revision = '2';
-        _stubChannels(api, [_channel('intermediate')]);
-        when(api.getChannelGroups).thenAnswer(
-          (_) async => const ChannelGroupLineup({
-            'new': {'Canadian'},
-          }, guideRevision: '3'),
-        );
-        await vm.refreshProgrammeCategories();
-        expect(vm.selectedGroup, 'Canadian');
-        expect(vm.filteredChannels.single.id, 'old');
-        revision = '3';
-        _stubChannels(api, [_channel('new')]);
-        await vm.refreshProgrammeCategories();
-        expect(vm.filteredChannels.single.id, 'new');
-      },
-    );
+    test('a newer notification supersedes an earlier lineup read', () async {
+      _stubChannels(api, [_channel('old')]);
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'old': {'Canadian'},
+        }),
+      );
+      await vm.load();
+      vm.setGroup('Canadian');
+      final slow = Completer<ChannelGroupLineup>();
+      when(api.getChannelGroups).thenAnswer((_) => slow.future);
+      final first = vm.refreshGuide();
+      await Future<void>.delayed(Duration.zero);
+      _stubChannels(api, [_channel('new')]);
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'new': {'Canadian'},
+        }),
+      );
+      await vm.refreshGuide();
+      slow.complete(const ChannelGroupLineup({}));
+      await first;
+      expect(vm.selectedGroup, 'Canadian');
+      expect(vm.filteredChannels.single.id, 'new');
+    });
+
+    test('paging while the guide refreshes keeps the new page', () async {
+      _stubChannels(
+        api,
+        List.generate(120, (i) => _channel('c$i', number: '$i')),
+      );
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => ChannelGroupLineup({}, guideRevision: revision),
+      );
+      Future<Map<String, dynamic>> result(Invocation inv) async => {
+        'Items': [for (final id in _requestedIds(inv)) _program(id, id)],
+      };
+      when(() => _guide(api)).thenAnswer(result);
+      await vm.load();
+      revision = '2';
+      final delayed = Completer<Map<String, dynamic>>();
+      when(() => _guide(api)).thenAnswer(
+        (inv) =>
+            _requestedIds(inv).contains('c0') ? delayed.future : result(inv),
+      );
+      final updating = vm.refreshGuide();
+      await Future<void>.delayed(Duration.zero);
+      await vm.loadMorePrograms();
+      expect(vm.programsHighWater, 100);
+      expect(vm.hasProgramsFor('c80'), true);
+      delayed.complete({'Items': []});
+      await updating;
+      expect(vm.hasProgramsFor('c80'), true);
+    });
+    test('import notification replaces first-open listings even when all channel IDs match', () async {
+      _stubChannels(api, [_channel('one')]);
+      final oldGroups = Completer<ChannelGroupLineup>();
+      when(api.getChannelGroups).thenAnswer((_) => oldGroups.future);
+      when(() => _guide(api)).thenAnswer(
+        (_) async => {
+          'Items': [_program('Old show', 'one')],
+        },
+      );
+      await vm.load();
+      expect(vm.programsForChannel('one').single.name, 'Old show');
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'one': {'Canada'},
+        }),
+      );
+      when(() => _guide(api)).thenAnswer(
+        (_) async => {
+          'Items': [_program('New show', 'one')],
+        },
+      );
+      await vm.refreshGuide();
+      oldGroups.complete(
+        const ChannelGroupLineup({
+          'one': {'UK'},
+        }),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.programsForChannel('one').single.name, 'New show');
+      expect(vm.availableGroups, ['Canada']);
+    });
+
+    test('a new time window updates the channels in Sports', () async {
+      _stubChannels(api, [_channel('a'), _channel('b')]);
+      when(api.getChannelGroups).thenAnswer(
+        (_) async =>
+            const ChannelGroupLineup({}, programmeCategories: {'sports'}),
+      );
+      var sportsChannel = 'a';
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer(_serverFiltered((id) => id == sportsChannel));
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.filteredChannels.single.id, 'a');
+      sportsChannel = 'b';
+      await vm.setWindowStart(vm.windowStart.add(const Duration(hours: 3)));
+      expect(vm.filteredChannels.single.id, 'b');
+    });
 
     for (final leaveSports in [false, true]) {
       test(
@@ -402,7 +455,7 @@ void main() {
           if (leaveSports) vm.setFilter(GuideFilter.all);
           revision = '2';
           sports = 'two';
-          await vm.refreshProgrammeCategories();
+          await vm.refreshGuide();
           vm.setFilter(GuideFilter.sports);
           await Future<void>.delayed(Duration.zero);
           expect(vm.filteredChannels.single.id, 'two');
@@ -430,9 +483,8 @@ void main() {
             'b': {'Canada'},
           }, guideRevision: revision),
         );
-        await vm.refreshProgrammeCategories();
+        await vm.refreshGuide();
         expect(vm.availableGroups, ['Canada', 'US']);
-        await vm.refreshProgrammeCategories();
         verify(api.getChannelGroups).called(2);
       },
     );
@@ -524,9 +576,8 @@ void main() {
     expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
 
     final oldReply = Completer<ChannelGroupLineup>();
-    when(grouped.getGuideRevision).thenAnswer((_) async => '2');
     when(grouped.getChannelGroups).thenAnswer((_) => oldReply.future);
-    final refresh = vm.refreshProgrammeCategories();
+    final refresh = vm.refreshGuide();
     await Future<void>.delayed(Duration.zero);
     when(() => client.userId).thenReturn('other-user');
     reply(const ChannelGroupLineup({}, guideRevision: 'pending'));
@@ -688,14 +739,14 @@ void main() {
       vm.setGroup('Canadian');
 
       when(api.getChannelGroups).thenThrow(TimeoutException('lineup'));
-      await vm.goToNow();
+      await vm.load();
       expect(vm.filteredChannels.map((c) => c.id), ['old']);
       expect(vm.selectedGroup, 'Canadian');
 
       _stubChannels(api, [_channel('new'), _channel('outside')]);
       final pending = Completer<ChannelGroupLineup>();
       when(api.getChannelGroups).thenAnswer((_) => pending.future);
-      await vm.goToNow();
+      await vm.load();
       expect(vm.selectedGroup, 'Canadian');
       expect(vm.availableGroups, contains('Canadian'));
       expect(vm.filteredChannels, isEmpty);
@@ -714,7 +765,7 @@ void main() {
           'new': {'Canadian'},
         }),
       );
-      await vm.goToNow();
+      await vm.load();
       expect(vm.selectedGroup, 'Canadian');
       expect(vm.filteredChannels.map((c) => c.id), ['new']);
       await Future<void>.delayed(Duration.zero);
@@ -725,7 +776,7 @@ void main() {
           'outside': {'News'},
         }),
       );
-      await vm.goToNow();
+      await vm.load();
       expect(vm.selectedGroup, isNull);
       expect(vm.availableGroups, ['News']);
       expect(vm.filteredChannels.map((c) => c.id), ['new', 'outside']);
@@ -751,7 +802,7 @@ void main() {
       vm.setGroup('old group');
       final pending = Completer<ChannelGroupLineup>();
       when(grouped.getChannelGroups).thenAnswer((_) => pending.future);
-      await vm.goToNow();
+      await vm.load();
       expect(vm.selectedGroup, 'old group');
       when(() => client.userId).thenReturn('other');
       when(grouped.getChannelGroups).thenThrow(StateError('forbidden'));

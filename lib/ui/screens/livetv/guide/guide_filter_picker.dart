@@ -36,6 +36,7 @@ typedef _Row = ({
 });
 
 class _GuideFilterPickerState extends State<GuideFilterPicker> {
+  final _searchFieldKey = GlobalKey();
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   ScrollController? _scroll;
@@ -122,6 +123,23 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    final compact =
+        !widget.sidePanel &&
+        keyboard > 0 &&
+        MediaQuery.sizeOf(context).height - keyboard < 240;
+    final search = LocalSearchField(
+      key: _searchFieldKey,
+      controller: _search,
+      focusNode: _searchFocus,
+      hint: widget.includeCategories
+          ? l10n.guideSearchGroupsAndCategories
+          : l10n.guideSearchGroups,
+      onChanged: (value) {
+        setState(() => _query = value.trim().toLowerCase());
+        if (_scroll?.hasClients == true) _scroll!.jumpTo(0);
+      },
+    );
     return Focus(
       canRequestFocus: false,
       onKeyEvent: (_, event) {
@@ -142,7 +160,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
               12,
               8,
               12,
-              8 + MediaQuery.viewInsetsOf(context).bottom,
+              (compact ? 0 : 8) + keyboard,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -151,27 +169,21 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                   children: [
                     if (!widget.sidePanel) const BackButton(),
                     Expanded(
-                      child: Text(
-                        l10n.guideBrowse,
-                        style: Theme.of(context).textTheme.titleLarge,
-                        overflow: TextOverflow.ellipsis,
-                      ),
+                      child: compact
+                          ? search
+                          : Text(
+                              l10n.guideBrowse,
+                              style: Theme.of(context).textTheme.titleLarge,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                LocalSearchField(
-                  controller: _search,
-                  focusNode: _searchFocus,
-                  hint: widget.includeCategories
-                      ? l10n.guideSearchGroupsAndCategories
-                      : l10n.guideSearchGroups,
-                  onChanged: (value) {
-                    setState(() => _query = value.trim().toLowerCase());
-                    if (_scroll?.hasClients == true) _scroll!.jumpTo(0);
-                  },
-                ),
-                const SizedBox(height: 8),
+                if (!compact) ...[
+                  const SizedBox(height: 8),
+                  search,
+                  const SizedBox(height: 8),
+                ],
                 Expanded(
                   child: ListenableBuilder(
                     listenable: widget.vm,
