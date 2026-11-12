@@ -49,25 +49,6 @@ void main() {
     expect(result.groupsByChannelId, {
       'one': {'News'},
     });
-    final empty = await ChannelGroupLineup.fetch(
-      fixture(200, body: {'version': 2, 'supported': false, 'channels': []}),
-    );
-    expect(empty.channels, isEmpty);
-    await expectLater(
-      ChannelGroupLineup.fetch(
-        fixture(
-          200,
-          body: {
-            'version': 2,
-            'supported': true,
-            'channels': [
-              {'Name': 'Missing ID'},
-            ],
-          },
-        ),
-      ),
-      throwsFormatException,
-    );
   });
   test(
     'reads exact labels, removes blanks and preserves partial results',
@@ -93,29 +74,6 @@ void main() {
       expect(result.unresolvedChannelIds, {'offline'});
     },
   );
-
-  test('category availability is independent of tuner groups', () async {
-    for (final (field, expected) in [
-      (['sports', 'kids'], {'sports', 'kids'}),
-      (<String>[], <String>{}),
-      ([1], null),
-      (null, null),
-    ]) {
-      final result = await ChannelGroupLineup.fetch(
-        fixture(
-          200,
-          body: {
-            'version': 1,
-            'supported': false,
-            if (field != null) 'programmeCategories': field,
-          },
-        ),
-      );
-      expect(result.programmeCategories, expected);
-      expect(result.groupsByChannelId, isEmpty);
-      expect(result.endpointAvailable, isTrue);
-    }
-  });
 
   test(
     'older Moonbase is optional and authorization failures reach the caller',

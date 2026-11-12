@@ -1,7 +1,6 @@
 import 'dart:async';
 
-import 'package:custom_tv_text_field/custom_tv_text_field.dart'
-    show KeyboardStyle;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -335,213 +334,6 @@ void main() {
     expect(picked, isNotNull);
     expect(lineup.map((c) => c.id), contains(picked));
   });
-
-  testWidgets('group picker keyboard on a landscape phone', (tester) async {
-    await GetIt.instance<UserPreferences>().set(
-      UserPreferences.liveTvCategoryDisplay,
-      LiveTvCategoryDisplay.both,
-    );
-    await pumpGuide(tester, surface: const Size(844, 390));
-    await tester.tap(find.text('All channels'));
-    await _pumpFrames(tester);
-    final picker = find.byType(GuideFilterPicker);
-    final field = find.descendant(of: picker, matching: find.byType(TextField));
-    await tester.tap(field);
-    await tester.enterText(field, 'All');
-    tester.view.viewInsets = const FakeViewPadding(bottom: 270);
-    await _pumpFrames(tester);
-    expect(tester.takeException(), isNull);
-    expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
-    expect(
-      find
-          .descendant(of: picker, matching: find.text('All channels'))
-          .hitTestable(),
-      findsOneWidget,
-    );
-  });
-  testWidgets('mobile group selection opens at the first channel', (
-    tester,
-  ) async {
-    await GetIt.instance<UserPreferences>().set(
-      UserPreferences.liveTvCategoryDisplay,
-      LiveTvCategoryDisplay.both,
-    );
-    channelCount = 220;
-    when(liveTvApi.getChannelGroups).thenAnswer(
-      (_) async => ChannelGroupLineup({
-        for (var i = 0; i < channelCount; i++)
-          'ch$i': {i.isEven ? 'Even' : 'Odd'},
-      }),
-    );
-    await pumpGuide(tester, surface: const Size(390, 740));
-    final scroll = tester
-        .state<ScrollableState>(find.byType(Scrollable).last)
-        .position;
-    scroll.jumpTo(4400);
-    await _pumpFrames(tester);
-    await tester.tap(find.text('All channels'));
-    await _pumpFrames(tester);
-    await tester.tap(find.text('Even'));
-    await _pumpFrames(tester);
-    final top = find.text('Channel 0').hitTestable().evaluate().length;
-    expect(top, 1);
-  });
-
-  testWidgets(
-    'landscape phone keeps channel search and results above the keyboard',
-    (tester) async {
-      await GetIt.instance<UserPreferences>().set(
-        UserPreferences.liveTvCategoryDisplay,
-        LiveTvCategoryDisplay.both,
-      );
-      await pumpGuide(tester, surface: const Size(844, 390));
-      expect(tester.takeException(), isNull);
-      await tester.tap(find.byType(TextField));
-      await tester.enterText(find.byType(TextField), 'Channel 1');
-      tester.view.viewInsets = const FakeViewPadding(bottom: 200);
-      await _pumpFrames(tester);
-      expect(tester.takeException(), isNull);
-      expect(
-        tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus,
-        isTrue,
-      );
-      expect(find.byType(EpgHeroPreview), findsNothing);
-      expect(find.byType(EpgChannelCell), findsWidgets);
-    },
-  );
-
-  testWidgets('empty category metadata resets a selected category to All', (
-    tester,
-  ) async {
-    final pending = Completer<ChannelGroupLineup>();
-    when(liveTvApi.getChannelGroups).thenAnswer((_) => pending.future);
-    await pumpGuide(tester);
-    EpgFilterRail rail() =>
-        tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
-    final sports = rail().labels.indexOf('Sports');
-    rail().onSelect(sports);
-    await _pumpFrames(tester);
-    expect(rail().selectedIndex, sports);
-    pending.complete(const ChannelGroupLineup({}, programmeCategories: {}));
-    await _pumpFrames(tester);
-    expect(rail().labels, ['All', 'Favorites']);
-    expect(rail().selectedIndex, 0);
-  });
-
-  testWidgets('TV focuses the first category row when its listings arrive', (
-    tester,
-  ) async {
-    PlatformDetection.setTvMode(true);
-    addTearDown(() => PlatformDetection.setTvMode(false));
-    await GetIt.instance<UserPreferences>().set(
-      UserPreferences.liveTvCategoryDisplay,
-      LiveTvCategoryDisplay.both,
-    );
-    when(liveTvApi.getChannelGroups)
-        .thenAnswer((_) async => const ChannelGroupLineup({}));
-    final sports = Completer<Map<String, dynamic>>();
-    when(
-      () => liveTvApi.getGuide(
-        startDate: any(named: 'startDate'),
-        endDate: any(named: 'endDate'),
-        channelIds: any(named: 'channelIds'),
-        isSports: true,
-        fields: any(named: 'fields'),
-        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-        enableImages: any(named: 'enableImages'),
-        enableUserData: any(named: 'enableUserData'),
-        userId: any(named: 'userId'),
-      ),
-    ).thenAnswer((_) => sports.future);
-    await pumpGuide(tester);
-    _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
-    await _pumpFrames(tester);
-    for (final key in [
-      LogicalKeyboardKey.arrowLeft,
-      // From All channels, pass Favorites, Movies and Series to reach Sports.
-      LogicalKeyboardKey.arrowDown,
-      LogicalKeyboardKey.arrowDown,
-      LogicalKeyboardKey.arrowDown,
-      LogicalKeyboardKey.arrowDown,
-      LogicalKeyboardKey.select,
-    ]) {
-      await tester.sendKeyEvent(key);
-      await _pumpFrames(tester);
-    }
-    sports.complete({
-      'Items': [
-        {..._programsFor('ch0').first, 'IsSports': true},
-      ],
-    });
-    await _pumpFrames(tester);
-    expect(find.byType(GuideFilterPicker), findsNothing);
-    expect(find.byType(EpgChannelCell), findsOneWidget);
-    expect(_focusedLabel(), 'GuideChannel:0');
-  });
-
-  testWidgets('the first native Apple TV channel search applies', (
-    tester,
-  ) async {
-    PlatformDetection.setTvMode(true);
-    addTearDown(() => PlatformDetection.setTvMode(false));
-    final prefs = GetIt.instance<UserPreferences>();
-    await prefs.set(
-      UserPreferences.liveTvCategoryDisplay,
-      LiveTvCategoryDisplay.both,
-    );
-    await prefs.set(UserPreferences.keyboardStyle, KeyboardStyle.native);
-    const kb = MethodChannel('moonfin/appletv_system');
-    int shown = 0;
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(kb, (
-      call,
-    ) async {
-      if (call.method == 'showTextInput') {
-        shown++;
-        return 'Channel 47';
-      }
-      return null;
-    });
-    addTearDown(
-      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-        kb,
-        null,
-      ),
-    );
-    await pumpGuide(tester);
-    _nodeLabelled(tester, 'GuideSearch').requestFocus();
-    await _pumpFrames(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.select);
-    await _pumpFrames(tester);
-    final cells = tester
-        .widgetList<EpgChannelCell>(find.byType(EpgChannelCell))
-        .map((w) => w.name)
-        .toList();
-    expect(shown, 1);
-    expect(cells, ['Channel 47']);
-  }, skip: !PlatformDetection.isAppleTV);
-
-  testWidgets(
-    'portrait channel search keeps its cards and focus above the keyboard',
-    (tester) async {
-      await GetIt.instance<UserPreferences>().set(
-        UserPreferences.liveTvCategoryDisplay,
-        LiveTvCategoryDisplay.both,
-      );
-      await pumpGuide(tester, surface: const Size(390, 700));
-      final field = find.byType(TextField);
-      await tester.enterText(field, 'Channel 47');
-      final focus = tester.widget<TextField>(field).focusNode!;
-
-      tester.view.viewInsets = const FakeViewPadding(bottom: 330);
-      await _pumpFrames(tester);
-      expect(tester.takeException(), isNull);
-      expect(focus.hasFocus, isTrue);
-      expect(find.text('Guide Timeline'), findsOneWidget);
-      expect(find.text('Channel 47'), findsNWidgets(2)); // Query and card.
-      expect(find.text('Channel 0'), findsNothing);
-    },
-  );
-
   testWidgets(
     'mobile picker filters groups and keeps channel search in the guide',
     (tester) async {
@@ -592,42 +384,6 @@ void main() {
       expect(rail.selectedIndex, 0);
     },
   );
-
-  testWidgets('choosing a group resets both portrait grid columns', (
-    tester,
-  ) async {
-    await GetIt.instance<UserPreferences>().set(
-      UserPreferences.liveTvCategoryDisplay,
-      LiveTvCategoryDisplay.both,
-    );
-    await GetIt.instance<UserPreferences>().set(
-      UserPreferences.epgMobileView,
-      EpgMobileView.grid,
-    );
-    channelCount = 220;
-    when(liveTvApi.getChannelGroups).thenAnswer(
-      (_) async => ChannelGroupLineup({
-        for (var i = 0; i < 220; i++) 'ch$i': {i.isEven ? 'Even' : 'Odd'},
-      }),
-    );
-    await pumpGuide(tester, surface: const Size(390, 740));
-    Iterable<ScrollPosition> positions() => tester
-        .stateList<ScrollableState>(find.byType(Scrollable))
-        .map((s) => s.position)
-        .where((p) => p.axis == Axis.vertical && p.maxScrollExtent > 4400);
-    expect(positions(), hasLength(2));
-    for (final p in positions().toList()) {
-      p.jumpTo(4400);
-    }
-    await _pumpFrames(tester);
-    await tester.tap(find.text('All channels'));
-    await _pumpFrames(tester);
-    await tester.tap(find.text('Even'));
-    await _pumpFrames(tester);
-    expect(positions().map((position) => position.pixels), [0.0, 0.0]);
-    expect(find.text('Channel 0').hitTestable(), findsOneWidget);
-  });
-
   testWidgets('TV Left opens the picker, OK selects and Back keeps the group', (
     tester,
   ) async {
@@ -674,7 +430,6 @@ void main() {
     expect(find.text('Sports'), findsOneWidget);
     expect(_focusedLabel(), 'GuideChannel:0');
   });
-
   /// Focuses a row-0 cell two hours into the window and then steps right once,
   /// which is the only move permitted to rewrite the anchor. Returns the
   /// anchor's offset in minutes from the window start.

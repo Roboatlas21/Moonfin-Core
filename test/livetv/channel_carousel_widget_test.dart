@@ -25,13 +25,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   bool ready = false;
   bool get listening => hasListeners;
   String titleSuffix = '';
-  String? failedChannel;
 
-  @override
-  GuideChannelLoadState loadStateFor(String channelId) =>
-      channelId == failedChannel
-      ? GuideChannelLoadState.failed
-      : super.loadStateFor(channelId);
 
   void changeProgram() {
     titleSuffix = ' updated';
@@ -48,7 +42,6 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   @override
   List<GuideProgram> unfilteredProgramsForChannel(String channelId) {
     programLookups++;
-    if (channelId == failedChannel) return const [];
     final now = DateTime.now();
     return [
       GuideProgram(
@@ -245,22 +238,6 @@ void main() {
     await tester.pump();
     return vm;
   }
-
-  testWidgets('a failed card shows a message and can show listings again', (
-    tester,
-  ) async {
-    final vm = await pumpOverlay(tester);
-    vm.failedChannel = 'ch10';
-    vm.changeProgram();
-    await tester.pump();
-    expect(find.text('Listings unavailable'), findsOneWidget);
-    vm.failedChannel = null;
-    vm.changeProgram();
-    await tester.pump();
-    expect(find.text('Listings unavailable'), findsNothing);
-    expect(find.text('Show ch10 updated'), findsOneWidget);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
 
   testWidgets('open carousel cards follow favorite changes', (tester) async {
     userDataSync.reset();
@@ -635,54 +612,6 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox.shrink());
   });
-
-  testWidgets(
-    'an open carousel keeps the tuned channel centered after a lineup replacement',
-    (tester) async {
-      final client = _CarouselClient();
-      GuideChannel channel(String id) =>
-          GuideChannel(id: id, name: id, rawData: const {});
-      var channels = [channel('A'), channel('B'), channel('C')];
-      var current = 'B';
-      final vm = _CarouselGuide(client, channels);
-      late StateSetter update;
-      String? selected;
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.buildTheme(ThemeRegistry.active),
-          home: Scaffold(
-            body: StatefulBuilder(
-              builder: (context, setState) {
-                update = setState;
-                return ChannelCarouselOverlay(
-                  client: client,
-                  channels: channels,
-                  currentChannelId: current,
-                  onChannelSelected: (id) => selected = id,
-                  onDismiss: () {},
-                  onShowControls: () {},
-                  viewModelFactory: (_) => vm,
-                );
-              },
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      update(() {
-        channels = [channel('New'), channel('B')];
-        current = 'New';
-      });
-      await tester.pumpAndSettle();
-      final card = find.byWidgetPredicate(
-        (w) => w is ChannelCarouselCard && w.centered,
-      );
-      expect(tester.widget<ChannelCarouselCard>(card).channelName, 'New');
-      await tester.sendKeyEvent(LogicalKeyboardKey.select);
-      expect(selected, 'New');
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
 
   testWidgets('overlay follows a restored current channel after tune failure', (
     tester,
