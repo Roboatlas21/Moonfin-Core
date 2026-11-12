@@ -363,7 +363,7 @@ void main() {
     expect(vm.listening, isFalse);
   });
 
-  testWidgets('prewarm loads the playback lineup and arms its boundary', (
+  testWidgets('prewarm loads listings near the tuned channel', (
     tester,
   ) async {
     final client = _CarouselClient();
@@ -389,9 +389,8 @@ void main() {
     await tester.pump();
 
     expect(vm.requests, hasLength(1));
-    expect(vm.requests.single, [
-      for (var i = 0; i < channels.length; i++) 'ch$i',
-    ]);
+    expect(vm.requests.single, [for (var i = 2; i <= 10; i++) 'ch$i']);
+    expect(vm.playbackChannels, channels);
     await prewarm.ensureVisibleChannels(
       carouselNeighborhood(channels, 'ch0', 5),
     );

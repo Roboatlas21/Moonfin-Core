@@ -29,6 +29,8 @@ private let carouselInactivity: TimeInterval = 120
 /// Flutter overlay, so the two surfaces behave the same way.
 @MainActor
 final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayerNavigable {
+    var onVisibleChannelsChanged: (([String]) -> Void)?
+    private var lastVisibleIds: [String] = []
     var onChannelSelected: ((String) -> Void)?
 
     /// DOWN leaves the carousel and hands the player its controls.
@@ -300,10 +302,17 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
 
     private func bindCards() {
         guard count > 0 else { return }
+        var visibleIds: [String] = []
         for (slot, card) in cards.enumerated() {
             let offset = slot - halfSpan
             let index = CarouselIndex.channelIndex(for: centerIndex + offset, count: count)
-            card.configure(entries[index], centered: offset == 0)
+            let entry = entries[index]
+            card.configure(entry, centered: offset == 0)
+            if !visibleIds.contains(entry.channelId) { visibleIds.append(entry.channelId) }
+        }
+        if visibleIds != lastVisibleIds {
+            lastVisibleIds = visibleIds
+            onVisibleChannelsChanged?(visibleIds)
         }
     }
 

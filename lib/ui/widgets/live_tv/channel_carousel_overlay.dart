@@ -56,7 +56,7 @@ List<String> carouselNeighborhood(
 /// entries a closed overlay could produce are mostly placeholders that the
 /// neighbourhood fetch invalidates a moment later anyway.
 class ChannelCarouselPrewarm {
-  /// Wait for channel surfing to settle before loading the lineup’s listings.
+  /// Wait for channel surfing to settle before loading the tuned channel’s listings.
   static const Duration settleDelay = Duration(seconds: 1);
 
   final LiveTvGuideViewModel viewModel;
@@ -67,6 +67,7 @@ class ChannelCarouselPrewarm {
   Timer? _hourlyTimer;
   DateTime? _hourlyDueAt;
   Future<void>? _inFlight;
+  String _tunedChannelId = '';
   bool _warmPending = false;
   bool _hourlyPending = false;
   bool _disposed = false;
@@ -101,9 +102,10 @@ class ChannelCarouselPrewarm {
   @visibleForTesting
   DateTime? get hourlyDueAt => _hourlyDueAt;
 
-  /// Warm the entire playback lineup once channel surfing settles.
+  /// Warm the cards around the tuned channel once channel surfing settles.
   void tuned(List<GuideChannel> channels, String channelId) {
     if (_disposed) return;
+    _tunedChannelId = channelId;
     viewModel.usePlaybackLineup(channels);
     _timer?.cancel();
     if (channels.isNotEmpty) _timer = Timer(settleDelay, _requestWarm);
@@ -121,7 +123,11 @@ class ChannelCarouselPrewarm {
   Future<void> _warm() async {
     final channels = viewModel.playbackChannels;
     if (_disposed || channels.isEmpty) return;
-    final ids = channels.map((channel) => channel.id).toSet().toList();
+    final ids = carouselNeighborhood(
+      channels,
+      _tunedChannelId,
+      _defaultVisibleCards,
+    );
     final wasCold = !isWarm;
     await _runExclusive(() async {
       await _warmPrograms(ids);

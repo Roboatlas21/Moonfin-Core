@@ -97,6 +97,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   /// Holds the lineup's schedule for the header and the channel list, and
   /// refreshes it on a program boundary and once an hour.
   ChannelCarouselPrewarm? _carouselPrewarm;
+  Timer? _carouselBrowseDebounce;
   AppThemeController? _themeController;
   ScreensaverController? _screensaverController;
 
@@ -235,6 +236,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     _liveRecoverySub?.cancel();
     _schedulePushDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
+    _carouselBrowseDebounce?.cancel();
     _carouselPrewarm?.dispose();
     _screensaverController?.setNativePlayerPresented(false);
     _themeController?.removeListener(_onThemeChanged);
@@ -944,6 +946,22 @@ class _AppleTvLiveTvPlayerHostScreenState
         unawaited(
           _manager.changeBitrate(mbps == null || mbps < 0 ? null : mbps),
         );
+      case 'visibleChannelsChanged':
+        final ids = (action['channelIds'] as List?)
+            ?.whereType<String>()
+            .toList();
+        _carouselBrowseDebounce?.cancel();
+        if (ids != null && ids.isNotEmpty) {
+          _carouselBrowseDebounce = Timer(const Duration(milliseconds: 150), () async {
+            try {
+              await _carouselPrewarm?.ensureVisibleChannels(ids);
+            } catch (error) {
+              debugPrint(
+                'Live TV carousel listings unavailable (${error.runtimeType})',
+              );
+            }
+          });
+        }
       case 'selectChannel':
         final id = action['channelId']?.toString();
         if (id != null && id.isNotEmpty) {
