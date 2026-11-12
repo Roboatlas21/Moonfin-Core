@@ -406,6 +406,51 @@ void main() {
     },
   );
 
+  test(
+    'a carousel refresh retries a newly visible card on the same lineup',
+    () async {
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      final tuned = GuideChannel(id: 'tuned', name: 'Tuned', rawData: const {});
+      final next = GuideChannel(id: 'next', name: 'Next', rawData: const {});
+      vm.usePlaybackLineup([tuned, next]);
+      await vm.load(initialChannelIds: ['tuned']);
+
+      final pending = Completer<Map<String, dynamic>>();
+      var targetReads = 0;
+      when(() => _guide(liveTv)).thenAnswer((call) async {
+        if (_requestedIds(call).contains('next')) {
+          if (++targetReads == 1) return pending.future;
+          return {
+            'Items': [_program('current', 'next')],
+          };
+        }
+        return {'Items': []};
+      });
+      final browse = vm.ensureProgramsForChannels(['next']);
+      final sameCard = vm.ensureProgramsForChannels(['next']);
+      await vm.refreshCarouselPrograms();
+      pending.complete({
+        'Items': [_program('earlier', 'next')],
+      });
+      await Future.wait([browse, sameCard]);
+      expect(targetReads, 2);
+      expect(vm.programsForChannel('next').single.id, 'current');
+
+      final removed = Completer<Map<String, dynamic>>();
+      final other = GuideChannel(id: 'other', name: 'Other', rawData: const {});
+      vm.usePlaybackLineup([tuned, other]);
+      when(() => _guide(liveTv)).thenAnswer((_) => removed.future);
+      final oldBrowse = vm.ensureProgramsForChannels(['other']);
+      vm.usePlaybackLineup([tuned]);
+      removed.complete({
+        'Items': [_program('old', 'other')],
+      });
+      await oldBrowse;
+      expect(vm.hasProgramsFor('other'), isFalse);
+    },
+  );
+
   test('clearing a failed channel search restores the loaded guide', () async {
     _stubChannels(
       liveTv,
@@ -652,6 +697,40 @@ void main() {
       expect(vm.selectedGroup, isNull);
       expect(vm.availableGroups, ['News']);
       expect(vm.filteredChannels.map((c) => c.id), ['new', 'outside']);
+    },
+  );
+
+  test(
+    'a fallback lineup drops a selected group with no surviving members',
+    () async {
+      final api = _GroupedLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => client.baseUrl).thenReturn('fixture');
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      when(api.getChannelGroups).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {
+            'old': {'Sports'},
+            'news': {'News'},
+          },
+          channels: [_channel('old'), _channel('news')],
+        ),
+      );
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setGroup('Sports');
+
+      when(api.getChannelGroups).thenThrow(TimeoutException('lineup'));
+      _stubChannels(api, [_channel('news'), _channel('new')]);
+      await vm.load();
+      expect(vm.state, GuideState.ready);
+      expect(vm.selectedGroup, isNull);
+      expect(vm.availableGroups, ['News']);
+      expect(
+        vm.filteredChannels.map((c) => c.id),
+        unorderedEquals(['news', 'new']),
+      );
     },
   );
 

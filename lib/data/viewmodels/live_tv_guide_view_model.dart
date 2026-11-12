@@ -1144,7 +1144,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } else if (account != null) {
       final visible = _channels.map((channel) => channel.id).toSet();
       _channelGroups.removeWhere((id, _) => !visible.contains(id));
-      _rebuildGroupChoices(complete: false);
+      _rebuildGroupChoices(complete: true);
     } else {
       _updatePageRows();
     }
@@ -1227,7 +1227,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (complete) {
         _selectedGroup = null;
       } else {
-        // A partial or unavailable group response can leave the selection unresolved.
+        // An older plugin's partial response can leave the selection unresolved.
         counts[selected] = 0;
       }
     }
@@ -1398,6 +1398,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Ensures the given channels' programs are fetched even if they sit past the
   /// scroll high-water mark (e.g. favorites). Loads only the missing ones.
   Future<void> ensureProgramsForChannels(List<String> channelIds) async {
+    final lineup = _channels;
+    final session = userDataSync.session;
+    final load = _loadGeneration;
     final missing = channelIds
         .where((id) => !_programsLoadedIds.contains(id))
         .toList();
@@ -1411,7 +1414,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           .map(channelForId)
           .whereType<GuideChannel>()
           .toList();
-      if (!await _loadProgramsBatch(chunk)) return;
+      if (!await _loadProgramsBatch(chunk)) {
+        // A refresh of cached cards can supersede the first read of a new card.
+        // Retry its missing listings once while the same player is still open.
+        if (!_usesPlaybackLineup ||
+            _disposed ||
+            _state != GuideState.ready ||
+            load != _loadGeneration ||
+            session != userDataSync.session ||
+            !identical(lineup, _channels)) {
+          return;
+        }
+        if (!await _loadProgramsBatch(chunk)) return;
+      }
     }
     _notifyListeners();
   }
@@ -2157,7 +2172,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
     }
     await Future.wait(inFlight);
-    return true;
+    return generation == _programGeneration;
   }
 
   void _notifyListeners() {
