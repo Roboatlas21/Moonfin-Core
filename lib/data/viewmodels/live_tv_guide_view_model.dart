@@ -537,9 +537,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _pageGeneration++;
   }
 
-  void _resetPageCursor() {
-    _advancePage();
+  void _resetPageCursor({bool advancePage = true}) {
+    if (advancePage) _advancePage();
     _programsHighWater = 0;
+    _advanceProgramsCursor();
+  }
+
+  void _advanceProgramsCursor() {
     final rows = _pageChannels;
     while (_programsHighWater < rows.length &&
         _programsLoadedIds.contains(rows[_programsHighWater].id)) {
@@ -640,8 +644,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (updated == null) return;
     if (_sortReadsFavorite) updated.sort(comparatorFor(_sortBy));
     _channels = updated;
-    _updatePageRows();
-    if (_sortReadsFavorite || _filter == GuideFilter.favorites) _resetPageCursor();
+    _updateFavoriteRows();
     _notifyListeners();
     if (_filter == GuideFilter.favorites) {
       unawaited(
@@ -698,6 +701,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// toggle under any other sort leaves the lineup where the viewer left it.
   bool get _sortReadsFavorite => _sortBy == ChannelSortBy.favoritesFirst;
 
+  void _updateFavoriteRows() {
+    _updatePageRows();
+    if (_sortReadsFavorite || _filter == GuideFilter.favorites) {
+      // Reordering a programme category keeps its channels and pending reload.
+      _resetPageCursor(advancePage: !_isCategory(_filter));
+    }
+  }
+
   /// Replaces one channel by id and re-sorts when the active sort depends on
   /// what changed. Selection is resolved by id by the screen, so it survives.
   void _applyChannelUpdate(GuideChannel updated) {
@@ -706,16 +717,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (at < 0) return;
     channels[at] = updated;
     final resort = _sortReadsFavorite;
-    if (resort) {
-      _advancePage();
-      channels.sort(comparatorFor(_sortBy));
-      // The lazy-load prefix follows list order, so walk it again from the top.
-      // Already-fetched channels are skipped in _loadNextBatch.
-      _programsHighWater = 0;
-    }
+    if (resort) channels.sort(comparatorFor(_sortBy));
     _channels = channels;
-    _updatePageRows();
-    if (_filter == GuideFilter.favorites) _resetPageCursor();
+    _updateFavoriteRows();
     _notifyListeners();
     if (resort || _filter == GuideFilter.favorites) {
       unawaited(loadMorePrograms());
@@ -1292,7 +1296,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       } else {
         _categoryPrograms.addAll(fetched);
         _categoryQueriedIds.addAll(ids);
-        _categoryHighWater = end;
+        _advanceCategoryCursor();
         _categoryLoadedFor = category;
       }
       _reloadDepth = 0;
@@ -1409,7 +1413,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (await _loadProgramsBatch(batch) &&
         pageGeneration == _pageGeneration &&
         batch.every((c) => _programsLoadedIds.contains(c.id))) {
-      _programsHighWater = end;
+      _advanceProgramsCursor();
     }
   }
 

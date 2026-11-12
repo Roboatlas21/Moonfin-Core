@@ -2131,6 +2131,71 @@ void main() {
       },
     );
 
+    for (final fullReload in [false, true]) {
+      final action = fullReload ? 'guide reload' : 'window change';
+      test(
+        'a favorite reorder preserves the category during a $action',
+        () async {
+          _stubChannels(
+            liveTv,
+            List.generate(216, (i) => _channel('c$i', number: '$i')),
+          );
+          final entered = Completer<void>();
+          final release = Completer<void>();
+          var pauseNext = false;
+          when(() => _guide(liveTv)).thenAnswer((inv) async {
+            if (pauseNext) {
+              pauseNext = false;
+              entered.complete();
+              await release.future;
+            }
+            return _serverFiltered((_) => true)(inv);
+          });
+          final vm = LiveTvGuideViewModel(
+            client,
+            initialSortBy: ChannelSortBy.favoritesFirst,
+          );
+          addTearDown(vm.dispose);
+          await vm.load();
+          vm.setFilter(GuideFilter.sports);
+          await pumpEventQueue();
+          expect(vm.filteredChannels, hasLength(200));
+
+          pauseNext = true;
+          final reload = fullReload
+              ? vm.goToNow()
+              : vm.setWindowStart(vm.windowStart.add(const Duration(hours: 1)));
+          await entered.future;
+          if (fullReload) {
+            final library = _MockUserLibraryApi();
+            when(() => client.userLibraryApi).thenReturn(library);
+            when(() => library.markFavorite('c215')).thenAnswer((_) async {});
+            await vm.toggleChannelFavorite('c215');
+          } else {
+            userDataSync.publish('c215', {'IsFavorite': true});
+            vm.syncChannelUserData();
+          }
+          release.complete();
+          await reload;
+          expect(vm.state, GuideState.ready);
+          expect(vm.filteredChannels, hasLength(200));
+          await vm.loadMorePrograms();
+          expect(vm.filteredChannels, hasLength(216));
+          expect(vm.filteredChannels.first.id, 'c215');
+
+          vm.setFilter(GuideFilter.all);
+          await pumpEventQueue();
+          while (vm.hasMorePrograms) {
+            await vm.loadMorePrograms();
+          }
+          expect(
+            vm.filteredChannels.every((c) => vm.hasProgramsFor(c.id)),
+            isTrue,
+          );
+        },
+      );
+    }
+
     test('a sparse category keeps walking until it finds rows', () async {
       _stubChannels(
         liveTv,
