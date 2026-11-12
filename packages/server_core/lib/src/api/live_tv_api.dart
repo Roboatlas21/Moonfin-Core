@@ -9,6 +9,9 @@ class ChannelGroupLineup {
   final Map<String, Set<String>> groupsByChannelId;
   final bool partial;
 
+  /// False when the server has no channel-group endpoint.
+  final bool endpointAvailable;
+
   /// Visible channel IDs the tuner could not resolve in a partial response.
   /// Older plugins and imports in progress leave this unknown.
   final Set<String>? unresolvedChannelIds;
@@ -19,6 +22,7 @@ class ChannelGroupLineup {
   const ChannelGroupLineup(
     this.groupsByChannelId, {
     this.partial = false,
+    this.endpointAvailable = true,
     this.unresolvedChannelIds,
     this.programmeCategories,
   });
@@ -59,7 +63,7 @@ class ChannelGroupLineup {
       );
     } on DioException catch (error) {
       if (error.response?.statusCode == 404) {
-        return const ChannelGroupLineup({});
+        return const ChannelGroupLineup({}, endpointAvailable: false);
       }
       rethrow;
     }

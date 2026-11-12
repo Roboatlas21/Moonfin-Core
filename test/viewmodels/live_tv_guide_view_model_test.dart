@@ -214,6 +214,33 @@ void main() {
     );
 
     test(
+      'removing the plugin restores the default categories on reload',
+      () async {
+        _stubChannels(api, [_channel('one')]);
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup(
+            {
+              'one': {'Local'},
+            },
+            programmeCategories: {'movies'},
+          ),
+        );
+        await vm.load();
+        vm.setGroup('Local');
+        expect(vm.availableProgrammeCategories, [GuideFilter.movies]);
+
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => const ChannelGroupLineup({}, endpointAvailable: false),
+        );
+        await vm.load();
+        expect(vm.availableGroups, isEmpty);
+        expect(vm.selectedGroup, isNull);
+        expect(vm.availableProgrammeCategories, contains(GuideFilter.sports));
+        expect(vm.playbackChannels.single.id, 'one');
+      },
+    );
+
+    test(
       'a denial from the optional plugin clears only group metadata',
       () async {
         _stubChannels(api, [_channel('one')]);

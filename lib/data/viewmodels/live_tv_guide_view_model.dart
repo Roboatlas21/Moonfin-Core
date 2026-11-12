@@ -1290,7 +1290,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         account != (_client.baseUrl, _client.userId)) {
       return;
     }
-    if (lineup == null) {
+    if (lineup == null || !lineup.endpointAvailable) {
       _programmeCategories = null;
     } else if (lineup.programmeCategories != null) {
       _programmeCategories = lineup.programmeCategories;

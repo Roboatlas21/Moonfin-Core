@@ -77,16 +77,16 @@ void main() {
       );
       expect(result.programmeCategories, expected);
       expect(result.groupsByChannelId, isEmpty);
+      expect(result.endpointAvailable, isTrue);
     }
   });
 
   test(
     'older Moonbase is optional and authorization failures reach the caller',
     () async {
-      expect(
-        (await ChannelGroupLineup.fetch(fixture(404))).groupsByChannelId,
-        isEmpty,
-      );
+      final missing = await ChannelGroupLineup.fetch(fixture(404));
+      expect(missing.groupsByChannelId, isEmpty);
+      expect(missing.endpointAvailable, isFalse);
       for (final status in [401, 403, 503]) {
         await expectLater(
           ChannelGroupLineup.fetch(fixture(status)),
