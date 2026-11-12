@@ -84,8 +84,8 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     private static let glowMargin: CGFloat = 48
 
     private var count: Int { entries.count }
-    private var centeredIndex: Int {
-        CarouselIndex.channelIndex(for: centerIndex, count: count)
+    var centeredChannel: ChannelCarouselEntry? {
+        entries.indices.contains(centerIndex) ? entries[centerIndex] : nil
     }
 
     init(entries: [ChannelCarouselEntry], startIndex: Int, theme: ChannelCarouselTheme) {
@@ -250,13 +250,14 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     /// Adopts a fresh lineup. Cards are rebound in place so a schedule arriving
     /// mid scroll cannot move the selection.
     func update(entries: [ChannelCarouselEntry], theme: ChannelCarouselTheme) {
-        let previousId = self.entries.indices.contains(centeredIndex)
-            ? self.entries[centeredIndex].channelId : ""
+        let previousId = centeredChannel?.channelId
         self.theme = theme
         let countChanged = entries.count != self.entries.count
         self.entries = entries
-        if countChanged {
+        if let previousId, centeredChannel?.channelId != previousId {
             centerIndex = entries.firstIndex { $0.channelId == previousId } ?? 0
+        }
+        if countChanged {
             rebuildCards()
         } else {
             for card in cards { card.applyTheme(theme) }
@@ -361,8 +362,7 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     }
 
     private func updateHeader() {
-        guard entries.indices.contains(centeredIndex) else { return }
-        let entry = entries[centeredIndex]
+        guard let entry = centeredChannel else { return }
         // Some sources repeat the program name as the episode title. Showing
         // it twice reads as a glitch.
         let episode =
@@ -441,8 +441,7 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     }
 
     private func tuneCenteredChannel() {
-        guard entries.indices.contains(centeredIndex) else { return }
-        let id = entries[centeredIndex].channelId
+        guard let id = centeredChannel?.channelId else { return }
         dismissed = true
         stopTimers()
         dismiss(animated: false) { [weak self] in
