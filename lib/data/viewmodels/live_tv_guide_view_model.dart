@@ -456,8 +456,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Map<String, List<GuideProgram>> _programsByChannel = {};
 
   Map<String, Set<String>> _channelGroups = {};
-  Iterable<GuideFilter> get availableProgrammeCategories =>
-      filters.where(_isCategory);
+  Set<String>? _programmeCategories;
+  Iterable<GuideFilter> get availableProgrammeCategories => filters.where(
+    (filter) =>
+        _isCategory(filter) &&
+        (_programmeCategories?.contains(filter.name) ?? true),
+  );
   bool get supportsGroupPicker => _client.liveTvApi is ChannelGroupApi;
   Map<String, int> _groupCounts = const {};
   int channelCountForGroup(String group) => _groupCounts[group] ?? 0;
@@ -1088,6 +1092,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         : null;
     if (account != _groupAccount) {
       _groupAccount = account;
+      _programmeCategories = null;
       _channelGroups = {};
       _availableGroups = const [];
       _groupCounts = const {};
@@ -1142,6 +1147,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _loadGeneration++;
         cancelBoundaryRefresh();
         _channels = const [];
+        _programmeCategories = null;
         _channelGroups = {};
         _filter = GuideFilter.all;
         _rebuildGroupChoices(complete: true);
@@ -1264,30 +1270,32 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       error is DioException &&
       (error.response?.statusCode == 401 || error.response?.statusCode == 403);
 
-  Future<ChannelGroupLineup?> _readChannelGroups(ChannelGroupApi api) async {
-    try {
-      return await api.getChannelGroups();
-    } catch (error) {
-      // Dio errors may contain signed URLs. Log only the error type.
-      debugPrint('Live TV channel groups unavailable (${error.runtimeType})');
-      return _accessDenied(error) ? const ChannelGroupLineup({}) : null;
-    }
-  }
-
   Future<void> _loadChannelGroups(
     ChannelGroupApi api,
     int request,
     (String, String?) account,
   ) async {
     final session = userDataSync.session;
-    final lineup = await _readChannelGroups(api);
+    ChannelGroupLineup? lineup;
+    try {
+      lineup = await api.getChannelGroups();
+    } catch (error) {
+      // Dio errors may contain signed URLs. Log only the error type.
+      debugPrint('Live TV channel groups unavailable (${error.runtimeType})');
+      if (!_accessDenied(error)) return;
+    }
     if (_disposed ||
         request != _lineupRequest ||
         session != userDataSync.session ||
         account != (_client.baseUrl, _client.userId)) {
       return;
     }
-    if (lineup != null) _applyChannelGroupLineup(lineup);
+    if (lineup == null) {
+      _programmeCategories = null;
+    } else if (lineup.programmeCategories != null) {
+      _programmeCategories = lineup.programmeCategories;
+    }
+    _applyChannelGroupLineup(lineup ?? const ChannelGroupLineup({}));
   }
 
   void _applyChannelGroupLineup(ChannelGroupLineup lineup) {

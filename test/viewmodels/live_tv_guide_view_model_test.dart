@@ -179,6 +179,40 @@ void main() {
       verify(api.getChannelGroups).called(1);
     });
 
+    testWidgets(
+      'programme categories change only on a confirmed lineup reload',
+      (tester) async {
+        _stubChannels(api, [_channel('one')]);
+        Set<String>? categories = {'movies'};
+        when(api.getChannelGroups).thenAnswer(
+          (_) async => ChannelGroupLineup({}, programmeCategories: categories),
+        );
+        await vm.load();
+        expect(vm.availableProgrammeCategories, [GuideFilter.movies]);
+
+        categories = {'sports'};
+        await vm.shiftWindow(const Duration(hours: 3));
+        await tester.pump(const Duration(minutes: 10));
+        expect(vm.availableProgrammeCategories, [GuideFilter.movies]);
+        verify(api.getChannelGroups).called(1);
+        await vm.goToNow();
+        expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+        verify(api.getChannelGroups).called(1);
+
+        categories = null;
+        await vm.load();
+        expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+        categories = {};
+        await vm.load();
+        expect(vm.availableProgrammeCategories, isEmpty);
+
+        when(() => client.userId).thenReturn('other-user');
+        categories = null;
+        await vm.load();
+        expect(vm.availableProgrammeCategories, contains(GuideFilter.sports));
+      },
+    );
+
     test(
       'a denial from the optional plugin clears only group metadata',
       () async {

@@ -58,6 +58,28 @@ void main() {
     },
   );
 
+  test('category availability is independent of tuner groups', () async {
+    for (final (field, expected) in [
+      (['sports', 'kids'], {'sports', 'kids'}),
+      (<String>[], <String>{}),
+      ([1], null),
+      (null, null),
+    ]) {
+      final result = await ChannelGroupLineup.fetch(
+        fixture(
+          200,
+          body: {
+            'version': 1,
+            'supported': false,
+            if (field != null) 'programmeCategories': field,
+          },
+        ),
+      );
+      expect(result.programmeCategories, expected);
+      expect(result.groupsByChannelId, isEmpty);
+    }
+  });
+
   test(
     'older Moonbase is optional and authorization failures reach the caller',
     () async {

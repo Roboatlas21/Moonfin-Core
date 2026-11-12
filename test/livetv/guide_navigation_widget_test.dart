@@ -410,6 +410,24 @@ void main() {
     },
   );
 
+  testWidgets('empty category metadata resets a selected category to All', (
+    tester,
+  ) async {
+    final pending = Completer<ChannelGroupLineup>();
+    when(liveTvApi.getChannelGroups).thenAnswer((_) => pending.future);
+    await pumpGuide(tester);
+    EpgFilterRail rail() =>
+        tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+    final sports = rail().labels.indexOf('Sports');
+    rail().onSelect(sports);
+    await _pumpFrames(tester);
+    expect(rail().selectedIndex, sports);
+    pending.complete(const ChannelGroupLineup({}, programmeCategories: {}));
+    await _pumpFrames(tester);
+    expect(rail().labels, ['All', 'Favorites']);
+    expect(rail().selectedIndex, 0);
+  });
+
   testWidgets('TV focuses the first category row when its listings arrive', (
     tester,
   ) async {
@@ -533,11 +551,14 @@ void main() {
         LiveTvCategoryDisplay.both,
       );
       when(liveTvApi.getChannelGroups).thenAnswer(
-        (_) async => const ChannelGroupLineup({
-          'ch1': {'Sports'},
-          'ch2': {'Sports'},
-          'ch47': {'US | PRIME'},
-        }),
+        (_) async => const ChannelGroupLineup(
+          {
+            'ch1': {'Sports'},
+            'ch2': {'Sports'},
+            'ch47': {'US | PRIME'},
+          },
+          programmeCategories: {'sports', 'movies'},
+        ),
       );
       await pumpGuide(tester, surface: const Size(390, 844));
       await tester.tap(find.text('All channels'));
@@ -548,7 +569,7 @@ void main() {
           find.descendant(of: picker, matching: match);
       expect(inside(find.text('Sports')), findsNWidgets(2));
       expect(inside(find.text('2')), findsOneWidget);
-      expect(inside(find.text('News')), findsOneWidget);
+      expect(inside(find.text('News')), findsNothing);
       await tester.enterText(inside(find.byType(TextField)), 'prime');
       await _pumpFrames(tester);
       expect(inside(find.text('Sports')), findsNothing);
@@ -567,10 +588,7 @@ void main() {
       );
       await _pumpFrames(tester);
       final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
-      expect(
-        rail.labels,
-        containsAll(['All', 'Movies', 'Sports', 'News', 'Favorites']),
-      );
+      expect(rail.labels, ['All', 'Movies', 'Sports', 'Favorites']);
       expect(rail.selectedIndex, 0);
     },
   );

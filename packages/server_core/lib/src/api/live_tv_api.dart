@@ -13,10 +13,14 @@ class ChannelGroupLineup {
   /// Older plugins and imports in progress leave this unknown.
   final Set<String>? unresolvedChannelIds;
 
+  /// Null when the plugin cannot confirm availability. An empty set is authoritative.
+  final Set<String>? programmeCategories;
+
   const ChannelGroupLineup(
     this.groupsByChannelId, {
     this.partial = false,
     this.unresolvedChannelIds,
+    this.programmeCategories,
   });
 
   static Future<ChannelGroupLineup> fetch(Dio dio) async {
@@ -33,6 +37,7 @@ class ChannelGroupLineup {
         throw const FormatException('Invalid channel group response');
       }
       final unresolved = data['unresolvedChannelIds'];
+      final categories = data['programmeCategories'];
       return ChannelGroupLineup(
         {
           for (final entry in raw.entries)
@@ -43,6 +48,10 @@ class ChannelGroupLineup {
               },
         },
         partial: data['partial'] == true,
+        programmeCategories:
+            categories is List && categories.every((c) => c is String)
+            ? categories.cast<String>().toSet()
+            : null,
         unresolvedChannelIds:
             unresolved is List && unresolved.every((id) => id is String)
             ? unresolved.cast<String>().toSet()
