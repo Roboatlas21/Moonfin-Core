@@ -1268,7 +1268,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (complete) {
         _selectedGroup = null;
       } else {
-        // An older plugin's partial response can leave the selection unresolved.
+        // A partial tuner response may leave the selection unresolved.
         counts[selected] = 0;
       }
     }
@@ -1354,7 +1354,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _channelGroups = updated;
     // Explicit unresolved IDs have already kept their memberships above.
-    // Only older partial responses leave the selection open without any visible members.
+    // Partial responses without resolved memberships can retain the selection.
     _rebuildGroupChoices(complete: !partial || unresolved != null);
   }
 

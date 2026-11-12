@@ -9,7 +9,7 @@ Dio fixture(int status, {Object? body}) {
       onRequest: (request, handler) {
         expect(request.method, 'GET');
         expect(request.path, '/Moonfin/LiveTv/ChannelGroups');
-        expect(request.queryParameters, {'includeChannels': true});
+        expect(request.queryParameters, isEmpty);
         final response = Response(
           requestOptions: request,
           data: body,
@@ -35,20 +35,19 @@ Dio fixture(int status, {Object? body}) {
 void main() {
   test('reads grouped and ungrouped channels in one response', () async {
     final rows = [
-      {
-        'Id': 'one',
-        'Name': 'One',
-        'groups': ['News'],
-      },
+      {'Id': 'one', 'Name': 'One', 'groups': ['News']},
       {'Id': 'two', 'Name': 'Two', 'groups': <String>[]},
     ];
     final result = await ChannelGroupLineup.fetch(
       fixture(200, body: {'version': 2, 'supported': true, 'channels': rows}),
     );
     expect(result.channels, rows);
-    expect(result.groupsByChannelId, {
-      'one': {'News'},
-    });
+    expect(result.groupsByChannelId, {'one': {'News'}});
+    final ungrouped = await ChannelGroupLineup.fetch(
+      fixture(200, body: {'version': 2, 'supported': false, 'channels': [rows.last]}),
+    );
+    expect(ungrouped.channels, hasLength(1));
+    expect(ungrouped.groupsByChannelId, isEmpty);
   });
   test(
     'reads exact labels, removes blanks and preserves partial results',
@@ -57,13 +56,13 @@ void main() {
         fixture(
           200,
           body: {
-            'version': 1,
+            'version': 2,
             'supported': true,
             'partial': true,
             'unresolvedChannelIds': ['offline'],
-            'groupsByChannelId': {
-              'seven': ['US| SPORTS', 'US|SPORTS', 'Kids', 'Kids', ' '],
-            },
+            'channels': [
+              {'Id': 'seven', 'Name': 'Seven', 'groups': ['US| SPORTS', 'US|SPORTS', 'Kids', 'Kids', ' ']},
+            ],
           },
         ),
       );
@@ -76,10 +75,10 @@ void main() {
   );
 
   test(
-    'older Moonbase is optional and authorization failures reach the caller',
+    'missing Moonbase falls back while authorization errors are reported',
     () async {
       final missing = await ChannelGroupLineup.fetch(fixture(404));
-      expect(missing.groupsByChannelId, isEmpty);
+      expect(missing.channels, isNull);
       expect(missing.endpointAvailable, isFalse);
       for (final status in [401, 403, 503]) {
         await expectLater(

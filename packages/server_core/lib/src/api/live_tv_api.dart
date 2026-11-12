@@ -8,8 +8,7 @@ abstract interface class ChannelGroupApi {
 class ChannelGroupLineup {
   final Map<String, Set<String>> groupsByChannelId;
 
-  /// Viewer-visible channel rows returned with their memberships.
-  /// Older plugins supply only groups and need the native channel list.
+  /// Viewer-visible channel rows; null when the optional endpoint is unavailable.
   final List<Map<String, dynamic>>? channels;
   final bool partial;
 
@@ -17,7 +16,6 @@ class ChannelGroupLineup {
   final bool endpointAvailable;
 
   /// Visible channel IDs the tuner could not resolve in a partial response.
-  /// Older plugins and imports in progress leave this unknown.
   final Set<String>? unresolvedChannelIds;
 
   /// Null when the plugin cannot confirm availability. An empty set is authoritative.
@@ -36,47 +34,32 @@ class ChannelGroupLineup {
     try {
       final response = await dio.get(
         '/Moonfin/LiveTv/ChannelGroups',
-        queryParameters: {'includeChannels': true},
         options: Options(receiveTimeout: const Duration(seconds: 6)),
       );
       final data = response.data;
-      if (data is! Map || data['supported'] is! bool) {
+      if (data is! Map ||
+          data['version'] != 2 ||
+          data['supported'] is! bool ||
+          data['channels'] is! List) {
         throw const FormatException('Invalid channel group response');
       }
-      List<Map<String, dynamic>>? channels;
+      final channels = <Map<String, dynamic>>[];
       final memberships = <String, Set<String>>{};
       Set<String> labels(List values) => {
         for (final value in values)
           if (value is String && value.trim().isNotEmpty) value.trim(),
       };
-      if (data['version'] == 2 && data['channels'] is List) {
-        channels = [];
-        for (final row in data['channels'] as List) {
-          if (row is! Map<String, dynamic> ||
-              row['Id'] is! String ||
-              (row['Id'] as String).isEmpty ||
-              row['Name'] is! String ||
-              row['groups'] is! List) {
-            throw const FormatException('Invalid guide channel');
-          }
-          channels.add(row);
-          final groups = labels(row['groups'] as List);
-          if (groups.isNotEmpty) memberships[row['Id'] as String] = groups;
+      for (final row in data['channels'] as List) {
+        if (row is! Map<String, dynamic> ||
+            row['Id'] is! String ||
+            (row['Id'] as String).isEmpty ||
+            row['Name'] is! String ||
+            row['groups'] is! List) {
+          throw const FormatException('Invalid guide channel');
         }
-      } else if (data['version'] == 1) {
-        final groups = data['supported'] == false
-            ? const {}
-            : data['groupsByChannelId'];
-        if (groups is! Map) {
-          throw const FormatException('Invalid channel groups');
-        }
-        for (final entry in groups.entries) {
-          if (entry.key is String && entry.value is List) {
-            memberships[entry.key as String] = labels(entry.value as List);
-          }
-        }
-      } else {
-        throw const FormatException('Unknown channel group response');
+        channels.add(row);
+        final groups = labels(row['groups'] as List);
+        if (groups.isNotEmpty) memberships[row['Id'] as String] = groups;
       }
       final unresolved = data['unresolvedChannelIds'];
       final categories = data['programmeCategories'];
