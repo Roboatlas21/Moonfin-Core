@@ -1,15 +1,54 @@
 import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
-class JellyfinLiveTvApi implements LiveTvApi, ChannelGroupApi {
+class JellyfinLiveTvApi
+    implements LiveTvApi, ChannelGroupApi, ProgrammeCategoryApi {
   final Dio _dio;
   static const _postChannelIdsThreshold = 1800;
+  static const _categoryTags = <String, String>{
+    'movies': 'Movie',
+    'series': 'Series',
+    'sports': 'Sports',
+    'news': 'News',
+    'kids': 'Kids',
+    'premiere': 'Premiere',
+  };
+  late final _categories = ProgrammeCategoryChecker(_hasCategory);
 
   JellyfinLiveTvApi(this._dio);
 
   @override
   Future<ChannelGroupLineup> getChannelGroups({String? userId}) =>
       ChannelGroupLineup.fetch(_dio);
+
+  @override
+  Future<Set<String>?> getProgrammeCategories({String? userId}) =>
+      _categories.check(userId: userId);
+
+  // Jellyfin imports all six classifications as LiveTvProgram tags.
+  // The /Items search covers the whole imported EPG, including premieres.
+  Future<bool> _hasCategory(String category, String? userId) async {
+    final response = await _dio.get(
+      '/Items',
+      queryParameters: {
+        'UserId': ?userId,
+        'IncludeItemTypes': 'LiveTvProgram',
+        'Tags': _categoryTags[category]!,
+        'Recursive': true,
+        'Limit': 1,
+        'EnableTotalRecordCount': false,
+        'EnableImages': false,
+        'EnableUserData': false,
+      },
+      options: Options(receiveTimeout: const Duration(seconds: 4)),
+    );
+    final body = response.data;
+    final items = body is Map ? body['Items'] : null;
+    if (items is! List) {
+      throw const FormatException('Invalid Jellyfin program category reply');
+    }
+    return items.isNotEmpty;
+  }
 
   @override
   Future<Map<String, dynamic>> getChannels({

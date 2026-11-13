@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
@@ -15,84 +13,34 @@ class EmbyLiveTvApi
     'kids': 'IsKids',
     'premiere': 'IsPremiere',
   };
-  ({
-    String? userId,
-    DateTime from,
-    DateTime to,
-    DateTime expiresAt,
-    Future<Set<String>?> future,
-  })? _categoryCache;
+  late final _categories = ProgrammeCategoryChecker(_hasCategory);
 
   EmbyLiveTvApi(this._dio);
 
   @override
-  Future<Set<String>?> getProgrammeCategories({
-    required DateTime from,
-    required DateTime to,
-    String? userId,
-  }) {
-    final start = from.toUtc();
-    final end = to.toUtc();
-    final cached = _categoryCache;
-    if (cached != null &&
-        cached.userId == userId &&
-        cached.from == start &&
-        cached.to == end &&
-        DateTime.now().isBefore(cached.expiresAt)) {
-      return cached.future;
-    }
-    final future = _queryProgrammeCategories(start, end, userId);
-    _categoryCache = (
-      userId: userId,
-      from: start,
-      to: end,
-      expiresAt: DateTime.now().add(const Duration(minutes: 5)),
-      future: future,
-    );
-    // Failed probes aren't cached: the next guide reload can try again.
-    unawaited(future.then((value) {
-      if (value == null && identical(_categoryCache?.future, future)) {
-        _categoryCache = null;
-      }
-    }));
-    return future;
-  }
+  Future<Set<String>?> getProgrammeCategories({String? userId}) =>
+      _categories.check(userId: userId);
 
-  Future<Set<String>?> _queryProgrammeCategories(
-    DateTime from,
-    DateTime to,
-    String? userId,
-  ) async {
-    try {
-      final matches = await Future.wait(
-        _categoryFlags.entries.map((category) async {
-          final response = await _dio.get(
-            '/LiveTv/Programs',
-            queryParameters: {
-              'UserId': ?userId,
-              'MinEndDate': from.toIso8601String(),
-              'MaxStartDate': to.toIso8601String(),
-              'Limit': 1,
-              'EnableTotalRecordCount': false,
-              'EnableImages': false,
-              'EnableUserData': false,
-              category.value: true,
-            },
-            options: Options(receiveTimeout: const Duration(seconds: 4)),
-          );
-          final body = response.data;
-          final items = body is Map ? body['Items'] : null;
-          if (items is! List) {
-            throw const FormatException('Invalid Emby program category reply');
-          }
-          return items.isEmpty ? null : category.key;
-        }),
-      );
-      return matches.whereType<String>().toSet();
-    } catch (_) {
-      // Unknown must not be treated as an empty EPG.
-      return null;
+  Future<bool> _hasCategory(String category, String? userId) async {
+    final flag = _categoryFlags[category]!;
+    final response = await _dio.get(
+      '/LiveTv/Programs',
+      queryParameters: {
+        'UserId': ?userId,
+        'Limit': 1,
+        'EnableTotalRecordCount': false,
+        'EnableImages': false,
+        'EnableUserData': false,
+        flag: true,
+      },
+      options: Options(receiveTimeout: const Duration(seconds: 4)),
+    );
+    final body = response.data;
+    final items = body is Map ? body['Items'] : null;
+    if (items is! List) {
+      throw const FormatException('Invalid Emby program category reply');
     }
+    return items.isNotEmpty;
   }
 
   /// Emby exposes M3U groups (and other channel labels) as ordinary tags.

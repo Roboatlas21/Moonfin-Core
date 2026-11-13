@@ -479,18 +479,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   List<GuideChannel> _pageChannels = const [];
   int _lineupRequest = 0;
   (String, String?)? _groupAccount;
-  ({DateTime from, DateTime to})? _categoryScope;
 
   void _refreshProgrammeCategories() {
     final api = _client.liveTvApi;
     if (api is! ProgrammeCategoryApi) return;
-    final from = _windowStart;
-    final to = _windowEnd;
-    final scope = (from: from, to: to);
-    if (_categoryScope != scope) {
-      _categoryScope = scope;
-      _programmeCategories = null;
-    }
     if (_channels.isEmpty) {
       _programmeCategories = <String>{};
       return;
@@ -499,14 +491,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final session = userDataSync.session;
     final baseUrl = _client.baseUrl;
     final userId = _client.userId;
+    // Category availability describes the entire imported EPG, not the date
+    // currently selected in the guide. The server adapter caches each probe.
     unawaited(() async {
       Set<String>? found;
       try {
-        found = await api.getProgrammeCategories(
-          from: from,
-          to: to,
-          userId: userId,
-        );
+        found = await api.getProgrammeCategories(userId: userId);
       } catch (error) {
         debugPrint('Live TV category check unavailable (${error.runtimeType})');
       }
@@ -515,8 +505,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           session != userDataSync.session ||
           baseUrl != _client.baseUrl ||
           userId != _client.userId ||
-          from != _windowStart ||
-          to != _windowEnd ||
           !identical(api, _client.liveTvApi)) {
         return;
       }
@@ -1070,7 +1058,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
     _atLivePosition = livePosition;
-    _refreshProgrammeCategories();
     if (_isCategory(_filter)) {
       await _reloadPrograms(keepCategoryRows: true);
       return;
@@ -1099,7 +1086,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> _reloadPrograms({bool keepCategoryRows = false}) async {
-    _refreshProgrammeCategories();
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final depth = _requestedPageDepth;
@@ -1181,7 +1167,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         : null;
     if (account != _groupAccount) {
       _groupAccount = account;
-      _categoryScope = null;
       _programmeCategories = null;
       _channelGroups = {};
       _availableGroups = const [];
@@ -1222,7 +1207,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
       if (!current()) return false;
       if (lineup?.endpointAvailable == false) {
-        _programmeCategories = null;
         _channelGroups = {};
         _rebuildGroupChoices(complete: true);
       }
@@ -1235,9 +1219,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _publishChannels(items, revision);
     if (lineup != null) {
-      if (lineup.programmeCategories != null) {
-        _programmeCategories = lineup.programmeCategories;
-      }
       _applyChannelGroupLineup(lineup);
     } else if (account != null) {
       final visible = _channels.map((channel) => channel.id).toSet();
@@ -1278,7 +1259,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _loadGeneration++;
     cancelBoundaryRefresh();
     _channels = const [];
-    _categoryScope = null;
     _programmeCategories = null;
     _channelGroups = {};
     _filter = GuideFilter.all;

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 
 /// Reads the grouped Live TV lineup from the server's supported source.
@@ -9,14 +11,56 @@ abstract interface class ChannelGroupApi {
 /// plugin. An error must be reported rather than retried as a separate lineup.
 abstract interface class DirectChannelGroupApi implements ChannelGroupApi {}
 
-/// Optional lightweight check for program categories in the visible guide window.
-/// Null means the check was unavailable; the guide should keep its filters.
+/// Checks the entire imported EPG, independently of the selected guide date.
+/// Null means the check was unavailable, so the guide keeps all its filters.
 abstract interface class ProgrammeCategoryApi {
-  Future<Set<String>?> getProgrammeCategories({
-    required DateTime from,
-    required DateTime to,
-    String? userId,
-  });
+  Future<Set<String>?> getProgrammeCategories({String? userId});
+}
+
+/// Runs six small category checks concurrently and caches the result per user.
+/// Each server adapter supplies its own native API query.
+class ProgrammeCategoryChecker {
+  ProgrammeCategoryChecker(this._hasCategory);
+
+  static const categories = [
+    'movies', 'series', 'sports', 'news', 'kids', 'premiere',
+  ];
+  final Future<bool> Function(String category, String? userId) _hasCategory;
+  ({String? userId, DateTime until, Future<Set<String>?> result})? _cached;
+
+  Future<Set<String>?> check({String? userId}) {
+    final cached = _cached;
+    if (cached != null &&
+        cached.userId == userId &&
+        DateTime.now().isBefore(cached.until)) {
+      return cached.result;
+    }
+    final result = _query(userId);
+    _cached = (
+      userId: userId,
+      until: DateTime.now().add(const Duration(minutes: 15)),
+      result: result,
+    );
+    // A failed check is unknown, not an empty EPG. Retry on the next load.
+    unawaited(result.then((value) {
+      if (value == null && identical(_cached?.result, result)) _cached = null;
+    }));
+    return result;
+  }
+
+  Future<Set<String>?> _query(String? userId) async {
+    try {
+      final found = await Future.wait([
+        for (final category in categories)
+          _hasCategory(category, userId).then(
+            (present) => present ? category : null,
+          ),
+      ]);
+      return found.whereType<String>().toSet();
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 class ChannelGroupLineup {
@@ -32,16 +76,12 @@ class ChannelGroupLineup {
   /// Channel IDs the tuner couldn't match in a partial response.
   final Set<String>? unresolvedChannelIds;
 
-  /// Null means the plugin couldn't check. An empty set means it found no categories.
-  final Set<String>? programmeCategories;
-
   const ChannelGroupLineup(
     this.groupsByChannelId, {
     this.channels,
     this.partial = false,
     this.endpointAvailable = true,
     this.unresolvedChannelIds,
-    this.programmeCategories,
   });
 
   static Future<ChannelGroupLineup> fetch(Dio dio) async {
@@ -75,15 +115,10 @@ class ChannelGroupLineup {
         if (groups.isNotEmpty) memberships[row['Id'] as String] = groups;
       }
       final unresolved = data['unresolvedChannelIds'];
-      final categories = data['programmeCategories'];
       return ChannelGroupLineup(
         memberships,
         channels: channels,
         partial: data['partial'] == true,
-        programmeCategories:
-            categories is List && categories.every((c) => c is String)
-            ? categories.cast<String>().toSet()
-            : null,
         unresolvedChannelIds:
             unresolved is List && unresolved.every((id) => id is String)
             ? unresolved.cast<String>().toSet()

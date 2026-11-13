@@ -184,20 +184,17 @@ void main() {
       verify(() => api.getChannelGroups(userId: 'user')).called(1);
     });
     test(
-      'removing the plugin restores the default categories on reload',
+      'removing the plugin clears groups without affecting category filtering',
       () async {
         _stubChannels(api, [_channel('one')]);
         when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
-          (_) async => const ChannelGroupLineup(
-            {
-              'one': {'Local'},
-            },
-            programmeCategories: {'movies'},
-          ),
+          (_) async => const ChannelGroupLineup({
+            'one': {'Local'},
+          }),
         );
         await vm.load();
         vm.setGroup('Local');
-        expect(vm.availableProgrammeCategories, [GuideFilter.movies]);
+        expect(vm.availableProgrammeCategories, contains(GuideFilter.movies));
 
         when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
           (_) async => const ChannelGroupLineup({}, endpointAvailable: false),
@@ -251,11 +248,7 @@ void main() {
     );
     final pending = Completer<Set<String>?>();
     when(
-      () => api.getProgrammeCategories(
-        from: any(named: 'from'),
-        to: any(named: 'to'),
-        userId: 'user',
-      ),
+      () => api.getProgrammeCategories(userId: 'user'),
     ).thenAnswer((_) => pending.future);
     final vm = LiveTvGuideViewModel(client);
     addTearDown(vm.dispose);
@@ -271,7 +264,7 @@ void main() {
     ]);
   });
 
-  test('a stale Emby category check cannot override a later guide window', () async {
+  test('changing guide dates does not recheck the entire EPG', () async {
     final api = _CategoryLiveTvApi();
     when(() => client.liveTvApi).thenReturn(api);
     when(() => client.baseUrl).thenReturn('emby');
@@ -280,30 +273,25 @@ void main() {
     when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
       (_) async => ChannelGroupLineup({}, channels: [_channel('one')]),
     );
-    final checks = <Completer<Set<String>?>>[];
-    when(
-      () => api.getProgrammeCategories(
-        from: any(named: 'from'),
-        to: any(named: 'to'),
-        userId: 'user',
-      ),
-    ).thenAnswer((_) {
-      final done = Completer<Set<String>?>();
-      checks.add(done);
-      return done.future;
+    final pending = Completer<Set<String>?>();
+    var calls = 0;
+    when(() => api.getProgrammeCategories(userId: 'user')).thenAnswer((_) {
+      calls++;
+      return pending.future;
     });
     final vm = LiveTvGuideViewModel(client);
     addTearDown(vm.dispose);
     await vm.load();
-    expect(checks, hasLength(1));
+    expect(calls, 1);
     await vm.setDate(vm.windowStart.add(const Duration(days: 1)));
-    expect(checks, hasLength(2));
-    checks[0].complete({'movies'});
+    await vm.shiftWindow(const Duration(hours: 2));
+    expect(calls, 1);
+    pending.complete({'movies', 'premiere'});
     await Future<void>.delayed(Duration.zero);
-    expect(vm.availableProgrammeCategories, contains(GuideFilter.kids));
-    checks[1].complete({'sports'});
-    await Future<void>.delayed(Duration.zero);
-    expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+    expect(vm.availableProgrammeCategories, [
+      GuideFilter.movies,
+      GuideFilter.premiere,
+    ]);
   });
 
   test('direct Emby channel failures do not trigger a duplicate fetch', () async {
