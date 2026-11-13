@@ -1155,7 +1155,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     ChannelGroupLineup? lineup;
     if (api is ChannelGroupApi) {
       try {
-        lineup = await (api as ChannelGroupApi).getChannelGroups();
+        lineup = await (api as ChannelGroupApi).getChannelGroups(userId: _client.userId);
       } catch (error) {
         debugPrint('Live TV channel groups unavailable (${error.runtimeType})');
         if (_accessDenied(error)) {

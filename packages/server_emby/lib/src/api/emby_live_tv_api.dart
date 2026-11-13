@@ -7,9 +7,43 @@ class EmbyLiveTvApi implements LiveTvApi, ChannelGroupApi {
 
   EmbyLiveTvApi(this._dio);
 
+  /// Emby exposes M3U groups (and other channel labels) as ordinary tags.
+  /// The normal, user-scoped channel response is enough; Moonbase is not needed.
   @override
-  Future<ChannelGroupLineup> getChannelGroups() =>
-      ChannelGroupLineup.fetch(_dio);
+  Future<ChannelGroupLineup> getChannelGroups({String? userId}) async {
+    final response = await getChannels(
+      sortBy: 'SortName',
+      sortOrder: 'Ascending',
+      fields: 'ImageTags,UserData,Tags',
+      enableTotalRecordCount: false,
+      userId: userId,
+    );
+    final channels =
+        (response['Items'] as List?)?.cast<Map<String, dynamic>>() ??
+        <Map<String, dynamic>>[];
+    Set<String> nonEmptyNames(Iterable<dynamic> values) => {
+      for (final name in values)
+        if (name is String && name.trim().isNotEmpty) name.trim(),
+    };
+    final groups = <String, Set<String>>{};
+    for (final channel in channels) {
+      final id = channel['Id'];
+      if (id is! String || id.isEmpty) continue;
+
+      final tagItems = channel['TagItems'];
+      final names = tagItems is List
+          ? nonEmptyNames(
+              tagItems.map((item) => item is Map ? item['Name'] : null),
+            )
+          : <String>{};
+      // Preserve the complete TagItems labels, including vertical bars.
+      if (names.isEmpty && channel['Tags'] is List) {
+        names.addAll(nonEmptyNames(channel['Tags'] as List));
+      }
+      if (names.isNotEmpty) groups[id] = names;
+    }
+    return ChannelGroupLineup(groups, channels: channels);
+  }
 
   @override
   Future<Map<String, dynamic>> getChannels({

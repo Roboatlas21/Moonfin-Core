@@ -1,18 +1,18 @@
 import 'package:dio/dio.dart';
 
-/// Read channel groups from Moonbase when available; other servers use the regular guide.
+/// Reads the grouped Live TV lineup from the server's supported source.
 abstract interface class ChannelGroupApi {
-  Future<ChannelGroupLineup> getChannelGroups();
+  Future<ChannelGroupLineup> getChannelGroups({String? userId});
 }
 
 class ChannelGroupLineup {
   final Map<String, Set<String>> groupsByChannelId;
 
-  /// Channels this viewer can access, or null if Moonbase doesn't provide them.
+  /// Channels this viewer can access, or null if only group data is available.
   final List<Map<String, dynamic>>? channels;
   final bool partial;
 
-  /// False if the server doesn't support the channel-group endpoint.
+  /// False when an optional group source (such as Moonbase) is unavailable.
   final bool endpointAvailable;
 
   /// Channel IDs the tuner couldn't match in a partial response.
