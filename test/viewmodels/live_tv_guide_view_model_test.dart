@@ -19,6 +19,9 @@ class _GroupedLiveTvApi extends _MockLiveTvApi implements ChannelGroupApi {}
 class _CategoryLiveTvApi extends _GroupedLiveTvApi
     implements ProgrammeCategoryApi {}
 
+class _DirectGroupedLiveTvApi extends _GroupedLiveTvApi
+    implements DirectChannelGroupApi {}
+
 class _MockUserLibraryApi extends Mock implements UserLibraryApi {}
 
 Map<String, dynamic> _channel(String id, {String? number}) => {
@@ -301,6 +304,66 @@ void main() {
     checks[1].complete({'sports'});
     await Future<void>.delayed(Duration.zero);
     expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+  });
+
+  test('direct Emby channel failures do not trigger a duplicate fetch', () async {
+    final api = _DirectGroupedLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => client.baseUrl).thenReturn('emby');
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    _stubChannels(api, [_channel('one')]);
+    when(() => api.getChannelGroups(userId: 'user')).thenThrow(
+      DioException(
+        requestOptions: RequestOptions(path: '/LiveTv/Channels'),
+        response: Response(
+          requestOptions: RequestOptions(path: '/LiveTv/Channels'),
+          statusCode: 503,
+        ),
+      ),
+    );
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+
+    expect(vm.state, GuideState.error);
+    verifyNever(() => _channelsRequest(api));
+    verify(() => api.getChannelGroups(userId: 'user')).called(1);
+  });
+
+  test('direct Emby access denial clears previously authorized channels', () async {
+    final api = _DirectGroupedLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => client.baseUrl).thenReturn('emby');
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+      (_) async => ChannelGroupLineup(
+        {'one': {'US | SPORTS'}},
+        channels: [_channel('one')],
+      ),
+    );
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    expect(vm.playbackChannels, hasLength(1));
+    vm.setGroup('US | SPORTS');
+
+    when(() => api.getChannelGroups(userId: 'user')).thenThrow(
+      DioException(
+        requestOptions: RequestOptions(path: '/LiveTv/Channels'),
+        response: Response(
+          requestOptions: RequestOptions(path: '/LiveTv/Channels'),
+          statusCode: 403,
+        ),
+      ),
+    );
+    await vm.load();
+    expect(vm.state, GuideState.error);
+    expect(vm.playbackChannels, isEmpty);
+    expect(vm.availableGroups, isEmpty);
+    expect(vm.selectedGroup, isNull);
+    verifyNever(() => _channelsRequest(api));
   });
 
   test('channel groups page by channel and keep every programme', () async {

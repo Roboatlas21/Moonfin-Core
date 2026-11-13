@@ -1207,6 +1207,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       try {
         lineup = await (api as ChannelGroupApi).getChannelGroups(userId: _client.userId);
       } catch (error) {
+        if (api is DirectChannelGroupApi) {
+          // Emby reads the authoritative channel list here. The fallback
+          // would repeat the same failed request.
+          if (error is DioException && _accessDenied(error) && current()) {
+            _discardDeniedChannelLineup(error);
+          }
+          rethrow;
+        }
         debugPrint('Live TV channel groups unavailable (${error.runtimeType})');
         if (_accessDenied(error)) {
           lineup = const ChannelGroupLineup({}, endpointAvailable: false);
@@ -1259,23 +1267,27 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           request == _lineupRequest &&
           session == userDataSync.session &&
           (account == null || account == (_client.baseUrl, _client.userId))) {
-        // If the server denies access, clear the channels and pending guide requests.
-        // Moonbase handles its own permissions.
-        _loadGeneration++;
-        cancelBoundaryRefresh();
-        _channels = const [];
-        _programmeCategories = null;
-        _channelGroups = {};
-        _filter = GuideFilter.all;
-        _rebuildGroupChoices(complete: true);
-        _resetPrograms();
-        _error = error;
-        _state = GuideState.error;
-        _reloadOnEntry = true;
-        _notifyListeners();
+        _discardDeniedChannelLineup(error);
       }
       return null;
     }
+  }
+
+  void _discardDeniedChannelLineup(DioException error) {
+    // A channel permission change must also discard cached channel data.
+    _loadGeneration++;
+    cancelBoundaryRefresh();
+    _channels = const [];
+    _categoryScope = null;
+    _programmeCategories = null;
+    _channelGroups = {};
+    _filter = GuideFilter.all;
+    _rebuildGroupChoices(complete: true);
+    _resetPrograms();
+    _error = error;
+    _state = GuideState.error;
+    _reloadOnEntry = true;
+    _notifyListeners();
   }
 
   void _publishChannels(List<Map<String, dynamic>> items, int revision) {

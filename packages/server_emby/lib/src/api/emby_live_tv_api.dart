@@ -4,7 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
 class EmbyLiveTvApi
-    implements LiveTvApi, ChannelGroupApi, ProgrammeCategoryApi {
+    implements LiveTvApi, DirectChannelGroupApi, ProgrammeCategoryApi {
   final Dio _dio;
   static const _postChannelIdsThreshold = 1800;
   static const _categoryFlags = <String, String>{
@@ -106,9 +106,20 @@ class EmbyLiveTvApi
       enableTotalRecordCount: false,
       userId: userId,
     );
-    final channels =
-        (response['Items'] as List?)?.cast<Map<String, dynamic>>() ??
-        <Map<String, dynamic>>[];
+    final rawItems = response['Items'];
+    if (rawItems is! List) {
+      throw const FormatException('Invalid Emby Live TV channel response');
+    }
+    final channels = <Map<String, dynamic>>[];
+    for (final item in rawItems) {
+      if (item is! Map<String, dynamic> ||
+          item['Id'] is! String ||
+          (item['Id'] as String).isEmpty ||
+          item['Name'] is! String) {
+        throw const FormatException('Invalid Emby Live TV channel');
+      }
+      channels.add(item);
+    }
     Set<String> nonEmptyNames(Iterable<dynamic> values) => {
       for (final name in values)
         if (name is String && name.trim().isNotEmpty) name.trim(),

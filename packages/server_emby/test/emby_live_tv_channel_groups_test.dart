@@ -130,9 +130,17 @@ void main() {
       isEmpty,
     );
     expect(fake.requests, hasLength(6));
-    await api.getProgrammeCategories(from: to, to: to.add(const Duration(hours: 6)), userId: 'viewer');
+    await api.getProgrammeCategories(
+      from: to,
+      to: to.add(const Duration(hours: 6)),
+      userId: 'viewer',
+    );
     expect(fake.requests, hasLength(12));
-    await api.getProgrammeCategories(from: from, to: to, userId: 'another');
+    await api.getProgrammeCategories(
+      from: from,
+      to: to,
+      userId: 'another',
+    );
     expect(fake.requests, hasLength(18));
   });
 
@@ -155,8 +163,64 @@ void main() {
     expect(fake.requests, hasLength(12));
     fake.responses['/LiveTv/Programs'] = {};
     expect(
-      await api.getProgrammeCategories(from: to, to: to.add(const Duration(days: 1)), userId: 'viewer'),
+      await api.getProgrammeCategories(
+        from: to,
+        to: to.add(const Duration(days: 1)),
+        userId: 'viewer',
+      ),
       isNull,
     );
+  });
+
+  test('malformed channel replies fail instead of clearing the lineup', () async {
+    for (final body in <Map<String, dynamic>>[
+      {},
+      {'Items': null},
+      {'Items': 'incorrect'},
+      {'Items': [{'Name': 'Missing ID'}]},
+      {'Items': [{'Id': 'one', 'Name': null}]},
+    ]) {
+      final fake = AdminFake({'/LiveTv/Channels': body});
+      await expectLater(
+        EmbyLiveTvApi(fake.dio).getChannelGroups(userId: 'viewer'),
+        throwsA(isA<FormatException>()),
+      );
+      expect(fake.requests, hasLength(1));
+    }
+    final fake = AdminFake({'/LiveTv/Channels': {'Items': []}});
+    final empty = await EmbyLiveTvApi(fake.dio).getChannelGroups();
+    expect(empty.channels, isEmpty);
+  });
+
+  test('category presence is found without downloading entire EPG lists', () async {
+    final sent = <RequestOptions>[];
+    final dio = Dio()
+      ..interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (request, handler) {
+            sent.add(request);
+            final present = request.queryParameters['IsSports'] == true ||
+                request.queryParameters['IsPremiere'] == true;
+            handler.resolve(
+              Response(
+                requestOptions: request,
+                statusCode: 200,
+                data: {
+                  'Items': present ? [{'Id': 'p1'}] : <Map<String, dynamic>>[],
+                },
+              ),
+            );
+          },
+        ),
+      );
+    final from = DateTime.utc(2026, 11, 13);
+    final result = await EmbyLiveTvApi(dio).getProgrammeCategories(
+      from: from,
+      to: from.add(const Duration(days: 1)),
+      userId: 'viewer',
+    );
+    expect(result, {'sports', 'premiere'});
+    expect(sent, hasLength(6));
+    expect(sent.every((request) => request.queryParameters['Limit'] == 1), true);
   });
 }

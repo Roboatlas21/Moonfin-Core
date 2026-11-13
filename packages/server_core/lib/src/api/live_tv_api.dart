@@ -5,6 +5,10 @@ abstract interface class ChannelGroupApi {
   Future<ChannelGroupLineup> getChannelGroups({String? userId});
 }
 
+/// Groups and channels come from the same mandatory request, not an optional
+/// plugin. An error must be reported rather than retried as a separate lineup.
+abstract interface class DirectChannelGroupApi implements ChannelGroupApi {}
+
 /// Optional lightweight check for program categories in the visible guide window.
 /// Null means the check was unavailable; the guide should keep its filters.
 abstract interface class ProgrammeCategoryApi {
