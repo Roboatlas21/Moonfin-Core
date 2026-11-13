@@ -465,7 +465,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Iterable<GuideFilter> get availableProgrammeCategories => filters.where(
     (filter) =>
         _isCategory(filter) &&
-        (_programmeCategories?.contains(filter.name) ?? true),
+        (filter == _filter ||
+            (_programmeCategories?.contains(filter.name) ?? true)),
   );
   bool get supportsGroupPicker => _client.liveTvApi is ChannelGroupApi;
   Map<String, int> _groupCounts = const {};
@@ -478,6 +479,52 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   List<GuideChannel> _pageChannels = const [];
   int _lineupRequest = 0;
   (String, String?)? _groupAccount;
+  ({DateTime from, DateTime to})? _categoryScope;
+
+  void _refreshProgrammeCategories() {
+    final api = _client.liveTvApi;
+    if (api is! ProgrammeCategoryApi) return;
+    final from = _windowStart;
+    final to = _windowEnd;
+    final scope = (from: from, to: to);
+    if (_categoryScope != scope) {
+      _categoryScope = scope;
+      _programmeCategories = null;
+    }
+    if (_channels.isEmpty) {
+      _programmeCategories = <String>{};
+      return;
+    }
+    final request = _lineupRequest;
+    final session = userDataSync.session;
+    final baseUrl = _client.baseUrl;
+    final userId = _client.userId;
+    unawaited(() async {
+      Set<String>? found;
+      try {
+        found = await api.getProgrammeCategories(
+          from: from,
+          to: to,
+          userId: userId,
+        );
+      } catch (error) {
+        debugPrint('Live TV category check unavailable (${error.runtimeType})');
+      }
+      if (_disposed ||
+          request != _lineupRequest ||
+          session != userDataSync.session ||
+          baseUrl != _client.baseUrl ||
+          userId != _client.userId ||
+          from != _windowStart ||
+          to != _windowEnd ||
+          !identical(api, _client.liveTvApi)) {
+        return;
+      }
+      if (setEquals(_programmeCategories, found)) return;
+      _programmeCategories = found;
+      _notifyListeners();
+    }());
+  }
 
   // Search the full channel list first, so a match appears even if its
   // guide data hasn't loaded.
@@ -1023,6 +1070,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
     _atLivePosition = livePosition;
+    _refreshProgrammeCategories();
     if (_isCategory(_filter)) {
       await _reloadPrograms(keepCategoryRows: true);
       return;
@@ -1051,6 +1099,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> _reloadPrograms({bool keepCategoryRows = false}) async {
+    _refreshProgrammeCategories();
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final depth = _requestedPageDepth;
@@ -1132,6 +1181,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         : null;
     if (account != _groupAccount) {
       _groupAccount = account;
+      _categoryScope = null;
       _programmeCategories = null;
       _channelGroups = {};
       _availableGroups = const [];
@@ -1188,6 +1238,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } else {
       _updatePageRows();
     }
+    if (api is ProgrammeCategoryApi) _refreshProgrammeCategories();
     return true;
   }
 

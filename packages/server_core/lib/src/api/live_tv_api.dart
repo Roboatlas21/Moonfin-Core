@@ -5,6 +5,16 @@ abstract interface class ChannelGroupApi {
   Future<ChannelGroupLineup> getChannelGroups({String? userId});
 }
 
+/// Optional lightweight check for program categories in the visible guide window.
+/// Null means the check was unavailable; the guide should keep its filters.
+abstract interface class ProgrammeCategoryApi {
+  Future<Set<String>?> getProgrammeCategories({
+    required DateTime from,
+    required DateTime to,
+    String? userId,
+  });
+}
+
 class ChannelGroupLineup {
   final Map<String, Set<String>> groupsByChannelId;
 

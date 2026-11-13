@@ -16,6 +16,9 @@ class _MockLiveTvApi extends Mock implements LiveTvApi {}
 
 class _GroupedLiveTvApi extends _MockLiveTvApi implements ChannelGroupApi {}
 
+class _CategoryLiveTvApi extends _GroupedLiveTvApi
+    implements ProgrammeCategoryApi {}
+
 class _MockUserLibraryApi extends Mock implements UserLibraryApi {}
 
 Map<String, dynamic> _channel(String id, {String? number}) => {
@@ -234,6 +237,72 @@ void main() {
       );
     }
   });
+  test('Emby category checks update the chips without delaying the guide', () async {
+    final api = _CategoryLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => client.baseUrl).thenReturn('emby');
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+      (_) async => ChannelGroupLineup({}, channels: [_channel('one')]),
+    );
+    final pending = Completer<Set<String>?>();
+    when(
+      () => api.getProgrammeCategories(
+        from: any(named: 'from'),
+        to: any(named: 'to'),
+        userId: 'user',
+      ),
+    ).thenAnswer((_) => pending.future);
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+
+    await vm.load();
+    expect(vm.playbackChannels.single.id, 'one');
+    expect(vm.availableProgrammeCategories, contains(GuideFilter.sports));
+    pending.complete({'movies', 'sports'});
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.availableProgrammeCategories, [
+      GuideFilter.movies,
+      GuideFilter.sports,
+    ]);
+  });
+
+  test('a stale Emby category check cannot override a later guide window', () async {
+    final api = _CategoryLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => client.baseUrl).thenReturn('emby');
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+      (_) async => ChannelGroupLineup({}, channels: [_channel('one')]),
+    );
+    final checks = <Completer<Set<String>?>>[];
+    when(
+      () => api.getProgrammeCategories(
+        from: any(named: 'from'),
+        to: any(named: 'to'),
+        userId: 'user',
+      ),
+    ).thenAnswer((_) {
+      final done = Completer<Set<String>?>();
+      checks.add(done);
+      return done.future;
+    });
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    expect(checks, hasLength(1));
+    await vm.setDate(vm.windowStart.add(const Duration(days: 1)));
+    expect(checks, hasLength(2));
+    checks[0].complete({'movies'});
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.availableProgrammeCategories, contains(GuideFilter.kids));
+    checks[1].complete({'sports'});
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.availableProgrammeCategories, [GuideFilter.sports]);
+  });
+
   test('channel groups page by channel and keep every programme', () async {
     final grouped = _GroupedLiveTvApi();
     when(() => client.liveTvApi).thenReturn(grouped);
