@@ -14,6 +14,7 @@ import '../repositories/item_mutation_repository.dart';
 import '../services/user_data_sync.dart';
 import '../models/live_tv_recording_state.dart';
 import '../models/series_recording_episodes.dart';
+import 'live_tv_guide_search.dart';
 
 class GuideChannel {
   final String id;
@@ -475,13 +476,20 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String? _selectedGroup;
   String? get selectedGroup => _selectedGroup;
   String _channelQuery = '';
+  List<GuideTitleMatch> _programTitleMatches = const [];
+  int _titleSearchRequest = 0;
+  bool _searchingProgramTitles = false;
+  Object? _programTitleSearchError;
+  bool get searchingProgramTitles => _searchingProgramTitles;
+  Object? get programTitleSearchError => _programTitleSearchError;
   List<GuideChannel> _pageChannels = const [];
   int _lineupRequest = 0;
   (String, String?)? _groupAccount;
 
   // Search the full channel list first, so a match appears even if its
-  // guide data hasn't loaded.
-  void _updatePageRows() {
+  // guide data hasn't loaded. Report whether the channel IDs or order changed,
+  // so a search can keep an already-running guide request when they didn't.
+  bool _updatePageRows() {
     Iterable<GuideChannel> rows = _channels;
     final group = _selectedGroup;
     if (group != null) {
@@ -493,15 +501,32 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       rows = rows.where((channel) => channel.isFavorite);
     }
     if (_channelQuery.isNotEmpty) {
+      final programIds = programChannelsInWindow(
+        _programTitleMatches,
+        _windowStart,
+        _windowEnd,
+      );
       rows = rows.where(
         (channel) =>
             channel.name.toLowerCase().contains(_channelQuery) ||
-            (channel.number?.toLowerCase().contains(_channelQuery) ?? false),
+            (channel.number?.toLowerCase().contains(_channelQuery) ?? false) ||
+            programIds.contains(channel.id),
       );
     }
-    _pageChannels = identical(rows, _channels) ? _channels : rows.toList();
+    final updatedRows = identical(rows, _channels) ? _channels : rows.toList();
+    var changed = _pageChannels.length != updatedRows.length;
+    if (!changed) {
+      for (var i = 0; i < updatedRows.length; i++) {
+        if (_pageChannels[i].id != updatedRows[i].id) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    _pageChannels = updatedRows;
     _categoryHighWater = 0;
     _advanceCategoryCursor();
+    return changed;
   }
 
   // If favorites change the order while loading, continue with the first
@@ -517,7 +542,23 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final query = text.trim().toLowerCase();
     if (_channelQuery == query) return;
     _channelQuery = query;
-    _updatePageRows();
+    final request = ++_titleSearchRequest;
+    _programTitleMatches = const [];
+    _programTitleSearchError = null;
+    _searchingProgramTitles = query.length >= 2;
+    _applyChannelSearchRows();
+    if (_searchingProgramTitles) {
+      unawaited(_searchProgramTitles(query, request));
+    }
+  }
+
+  // A new query or search reply needn't invalidate the guide if the same
+  // channels are still shown in the same order.
+  void _applyChannelSearchRows() {
+    if (!_updatePageRows()) {
+      _notifyListeners();
+      return;
+    }
     _resetPageCursor();
     if (_isCategory(_filter)) {
       unawaited(_loadCategoryPrograms());
@@ -526,6 +567,25 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _notifyListeners();
       if (_state == GuideState.ready) unawaited(loadMorePrograms());
     }
+  }
+
+  Future<void> _searchProgramTitles(String query, int request) async {
+    bool current() =>
+        !_disposed && request == _titleSearchRequest && _channelQuery == query;
+    try {
+      final found = await searchGuideProgramTitles(
+        _client,
+        query,
+        isCurrent: current,
+      );
+      if (!current()) return;
+      _programTitleMatches = found;
+    } catch (error) {
+      if (!current()) return;
+      _programTitleSearchError = error;
+    }
+    _searchingProgramTitles = false;
+    _applyChannelSearchRows();
   }
 
   void _advancePage() {
@@ -1050,6 +1110,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
     _atLivePosition = livePosition;
+    if (_channelQuery.isNotEmpty) {
+      _updatePageRows();
+      _resetPageCursor();
+    }
     if (_isCategory(_filter)) {
       await _reloadPrograms(keepCategoryRows: true);
       return;
@@ -1078,6 +1142,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> _reloadPrograms({bool keepCategoryRows = false}) async {
+    if (_channelQuery.isNotEmpty) _updatePageRows();
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final depth = _requestedPageDepth;

@@ -11188,9 +11188,9 @@
   "@guideAllChannels": {
     "description": "Browse option that shows all accessible Live TV channels, without a category or channel-group filter."
   },
-  "guideSearchChannels": "Search channels",
+  "guideSearchChannels": "Search channels and programs",
   "@guideSearchChannels": {
-    "description": "Placeholder for the Live TV guide search field that searches channel names and numbers."
+    "description": "Placeholder for the Live TV guide search field for channel names, channel numbers, and EPG program titles."
   },
   "guideSearchGroups": "Search groups",
   "@guideSearchGroups": {

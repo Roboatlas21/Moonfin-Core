@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/models/live_tv_recording_state.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
+import 'package:moonfin/data/viewmodels/live_tv_guide_search.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 
@@ -20,6 +21,8 @@ class _DirectGroupedLiveTvApi extends _GroupedLiveTvApi
     implements DirectChannelGroupApi {}
 
 class _MockUserLibraryApi extends Mock implements UserLibraryApi {}
+
+class _MockItemsApi extends Mock implements ItemsApi {}
 
 Map<String, dynamic> _channel(String id, {String? number}) => {
   'Id': id,
@@ -125,6 +128,83 @@ void main() {
     when(() => client.serverType).thenReturn(ServerType.jellyfin);
     when(() => client.userId).thenReturn('user');
     when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': <dynamic>[]});
+  });
+
+  test('Jellyfin and Emby paginate program titles', () async {
+    final items = _MockItemsApi();
+    when(() => client.itemsApi).thenReturn(items);
+    Map<String, dynamic> item(String id, String title) => {
+      'Id': id,
+      'ChannelId': id,
+      'Type': client.serverType == ServerType.emby ? 'Program' : 'LiveTvProgram',
+      'Name': title,
+      'Overview': 'Soccer',
+      'StartDate': '2026-11-14T19:00:00Z',
+      'EndDate': '2026-11-14T20:00:00Z',
+    };
+    final offsets = <int>[];
+    when(
+      () => items.getItems(
+        searchTerm: 'soccer',
+        includeItemTypes: any(named: 'includeItemTypes'),
+        recursive: true,
+        startIndex: any(named: 'startIndex'),
+        limit: 200,
+      ),
+    ).thenAnswer((call) async {
+      expect(call.namedArguments[#includeItemTypes], [
+        client.serverType == ServerType.emby ? 'Program' : 'LiveTvProgram',
+      ]);
+      final offset = call.namedArguments[#startIndex] as int;
+      offsets.add(offset);
+      return {
+        'TotalRecordCount': 3,
+        'Items': offset == 0
+            ? [item('tsn', 'Soccer'), item('espn', 'Baseball')]
+            : [item('sports', 'Soccer Highlights')],
+      };
+    });
+    final found = await searchGuideProgramTitles(
+      client, 'soccer', isCurrent: () => true,
+    );
+    expect(offsets, [0, 2]);
+    expect(found.map((p) => p.channelId), ['tsn', 'sports']);
+    final start = DateTime.utc(2026, 11, 14, 19);
+    expect(programChannelsInWindow(
+      found, start, start.add(const Duration(hours: 2)),
+    ), {'tsn', 'sports'});
+
+    var checks = 0;
+    expect(await searchGuideProgramTitles(
+      client, 'soccer', isCurrent: () => checks++ == 0,
+    ), isEmpty);
+
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    offsets.clear();
+    final emby = await searchGuideProgramTitles(
+      client, 'soccer', isCurrent: () => true,
+    );
+    expect(offsets, [0, 2]);
+    expect(emby.map((p) => p.channelId), ['tsn', 'sports']);
+  });
+
+  test('unchanged search preserves an in-flight guide page', () async {
+    _stubChannels(liveTv, [
+      for (var i = 0; i < 100; i++)
+        {'Id': 'c$i', 'Name': 'Soccer $i', 'ChannelNumber': '$i'},
+    ]);
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    final page = Completer<Map<String, dynamic>>();
+    when(() => _guide(liveTv)).thenAnswer((_) => page.future);
+    final pending = vm.loadMorePrograms();
+    vm.setChannelQuery('s');
+    page.complete({'Items': []});
+    await pending;
+    expect(vm.filteredChannels, hasLength(100));
+    expect(vm.programsHighWater, 100);
+    verify(() => _guide(liveTv)).called(2);
   });
 
   test('Plex leaves out the genre filters its programs never carry', () {

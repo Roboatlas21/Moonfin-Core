@@ -1733,28 +1733,51 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildChannelSearchField({bool compact = false}) => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 360),
-    child: LocalSearchField(
-      controller: _channelSearch,
-      focusNode: _channelSearchFocus,
-      hint: AppLocalizations.of(context).guideSearchChannels,
-      compact: compact,
-      onChanged: _searchChannels,
-      onTvKeyEvent: (_, event) {
-        if (!event.isActionable) return KeyEventResult.ignored;
-        if (event.logicalKey.isLeftKey) {
-          if (_usesPicker) {
-            _browseFocus.requestFocus();
-          } else {
-            _focusFilterRail();
-          }
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey.isDownKey) {
-          _focusWindowBarFromGenres();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
+    child: Stack(
+      children: [
+        LocalSearchField(
+          controller: _channelSearch,
+          focusNode: _channelSearchFocus,
+          hint: AppLocalizations.of(context).guideSearchChannels,
+          compact: compact,
+          onChanged: _searchChannels,
+          onTvKeyEvent: (_, event) {
+            if (!event.isActionable) return KeyEventResult.ignored;
+            if (event.logicalKey.isLeftKey) {
+              if (_usesPicker) {
+                _browseFocus.requestFocus();
+              } else {
+                _focusFilterRail();
+              }
+              return KeyEventResult.handled;
+            }
+            if (event.logicalKey.isDownKey) {
+              _focusWindowBarFromGenres();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+        ),
+        if (_vm.searchingProgramTitles)
+          const Positioned(
+            left: 12,
+            right: 12,
+            bottom: 0,
+            child: LinearProgressIndicator(minHeight: 2),
+          ),
+        if (_vm.programTitleSearchError != null)
+          Positioned(
+            right: 44,
+            top: 8,
+            child: Tooltip(
+              message:
+                  '${AppLocalizations.of(context).search} '
+                  '${AppLocalizations.of(context).programs}: '
+                  '${AppLocalizations.of(context).error}',
+              child: const Icon(Icons.error_outline, color: Colors.orange),
+            ),
+          ),
+      ],
     ),
   );
 
@@ -1864,6 +1887,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         );
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
+        if (channels.isEmpty && _vm.searchingProgramTitles) {
+          return const Center(child: CircularProgressIndicator());
+        }
         if (channels.isEmpty) {
           return Center(
             child: Text(
@@ -2277,6 +2303,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         );
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
+        if (channels.isEmpty && _vm.searchingProgramTitles) {
+          return const Center(child: CircularProgressIndicator());
+        }
         if (channels.isEmpty) {
           return Center(
             child: Text(
