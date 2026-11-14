@@ -77,6 +77,37 @@ const _teletubbies = {
           ],
         },
       },
+      '/tv.plex.providers.epg.xmltv:2/library/search' => {
+        'MediaContainer': {
+          'SearchResult': [
+            {
+              'Metadata': {
+                'ratingKey': 'sintel',
+                'type': 'movie',
+                'title': 'Sintel',
+                'Media': [
+                  {
+                    'channelIdentifier': '4',
+                    'beginsAt': 1792699380,
+                    'endsAt': 1792703040,
+                  },
+                ],
+              },
+            },
+            {
+              'Metadata': {
+                'ratingKey': 'teletubbies',
+                'type': 'show',
+                'title': 'Teletubbies',
+                'key': '/tv.plex.providers.epg.xmltv:2/metadata/tubbies/children',
+              },
+            },
+          ],
+        },
+      },
+      '/tv.plex.providers.epg.xmltv:2/metadata/tubbies/grandchildren' => {
+        'MediaContainer': {'Metadata': [_teletubbies]},
+      },
       '/tv.plex.providers.epg.xmltv:2/grid' => {
         'MediaContainer': {
           'Metadata': [
@@ -194,6 +225,28 @@ const _teletubbies = {
 }
 
 void main() {
+  test('searches DVR movies and series without fetching free-channel EPG', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final movie = await api.searchProgramTitles('Sintel', isCurrent: () => true);
+    expect(movie.single['ChannelId'], 'channel-2-4');
+    expect(movie.single['StartDate'], '2026-10-22T20:03:00.000Z');
+
+    final shows = await api.searchProgramTitles('Teletubbies', isCurrent: () => true);
+    expect(shows.map((p) => p['ChannelId']), ['channel-2-4', 'channel-2-9']);
+    expect(shows.map((p) => p['Name']), ['Teletubbies', 'Teletubbies']);
+    expect(server.requests.where((r) => r.uri.path.endsWith('/grandchildren')),
+        hasLength(1));
+    expect(server.requests.where((r) => r.uri.host == 'epg.provider.plex.tv'),
+        isEmpty);
+    var currentChecks = 0;
+    expect(await api.searchProgramTitles(
+      'Sintel', isCurrent: () => currentChecks++ == 0,
+    ), isEmpty);
+    expect(server.requests.where((r) => r.uri.path.endsWith('/library/search')),
+        hasLength(2));
+  });
+
   test('channel and showing ids come apart again', () {
     expect(plexChannelOf('channel-2-4'), (source: '2', channel: '4'));
     expect(plexChannelOf('channel-plex-abc-66635fc0'), (

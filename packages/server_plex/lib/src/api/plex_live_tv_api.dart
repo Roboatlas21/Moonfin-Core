@@ -55,7 +55,7 @@ typedef _Grab = ({Map op, Map<String, dynamic> program});
 
 /// Live TV from the server's own DVRs, each a tuner with its guide, and from
 /// Plex's free channels, which plex.tv serves itself.
-class PlexLiveTvApi implements LiveTvApi {
+class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
   final Dio _dio;
 
   PlexLiveTvApi(this._dio);
@@ -135,6 +135,132 @@ class PlexLiveTvApi implements LiveTvApi {
               (key: '${dvr['key']}', epg: dvr['epgIdentifier'] as String),
         ];
       });
+
+  // Plex's provider search returns movies with their airings, but a show can
+  // be just a parent record. Its grandchildren have the actual airings.
+  @override
+  Future<List<Map<String, dynamic>>> searchProgramTitles(
+    String query, {
+    required bool Function() isCurrent,
+  }) async {
+    final term = query.trim();
+    if (term.length < 2 || !isCurrent()) return const [];
+    final folded = term.toLowerCase();
+    final programs = <Map<String, dynamic>>[];
+
+    for (final dvr in await _dvrList()) {
+      if (!isCurrent()) return const [];
+      final hits = await _providerPages(
+        '/${dvr.epg}/library/search',
+        'SearchResult',
+        {'query': term, 'searchTypes': 'livetv', 'limit': 200},
+        isCurrent,
+      );
+      if (!isCurrent()) return const [];
+
+      for (final hit in hits) {
+        final parent = hit['Metadata'];
+        if (parent is! Map) continue;
+        final type = parent['type'];
+        if (type != 'movie' && type != 'episode' && type != 'show') continue;
+
+        List<Map> items = [parent];
+        if (type == 'show') {
+          final key = parent['key'];
+          if (key is! String ||
+              !key.startsWith('/${dvr.epg}/metadata/') ||
+              !key.endsWith('/children')) {
+            continue;
+          }
+          items = await _providerPages(
+            '${key.substring(0, key.length - '/children'.length)}/grandchildren',
+            'Metadata',
+            const {},
+            isCurrent,
+          );
+        }
+        if (!isCurrent()) return const [];
+
+        for (final item in items) {
+          final kind = item['type'];
+          if (kind != 'movie' && kind != 'episode') continue;
+          final title = (kind == 'episode'
+                      ? item['grandparentTitle'] ?? parent['title']
+                      : item['title'])
+                  ?.toString() ??
+              '';
+          final episode = kind == 'episode' ? item['title']?.toString() ?? '' : '';
+          if (!title.toLowerCase().contains(folded) &&
+              !episode.toLowerCase().contains(folded)) {
+            continue;
+          }
+
+          final source = kind == 'episode' && item['grandparentTitle'] == null
+              ? {...item, 'grandparentTitle': title}
+              : item;
+          for (final media in item['Media'] as List? ?? const []) {
+            if (media is! Map) continue;
+            final program = _program(
+              dvr.key,
+              media['channelIdentifier'],
+              source,
+              media,
+              channelName: media['channelTitle'],
+            );
+            if (program != null) programs.add(program);
+          }
+        }
+      }
+    }
+    return isCurrent() ? programs : const [];
+  }
+
+  Future<List<Map>> _providerPages(
+    String path,
+    String field,
+    Map<String, dynamic> query,
+    bool Function() isCurrent,
+  ) async {
+    const pageSize = 200;
+    final rows = <Map>[];
+    var offset = 0;
+    String? previousPage;
+
+    while (isCurrent()) {
+      final response = await plexContainer(_dio, path, {
+        ...query,
+        'X-Plex-Container-Start': offset,
+        'X-Plex-Container-Size': pageSize,
+      });
+      if (!isCurrent()) return const [];
+      final page = response[field] as List? ?? const [];
+      if (page.isEmpty) {
+        if (response['totalSize'] case final num total when total > offset) {
+          throw StateError('Plex EPG search returned an incomplete page');
+        }
+        break;
+      }
+      final signature = [
+        for (final row in page)
+          if (row is Map)
+            (row['Metadata'] is Map
+                    ? (row['Metadata'] as Map)['ratingKey']
+                    : row['ratingKey'])
+                ?.toString() ??
+                '',
+      ].join(',');
+      if (signature == previousPage) {
+        throw StateError('Plex EPG search pagination did not advance');
+      }
+      previousPage = signature;
+      rows.addAll(page.whereType<Map>());
+      offset += page.length;
+      final total = response['totalSize'];
+      if (total is num && offset >= total) break;
+      if (total is! num && page.length < pageSize) break;
+    }
+    return rows;
+  }
 
   Future<List<Map<String, dynamic>>> _dvrChannels() async {
     final channels = <Map<String, dynamic>>[];

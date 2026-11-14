@@ -15,6 +15,9 @@ class _MockClient extends Mock implements MediaServerClient {}
 
 class _MockLiveTvApi extends Mock implements LiveTvApi {}
 
+class _SearchableLiveTvApi extends _MockLiveTvApi
+    implements LiveTvProgramSearchApi {}
+
 class _GroupedLiveTvApi extends _MockLiveTvApi implements ChannelGroupApi {}
 
 class _DirectGroupedLiveTvApi extends _GroupedLiveTvApi
@@ -186,6 +189,26 @@ void main() {
     );
     expect(offsets, [0, 2]);
     expect(emby.map((p) => p.channelId), ['tsn', 'sports']);
+  });
+
+  test('Plex guide titles use the DVR search API', () async {
+    final api = _SearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => api.searchProgramTitles(
+      'soccer', isCurrent: any(named: 'isCurrent'),
+    )).thenAnswer((_) async => [{
+      'Id': 'airing-2-123-4',
+      'Type': 'Program',
+      'ChannelId': 'channel-2-4',
+      'Name': 'Soccer',
+      'StartDate': '2026-11-14T19:00:00Z',
+      'EndDate': '2026-11-14T20:00:00Z',
+    }]);
+    final result = await searchGuideProgramTitles(
+      client, 'soccer', isCurrent: () => true,
+    );
+    expect(result.single.channelId, 'channel-2-4');
   });
 
   test('unchanged search preserves an in-flight guide page', () async {

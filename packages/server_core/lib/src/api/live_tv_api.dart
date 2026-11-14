@@ -1,5 +1,14 @@
 import 'package:dio/dio.dart';
 
+/// Backends with their own EPG search can provide program rows in the same
+/// shape as a Live TV guide response.
+abstract interface class LiveTvProgramSearchApi {
+  Future<List<Map<String, dynamic>>> searchProgramTitles(
+    String query, {
+    required bool Function() isCurrent,
+  });
+}
+
 /// Reads channel groups from the server's supported source.
 abstract interface class ChannelGroupApi {
   Future<ChannelGroupLineup> getChannelGroups({String? userId});

@@ -16,7 +16,7 @@ Set<String> programChannelsInWindow(
       match.channelId,
 };
 
-/// Jellyfin and Emby can narrow item searches to EPG programs.
+/// Jellyfin and Emby search the item index; Plex searches its DVR provider.
 Future<List<GuideTitleMatch>> searchGuideProgramTitles(
   MediaServerClient client,
   String query, {
@@ -33,9 +33,48 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
   const pageSize = 200;
   final results = <GuideTitleMatch>[];
   final seen = <String>{};
+
+  void addItems(List items) {
+    for (final raw in items) {
+      if (raw is! Map) continue;
+      if (raw['Type'] != 'LiveTvProgram' && raw['Type'] != 'Program') {
+        continue;
+      }
+      final id = raw['Id']?.toString();
+      final channelId = raw['ChannelId']?.toString();
+      final name = raw['Name']?.toString().toLowerCase() ?? '';
+      final episode = raw['EpisodeTitle']?.toString().toLowerCase() ?? '';
+      final start = parseServerDate(raw['StartDate'])?.toLocal();
+      final end = parseServerDate(raw['EndDate'])?.toLocal();
+      if (id == null ||
+          id.isEmpty ||
+          channelId == null ||
+          channelId.isEmpty ||
+          (!name.contains(foldedTerm) && !episode.contains(foldedTerm)) ||
+          start == null ||
+          end == null ||
+          !end.isAfter(start) ||
+          !seen.add(id)) {
+        continue;
+      }
+      results.add((channelId: channelId, start: start, end: end));
+    }
+  }
+
+  final searchApi = client.liveTvApi;
+  if (searchApi is LiveTvProgramSearchApi) {
+    final rows = await searchApi.searchProgramTitles(term, isCurrent: isCurrent);
+    if (!isCurrent()) return const [];
+    addItems(rows);
+    return results;
+  }
+  if (client.serverType == ServerType.plex ||
+      client.serverType == ServerType.silo) {
+    return const [];
+  }
+
   var offset = 0;
   String? previousPage;
-
   while (isCurrent()) {
     final response = await client.itemsApi.getItems(
       searchTerm: term,
@@ -65,29 +104,7 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
     }
     previousPage = signature;
 
-    for (final raw in items) {
-      if (raw is! Map) continue;
-      if (raw['Type'] != 'LiveTvProgram' && raw['Type'] != 'Program') {
-        continue;
-      }
-      final id = raw['Id']?.toString();
-      final channelId = raw['ChannelId']?.toString();
-      final name = raw['Name']?.toString().toLowerCase() ?? '';
-      final start = parseServerDate(raw['StartDate'])?.toLocal();
-      final end = parseServerDate(raw['EndDate'])?.toLocal();
-      if (id == null ||
-          id.isEmpty ||
-          channelId == null ||
-          channelId.isEmpty ||
-          !name.contains(foldedTerm) ||
-          start == null ||
-          end == null ||
-          !end.isAfter(start) ||
-          !seen.add(id)) {
-        continue;
-      }
-      results.add((channelId: channelId, start: start, end: end));
-    }
+    addItems(items);
 
     offset += items.length;
     if (total is num && total > 0) {
