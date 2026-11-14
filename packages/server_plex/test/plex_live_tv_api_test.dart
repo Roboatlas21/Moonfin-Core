@@ -338,6 +338,73 @@ void main() {
     expect(combined.single['ChannelId'], 'channel-2-4');
   });
 
+  test('publishes ready movies before a slow series lookup in the same page', () async {
+    final (dio, server) = _server();
+    final detailRequested = Completer<void>();
+    RequestOptions? detailOptions;
+    RequestInterceptorHandler? detailHandler;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == '/tv.plex.providers.epg.xmltv:2/library/search') {
+            // Put the show first so it would block the movie in a serial walk.
+            final container =
+                (server.answer(options) as Map)['MediaContainer'] as Map;
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: {
+                  'MediaContainer': {
+                    ...container,
+                    'SearchResult':
+                        (container['SearchResult'] as List).reversed.toList(),
+                  },
+                },
+              ),
+            );
+          } else if (options.uri.path.endsWith('/grandchildren')) {
+            detailOptions = options;
+            detailHandler = handler;
+            detailRequested.complete();
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+
+    final batches = <List<Map<String, dynamic>>>[];
+    final pending = PlexLiveTvApi(dio).searchProgramTitlesIncrementally(
+      'tel',
+      isCurrent: () => true,
+      onBatch: (batch) => batches.add(batch),
+    );
+    await detailRequested.future;
+
+    // Sintel matches "tel" and is ready even though the first hit is a show.
+    expect(batches, hasLength(1));
+    expect(batches.single.map((program) => program['Name']), ['Sintel']);
+    expect(
+      server.requests.where(
+        (request) => request.uri.host == 'discover.provider.plex.tv',
+      ),
+      isEmpty,
+    );
+
+    detailHandler!.next(detailOptions!);
+    final results = await pending;
+    expect(batches, hasLength(2));
+    expect(
+      batches.last.map((program) => program['Name']),
+      ['Teletubbies', 'Teletubbies'],
+    );
+    expect(
+      results.map((program) => program['Name']),
+      ['Sintel', 'Teletubbies', 'Teletubbies'],
+    );
+  });
+
   test('keeps DVR matches if Plex Discover search fails', () async {
     final (dio, server) = _server();
     var cloudAttempts = 0;

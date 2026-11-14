@@ -197,31 +197,14 @@ class PlexLiveTvApi
           {'query': term, 'searchTypes': 'livetv', 'limit': 200},
           isCurrent,
           onPage: (hits) async {
-            final batch = <Map<String, dynamic>>[];
-            for (final hit in hits) {
-              if (!isCurrent()) return;
-              final parent = hit['Metadata'];
-              if (parent is! Map) continue;
-              final type = parent['type'];
-              if (type != 'movie' && type != 'episode' && type != 'show') continue;
+            final pendingShows = <Map>[];
+            final immediate = <Map<String, dynamic>>[];
 
-              List<Map> items = [parent];
-              if (type == 'show') {
-                final key = parent['key'];
-                if (key is! String ||
-                    !key.startsWith('/${dvr.epg}/metadata/') ||
-                    !key.endsWith('/children')) {
-                  continue;
-                }
-                items = await _providerPages(
-                  '${key.substring(0, key.length - '/children'.length)}/grandchildren',
-                  'Metadata',
-                  const {},
-                  isCurrent,
-                );
-              }
-              if (!isCurrent()) return;
-
+            void appendPrograms(
+              Map parent,
+              List<Map> items,
+              List<Map<String, dynamic>> batch,
+            ) {
               for (final item in items) {
                 final kind = item['type'];
                 if (kind != 'movie' && kind != 'episode') continue;
@@ -253,9 +236,46 @@ class PlexLiveTvApi
                 }
               }
             }
-            if (batch.isNotEmpty && isCurrent()) {
+
+            void publish(List<Map<String, dynamic>> batch) {
+              if (batch.isEmpty || !isCurrent()) return;
               programs.addAll(batch);
               onBatch?.call(batch);
+            }
+
+            // Ready movies and episodes should not wait on a show's
+            // separate grandchildren request, even when the show comes first.
+            for (final hit in hits) {
+              if (!isCurrent()) return;
+              final parent = hit['Metadata'];
+              if (parent is! Map) continue;
+              final type = parent['type'];
+              if (type == 'show') {
+                pendingShows.add(parent);
+              } else if (type == 'movie' || type == 'episode') {
+                appendPrograms(parent, [parent], immediate);
+              }
+            }
+            publish(immediate);
+
+            for (final show in pendingShows) {
+              if (!isCurrent()) return;
+              final key = show['key'];
+              if (key is! String ||
+                  !key.startsWith('/${dvr.epg}/metadata/') ||
+                  !key.endsWith('/children')) {
+                continue;
+              }
+              final items = await _providerPages(
+                '${key.substring(0, key.length - '/children'.length)}/grandchildren',
+                'Metadata',
+                const {},
+                isCurrent,
+              );
+              if (!isCurrent()) return;
+              final batch = <Map<String, dynamic>>[];
+              appendPrograms(show, items, batch);
+              publish(batch);
             }
           },
         );
