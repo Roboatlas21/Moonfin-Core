@@ -20,6 +20,9 @@ class _SearchableLiveTvApi extends _MockLiveTvApi
 
 class _GroupedLiveTvApi extends _MockLiveTvApi implements ChannelGroupApi {}
 
+class _GroupedSearchableLiveTvApi extends _SearchableLiveTvApi
+    implements ChannelGroupApi {}
+
 class _DirectGroupedLiveTvApi extends _GroupedLiveTvApi
     implements DirectChannelGroupApi {}
 
@@ -240,6 +243,149 @@ void main() {
         nextStart: t.add(const Duration(minutes: 30))), isNull);
     expect(find([match('tsn', 0), ...later], currentStart: t), isNull);
     expect(find([match('tsn', 150)]), isNull);
+  });
+
+  group('next guide search airing', () {
+    late _SearchableLiveTvApi api;
+    late LiveTvGuideViewModel vm;
+    final now = DateTime.utc(2026, 11, 14, 17);
+    final end = now.add(const Duration(minutes: 150));
+
+    Map<String, dynamic> airing(String id, String channel, DateTime start) => {
+      'Id': id,
+      'Type': 'Program',
+      'Name': 'Silo',
+      'ChannelId': channel,
+      'StartDate': start.toIso8601String(),
+      'EndDate': start.add(const Duration(hours: 1)).toIso8601String(),
+    };
+
+    setUp(() {
+      api = _SearchableLiveTvApi();
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [_channel('tsn'), _channel('espn')]);
+      vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+    });
+
+    Future<void> search(List<Map<String, dynamic>> results) async {
+      when(() => api.searchProgramTitles(
+        'silo', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => results);
+      await vm.load(windowStart: now);
+      vm.setChannelQuery('silo');
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.searchingProgramTitles, isFalse);
+    }
+
+    test('uses the earliest later airing on a known channel', () async {
+      await search([
+        airing('late', 'tsn', end.add(const Duration(minutes: 30))),
+        airing('unknown', 'not-in-lineup', end.add(const Duration(minutes: 1))),
+        airing('early', 'espn', end),
+        airing('visible', 'tsn', now.add(const Duration(minutes: 30))),
+      ]);
+      expect(vm.nextSearchAiring?.channelId, 'espn');
+      expect(vm.nextSearchAiring!.start.isAtSameMomentAs(end), isTrue);
+      expect(vm.nextSearchAiring?.title, 'Silo');
+      await vm.setWindowStart(end, livePosition: false);
+      expect(vm.nextSearchAiring?.channelId, 'tsn');
+    });
+
+    test('same-time airings both appear after moving the window', () async {
+      await search([
+        airing('one', 'tsn', end),
+        airing('two', 'espn', end),
+      ]);
+      expect(vm.nextSearchAiring!.start.isAtSameMomentAs(end), isTrue);
+      await vm.setWindowStart(end, livePosition: false);
+      expect(vm.filteredChannels.map((ch) => ch.id), containsAll(['tsn', 'espn']));
+      expect(vm.nextSearchAiring, isNull);
+      verify(() => api.searchProgramTitles(
+        'silo', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
+    test('no result, cleared search and failed search offer no jump', () async {
+      await search([]);
+      expect(vm.nextSearchAiring, isNull);
+      vm.setChannelQuery('');
+      expect(vm.nextSearchAiring, isNull);
+      when(() => api.searchProgramTitles(
+        'fail', isCurrent: any(named: 'isCurrent'),
+      )).thenThrow(StateError('EPG unavailable'));
+      vm.setChannelQuery('fail');
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.programTitleSearchError, isNotNull);
+      expect(vm.nextSearchAiring, isNull);
+    });
+
+    test('does not suggest airings while a search is pending', () async {
+      final pending = Completer<List<Map<String, dynamic>>>();
+      when(() => api.searchProgramTitles(
+        'silo', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) => pending.future);
+      await vm.load(windowStart: now);
+      vm.setChannelQuery('silo');
+      expect(vm.searchingProgramTitles, isTrue);
+      expect(vm.nextSearchAiring, isNull);
+      pending.complete([airing('future', 'tsn', end)]);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.nextSearchAiring?.channelId, 'tsn');
+    });
+
+    test('respects Favorites when only some channels are saved', () async {
+      _stubChannels(api, [
+        {'Id': 'tsn', 'Name': 'TSN', 'UserData': {'IsFavorite': true}},
+        _channel('espn'),
+      ]);
+      await search([
+        airing('espn-early', 'espn', end),
+        airing('tsn-late', 'tsn', end.add(const Duration(hours: 1))),
+      ]);
+      vm.setFilter(GuideFilter.favorites);
+      expect(vm.nextSearchAiring?.channelId, 'tsn');
+    });
+
+    test('respects the selected channel group', () async {
+      final grouped = _GroupedSearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(grouped);
+      when(() => client.baseUrl).thenReturn('fixture');
+      when(() => _guide(grouped)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(grouped, [_channel('tsn'), _channel('espn')]);
+      when(() => grouped.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => const ChannelGroupLineup({
+          'tsn': {'Sports'},
+          'espn': {'News'},
+        }),
+      );
+      when(() => grouped.searchProgramTitles(
+        'silo', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        airing('news', 'espn', end),
+        airing('sports', 'tsn', end.add(const Duration(hours: 1))),
+      ]);
+      final groupedVm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(groupedVm.dispose);
+      await groupedVm.load(windowStart: now);
+      groupedVm.setGroup('Sports');
+      groupedVm.setChannelQuery('silo');
+      await Future<void>.delayed(Duration.zero);
+      expect(groupedVm.nextSearchAiring?.channelId, 'tsn');
+    });
+
+    test('does not suggest airings outside Favorites or genre scope', () async {
+      await search([
+        airing('espn-early', 'espn', end),
+        airing('tsn-late', 'tsn', end.add(const Duration(hours: 1))),
+      ]);
+      vm.setFilter(GuideFilter.favorites);
+      expect(vm.nextSearchAiring, isNull);
+      vm.setFilter(GuideFilter.sports);
+      expect(vm.nextSearchAiring, isNull);
+    });
   });
 
   test('unchanged search preserves an in-flight guide page', () async {

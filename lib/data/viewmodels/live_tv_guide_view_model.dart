@@ -477,6 +477,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String? get selectedGroup => _selectedGroup;
   String _channelQuery = '';
   List<GuideTitleMatch> _programTitleMatches = const [];
+  String get channelQuery => _channelQuery;
   int _titleSearchRequest = 0;
   bool _searchingProgramTitles = false;
   Object? _programTitleSearchError;
@@ -705,6 +706,35 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           currentStart: now?.startDate,
           nextStart: next?.startDate,
         );
+
+  /// Finds the next search hit after this window in the current lineup.
+  /// Program categories need genre information the search hits do not carry.
+  GuideTitleMatch? get nextSearchAiring {
+    if (_channelQuery.length < 2 ||
+        _searchingProgramTitles ||
+        _programTitleSearchError != null ||
+        (_filter != GuideFilter.all && _filter != GuideFilter.favorites)) {
+      return null;
+    }
+    final eligible = {
+      for (final channel in _channels)
+        if ((_selectedGroup == null ||
+                _channelGroups[channel.id]?.contains(_selectedGroup) == true) &&
+            (_filter != GuideFilter.favorites || channel.isFavorite))
+          channel.id,
+    };
+    final now = _now();
+    GuideTitleMatch? next;
+    for (final match in _programTitleMatches) {
+      if (!eligible.contains(match.channelId) ||
+          match.start.isBefore(_windowEnd) ||
+          !match.start.isAfter(now)) {
+        continue;
+      }
+      if (next == null || match.start.isBefore(next.start)) next = match;
+    }
+    return next;
+  }
 
   static bool _isCategory(GuideFilter filter) =>
       filter != GuideFilter.all && filter != GuideFilter.favorites;

@@ -171,6 +171,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   late LiveTvCategoryDisplay _categoryDisplay;
   final _browseFocus = FocusNode(debugLabel: 'GuideBrowse');
   final _channelSearchFocus = FocusNode(debugLabel: 'GuideSearch');
+  final _nextAiringFocus = FocusNode(debugLabel: 'GuideNextAiring');
   final _channelSearch = TextEditingController();
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
@@ -851,6 +852,16 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// DOWN out of the genre rail lands on the same button UP left behind.
   void _focusWindowBarFromGenres() => _focusWindowBar(_lastWindowBarIndex);
 
+  void _focusGuideResults() {
+    if (_vm.state == GuideState.ready &&
+        _vm.filteredChannels.isEmpty &&
+        _vm.nextSearchAiring != null) {
+      _nextAiringFocus.requestFocus();
+      return;
+    }
+    _focusLastChannelRow();
+  }
+
   void _focusLastChannelRow() {
     final channels = _vm.filteredChannels;
     if (channels.isEmpty) return;
@@ -986,6 +997,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _miniPlayerFocusNode.dispose();
     _browseFocus.dispose();
     _channelSearchFocus.dispose();
+    _nextAiringFocus.dispose();
     _channelSearchDebounce?.cancel();
     _channelSearch.dispose();
     for (final node in _channelFocusNodes.values) {
@@ -1805,7 +1817,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         },
         apple: _apple,
         focusNodeFor: (i) => _filterFocusNodeFor(filters[i]),
-        onNavigateDown: onNavigateDown ?? _focusLastChannelRow,
+        onNavigateDown: onNavigateDown ?? _focusGuideResults,
       ),
     );
   }
@@ -2277,7 +2289,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           return KeyEventResult.handled;
         }
         if (key.isDownKey) {
-          _focusLastChannelRow();
+          _focusGuideResults();
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -2318,6 +2330,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           return const Center(child: CircularProgressIndicator());
         }
         if (channels.isEmpty) {
+          if (_vm.channelQuery.length >= 2 &&
+              _vm.programTitleSearchError == null &&
+              (_vm.filter == GuideFilter.all ||
+                  _vm.filter == GuideFilter.favorites)) {
+            return _buildEmptySearchResults();
+          }
           return Center(
             child: Text(
               AppLocalizations.of(context).noChannelsFound,
@@ -2327,6 +2345,106 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         }
         return _buildGuideGrid(channels);
     }
+  }
+
+  String _nextAiringDay(DateTime date) {
+    final today = DateTime.now();
+    final l10n = AppLocalizations.of(context);
+    if (DateUtils.isSameDay(today, date)) return l10n.guideToday;
+    if (DateUtils.isSameDay(
+      date,
+      DateTime(today.year, today.month, today.day + 1),
+    )) {
+      return l10n.guideTomorrow;
+    }
+    return _formatDate(date);
+  }
+
+  Widget _buildEmptySearchResults() {
+    final l10n = AppLocalizations.of(context);
+    final next = _vm.nextSearchAiring;
+    final query = _channelSearch.text.trim();
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.search_off, color: Colors.white54, size: 36),
+              const SizedBox(height: 12),
+              Text(
+                next == null
+                    ? l10n.guideNoProgramsFound
+                    : l10n.guideNoProgramsThisWindow,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                next == null
+                    ? l10n.guideNoLaterAirings(query)
+                    : l10n.guideNextMatchingAiring(
+                        query,
+                        _nextAiringDay(next.start),
+                        _formatTime(next.start),
+                      ),
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70),
+              ),
+              if (next != null) ...[
+                const SizedBox(height: 16),
+                _GuidePillButton(
+                  icon: Icons.arrow_forward,
+                  label: l10n.guideJumpToNextAiring,
+                  focusNode: _nextAiringFocus,
+                  onPressed: () => unawaited(_jumpToNextAiring()),
+                  onKeyEvent: (_, event) {
+                    if (event.isActionable && event.logicalKey.isUpKey) {
+                      _focusWindowBar(_lastWindowBarIndex);
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _jumpToNextAiring() async {
+    final next = _vm.nextSearchAiring;
+    if (next == null) return;
+    _cancelPendingVerticalMove();
+    _selection = null;
+    _lastFocusedRowIndex = null;
+    try {
+      await _vm.setWindowStart(guideLeftEdge(next.start), livePosition: false);
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    // The matching row is built on the next frame. Mount it before focusing.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final rows = _vm.filteredChannels;
+      final index = rows.indexWhere((ch) => ch.id == next.channelId);
+      if (rows.isEmpty) return;
+      _scrollToRow(index < 0 ? 0 : index, animate: false);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final current = _vm.filteredChannels;
+        if (current.isEmpty) return;
+        final row = current.indexWhere((ch) => ch.id == next.channelId);
+        _focusChannelRow(row < 0 ? 0 : row, animate: false);
+      });
+    });
   }
 
   Widget _buildGuideGrid(List<GuideChannel> channels) {
