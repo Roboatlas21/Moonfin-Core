@@ -190,74 +190,84 @@ class PlexLiveTvApi
     }
     for (final dvr in dvrs) {
       if (!isCurrent()) return const [];
-      await _providerPages(
-        '/${dvr.epg}/library/search',
-        'SearchResult',
-        {'query': term, 'searchTypes': 'livetv', 'limit': 200},
-        isCurrent,
-        onPage: (hits) async {
-          final batch = <Map<String, dynamic>>[];
-          for (final hit in hits) {
-            if (!isCurrent()) return;
-            final parent = hit['Metadata'];
-            if (parent is! Map) continue;
-            final type = parent['type'];
-            if (type != 'movie' && type != 'episode' && type != 'show') continue;
+      try {
+        await _providerPages(
+          '/${dvr.epg}/library/search',
+          'SearchResult',
+          {'query': term, 'searchTypes': 'livetv', 'limit': 200},
+          isCurrent,
+          onPage: (hits) async {
+            final batch = <Map<String, dynamic>>[];
+            for (final hit in hits) {
+              if (!isCurrent()) return;
+              final parent = hit['Metadata'];
+              if (parent is! Map) continue;
+              final type = parent['type'];
+              if (type != 'movie' && type != 'episode' && type != 'show') continue;
 
-            List<Map> items = [parent];
-            if (type == 'show') {
-              final key = parent['key'];
-              if (key is! String ||
-                  !key.startsWith('/${dvr.epg}/metadata/') ||
-                  !key.endsWith('/children')) {
-                continue;
-              }
-              items = await _providerPages(
-                '${key.substring(0, key.length - '/children'.length)}/grandchildren',
-                'Metadata',
-                const {},
-                isCurrent,
-              );
-            }
-            if (!isCurrent()) return;
-
-            for (final item in items) {
-              final kind = item['type'];
-              if (kind != 'movie' && kind != 'episode') continue;
-              final title = (kind == 'episode'
-                          ? item['grandparentTitle'] ?? parent['title']
-                          : item['title'])
-                      ?.toString() ??
-                  '';
-              final episode =
-                  kind == 'episode' ? item['title']?.toString() ?? '' : '';
-              if (!title.toLowerCase().contains(folded) &&
-                  !episode.toLowerCase().contains(folded)) {
-                continue;
-              }
-
-              final source = kind == 'episode' && item['grandparentTitle'] == null
-                  ? {...item, 'grandparentTitle': title}
-                  : item;
-              for (final media in item['Media'] as List? ?? const []) {
-                if (media is! Map) continue;
-                final program = _program(
-                  dvr.key,
-                  media['channelIdentifier'],
-                  source,
-                  media,
-                  channelName: media['channelTitle'],
+              List<Map> items = [parent];
+              if (type == 'show') {
+                final key = parent['key'];
+                if (key is! String ||
+                    !key.startsWith('/${dvr.epg}/metadata/') ||
+                    !key.endsWith('/children')) {
+                  continue;
+                }
+                items = await _providerPages(
+                  '${key.substring(0, key.length - '/children'.length)}/grandchildren',
+                  'Metadata',
+                  const {},
+                  isCurrent,
                 );
-                if (program != null) batch.add(program);
+              }
+              if (!isCurrent()) return;
+
+              for (final item in items) {
+                final kind = item['type'];
+                if (kind != 'movie' && kind != 'episode') continue;
+                final title = (kind == 'episode'
+                            ? item['grandparentTitle'] ?? parent['title']
+                            : item['title'])
+                        ?.toString() ??
+                    '';
+                final episode =
+                    kind == 'episode' ? item['title']?.toString() ?? '' : '';
+                if (!title.toLowerCase().contains(folded) &&
+                    !episode.toLowerCase().contains(folded)) {
+                  continue;
+                }
+
+                final source = kind == 'episode' && item['grandparentTitle'] == null
+                    ? {...item, 'grandparentTitle': title}
+                    : item;
+                for (final media in item['Media'] as List? ?? const []) {
+                  if (media is! Map) continue;
+                  final program = _program(
+                    dvr.key,
+                    media['channelIdentifier'],
+                    source,
+                    media,
+                    channelName: media['channelTitle'],
+                  );
+                  if (program != null) batch.add(program);
+                }
               }
             }
-          }
-          if (batch.isNotEmpty && isCurrent()) {
-            programs.addAll(batch);
-            onBatch?.call(batch);
-          }
-        },
-      );
+            if (batch.isNotEmpty && isCurrent()) {
+              programs.addAll(batch);
+              onBatch?.call(batch);
+            }
+          },
+        );
+      } catch (error, stackTrace) {
+        if (!isCurrent()) return const [];
+        developer.log(
+          'Plex DVR program search failed (${dvr.key}); continuing',
+          name: 'PlexLiveTvApi',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
       if (!isCurrent()) return const [];
     }
     if (!isCurrent()) return const [];

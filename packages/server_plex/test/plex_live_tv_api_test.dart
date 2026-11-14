@@ -436,6 +436,108 @@ void main() {
     });
   }
 
+  for (final path in [
+    '/tv.plex.providers.epg.xmltv:2/library/search',
+    '/tv.plex.providers.epg.xmltv:2/metadata/tubbies/grandchildren',
+  ]) {
+    test('free-channel search survives a DVR program failure at $path', () async {
+      final (dio, server) = _server();
+      var dvrFailures = 0;
+      dio.interceptors.insert(
+        0,
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            if (options.uri.path == path) {
+              dvrFailures++;
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  type: DioExceptionType.badResponse,
+                  response: Response(requestOptions: options, statusCode: 500),
+                  message: 'DVR EPG unavailable',
+                ),
+              );
+            } else {
+              handler.next(options);
+            }
+          },
+        ),
+      );
+
+      final results = await PlexLiveTvApi(dio).searchProgramTitles(
+        'World Poker Tour',
+        isCurrent: () => true,
+      );
+      expect(dvrFailures, 1);
+      expect(results, hasLength(1));
+      expect(results.single['ChannelId'], 'channel-plex-abc-66635fc0');
+      expect(
+        server.requests.where(
+          (request) => request.uri.host == 'discover.provider.plex.tv',
+        ),
+        hasLength(1),
+      );
+    });
+  }
+
+  test('a later DVR failure keeps matches from an earlier DVR', () async {
+    final (dio, server) = _server();
+    var failures = 0;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == '/livetv/dvrs') {
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: {
+                  'MediaContainer': {
+                    'Dvr': [
+                      {'key': '2', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:2'},
+                      {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
+                    ],
+                  },
+                },
+              ),
+            );
+          } else if (
+              options.uri.path ==
+              '/tv.plex.providers.epg.xmltv:3/library/search') {
+            failures++;
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                type: DioExceptionType.connectionError,
+                message: 'Second DVR offline',
+              ),
+            );
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+
+    final batches = <List<Map<String, dynamic>>>[];
+    final results = await PlexLiveTvApi(dio).searchProgramTitlesIncrementally(
+      'Sintel',
+      isCurrent: () => true,
+      onBatch: (batch) => batches.add(batch),
+    );
+    expect(failures, 1);
+    expect(batches, hasLength(1));
+    expect(batches.single.single['ChannelId'], 'channel-2-4');
+    expect(results, hasLength(1));
+    expect(results.single['ChannelId'], 'channel-2-4');
+    expect(
+      server.requests.where(
+        (request) => request.uri.host == 'discover.provider.plex.tv',
+      ),
+      hasLength(1),
+    );
+  });
+
   test('searches free channel programs without fetching their grids', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
