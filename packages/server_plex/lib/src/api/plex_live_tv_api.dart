@@ -12,6 +12,7 @@ const plexCloudSource = 'plex';
 
 /// Where Plex's free channels and their guide live.
 const plexCloudEpg = 'https://epg.provider.plex.tv';
+const _plexCloudSearch = 'https://discover.provider.plex.tv/library/search';
 
 /// The source, a DVR key or [plexCloudSource], and the channel a channel id
 /// names.
@@ -148,7 +149,15 @@ class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
     final folded = term.toLowerCase();
     final programs = <Map<String, dynamic>>[];
 
-    for (final dvr in await _dvrList()) {
+    // A Plex server without a DVR can still show Plex's free channels.
+    List<_Dvr> dvrs;
+    try {
+      dvrs = await _dvrList();
+    } on DioException catch (error) {
+      if (error.response?.statusCode != 404) rethrow;
+      dvrs = [];
+    }
+    for (final dvr in dvrs) {
       if (!isCurrent()) return const [];
       final hits = await _providerPages(
         '/${dvr.epg}/library/search',
@@ -212,7 +221,67 @@ class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
         }
       }
     }
+    if (!isCurrent()) return const [];
+    programs.addAll(await _freeTitleSearch(term, isCurrent));
     return isCurrent() ? programs : const [];
+  }
+
+  // Plex Discover searches the free lineup in one request. Standard paging
+  // offsets are ignored here, so ask for the largest useful result window.
+  Future<List<Map<String, dynamic>>> _freeTitleSearch(
+    String term,
+    bool Function() isCurrent,
+  ) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      _plexCloudSearch,
+      queryParameters: {
+        'query': term,
+        'searchProviders': 'plexFAST',
+        'searchTypes': 'livetv',
+        'includeMetadata': 1,
+        'includeGroups': 1,
+        'limit': 500,
+      },
+    );
+    if (!isCurrent()) return const [];
+    final results = <Map<String, dynamic>>[];
+    final folded = term.toLowerCase();
+    final groups =
+        (response.data?['MediaContainer'] as Map?)?['SearchResults'] as List? ??
+        const [];
+
+    for (final group in groups) {
+      if (group is! Map || group['id'] != 'liveTv') continue;
+      for (final hit in group['SearchResult'] as List? ?? const []) {
+        if (hit is! Map || hit['Metadata'] is! Map) continue;
+        final item = hit['Metadata'] as Map;
+        if (item['type'] != 'show' &&
+            item['type'] != 'episode' &&
+            item['type'] != 'movie') {
+          continue;
+        }
+        final title = item['title']?.toString() ?? '';
+        final series = item['grandparentTitle']?.toString() ?? '';
+        if (!title.toLowerCase().contains(folded) &&
+            !series.toLowerCase().contains(folded)) {
+          continue;
+        }
+        final source = item['type'] == 'episode' && series.isEmpty
+            ? {...item, 'grandparentTitle': title}
+            : item;
+        for (final media in item['Media'] as List? ?? const []) {
+          if (media is! Map) continue;
+          final program = _program(
+            plexCloudSource,
+            media['channelIdentifier'],
+            source,
+            media,
+          );
+          if (program != null) results.add(program);
+        }
+      }
+    }
+    return results;
   }
 
   Future<List<Map>> _providerPages(

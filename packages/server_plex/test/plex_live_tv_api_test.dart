@@ -77,6 +77,54 @@ const _teletubbies = {
           ],
         },
       },
+      '/library/search' => {
+        'MediaContainer': {
+          'SearchResults': [
+            {
+              'id': 'liveTv',
+              'SearchResult': [
+                {
+                  'Metadata': {
+                    'type': 'show',
+                    'title': 'World Poker Tour',
+                    'Media': [
+                      {
+                        'channelIdentifier': 'abc-66635fc0',
+                        'beginsAt': 1792699200,
+                        'endsAt': 1792706400,
+                      },
+                    ],
+                  },
+                },
+                {
+                  'Channel': {
+                    'id': 'abc-66635fc0',
+                    'title': 'World Poker Tour',
+                  },
+                },
+              ],
+            },
+            {
+              'id': 'plex',
+              'SearchResult': [
+                {
+                  'Metadata': {
+                    'type': 'movie',
+                    'title': 'World Poker Tour',
+                    'Media': [
+                      {
+                        'channelIdentifier': 'abc-66635fc0',
+                        'beginsAt': 1792699200,
+                        'endsAt': 1792706400,
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
       '/tv.plex.providers.epg.xmltv:2/library/search' => {
         'MediaContainer': {
           'SearchResult': [
@@ -243,8 +291,48 @@ void main() {
     expect(await api.searchProgramTitles(
       'Sintel', isCurrent: () => currentChecks++ == 0,
     ), isEmpty);
-    expect(server.requests.where((r) => r.uri.path.endsWith('/library/search')),
-        hasLength(2));
+    expect(
+      server.requests.where(
+        (r) => r.uri.path.endsWith('/library/search') &&
+            r.uri.host != 'discover.provider.plex.tv',
+      ),
+      hasLength(2),
+    );
+  });
+
+  test('searches free channel programs without fetching their grids', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final channels = ((await api.getChannels())['Items'] as List).cast<Map>();
+    final programs = await api.searchProgramTitles(
+      'World Poker Tour',
+      isCurrent: () => true,
+    );
+    expect(programs, hasLength(1));
+    expect(programs.single['ChannelId'], channels.last['Id']);
+    expect(programs.single['StartDate'], '2026-10-22T20:00:00.000Z');
+
+    final requests = server.requests.where(
+      (r) => r.uri.host == 'discover.provider.plex.tv',
+    );
+    expect(requests, hasLength(1));
+    expect(
+      requests.single.queryParameters,
+      containsPair('searchProviders', 'plexFAST'),
+    );
+    expect(requests.single.queryParameters, containsPair('limit', 500));
+    expect(server.requests.where((r) => r.uri.path == '/grid'), isEmpty);
+  });
+
+  test('channel-only search results do not become EPG programs', () async {
+    final (dio, _) = _server();
+    expect(
+      await PlexLiveTvApi(dio).searchProgramTitles(
+        'news',
+        isCurrent: () => true,
+      ),
+      isEmpty,
+    );
   });
 
   test('channel and showing ids come apart again', () {
