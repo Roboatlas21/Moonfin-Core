@@ -2314,7 +2314,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         );
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
-        if (channels.isEmpty && _vm.searchingProgramTitles) {
+        if (channels.isEmpty &&
+            _vm.searchingProgramTitles &&
+            _vm.nextSearchAiring == null) {
           return const Center(child: CircularProgressIndicator());
         }
         if (channels.isEmpty) {

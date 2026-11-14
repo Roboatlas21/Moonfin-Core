@@ -9,6 +9,16 @@ abstract interface class LiveTvProgramSearchApi {
   });
 }
 
+/// Optional progressive EPG search for backends that can publish hits before
+/// all providers finish. Each batch contains newly discovered program rows.
+abstract interface class LiveTvIncrementalProgramSearchApi {
+  Future<List<Map<String, dynamic>>> searchProgramTitlesIncrementally(
+    String query, {
+    required bool Function() isCurrent,
+    required void Function(List<Map<String, dynamic>>) onBatch,
+  });
+}
+
 /// Reads channel groups from the server's supported source.
 abstract interface class ChannelGroupApi {
   Future<ChannelGroupLineup> getChannelGroups({String? userId});

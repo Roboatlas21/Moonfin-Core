@@ -53,6 +53,7 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
   MediaServerClient client,
   String query, {
   required bool Function() isCurrent,
+  void Function(List<GuideTitleMatch>)? onPartialResults,
 }) async {
   final term = query.trim();
   if (term.length < 2) return const [];
@@ -104,6 +105,24 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
   }
 
   final searchApi = client.liveTvApi;
+  if (searchApi is LiveTvIncrementalProgramSearchApi &&
+      onPartialResults != null) {
+    final rows = await searchApi.searchProgramTitlesIncrementally(
+      term,
+      isCurrent: isCurrent,
+      onBatch: (batch) {
+        if (!isCurrent()) return;
+        final before = results.length;
+        addItems(batch);
+        if (results.length > before) {
+          onPartialResults(List<GuideTitleMatch>.of(results));
+        }
+      },
+    );
+    if (!isCurrent()) return const [];
+    addItems(rows);
+    return results;
+  }
   if (searchApi is LiveTvProgramSearchApi) {
     final rows = await searchApi.searchProgramTitles(term, isCurrent: isCurrent);
     if (!isCurrent()) return const [];

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:server_plex/src/api/plex_live_tv_api.dart';
 import 'package:server_plex/src/api/plex_playback_api.dart';
@@ -298,6 +300,42 @@ void main() {
       ),
       hasLength(2),
     );
+  });
+
+  test('publishes DVR matches before the cloud search completes', () async {
+    final (dio, _) = _server();
+    final cloudRequested = Completer<void>();
+    RequestOptions? cloudOptions;
+    RequestInterceptorHandler? cloudHandler;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.host == 'discover.provider.plex.tv') {
+            cloudOptions = options;
+            cloudHandler = handler;
+            cloudRequested.complete();
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+
+    final batches = <List<Map<String, dynamic>>>[];
+    final pending = PlexLiveTvApi(dio).searchProgramTitlesIncrementally(
+      'Sintel',
+      isCurrent: () => true,
+      onBatch: (batch) => batches.add(batch),
+    );
+    await cloudRequested.future;
+    expect(batches, hasLength(1));
+    expect(batches.single.single['ChannelId'], 'channel-2-4');
+
+    cloudHandler!.next(cloudOptions!);
+    final combined = await pending;
+    expect(combined, hasLength(1));
+    expect(combined.single['ChannelId'], 'channel-2-4');
   });
 
   test('keeps DVR matches if Plex Discover search fails', () async {

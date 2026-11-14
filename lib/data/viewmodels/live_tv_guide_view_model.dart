@@ -575,6 +575,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _client,
         query,
         isCurrent: current,
+        onPartialResults: (matches) {
+          if (!current()) return;
+          _programTitleMatches = matches;
+          _applyChannelSearchRows();
+        },
       );
       if (!current()) return;
       _programTitleMatches = found;
@@ -708,7 +713,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Program categories need genre information the search hits do not carry.
   GuideTitleMatch? get nextSearchAiring {
     if (_channelQuery.length < 2 ||
-        _searchingProgramTitles ||
         (_filter != GuideFilter.all && _filter != GuideFilter.favorites)) {
       return null;
     }

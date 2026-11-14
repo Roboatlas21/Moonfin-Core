@@ -58,7 +58,10 @@ typedef _Grab = ({Map op, Map<String, dynamic> program});
 
 /// Live TV from the server's own DVRs, each a tuner with its guide, and from
 /// Plex's free channels, which plex.tv serves itself.
-class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
+class PlexLiveTvApi
+    implements LiveTvApi,
+        LiveTvProgramSearchApi,
+        LiveTvIncrementalProgramSearchApi {
   final Dio _dio;
 
   PlexLiveTvApi(this._dio);
@@ -139,12 +142,30 @@ class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
         ];
       });
 
-  // Plex's provider search returns movies with their airings, but a show can
-  // be just a parent record. Its grandchildren have the actual airings.
   @override
   Future<List<Map<String, dynamic>>> searchProgramTitles(
     String query, {
     required bool Function() isCurrent,
+  }) => _searchProgramTitles(query, isCurrent: isCurrent);
+
+  @override
+  Future<List<Map<String, dynamic>>> searchProgramTitlesIncrementally(
+    String query, {
+    required bool Function() isCurrent,
+    required void Function(List<Map<String, dynamic>>) onBatch,
+  }) => _searchProgramTitles(
+    query,
+    isCurrent: isCurrent,
+    onBatch: onBatch,
+  );
+
+  // Plex's provider search returns movies with their airings, but a show can
+  // be just a parent record. Publish matches as each provider page is parsed,
+  // without waiting for all DVRs or the optional Plex Discover lookup.
+  Future<List<Map<String, dynamic>>> _searchProgramTitles(
+    String query, {
+    required bool Function() isCurrent,
+    void Function(List<Map<String, dynamic>>)? onBatch,
   }) async {
     final term = query.trim();
     if (term.length < 2 || !isCurrent()) return const [];
@@ -161,71 +182,82 @@ class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
     }
     for (final dvr in dvrs) {
       if (!isCurrent()) return const [];
-      final hits = await _providerPages(
+      await _providerPages(
         '/${dvr.epg}/library/search',
         'SearchResult',
         {'query': term, 'searchTypes': 'livetv', 'limit': 200},
         isCurrent,
+        onPage: (hits) async {
+          final batch = <Map<String, dynamic>>[];
+          for (final hit in hits) {
+            if (!isCurrent()) return;
+            final parent = hit['Metadata'];
+            if (parent is! Map) continue;
+            final type = parent['type'];
+            if (type != 'movie' && type != 'episode' && type != 'show') continue;
+
+            List<Map> items = [parent];
+            if (type == 'show') {
+              final key = parent['key'];
+              if (key is! String ||
+                  !key.startsWith('/${dvr.epg}/metadata/') ||
+                  !key.endsWith('/children')) {
+                continue;
+              }
+              items = await _providerPages(
+                '${key.substring(0, key.length - '/children'.length)}/grandchildren',
+                'Metadata',
+                const {},
+                isCurrent,
+              );
+            }
+            if (!isCurrent()) return;
+
+            for (final item in items) {
+              final kind = item['type'];
+              if (kind != 'movie' && kind != 'episode') continue;
+              final title = (kind == 'episode'
+                          ? item['grandparentTitle'] ?? parent['title']
+                          : item['title'])
+                      ?.toString() ??
+                  '';
+              final episode =
+                  kind == 'episode' ? item['title']?.toString() ?? '' : '';
+              if (!title.toLowerCase().contains(folded) &&
+                  !episode.toLowerCase().contains(folded)) {
+                continue;
+              }
+
+              final source = kind == 'episode' && item['grandparentTitle'] == null
+                  ? {...item, 'grandparentTitle': title}
+                  : item;
+              for (final media in item['Media'] as List? ?? const []) {
+                if (media is! Map) continue;
+                final program = _program(
+                  dvr.key,
+                  media['channelIdentifier'],
+                  source,
+                  media,
+                  channelName: media['channelTitle'],
+                );
+                if (program != null) batch.add(program);
+              }
+            }
+          }
+          if (batch.isNotEmpty && isCurrent()) {
+            programs.addAll(batch);
+            onBatch?.call(batch);
+          }
+        },
       );
       if (!isCurrent()) return const [];
-
-      for (final hit in hits) {
-        final parent = hit['Metadata'];
-        if (parent is! Map) continue;
-        final type = parent['type'];
-        if (type != 'movie' && type != 'episode' && type != 'show') continue;
-
-        List<Map> items = [parent];
-        if (type == 'show') {
-          final key = parent['key'];
-          if (key is! String ||
-              !key.startsWith('/${dvr.epg}/metadata/') ||
-              !key.endsWith('/children')) {
-            continue;
-          }
-          items = await _providerPages(
-            '${key.substring(0, key.length - '/children'.length)}/grandchildren',
-            'Metadata',
-            const {},
-            isCurrent,
-          );
-        }
-        if (!isCurrent()) return const [];
-
-        for (final item in items) {
-          final kind = item['type'];
-          if (kind != 'movie' && kind != 'episode') continue;
-          final title = (kind == 'episode'
-                      ? item['grandparentTitle'] ?? parent['title']
-                      : item['title'])
-                  ?.toString() ??
-              '';
-          final episode = kind == 'episode' ? item['title']?.toString() ?? '' : '';
-          if (!title.toLowerCase().contains(folded) &&
-              !episode.toLowerCase().contains(folded)) {
-            continue;
-          }
-
-          final source = kind == 'episode' && item['grandparentTitle'] == null
-              ? {...item, 'grandparentTitle': title}
-              : item;
-          for (final media in item['Media'] as List? ?? const []) {
-            if (media is! Map) continue;
-            final program = _program(
-              dvr.key,
-              media['channelIdentifier'],
-              source,
-              media,
-              channelName: media['channelTitle'],
-            );
-            if (program != null) programs.add(program);
-          }
-        }
-      }
     }
     if (!isCurrent()) return const [];
     try {
-      programs.addAll(await _freeTitleSearch(term, isCurrent));
+      final cloud = await _freeTitleSearch(term, isCurrent);
+      if (!isCurrent()) return const [];
+      programs.addAll(cloud);
+      if (cloud.isNotEmpty) onBatch?.call(cloud);
     } catch (error, stackTrace) {
       if (!isCurrent()) return const [];
       if (programs.isEmpty) rethrow;
@@ -301,8 +333,9 @@ class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
     String path,
     String field,
     Map<String, dynamic> query,
-    bool Function() isCurrent,
-  ) async {
+    bool Function() isCurrent, {
+    Future<void> Function(List<Map>)? onPage,
+  }) async {
     const pageSize = 200;
     final rows = <Map>[];
     var offset = 0;
@@ -335,7 +368,13 @@ class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
         throw StateError('Plex EPG search pagination did not advance');
       }
       previousPage = signature;
-      rows.addAll(page.whereType<Map>());
+      final batch = page.whereType<Map>().toList();
+      if (onPage != null) {
+        if (batch.isNotEmpty) await onPage(batch);
+        if (!isCurrent()) return const [];
+      } else {
+        rows.addAll(batch);
+      }
       offset += page.length;
       final total = response['totalSize'];
       if (total is num && offset >= total) break;

@@ -18,6 +18,9 @@ class _MockLiveTvApi extends Mock implements LiveTvApi {}
 class _SearchableLiveTvApi extends _MockLiveTvApi
     implements LiveTvProgramSearchApi {}
 
+class _IncrementalSearchableLiveTvApi extends _SearchableLiveTvApi
+    implements LiveTvIncrementalProgramSearchApi {}
+
 class _GroupedLiveTvApi extends _MockLiveTvApi implements ChannelGroupApi {}
 
 class _GroupedSearchableLiveTvApi extends _SearchableLiveTvApi
@@ -213,6 +216,112 @@ void main() {
       client, 'soccer', isCurrent: () => true,
     );
     expect(result.single.channelId, 'channel-2-4');
+  });
+
+  test('Plex DVR matches appear before its cloud search finishes', () async {
+    final api = _IncrementalSearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    _stubChannels(api, [_channel('dvr'), _channel('free')]);
+
+    final pending = Completer<List<Map<String, dynamic>>>();
+    late void Function(List<Map<String, dynamic>>) publish;
+    when(
+      () => api.searchProgramTitlesIncrementally(
+        'soccer',
+        isCurrent: any(named: 'isCurrent'),
+        onBatch: any(named: 'onBatch'),
+      ),
+    ).thenAnswer((invocation) {
+      publish = invocation.namedArguments[#onBatch]
+          as void Function(List<Map<String, dynamic>>);
+      return pending.future;
+    });
+
+    final now = DateTime.utc(2026, 11, 14, 17);
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('soccer');
+    expect(vm.filteredChannels, isEmpty);
+    expect(vm.searchingProgramTitles, isTrue);
+
+    Map<String, dynamic> hit(String id, String channel, DateTime start) => {
+      'Id': id,
+      'Type': 'Program',
+      'Name': 'Soccer',
+      'ChannelId': channel,
+      'StartDate': start.toIso8601String(),
+      'EndDate': start.add(const Duration(hours: 1)).toIso8601String(),
+    };
+    final future = hit('tomorrow', 'dvr', now.add(const Duration(days: 1)));
+    publish([future]);
+    expect(vm.nextSearchAiring?.channelId, 'dvr');
+    expect(vm.searchingProgramTitles, isTrue);
+
+    final dvr = hit('dvr-now', 'dvr', now.add(const Duration(minutes: 30)));
+    publish([dvr]);
+    expect(vm.filteredChannels.map((ch) => ch.id), ['dvr']);
+    expect(vm.searchingProgramTitles, isTrue);
+
+    final free = hit('free-now', 'free', now.add(const Duration(minutes: 40)));
+    // The repeated DVR item must not duplicate a match.
+    publish([dvr, free]);
+    expect(vm.filteredChannels.map((ch) => ch.id), ['dvr', 'free']);
+
+    pending.complete([future, dvr, free]);
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.searchingProgramTitles, isFalse);
+    expect(vm.filteredChannels.map((ch) => ch.id), ['dvr', 'free']);
+  });
+
+  test('old Plex search batches cannot change a newer query', () async {
+    final api = _IncrementalSearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    _stubChannels(api, [_channel('dvr')]);
+    final oldReply = Completer<List<Map<String, dynamic>>>();
+    late void Function(List<Map<String, dynamic>>) publishOld;
+    when(
+      () => api.searchProgramTitlesIncrementally(
+        'soccer',
+        isCurrent: any(named: 'isCurrent'),
+        onBatch: any(named: 'onBatch'),
+      ),
+    ).thenAnswer((invocation) {
+      publishOld = invocation.namedArguments[#onBatch]
+          as void Function(List<Map<String, dynamic>>);
+      return oldReply.future;
+    });
+    when(
+      () => api.searchProgramTitlesIncrementally(
+        'hockey',
+        isCurrent: any(named: 'isCurrent'),
+        onBatch: any(named: 'onBatch'),
+      ),
+    ).thenAnswer((_) async => []);
+
+    final now = DateTime.utc(2026, 11, 14, 17);
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('soccer');
+    vm.setChannelQuery('hockey');
+    publishOld([{
+      'Id': 'stale',
+      'Type': 'Program',
+      'Name': 'Soccer',
+      'ChannelId': 'dvr',
+      'StartDate': now.toIso8601String(),
+      'EndDate': now.add(const Duration(hours: 1)).toIso8601String(),
+    }]);
+    oldReply.complete([]);
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.channelQuery, 'hockey');
+    expect(vm.filteredChannels, isEmpty);
+    expect(vm.nextSearchAiring, isNull);
   });
 
   test('shows the earliest later program, not Now or Next', () {
