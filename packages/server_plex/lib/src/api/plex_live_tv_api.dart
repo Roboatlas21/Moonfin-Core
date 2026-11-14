@@ -172,12 +172,20 @@ class PlexLiveTvApi
     final folded = term.toLowerCase();
     final programs = <Map<String, dynamic>>[];
 
-    // A Plex server without a DVR can still show Plex's free channels.
+    // DVR discovery is optional. Free channels still work when a DVR is offline.
     List<_Dvr> dvrs;
     try {
       dvrs = await _dvrList();
-    } on DioException catch (error) {
-      if (error.response?.statusCode != 404) rethrow;
+    } on DioException catch (error, stackTrace) {
+      if (!isCurrent()) return const [];
+      if (error.response?.statusCode != 404) {
+        developer.log(
+          'Plex DVR discovery failed; searching free channels',
+          name: 'PlexLiveTvApi',
+          error: error,
+          stackTrace: stackTrace,
+        );
+      }
       dvrs = [];
     }
     for (final dvr in dvrs) {

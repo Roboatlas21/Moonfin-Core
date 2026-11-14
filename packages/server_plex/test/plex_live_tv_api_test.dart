@@ -384,6 +384,58 @@ void main() {
     expect(cloudAttempts, 2);
   });
 
+  for (final failure in [
+    DioExceptionType.connectionError,
+    DioExceptionType.badResponse,
+  ]) {
+    test('free-channel search survives DVR discovery ${failure.name}', () async {
+      final (dio, server) = _server();
+      var dvrAttempts = 0;
+      dio.interceptors.insert(
+        0,
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            if (options.uri.path == '/livetv/dvrs') {
+              dvrAttempts++;
+              handler.reject(
+                DioException(
+                  requestOptions: options,
+                  type: failure,
+                  response: failure == DioExceptionType.badResponse
+                      ? Response(requestOptions: options, statusCode: 503)
+                      : null,
+                  message: 'DVR discovery unavailable',
+                ),
+              );
+            } else {
+              handler.next(options);
+            }
+          },
+        ),
+      );
+
+      final results = await PlexLiveTvApi(dio).searchProgramTitles(
+        'World Poker Tour',
+        isCurrent: () => true,
+      );
+      expect(dvrAttempts, 1);
+      expect(results, hasLength(1));
+      expect(results.single['ChannelId'], 'channel-plex-abc-66635fc0');
+      expect(
+        server.requests.where(
+          (request) => request.uri.host == 'discover.provider.plex.tv',
+        ),
+        hasLength(1),
+      );
+      expect(
+        server.requests.where(
+          (request) => request.uri.path.endsWith('/grid'),
+        ),
+        isEmpty,
+      );
+    });
+  }
+
   test('searches free channel programs without fetching their grids', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
