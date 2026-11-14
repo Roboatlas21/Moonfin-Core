@@ -17,6 +17,7 @@ class EpgNowNextCard extends StatelessWidget {
   final double nowProgress; // 0..1
   final String? remainingLabel;
   final String? nextLabel;
+  final String? matchLabel;
   final bool isLive;
   final bool apple;
   final VoidCallback onTap;
@@ -31,6 +32,7 @@ class EpgNowNextCard extends StatelessWidget {
     required this.nowProgress,
     required this.remainingLabel,
     required this.nextLabel,
+    this.matchLabel,
     required this.isLive,
     required this.apple,
     required this.onTap,
@@ -119,6 +121,25 @@ class EpgNowNextCard extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: textTheme.labelMedium?.copyWith(color: muted),
+                ),
+              ],
+              if (matchLabel != null) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(Icons.search, size: 16, color: AppColorScheme.accent),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        matchLabel!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.labelMedium?.copyWith(
+                          color: AppColorScheme.accent,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],

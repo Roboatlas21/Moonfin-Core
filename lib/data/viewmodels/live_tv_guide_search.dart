@@ -2,6 +2,7 @@ import 'package:server_core/server_core.dart';
 
 typedef GuideTitleMatch = ({
   String channelId,
+  String title,
   DateTime start,
   DateTime end,
 });
@@ -15,6 +16,37 @@ Set<String> programChannelsInWindow(
     if (match.start.isBefore(end) && match.end.isAfter(start))
       match.channelId,
 };
+
+// The mobile list only shows Now and Next. Find the earliest later match
+// without repeating a program the card already displays.
+GuideTitleMatch? laterProgramSearchMatch(
+  List<GuideTitleMatch> matches, {
+  required String channelId,
+  required DateTime windowStart,
+  required DateTime windowEnd,
+  required DateTime now,
+  DateTime? currentStart,
+  DateTime? nextStart,
+}) {
+  GuideTitleMatch? later;
+  for (final match in matches) {
+    if (match.channelId != channelId ||
+        !match.start.isBefore(windowEnd) ||
+        !match.end.isAfter(windowStart)) {
+      continue;
+    }
+    if ((currentStart != null && match.start.isAtSameMomentAs(currentStart)) ||
+        (nextStart != null && match.start.isAtSameMomentAs(nextStart))) {
+      return null;
+    }
+    if (!match.start.isAfter(now) ||
+        (nextStart != null && !match.start.isAfter(nextStart))) {
+      continue;
+    }
+    if (later == null || match.start.isBefore(later.start)) later = match;
+  }
+  return later;
+}
 
 /// Jellyfin and Emby search the item index; Plex searches its DVR provider.
 Future<List<GuideTitleMatch>> searchGuideProgramTitles(
@@ -42,22 +74,32 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
       }
       final id = raw['Id']?.toString();
       final channelId = raw['ChannelId']?.toString();
-      final name = raw['Name']?.toString().toLowerCase() ?? '';
-      final episode = raw['EpisodeTitle']?.toString().toLowerCase() ?? '';
+      final name = raw['Name']?.toString().trim() ?? '';
+      final episode = raw['EpisodeTitle']?.toString().trim() ?? '';
       final start = parseServerDate(raw['StartDate'])?.toLocal();
       final end = parseServerDate(raw['EndDate'])?.toLocal();
       if (id == null ||
           id.isEmpty ||
           channelId == null ||
           channelId.isEmpty ||
-          (!name.contains(foldedTerm) && !episode.contains(foldedTerm)) ||
+          (!name.toLowerCase().contains(foldedTerm) &&
+              !episode.toLowerCase().contains(foldedTerm)) ||
           start == null ||
           end == null ||
           !end.isAfter(start) ||
           !seen.add(id)) {
         continue;
       }
-      results.add((channelId: channelId, start: start, end: end));
+      final title = [
+        if (name.isNotEmpty) name,
+        if (episode.isNotEmpty && episode != name) episode,
+      ].join(' · ');
+      results.add((
+        channelId: channelId,
+        title: title,
+        start: start,
+        end: end,
+      ));
     }
   }
 

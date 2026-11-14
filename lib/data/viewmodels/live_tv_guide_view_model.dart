@@ -688,6 +688,24 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     return (now: now, next: next);
   }
 
+  /// The first searched program after Now/Next, if one is hidden in the
+  /// mobile list. The grid keeps its normal schedule.
+  GuideTitleMatch? laterSearchMatchForChannel(
+    String channelId, {
+    GuideProgram? now,
+    GuideProgram? next,
+  }) => _channelQuery.length < 2
+      ? null
+      : laterProgramSearchMatch(
+          _programTitleMatches,
+          channelId: channelId,
+          windowStart: _windowStart,
+          windowEnd: _windowEnd,
+          now: _now(),
+          currentStart: now?.startDate,
+          nextStart: next?.startDate,
+        );
+
   static bool _isCategory(GuideFilter filter) =>
       filter != GuideFilter.all && filter != GuideFilter.favorites;
 

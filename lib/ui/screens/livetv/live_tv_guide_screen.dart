@@ -1916,6 +1916,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         final nowNext = _vm.nowNextForChannel(channel.id);
         final now = nowNext.now;
         final next = nowNext.next;
+        final match = _vm.laterSearchMatchForChannel(
+          channel.id,
+          now: now,
+          next: next,
+        );
         final t = DateTime.now();
         final logoUrl = channel.imageTag == null
             ? null
@@ -1942,6 +1947,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                 : AppLocalizations.of(context).guideNextProgram(
                     _formatTime(next.startDate),
                     next.titleWithEpisode,
+                  ),
+            matchLabel: match == null
+                ? null
+                : AppLocalizations.of(context).guideSearchMatch(
+                    _formatTime(match.start),
+                    match.title,
                   ),
             isLive: isLive,
             apple: _apple,

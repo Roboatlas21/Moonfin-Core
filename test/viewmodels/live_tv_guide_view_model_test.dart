@@ -172,6 +172,7 @@ void main() {
     );
     expect(offsets, [0, 2]);
     expect(found.map((p) => p.channelId), ['tsn', 'sports']);
+    expect(found.first.title, 'Soccer');
     final start = DateTime.utc(2026, 11, 14, 19);
     expect(programChannelsInWindow(
       found, start, start.add(const Duration(hours: 2)),
@@ -209,6 +210,36 @@ void main() {
       client, 'soccer', isCurrent: () => true,
     );
     expect(result.single.channelId, 'channel-2-4');
+  });
+
+  test('shows the earliest later program, not Now or Next', () {
+    final t = DateTime.utc(2026, 11, 14, 17);
+    GuideTitleMatch match(String channel, int minutes) => (
+      channelId: channel,
+      title: 'Soccer at $minutes',
+      start: t.add(Duration(minutes: minutes)),
+      end: t.add(Duration(minutes: minutes + 30)),
+    );
+    GuideTitleMatch? find(List<GuideTitleMatch> matches, {
+      DateTime? currentStart,
+      DateTime? nextStart,
+    }) => laterProgramSearchMatch(
+      matches,
+      channelId: 'tsn',
+      windowStart: t,
+      windowEnd: t.add(const Duration(minutes: 150)),
+      now: t,
+      currentStart: currentStart,
+      nextStart: nextStart,
+    );
+
+    final later = [match('espn', 60), match('tsn', 120), match('tsn', 90)];
+    expect(find(later, nextStart: t.add(const Duration(minutes: 30)))?.title,
+        'Soccer at 90');
+    expect(find([match('tsn', 30), ...later],
+        nextStart: t.add(const Duration(minutes: 30))), isNull);
+    expect(find([match('tsn', 0), ...later], currentStart: t), isNull);
+    expect(find([match('tsn', 150)]), isNull);
   });
 
   test('unchanged search preserves an in-flight guide page', () async {
