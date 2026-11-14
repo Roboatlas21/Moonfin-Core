@@ -1134,10 +1134,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   /// Moves the time window without entering the guide-wide loading state.
-  /// Existing rows stay visible until every requested replacement is ready.
+  /// A search jump loads its matching channel first and leaves other rows to
+  /// the normal lazy loader, rather than waiting on old-window pages.
   Future<void> setWindowStart(
     DateTime start, {
     bool livePosition = false,
+    String? priorityChannelId,
   }) async {
     if (_disposed) return;
     if (start == _windowStart) {
@@ -1148,12 +1150,29 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
 
-    final ids = _programsLoadedIds.toList();
-    final generation = ++_programGeneration;
     _windowStart = start;
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
     _atLivePosition = livePosition;
+    if (priorityChannelId != null && !_isCategory(_filter)) {
+      // Old-window guide pages aren't useful to this search jump. Let the
+      // matched channel load immediately; other rows load as they are viewed.
+      _resetPrograms();
+      _updatePageRows();
+      final priorityChannel = _pageChannels
+          .where((channel) => channel.id == priorityChannelId)
+          .firstOrNull;
+      if (priorityChannel != null) {
+        unawaited(
+          _loadPriorityGuideChannel(priorityChannel, _programGeneration),
+        );
+      }
+      _notifyListeners();
+      return;
+    }
+
+    final ids = _programsLoadedIds.toList();
+    final generation = ++_programGeneration;
     if (_channelQuery.isNotEmpty) {
       _updatePageRows();
       _resetPageCursor();
@@ -1175,6 +1194,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (replacements == null || generation != _programGeneration) return;
     _programsByChannel.addAll(replacements);
     _processedBoundaries.clear();
+    _notifyListeners();
+  }
+
+  Future<void> _loadPriorityGuideChannel(
+    GuideChannel channel,
+    int generation,
+  ) async {
+    try {
+      await _loadProgramsBatch([channel]);
+    } catch (error) {
+      if (!_disposed && generation == _programGeneration) {
+        debugPrint('Live TV search jump listings unavailable: $error');
+      }
+    }
+    if (_disposed || generation != _programGeneration) return;
+    _advanceProgramsCursor();
     _notifyListeners();
   }
 

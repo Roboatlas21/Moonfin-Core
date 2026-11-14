@@ -308,6 +308,81 @@ void main() {
       )).called(1);
     });
 
+    test('search jump fetches its channel without waiting', () async {
+      _stubChannels(api, [
+        for (var i = 0; i < 100; i++) _channel('c$i'),
+      ]);
+      await search([airing('future', 'c80', end)]);
+      expect(vm.hasProgramsFor('c0'), isTrue);
+      expect(vm.hasProgramsFor('c80'), isFalse);
+      expect(vm.nextSearchAiring?.channelId, 'c80');
+
+      final targetReply = Completer<Map<String, dynamic>>();
+      final requests = <List<String>>[];
+      when(() => _guide(api, captureChannelIds: true)).thenAnswer((call) {
+        requests.add(_requestedIds(call));
+        return targetReply.future;
+      });
+
+      // Returning from the jump must not wait for the target's EPG reply.
+      await vm.setWindowStart(
+        end,
+        priorityChannelId: 'c80',
+        livePosition: false,
+      );
+      expect(vm.windowStart, end);
+      expect(vm.filteredChannels.map((channel) => channel.id), ['c80']);
+      expect(vm.hasProgramsFor('c0'), isFalse);
+      expect(vm.hasProgramsFor('c80'), isFalse);
+      expect(requests, [
+        ['c80'],
+      ]);
+
+      targetReply.complete({
+        'Items': [_program('new-c80', 'c80', start: end)],
+      });
+      await pumpEventQueue();
+      expect(vm.programsForChannel('c80').map((program) => program.id), [
+        'new-c80',
+      ]);
+      expect(vm.programsHighWater, 1);
+      expect(requests, [
+        ['c80'],
+      ]);
+    });
+
+    test('an older search jump cannot overwrite a newer window', () async {
+      _stubChannels(api, [_channel('tsn')]);
+      final later = end.add(const Duration(hours: 4));
+      await search([
+        airing('first-airing', 'tsn', end),
+        airing('second-airing', 'tsn', later),
+      ]);
+
+      final replies = <Completer<Map<String, dynamic>>>[];
+      when(() => _guide(api, captureChannelIds: true)).thenAnswer((_) {
+        final reply = Completer<Map<String, dynamic>>();
+        replies.add(reply);
+        return reply.future;
+      });
+
+      await vm.setWindowStart(end, priorityChannelId: 'tsn');
+      await vm.setWindowStart(later, priorityChannelId: 'tsn');
+      expect(replies, hasLength(2));
+
+      replies[1].complete({
+        'Items': [_program('new-window', 'tsn', start: later)],
+      });
+      await pumpEventQueue();
+      replies[0].complete({
+        'Items': [_program('old-window', 'tsn', start: end)],
+      });
+      await pumpEventQueue();
+      expect(vm.programsForChannel('tsn').map((program) => program.id), [
+        'new-window',
+      ]);
+    });
+
     test('no result, cleared search and failed search offer no jump', () async {
       await search([]);
       expect(vm.nextSearchAiring, isNull);

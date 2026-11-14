@@ -2412,7 +2412,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _selection = null;
     _lastFocusedRowIndex = null;
     try {
-      await _vm.setWindowStart(guideLeftEdge(next.start), livePosition: false);
+      await _vm.setWindowStart(
+        guideLeftEdge(next.start),
+        livePosition: false,
+        priorityChannelId: next.channelId,
+      );
     } catch (_) {
       return;
     }
