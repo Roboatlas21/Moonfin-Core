@@ -1777,18 +1777,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             bottom: 0,
             child: LinearProgressIndicator(minHeight: 2),
           ),
-        if (_vm.programTitleSearchError != null)
-          Positioned(
-            right: 44,
-            top: 8,
-            child: Tooltip(
-              message:
-                  '${AppLocalizations.of(context).search} '
-                  '${AppLocalizations.of(context).programs}: '
-                  '${AppLocalizations.of(context).error}',
-              child: const Icon(Icons.error_outline, color: Colors.orange),
-            ),
-          ),
       ],
     ),
   );
@@ -2331,7 +2319,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         }
         if (channels.isEmpty) {
           if (_vm.channelQuery.length >= 2 &&
-              _vm.programTitleSearchError == null &&
               (_vm.filter == GuideFilter.all ||
                   _vm.filter == GuideFilter.favorites)) {
             return _buildEmptySearchResults();

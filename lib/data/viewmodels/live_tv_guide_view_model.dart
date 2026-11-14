@@ -480,9 +480,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String get channelQuery => _channelQuery;
   int _titleSearchRequest = 0;
   bool _searchingProgramTitles = false;
-  Object? _programTitleSearchError;
   bool get searchingProgramTitles => _searchingProgramTitles;
-  Object? get programTitleSearchError => _programTitleSearchError;
   List<GuideChannel> _pageChannels = const [];
   int _lineupRequest = 0;
   (String, String?)? _groupAccount;
@@ -545,7 +543,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _channelQuery = query;
     final request = ++_titleSearchRequest;
     _programTitleMatches = const [];
-    _programTitleSearchError = null;
     _searchingProgramTitles = query.length >= 2;
     _applyChannelSearchRows();
     if (_searchingProgramTitles) {
@@ -583,7 +580,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _programTitleMatches = found;
     } catch (error) {
       if (!current()) return;
-      _programTitleSearchError = error;
+      debugPrint('Live TV program search failed (${_client.serverType}): $error');
     }
     _searchingProgramTitles = false;
     _applyChannelSearchRows();
@@ -712,7 +709,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   GuideTitleMatch? get nextSearchAiring {
     if (_channelQuery.length < 2 ||
         _searchingProgramTitles ||
-        _programTitleSearchError != null ||
         (_filter != GuideFilter.all && _filter != GuideFilter.favorites)) {
       return null;
     }

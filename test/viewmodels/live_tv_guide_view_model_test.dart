@@ -314,11 +314,12 @@ void main() {
       vm.setChannelQuery('');
       expect(vm.nextSearchAiring, isNull);
       when(() => api.searchProgramTitles(
-        'fail', isCurrent: any(named: 'isCurrent'),
+        'tsn', isCurrent: any(named: 'isCurrent'),
       )).thenThrow(StateError('EPG unavailable'));
-      vm.setChannelQuery('fail');
+      vm.setChannelQuery('tsn');
       await Future<void>.delayed(Duration.zero);
-      expect(vm.programTitleSearchError, isNotNull);
+      expect(vm.searchingProgramTitles, isFalse);
+      expect(vm.filteredChannels.map((ch) => ch.id).toList(), ['tsn']);
       expect(vm.nextSearchAiring, isNull);
     });
 
