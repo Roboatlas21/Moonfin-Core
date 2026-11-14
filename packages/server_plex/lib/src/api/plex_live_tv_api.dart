@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
@@ -222,7 +224,18 @@ class PlexLiveTvApi implements LiveTvApi, LiveTvProgramSearchApi {
       }
     }
     if (!isCurrent()) return const [];
-    programs.addAll(await _freeTitleSearch(term, isCurrent));
+    try {
+      programs.addAll(await _freeTitleSearch(term, isCurrent));
+    } catch (error, stackTrace) {
+      if (!isCurrent()) return const [];
+      if (programs.isEmpty) rethrow;
+      developer.log(
+        'Plex free-channel search failed; keeping DVR matches',
+        name: 'PlexLiveTvApi',
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
     return isCurrent() ? programs : const [];
   }
 

@@ -300,6 +300,52 @@ void main() {
     );
   });
 
+  test('keeps DVR matches if Plex Discover search fails', () async {
+    final (dio, server) = _server();
+    var cloudAttempts = 0;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.host == 'discover.provider.plex.tv') {
+            cloudAttempts++;
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                type: DioExceptionType.connectionError,
+                message: 'Plex Discover unavailable',
+              ),
+            );
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+
+    final api = PlexLiveTvApi(dio);
+    final results = await api.searchProgramTitles(
+      'Sintel',
+      isCurrent: () => true,
+    );
+    expect(results, hasLength(1));
+    expect(results.single['ChannelId'], 'channel-2-4');
+    expect(cloudAttempts, 1);
+    expect(
+      server.requests.where(
+        (request) => request.uri.path.endsWith('/library/search'),
+      ),
+      hasLength(1),
+    );
+
+    // Without any DVR matches, keep the normal failed-search behavior.
+    await expectLater(
+      api.searchProgramTitles('World Poker Tour', isCurrent: () => true),
+      throwsA(isA<DioException>()),
+    );
+    expect(cloudAttempts, 2);
+  });
+
   test('searches free channel programs without fetching their grids', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
