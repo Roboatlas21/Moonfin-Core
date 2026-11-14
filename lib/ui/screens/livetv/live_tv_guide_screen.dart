@@ -1872,6 +1872,25 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _prefs.set(UserPreferences.epgMobileView, next);
   }
 
+  // Both mobile and TV use the same empty search state. Program matches
+  // beyond the visible window can still offer a jump while search continues.
+  Widget _buildEmptyGuideResults() {
+    if (_vm.searchingProgramTitles && _vm.nextSearchAiring == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_vm.channelQuery.length >= 2 &&
+        (_vm.filter == GuideFilter.all ||
+            _vm.filter == GuideFilter.favorites)) {
+      return _buildEmptySearchResults();
+    }
+    return Center(
+      child: Text(
+        AppLocalizations.of(context).noChannelsFound,
+        style: TextStyle(color: Colors.white.withAlpha(179)),
+      ),
+    );
+  }
+
   Widget _buildMobileBody() {
     switch (_vm.state) {
       case GuideState.loading:
@@ -1887,17 +1906,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         );
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
-        if (channels.isEmpty && _vm.searchingProgramTitles) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (channels.isEmpty) {
-          return Center(
-            child: Text(
-              AppLocalizations.of(context).noChannelsFound,
-              style: TextStyle(color: Colors.white.withAlpha(179)),
-            ),
-          );
-        }
+        if (channels.isEmpty) return _buildEmptyGuideResults();
         return _mobileView == EpgMobileView.grid
             ? _buildGuideGrid(channels)
             : _buildNowNextList(channels);
@@ -2314,24 +2323,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         );
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
-        if (channels.isEmpty &&
-            _vm.searchingProgramTitles &&
-            _vm.nextSearchAiring == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (channels.isEmpty) {
-          if (_vm.channelQuery.length >= 2 &&
-              (_vm.filter == GuideFilter.all ||
-                  _vm.filter == GuideFilter.favorites)) {
-            return _buildEmptySearchResults();
-          }
-          return Center(
-            child: Text(
-              AppLocalizations.of(context).noChannelsFound,
-              style: TextStyle(color: Colors.white.withAlpha(179)),
-            ),
-          );
-        }
+        if (channels.isEmpty) return _buildEmptyGuideResults();
         return _buildGuideGrid(channels);
     }
   }
@@ -2352,6 +2344,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Widget _buildEmptySearchResults() {
     final l10n = AppLocalizations.of(context);
     final next = _vm.nextSearchAiring;
+    final nextChannel = next == null ? null : _vm.channelForId(next.channelId);
     final query = _channelSearch.text.trim();
     return Center(
       child: ConstrainedBox(
@@ -2384,21 +2377,41 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70),
               ),
+              if (nextChannel != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  nextChannel.number == null || nextChannel.number!.isEmpty
+                      ? nextChannel.name
+                      : '${nextChannel.number} · ${nextChannel.name}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              ],
               if (next != null) ...[
                 const SizedBox(height: 16),
-                _GuidePillButton(
-                  icon: Icons.arrow_forward,
-                  label: l10n.guideJumpToNextAiring,
-                  focusNode: _nextAiringFocus,
-                  onPressed: () => unawaited(_jumpToNextAiring()),
-                  onKeyEvent: (_, event) {
-                    if (event.isActionable && event.logicalKey.isUpKey) {
-                      _focusWindowBar(_lastWindowBarIndex);
-                      return KeyEventResult.handled;
-                    }
-                    return KeyEventResult.ignored;
-                  },
-                ),
+                if (!_sidePanel)
+                  FilledButton.icon(
+                    onPressed: () => unawaited(_jumpToNextAiring()),
+                    icon: const Icon(Icons.arrow_forward),
+                    label: Text(l10n.guideJumpToNextAiring),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 48),
+                    ),
+                  )
+                else
+                  _GuidePillButton(
+                    icon: Icons.arrow_forward,
+                    label: l10n.guideJumpToNextAiring,
+                    focusNode: _nextAiringFocus,
+                    onPressed: () => unawaited(_jumpToNextAiring()),
+                    onKeyEvent: (_, event) {
+                      if (event.isActionable && event.logicalKey.isUpKey) {
+                        _focusWindowBar(_lastWindowBarIndex);
+                        return KeyEventResult.handled;
+                      }
+                      return KeyEventResult.ignored;
+                    },
+                  ),
               ],
             ],
           ),
@@ -2423,6 +2436,24 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       return;
     }
     if (!mounted) return;
+    if (!_sidePanel) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      // Now/Next is tied to the current clock. An explicit future jump opens
+      // the timeline so the scheduled program is visible at its actual time.
+      // Do not change the user's saved view preference.
+      if (!_isLandscapeSize(MediaQuery.sizeOf(context)) &&
+          _mobileView == EpgMobileView.list) {
+        setState(() => _mobileView = EpgMobileView.grid);
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final index = _vm.filteredChannels.indexWhere(
+          (channel) => channel.id == next.channelId,
+        );
+        if (index >= 0) _scrollToRow(index, animate: false);
+      });
+      return;
+    }
     // The matching row is built on the next frame. Mount it before focusing.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

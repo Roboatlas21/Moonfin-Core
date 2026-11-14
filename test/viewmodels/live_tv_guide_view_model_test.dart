@@ -492,6 +492,31 @@ void main() {
       ]);
     });
 
+    test('future-only search keeps its query when jumping to the airing', () async {
+      final nextDay = end.add(const Duration(days: 1));
+      await search([airing('future', 'espn', nextDay)]);
+      expect(vm.filteredChannels, isEmpty);
+      expect(vm.nextSearchAiring?.channelId, 'espn');
+      expect(vm.nextSearchAiring?.start, nextDay);
+
+      await vm.setWindowStart(
+        nextDay,
+        priorityChannelId: 'espn',
+        livePosition: false,
+      );
+
+      expect(vm.channelQuery, 'silo');
+      expect(vm.windowStart, nextDay);
+      expect(vm.filteredChannels.map((channel) => channel.id), ['espn']);
+      expect(vm.nextSearchAiring, isNull);
+      verify(
+        () => api.searchProgramTitles(
+          'silo',
+          isCurrent: any(named: 'isCurrent'),
+        ),
+      ).called(1);
+    });
+
     test('no result, cleared search and failed search offer no jump', () async {
       await search([]);
       expect(vm.nextSearchAiring, isNull);
