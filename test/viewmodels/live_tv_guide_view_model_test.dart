@@ -408,6 +408,72 @@ void main() {
     verify(() => _guide(liveTv)).called(2);
   });
 
+
+  test('async EPG search keeps an in-flight guide page', () async {
+    _stubChannels(liveTv, [
+      for (var i = 0; i < 100; i++)
+        {'Id': 'c$i', 'Name': 'Soccer $i', 'ChannelNumber': '$i'},
+    ]);
+    final items = _MockItemsApi();
+    when(() => client.itemsApi).thenReturn(items);
+    final search = Completer<Map<String, dynamic>>();
+    when(
+      () => items.getItems(
+        searchTerm: 'soccer',
+        includeItemTypes: any(named: 'includeItemTypes'),
+        recursive: true,
+        startIndex: 0,
+        limit: 200,
+      ),
+    ).thenAnswer((_) => search.future);
+
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    final page = Completer<Map<String, dynamic>>();
+    when(() => _guide(liveTv)).thenAnswer((_) => page.future);
+    final pending = vm.loadMorePrograms();
+
+    vm.setChannelQuery('soccer');
+    expect(vm.searchingProgramTitles, isTrue);
+    expect(vm.filteredChannels, hasLength(100));
+
+    final start = vm.windowStart.add(const Duration(minutes: 30));
+    search.complete({
+      'TotalRecordCount': 1,
+      'Items': [
+        {
+          'Id': 'match-1',
+          'ChannelId': 'c0',
+          'Type': 'LiveTvProgram',
+          'Name': 'Soccer',
+          'StartDate': start.toUtc().toIso8601String(),
+          'EndDate': start
+              .add(const Duration(hours: 1))
+              .toUtc()
+              .toIso8601String(),
+        },
+      ],
+    });
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.searchingProgramTitles, isFalse);
+    expect(vm.filteredChannels, hasLength(100));
+
+    page.complete({'Items': []});
+    await pending;
+    expect(vm.programsHighWater, 100);
+    verify(() => _guide(liveTv)).called(2);
+    verify(
+      () => items.getItems(
+        searchTerm: 'soccer',
+        includeItemTypes: any(named: 'includeItemTypes'),
+        recursive: true,
+        startIndex: 0,
+        limit: 200,
+      ),
+    ).called(1);
+  });
+
   test('Plex leaves out the genre filters its programs never carry', () {
     when(() => client.serverType).thenReturn(ServerType.plex);
     expect(
