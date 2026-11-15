@@ -4094,6 +4094,122 @@ void main() {
       expect(vm.programsForChannel('c5').single.hasTimer, isTrue);
     });
 
+    test('invalidated Sports refresh cannot acknowledge a recording change', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {
+        'Items': [
+          _program('unfiltered-c0', 'c0'),
+          _program('unfiltered-c1', 'c1'),
+        ],
+      });
+      final staleSports = Completer<Map<String, dynamic>>();
+      var sportsCalls = 0;
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((_) {
+            sportsCalls++;
+            if (sportsCalls == 2) return staleSports.future;
+            final prefix = sportsCalls == 1 ? 'old' : 'fresh';
+            return Future.value({
+              'Items': [
+                _program('$prefix-c0', 'c0', isSports: true),
+                _program('$prefix-c1', 'c1', isSports: true),
+              ],
+            });
+          });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.programsForChannel('c0').single.id, 'old-c0');
+
+      final changing = vm.recordingChanged();
+      await pumpEventQueue();
+      expect(sportsCalls, 2);
+
+      // This replaces the unfiltered programs successfully, but invalidates
+      // the pending Sports response without updating the category listings.
+      await vm.replacePrograms(
+        channelIds: const ['c0'],
+        from: vm.windowStart,
+        to: vm.windowEnd,
+      );
+      staleSports.complete({
+        'Items': [_program('stale-c0', 'c0', isSports: true)],
+      });
+      await changing;
+      await pumpEventQueue();
+
+      // The recording revision stays pending until Sports itself refreshes.
+      expect(sportsCalls, 3);
+      expect(vm.programsForChannel('c0').single.id, 'fresh-c0');
+      expect(vm.programsForChannel('c1').single.id, 'fresh-c1');
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
+    });
+
+    test('Sports refresh waits for unfiltered channel replacements too', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      final heldUnfiltered = Completer<Map<String, dynamic>>();
+      var recordingStarted = false;
+      var unfilteredCalls = 0;
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final ids = List<String>.of(_requestedIds(call));
+        if (!recordingStarted) {
+          return Future.value({'Items': [
+            for (final id in ids) _program('initial-$id', id),
+          ]});
+        }
+        unfilteredCalls++;
+        if (unfilteredCalls == 1) return heldUnfiltered.future;
+        return Future.value({'Items': [
+          for (final id in ids)
+            {..._program('updated-$id', id), 'TimerId': 'timer-new'},
+        ]});
+      });
+      var sportsCalls = 0;
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((call) {
+            sportsCalls++;
+            return Future.value({'Items': [
+              for (final id in _requestedIds(call))
+                _program('sport-$id', id, isSports: true),
+            ]});
+          });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(sportsCalls, 1);
+
+      recordingStarted = true;
+      final changing = vm.recordingChanged();
+      await pumpEventQueue();
+      expect(sportsCalls, 2);
+      expect(unfilteredCalls, 1);
+
+      // Supersede the unfiltered request after Sports already refreshed.
+      await vm.replacePrograms(
+        channelIds: const ['c0'],
+        from: vm.windowStart,
+        to: vm.windowEnd,
+      );
+      heldUnfiltered.complete({'Items': [_program('stale-c0', 'c0')]});
+      await changing;
+      await pumpEventQueue();
+
+      // A ready Sports category alone must not acknowledge the revision.
+      expect(sportsCalls, 3);
+      expect(vm.unfilteredProgramsForChannel('c1').single.hasTimer, isTrue);
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
+    });
+
     test('successful category refresh removes channels with no matching programs', () async {
       _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
       when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
@@ -4340,6 +4456,67 @@ void main() {
       });
       await reloading;
 
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
+    });
+
+    test('recording refresh stops old-window batches after a guide shift', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [
+        for (var i = 0; i < 100; i++) _channel('c$i', number: '$i'),
+      ]);
+      final oldBatch = Completer<Map<String, dynamic>>();
+      var recordingStarted = false;
+      var heldOldBatch = false;
+      final refreshRequests = <({DateTime from, List<String> ids})>[];
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        final ids = List<String>.of(_requestedIds(call));
+        if (recordingStarted) refreshRequests.add((from: from, ids: ids));
+        if (recordingStarted &&
+            !heldOldBatch &&
+            from == start &&
+            ids.first == 'c0') {
+          heldOldBatch = true;
+          return oldBatch.future;
+        }
+        return Future.value({
+          'Items': [
+            for (final id in ids)
+              _program('${from == start ? 'earlier' : 'later'}-$id',
+                  id, start: from),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      await vm.loadMorePrograms();
+      expect(vm.hasProgramsFor('c99'), isTrue);
+
+      recordingStarted = true;
+      final refreshing = vm.recordingChanged();
+      await pumpEventQueue();
+      expect(heldOldBatch, isTrue);
+
+      await vm.shiftWindow(const Duration(hours: 3));
+      expect(vm.windowStart, later);
+      expect(vm.programsForChannel('c99').single.id, 'later-c99');
+
+      oldBatch.complete({
+        'Items': [_program('stale-c0', 'c0', start: start)],
+      });
+      await refreshing;
+      await pumpEventQueue();
+
+      // A late batch from the old window must never be issued for c50-c99.
+      expect(refreshRequests.where((r) =>
+          r.from == start && r.ids.contains('c50')), isEmpty);
+      expect(vm.programsForChannel('c0').single.id, 'later-c0');
+      expect(vm.programsForChannel('c99').single.id, 'later-c99');
       clearInteractions(liveTv);
       await vm.reloadIfRecordingsChanged();
       verifyNever(() => _guide(liveTv));

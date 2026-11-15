@@ -308,6 +308,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
   int _recordingRefreshDepth = 0;
+  bool _recordingRefreshSucceeded = false;
   bool _recordingRefreshRemovedCategoryRows = false;
   bool _resumeCategoryPageAfterRefresh = false;
   bool _resumeAllPageAfterRefresh = false;
@@ -1202,17 +1203,30 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _clearWindowProgramCache();
     var removedCategoryRows = false;
     var refreshed = false;
+    final filter = _filter;
+    final windowStart = _windowStart;
+    final windowEnd = _windowEnd;
+    final hadLoadedChannels = _programsLoadedIds.isNotEmpty;
+    final isCategory = _isCategory(filter);
+    var categoryComplete = !isCategory;
     try {
-      if (_isCategory(_filter) && !_showingPreviousCategory) {
-        removedCategoryRows = await _refreshCategoryRows();
+      if (isCategory && !_showingPreviousCategory) {
+        final result = await _refreshCategoryRows();
+        removedCategoryRows = result.removed;
+        categoryComplete = result.complete;
       }
       final channelsRefreshed = await _refreshLoadedChannels(_now());
-      final categoryReady = _isCategory(_filter) &&
-          _categoryLoadedFor == _filter &&
+      final categoryReady = isCategory &&
+          _categoryLoadedFor == filter &&
           _state == GuideState.ready;
-      if (channelsRefreshed ||
-          categoryReady ||
-          (_pageChannels.isEmpty && _state == GuideState.ready)) {
+      final sameWindow = _filter == filter &&
+          _windowStart == windowStart &&
+          _windowEnd == windowEnd;
+      final unfilteredComplete = channelsRefreshed ||
+          (!hadLoadedChannels &&
+              (categoryReady ||
+                  (_pageChannels.isEmpty && _state == GuideState.ready)));
+      if (sameWindow && categoryComplete && unfilteredComplete) {
         // A slower, older refresh must not undo a newer completed revision.
         _loadedRecordingRevision = max(_loadedRecordingRevision, recordingRevision);
         refreshed = true;
@@ -1223,14 +1237,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } catch (error) {
       if (!_accessDenied(error)) await _reloadPrograms();
     } finally {
-      if (refreshed && removedCategoryRows) {
-        _recordingRefreshRemovedCategoryRows = true;
-      }
+      if (refreshed) _recordingRefreshSucceeded = true;
+      // An incomplete category refresh may still have removed a valid row
+      // in an earlier batch. Keep its paging signal until a refresh succeeds.
+      if (removedCategoryRows) _recordingRefreshRemovedCategoryRows = true;
       _recordingRefreshDepth--;
       if (_recordingRefreshDepth == 0) {
         final interrupted = _resumeCategoryPageAfterRefresh;
-        final resume = refreshed &&
+        final resume = _recordingRefreshSucceeded &&
             (_recordingRefreshRemovedCategoryRows || interrupted);
+        _recordingRefreshSucceeded = false;
         _recordingRefreshRemovedCategoryRows = false;
         _resumeCategoryPageAfterRefresh = false;
         if (resume &&
@@ -1283,22 +1299,31 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// A category view keeps its own program lists. A recording change doesn't
   /// change which programs belong to the category, so the channels already
   /// shown are fetched again and their lists swapped.
-  Future<bool> _refreshCategoryRows() async {
+  Future<({bool complete, bool removed})> _refreshCategoryRows() async {
     final request = _categoryRequest;
-    var removed = false;
     final filter = _filter;
+    final windowStart = _windowStart;
+    final windowEnd = _windowEnd;
+    var removed = false;
+    bool current() =>
+        !_disposed &&
+        request == _categoryRequest &&
+        filter == _filter &&
+        windowStart == _windowStart &&
+        windowEnd == _windowEnd;
     final channels = _categoryPrograms.keys
         .map(channelForId)
         .whereType<GuideChannel>()
         .toList();
     final size = _batchSizeFor(filter);
     for (var i = 0; i < channels.length; i += size) {
+      if (!current()) return (complete: false, removed: removed);
       final batch = channels.sublist(i, min(i + size, channels.length));
       final completedIds = <String>{};
       final fetched = await _fetchPrograms(
         batch, category: filter, completedIds: completedIds,
       );
-      if (request != _categoryRequest) return false;
+      if (!current()) return (complete: false, removed: removed);
       for (final channel in batch) {
         if (!completedIds.contains(channel.id)) continue;
         final programs = fetched[channel.id];
@@ -1310,9 +1335,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
       // The visible category count changed without advancing the page cursor.
       if (completedIds.isNotEmpty) _checkedCategorySearchRows = null;
+      if (completedIds.length != batch.length) {
+        _notifyListeners();
+        return (complete: false, removed: removed);
+      }
     }
     _notifyListeners();
-    return removed;
+    return (complete: true, removed: removed);
   }
 
   /// Records the showings of this program's series that [episodes] picks, or
@@ -2503,20 +2532,38 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<bool> _refreshLoadedChannels(DateTime now) async {
     final ids = _programsLoadedIds.toList();
     if (ids.isEmpty) return false;
-    final from = _windowStart.isBefore(now) ? _windowStart : now;
+    final windowStart = _windowStart;
+    final windowEnd = _windowEnd;
+    final page = _pageGeneration;
+    final load = _loadGeneration;
+    final filter = _filter;
+    var generation = _programGeneration;
+    bool current() =>
+        !_disposed &&
+        windowStart == _windowStart &&
+        windowEnd == _windowEnd &&
+        page == _pageGeneration &&
+        load == _loadGeneration &&
+        filter == _filter &&
+        generation == _programGeneration;
+    final from = windowStart.isBefore(now) ? windowStart : now;
     final rolling = now.add(_guideWindow);
-    final to = rolling.isAfter(_windowEnd) ? rolling : _windowEnd;
+    final to = rolling.isAfter(windowEnd) ? rolling : windowEnd;
 
-    var allApplied = true;
     for (var i = 0; i < ids.length; i += _programBatchSize) {
+      if (!current()) return false;
       final applied = await _replaceProgramsApplied(
         channelIds: ids.sublist(i, min(i + _programBatchSize, ids.length)),
         from: from,
         to: to,
       );
-      allApplied = allApplied && applied;
+      // This replacement should be the only operation to advance the
+      // generation. A different request may have superseded it meanwhile.
+      if (!applied || _programGeneration != generation + 1) return false;
+      generation++;
+      if (!current()) return false;
     }
-    return allApplied;
+    return true;
   }
 
   void _scheduleAfterRollingRefresh() {
