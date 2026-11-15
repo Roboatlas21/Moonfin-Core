@@ -517,6 +517,92 @@ void main() {
     );
   });
 
+  test('keeps published episode pages if a later page fails', () async {
+    final (dio, _) = _server();
+    const path = '/tv.plex.providers.epg.xmltv:2/metadata/tubbies/grandchildren';
+    final secondPageRequested = Completer<void>();
+    RequestOptions? failedOptions;
+    RequestInterceptorHandler? failedHandler;
+    final starts = <String?>[];
+
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path != path) {
+            handler.next(options);
+            return;
+          }
+          final offset = options.uri.queryParameters['X-Plex-Container-Start'];
+          starts.add(offset);
+          if (offset == '0') {
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: {
+                  'MediaContainer': {
+                    'totalSize': 400,
+                    'Metadata': [
+                      for (var i = 0; i < 200; i++)
+                        {
+                          'type': 'episode',
+                          'title': 'Episode $i',
+                          'grandparentTitle': 'Teletubbies',
+                          'Media': [
+                            {
+                              'channelIdentifier': '4',
+                              'beginsAt': 1792699380 + i * 3600,
+                              'endsAt': 1792702980 + i * 3600,
+                            },
+                          ],
+                        },
+                    ],
+                  },
+                },
+              ),
+            );
+          } else if (offset == '200') {
+            failedOptions = options;
+            failedHandler = handler;
+            secondPageRequested.complete();
+          } else {
+            fail('Unexpected grandchildren offset: $offset');
+          }
+        },
+      ),
+    );
+
+    final batches = <List<Map<String, dynamic>>>[];
+    final pending = PlexLiveTvApi(dio).searchProgramTitlesIncrementally(
+      'Teletubbies',
+      isCurrent: () => true,
+      onBatch: batches.add,
+    );
+
+    // The first 200 episodes appear without waiting for the next page.
+    await secondPageRequested.future;
+    expect(starts, ['0', '200']);
+    expect(batches, hasLength(1));
+    expect(batches.single, hasLength(200));
+    expect(batches.single.first['Name'], 'Teletubbies');
+    expect(batches.single.last['EpisodeTitle'], 'Episode 199');
+
+    failedHandler!.reject(
+      DioException(
+        requestOptions: failedOptions!,
+        type: DioExceptionType.badResponse,
+        response: Response(requestOptions: failedOptions!, statusCode: 503),
+        message: 'Second episode page unavailable',
+      ),
+    );
+
+    final results = await pending;
+    expect(results, hasLength(200));
+    expect(results.map((p) => p['Id']).toSet(), hasLength(200));
+    expect(results.last['EpisodeTitle'], 'Episode 199');
+    expect(batches, hasLength(1), reason: 'Do not publish a partial page twice');
+  });
+
   test('continues after a failed series lookup', () async {
     final (dio, server) = _server();
     const epg = '/tv.plex.providers.epg.xmltv:2';

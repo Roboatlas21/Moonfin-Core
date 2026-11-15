@@ -268,16 +268,23 @@ class PlexLiveTvApi
                   !key.endsWith('/children')) {
                 continue;
               }
-              List<Map> items;
               try {
-                items = await _providerPages(
+                await _providerPages(
                   '${key.substring(0, key.length - '/children'.length)}/grandchildren',
                   'Metadata',
                   const {},
                   isCurrent,
+                  onPage: (items) async {
+                    if (!isCurrent()) return;
+                    final batch = <Map<String, dynamic>>[];
+                    appendPrograms(show, items, batch);
+                    publish(batch);
+                  },
                 );
               } catch (error, stackTrace) {
                 if (!isCurrent()) return;
+                // Earlier pages have already been published. A later failure
+                // must not discard those airings or block the next show.
                 developer.log(
                   'Plex series search failed (${dvr.key}, $key); continuing',
                   name: 'PlexLiveTvApi',
@@ -287,9 +294,6 @@ class PlexLiveTvApi
                 continue;
               }
               if (!isCurrent()) return;
-              final batch = <Map<String, dynamic>>[];
-              appendPrograms(show, items, batch);
-              publish(batch);
             }
           },
         );
