@@ -1460,6 +1460,96 @@ void main() {
       expect(vm.hasMorePrograms, isFalse);
     });
 
+    test('older window reply does not reload a successful full guide load', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [_channel('c0')]);
+      final oldReply = Completer<Map<String, dynamic>>();
+      var laterCalls = 0;
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == later) {
+          laterCalls++;
+          if (laterCalls == 1) return oldReply.future;
+          return Future.value({
+            'Items': [_program('fresh', 'c0', start: later)],
+          });
+        }
+        return Future.value({
+          'Items': [_program('initial', 'c0', start: start)],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      final obsolete = vm.setWindowStart(later);
+      await pumpEventQueue();
+      expect(laterCalls, 1);
+
+      await vm.load(windowStart: later);
+      expect(laterCalls, 2);
+      expect(vm.programsForChannel('c0').single.id, 'fresh');
+      clearInteractions(liveTv);
+
+      oldReply.complete({
+        'Items': [_program('obsolete', 'c0', start: later)],
+      });
+      await obsolete;
+      await pumpEventQueue();
+
+      verifyNever(() => _guide(liveTv));
+      expect(laterCalls, 2);
+      expect(vm.state, GuideState.ready);
+      expect(vm.programsForChannel('c0').single.id, 'fresh');
+    });
+
+    test('unrelated program replacement does not reload a superseded window', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [_channel('c0')]);
+      final oldReply = Completer<Map<String, dynamic>>();
+      var laterCalls = 0;
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == later) {
+          laterCalls++;
+          if (laterCalls == 1) return oldReply.future;
+          return Future.value({
+            'Items': [_program('replacement', 'c0', start: later)],
+          });
+        }
+        return Future.value({
+          'Items': [_program('initial', 'c0', start: start)],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      final obsolete = vm.setWindowStart(later);
+      await pumpEventQueue();
+      expect(laterCalls, 1);
+
+      await vm.replacePrograms(
+        channelIds: const ['c0'],
+        from: later,
+        to: later.add(const Duration(hours: 3)),
+      );
+      expect(vm.programsForChannel('c0').single.id, 'replacement');
+      clearInteractions(liveTv);
+
+      oldReply.complete({
+        'Items': [_program('obsolete', 'c0', start: later)],
+      });
+      await obsolete;
+      await pumpEventQueue();
+
+      verifyNever(() => _guide(liveTv));
+      expect(laterCalls, 2);
+      expect(vm.programsForChannel('c0').single.id, 'replacement');
+    });
+
     test('older guide replies cannot replace a newer window cache entry', () async {
       final start = DateTime.utc(2026, 11, 14, 17);
       final later = start.add(const Duration(hours: 3));
@@ -4520,6 +4610,56 @@ void main() {
       clearInteractions(liveTv);
       await vm.reloadIfRecordingsChanged();
       verifyNever(() => _guide(liveTv));
+    });
+
+    test('Sports load resumes a recording refresh deferred while loading', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {
+        'Items': [_program('all', 'c0')],
+      });
+      final firstSports = Completer<Map<String, dynamic>>();
+      var sportsCalls = 0;
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((_) {
+            sportsCalls++;
+            if (sportsCalls == 1) return firstSports.future;
+            return Future.value({
+              'Items': [{
+                ..._program('recorded-sport', 'c0', isSports: true),
+                'TimerId': 'timer-new',
+              }],
+            });
+          });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      // Simulate the ready guide having no loaded rows before switching chips.
+      await vm.loadInitialPrograms(channelIds: const []);
+      expect(vm.state, GuideState.ready);
+      expect(vm.hasProgramsFor('c0'), isFalse);
+
+      final refreshing = vm.recordingChanged();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+      expect(sportsCalls, 1);
+      await refreshing;
+      expect(vm.state, GuideState.loading);
+
+      firstSports.complete({
+        'Items': [_program('old-sport', 'c0', isSports: true)],
+      });
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(sportsCalls, 2);
+      expect(vm.programsForChannel('c0').single.id, 'recorded-sport');
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv, category: GuideFilter.sports));
     });
 
     test('a recording change during a window reload is refreshed after loading', () async {

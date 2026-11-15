@@ -1519,6 +1519,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         unawaited(loadMorePrograms());
       }
     }
+    // A recording refresh may have finished while this category was loading.
+    if (_state == GuideState.ready &&
+        !interrupted &&
+        request == _categoryRequest) {
+      _resumeInterruptedGuideWork();
+    }
   }
 
   /// Look up one channel outside the loaded page of a program category.
@@ -1716,6 +1722,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _resetCategory();
     _notifyListeners();
     if (ids.isEmpty) return;
+    final loadGeneration = _loadGeneration;
+    final pageGeneration = _pageGeneration;
+    final recordingRevision = liveTvRecordingRevision.value;
+    final cacheRevision = _windowCacheRevision;
 
     final replacements = await _fetchProgramReplacements(
       ids,
@@ -1724,7 +1734,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       generation: generation,
     );
     if (replacements == null || generation != _programGeneration) {
-      if (!_disposed && _windowStart == start && !_isCategory(_filter)) {
+      // A newer guide load already owns the window. Only recover when this
+      // request was interrupted by a recording refresh, not another reload.
+      if (!_disposed &&
+          _windowStart == start &&
+          !_isCategory(_filter) &&
+          loadGeneration == _loadGeneration &&
+          pageGeneration == _pageGeneration &&
+          cacheRevision != _windowCacheRevision &&
+          (_recordingRefreshDepth > 0 ||
+              recordingRevision != liveTvRecordingRevision.value)) {
         _reloadAfterRecordingRefresh = true;
         _resumeInterruptedGuideWork();
       }
