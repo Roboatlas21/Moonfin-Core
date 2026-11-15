@@ -1346,6 +1346,120 @@ void main() {
       expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c1']);
     });
 
+    test('All Channels retries a page invalidated by a recording refresh', () async {
+      _stubChannels(liveTv, [
+        for (var i = 0; i < 100; i++) _channel('c$i', number: '$i'),
+      ]);
+      final stalePage = Completer<Map<String, dynamic>>();
+      var laterCalls = 0;
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final ids = _requestedIds(call);
+        if (ids.first == 'c50') {
+          laterCalls++;
+          if (laterCalls == 1) return stalePage.future;
+        }
+        return Future.value({
+          'Items': [
+            for (final id in ids)
+              _program('fresh-$id', id),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      expect(vm.hasProgramsFor('c0'), isTrue);
+      expect(vm.hasProgramsFor('c50'), isFalse);
+
+      final paging = vm.loadMorePrograms();
+      await pumpEventQueue();
+      expect(laterCalls, 1);
+      await vm.recordingChanged();
+      expect(vm.hasProgramsFor('c50'), isFalse);
+
+      stalePage.complete({
+        'Items': [_program('stale-c50', 'c50')],
+      });
+      await paging;
+      await pumpEventQueue();
+
+      expect(laterCalls, 2);
+      expect(vm.hasProgramsFor('c50'), isTrue);
+      expect(vm.programsForChannel('c50').single.id, 'fresh-c50');
+      expect(vm.hasMorePrograms, isFalse);
+    });
+
+    test('All Channels drops cached hits from an invalidated mixed batch', () async {
+      _stubChannels(liveTv, [
+        for (var i = 0; i < 100; i++) _channel('c$i', number: '$i'),
+      ]);
+      final stalePage = Completer<Map<String, dynamic>>();
+      var seeded = false;
+      var interrupted = false;
+      final requested = <List<String>>[];
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final ids = List<String>.of(_requestedIds(call));
+        requested.add(ids);
+        if (ids.length == 1 && ids.single == 'c75' && !seeded) {
+          seeded = true;
+          return Future.value({
+            'Items': [_program('cached-c75', 'c75')],
+          });
+        }
+        if (ids.first == 'c50' && !interrupted) {
+          interrupted = true;
+          return stalePage.future;
+        }
+        return Future.value({
+          'Items': [
+            for (final id in ids)
+              _program('fresh-$id', id),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      await vm.ensureProgramsForChannels(['c75']);
+      expect(vm.programsForChannel('c75').single.id, 'cached-c75');
+
+      // Clear the loaded-state cursor without clearing the window cache.
+      await vm.loadInitialPrograms(channelIds: const []);
+      await vm.loadMorePrograms();
+      expect(vm.programsHighWater, 50);
+
+      final paging = vm.loadMorePrograms();
+      await pumpEventQueue();
+      expect(requested.last, [
+        for (var i = 50; i < 100; i++)
+          if (i != 75) 'c$i',
+      ]);
+      await vm.recordingChanged();
+      stalePage.complete({'Items': [_program('stale-c50', 'c50')]});
+      await paging;
+      await pumpEventQueue();
+
+      expect(vm.hasProgramsFor('c75'), isTrue);
+      expect(vm.programsForChannel('c75').single.id, 'fresh-c75');
+      expect(vm.programsForChannel('c50').single.id, 'fresh-c50');
+      expect(vm.hasMorePrograms, isFalse);
+      expect(requested.where((ids) => ids.contains('c75')), hasLength(2));
+    });
+
+    test('a successful empty All Channels response still marks rows loaded', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+
+      expect(vm.hasProgramsFor('c0'), isTrue);
+      expect(vm.programsForChannel('c0'), isEmpty);
+      expect(vm.hasMorePrograms, isFalse);
+    });
+
     test('older guide replies cannot replace a newer window cache entry', () async {
       final start = DateTime.utc(2026, 11, 14, 17);
       final later = start.add(const Duration(hours: 3));
@@ -4226,6 +4340,127 @@ void main() {
       });
       await reloading;
 
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
+    });
+
+    test('a recording change during a window reload is refreshed after loading', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      _stubChannels(liveTv, [_channel('c0')]);
+      final stalePage = Completer<Map<String, dynamic>>();
+      var reloading = false;
+      var reloadCalls = 0;
+      when(() => _guide(liveTv)).thenAnswer((_) {
+        if (!reloading) {
+          return Future.value({
+            'Items': [_program('initial', 'c0', start: start)],
+          });
+        }
+        reloadCalls++;
+        if (reloadCalls == 1) return stalePage.future;
+        return Future.value({
+          'Items': [{
+            ..._program('updated', 'c0', start: start.add(const Duration(hours: 3))),
+            'TimerId': 'timer-new',
+          }],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      reloading = true;
+      final shifting = vm.shiftWindow(const Duration(hours: 3));
+      await pumpEventQueue();
+      expect(reloadCalls, 1);
+      expect(vm.hasProgramsFor('c0'), isFalse);
+
+      // There are no loaded channels to refresh yet. Keep the revision pending.
+      await vm.recordingChanged();
+      expect(reloadCalls, 1);
+      stalePage.complete({
+        'Items': [_program('superseded', 'c0',
+            start: start.add(const Duration(hours: 3)))],
+      });
+      await shifting;
+      await pumpEventQueue();
+
+      expect(reloadCalls, greaterThanOrEqualTo(2));
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
+    });
+
+    test('a recording change can reload an empty ready All Channels page', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      var currentProgramIsRecorded = false;
+      when(() => _guide(liveTv)).thenAnswer((_) async => {
+        'Items': [
+          {
+            ..._program('p0', 'c0'),
+            if (currentProgramIsRecorded) 'TimerId': 'timer-new',
+          },
+        ],
+      });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      await vm.loadInitialPrograms(channelIds: const []);
+      expect(vm.state, GuideState.ready);
+      expect(vm.hasProgramsFor('c0'), isFalse);
+
+      currentProgramIsRecorded = true;
+      await vm.recordingChanged();
+      await pumpEventQueue();
+      expect(vm.hasProgramsFor('c0'), isTrue);
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
+    });
+
+    test('a recording change during a full load does not leave blank rows', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      final stalePage = Completer<Map<String, dynamic>>();
+      var reloading = false;
+      var loadCalls = 0;
+      when(() => _guide(liveTv)).thenAnswer((_) {
+        if (!reloading) {
+          return Future.value({
+            'Items': [_program('initial', 'c0')],
+          });
+        }
+        loadCalls++;
+        if (loadCalls == 1) return stalePage.future;
+        return Future.value({
+          'Items': [{
+            ..._program('updated', 'c0'),
+            'TimerId': 'timer-new',
+          }],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      reloading = true;
+      final loading = vm.load();
+      await pumpEventQueue();
+      expect(loadCalls, 1);
+      expect(vm.hasProgramsFor('c0'), isFalse);
+
+      await vm.recordingChanged();
+      expect(loadCalls, 1);
+      stalePage.complete({'Items': [_program('superseded', 'c0')]});
+      await loading;
+      await pumpEventQueue();
+
+      expect(loadCalls, greaterThanOrEqualTo(2));
+      expect(vm.hasProgramsFor('c0'), isTrue);
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
       clearInteractions(liveTv);
       await vm.reloadIfRecordingsChanged();
       verifyNever(() => _guide(liveTv));
