@@ -702,37 +702,26 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   bool _matchInWindow(GuideTitleMatch match) =>
       match.start.isBefore(_windowEnd) && match.end.isAfter(_windowStart);
 
-  /// Future-only channels join normal search results after the server search
-  /// completes, so the next airing cannot change as providers reply.
-  GuideTitleMatch? futureSearchMatchForChannel(String channelId) {
-    if (_channelQuery.length < 2 ||
-        (_searchingProgramTitles && !_preservingTitleMatchesDuringSearch)) {
-      return null;
-    }
-    final matches = _searchMatchesByChannel[channelId];
-    if (matches == null || matches.any(_matchInWindow)) return null;
-    final now = _now();
-    for (final match in matches) {
-      if (!match.start.isBefore(_windowEnd) && match.start.isAfter(now)) {
-        return match;
-      }
-    }
-    return null;
-  }
+  // In-progress searches only expose future matches from a retained result
+  // set. New searches wait for all providers before showing future-only rows.
+  bool get _canShowFutureMatches =>
+      !searchingProgramTitles || _preservingTitleMatchesDuringSearch;
 
-  /// The hero keeps the selected program but can preview its next search
-  /// match where the synopsis normally appears.
-  GuideTitleMatch? nextSearchMatchForChannel(
+  GuideTitleMatch? _firstSearchMatch(
     String channelId, {
     DateTime? after,
+    bool futureOnly = false,
   }) {
-    if (_channelQuery.length < 2 ||
-        (_searchingProgramTitles && !_preservingTitleMatchesDuringSearch)) {
+    if (_channelQuery.length < 2 || !_canShowFutureMatches) return null;
+    final matches = _searchMatchesByChannel[channelId];
+    if (matches == null || (futureOnly && matches.any(_matchInWindow))) {
       return null;
     }
     final now = _now();
-    final cutoff = after != null && after.isAfter(now) ? after : now;
-    for (final match in _searchMatchesByChannel[channelId] ?? const []) {
+    final cutoff = futureOnly
+        ? _windowEnd
+        : (after != null && after.isAfter(now) ? after : now);
+    for (final match in matches) {
       if (!match.start.isBefore(cutoff) && match.start.isAfter(now)) {
         return match;
       }
@@ -740,16 +729,26 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     return null;
   }
 
+  /// Show the next airing only if this channel has no match in the timeline.
+  GuideTitleMatch? futureSearchMatchForChannel(String channelId) =>
+      _firstSearchMatch(channelId, futureOnly: true);
+
+  /// The hero can preview the next match where the synopsis normally appears.
+  GuideTitleMatch? nextSearchMatchForChannel(
+    String channelId, {
+    DateTime? after,
+  }) => _firstSearchMatch(channelId, after: after);
+
   bool programMatchesSearch(GuideProgram program) =>
       _channelQuery.length >= 2 &&
       (program.name.toLowerCase().contains(_channelQuery) ||
           (program.episodeTitle?.toLowerCase().contains(_channelQuery) ??
               false));
   int _titleSearchRequest = 0;
-  bool _searchingProgramTitles = false;
-  bool get searchingProgramTitles => _searchingProgramTitles;
   GuideProgramSearchStatus _programSearchStatus = GuideProgramSearchStatus.idle;
   GuideProgramSearchStatus get programSearchStatus => _programSearchStatus;
+  bool get searchingProgramTitles =>
+      _programSearchStatus == GuideProgramSearchStatus.searching;
   List<GuideChannel> _pageChannels = const [];
   int _lineupRequest = 0;
   (String, String?)? _groupAccount;
@@ -775,8 +774,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _windowEnd,
       );
       final futureIds = <String>{};
-      if (_channelQuery.length >= 2 &&
-          (!_searchingProgramTitles || _preservingTitleMatchesDuringSearch)) {
+      if (_channelQuery.length >= 2 && _canShowFutureMatches) {
         for (final channelId in _searchMatchesByChannel.keys) {
           if (futureSearchMatchForChannel(channelId) != null) {
             futureIds.add(channelId);
@@ -845,14 +843,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // A retry or full-guide refresh keeps its previous results until the
     // replacement is complete. A different query starts from empty results.
     if (!preserveMatches) _setTitleMatches(const []);
-    _searchingProgramTitles = _channelQuery.length >= 2;
-    _preservingTitleMatchesDuringSearch =
-        preserveMatches && _searchingProgramTitles && _programTitleMatches.isNotEmpty;
-    _programSearchStatus = _searchingProgramTitles
+    _programSearchStatus = _channelQuery.length >= 2
         ? GuideProgramSearchStatus.searching
         : GuideProgramSearchStatus.idle;
+    _preservingTitleMatchesDuringSearch =
+        preserveMatches && searchingProgramTitles && _programTitleMatches.isNotEmpty;
     _applyChannelSearchRows(recheckExpiredCategory: recheckExpiredCategory);
-    if (_searchingProgramTitles) {
+    if (searchingProgramTitles) {
       unawaited(_searchProgramTitles(_channelQuery, request));
     }
   }
@@ -1001,7 +998,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           : GuideProgramSearchStatus.partial;
       debugPrint('Live TV program search failed (${_client.serverType}): $error');
     }
-    _searchingProgramTitles = false;
     _preservingTitleMatchesDuringSearch = false;
     _applyChannelSearchRows();
   }
@@ -1856,6 +1852,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         !_isCategory(_filter);
   }
 
+  // All successful window paths finish with the same cache/focus updates.
+  void _finishPendingGuideWindow() {
+    _processedBoundaries.clear();
+    _rememberConfirmedGuideWindow();
+    _notifyListeners();
+    _resumeInterruptedGuideWork();
+  }
+
   Future<void> _completePendingGuideWindow(
     Object token,
     List<String> ids,
@@ -1878,10 +1882,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           if (!pending.coveredIds.contains(id)) id,
       ];
       if (missing.isEmpty) {
-        _processedBoundaries.clear();
-        _rememberConfirmedGuideWindow();
-        _notifyListeners();
-        _resumeInterruptedGuideWork();
+        _finishPendingGuideWindow();
         return;
       }
       if (_recordingRefreshDepth > 0 &&
@@ -1909,10 +1910,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
       _programsByChannel.addAll(fetched);
       pending.coveredIds.addAll(missing);
-      _processedBoundaries.clear();
-      _rememberConfirmedGuideWindow();
-      _notifyListeners();
-      _resumeInterruptedGuideWork();
+      _finishPendingGuideWindow();
       return;
     }
   }
@@ -1994,10 +1992,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (replacements != null && generation == _programGeneration) {
         _programsByChannel.addAll(replacements);
         _pendingGuideWindow!.coveredIds.addAll(ids);
-        _processedBoundaries.clear();
-        _rememberConfirmedGuideWindow();
-        _notifyListeners();
-        _resumeInterruptedGuideWork();
+        _finishPendingGuideWindow();
         return;
       }
       // A targeted update may have replaced only some channels. Complete the
