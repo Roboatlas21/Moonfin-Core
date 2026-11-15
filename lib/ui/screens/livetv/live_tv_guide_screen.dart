@@ -97,7 +97,7 @@ class LiveTvGuideScreen extends StatefulWidget {
   /// In this mode the [Scaffold]/[SafeArea] chrome is dropped, the mini-player
   /// frame is transparent (the host draws the real video behind it), and channel
   /// selection / close are reported via [onChannelSelected] / [onClose] instead
-  /// of [Navigator] pops.
+  /// of `Navigator` pops.
   final bool embedded;
 
   /// Pass the player the channels the viewer can see, including any changes
@@ -171,7 +171,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   late LiveTvCategoryDisplay _categoryDisplay;
   final _browseFocus = FocusNode(debugLabel: 'GuideBrowse');
   final _channelSearchFocus = FocusNode(debugLabel: 'GuideSearch');
+  final _channelSearchRetryFocus = FocusNode(debugLabel: 'GuideSearchRetry');
   final _channelSearch = TextEditingController();
+  bool get _searchControlsHaveFocus =>
+      _channelSearchFocus.hasFocus || _channelSearchRetryFocus.hasFocus;
+  bool get _canRetryProgramSearch =>
+      !widget.miniPlayerMode &&
+      (_vm.programSearchStatus == GuideProgramSearchStatus.partial ||
+          _vm.programSearchStatus == GuideProgramSearchStatus.failed);
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
   GuideFilter? _pendingPickerFocus;
@@ -390,6 +397,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   void _onChanged() {
     if (!mounted) return;
+    // Retry disappears while the request runs. Keep TV/keyboard focus in the
+    // search controls without opening the on-screen keyboard.
+    if (!_canRetryProgramSearch &&
+        _channelSearchRetryFocus.hasFocus &&
+        _mayTakeFocus &&
+        _sidePanel) {
+      _channelSearchFocus.requestFocus();
+    }
     if (_vm.filter != GuideFilter.all &&
         _vm.filter != GuideFilter.favorites &&
         (!_vm.availableProgrammeCategories.contains(_vm.filter) ||
@@ -543,7 +558,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (focus == null ||
         !_mayTakeFocus ||
         _browseFocus.hasFocus ||
-        _channelSearchFocus.hasFocus) {
+        _searchControlsHaveFocus) {
       return false;
     }
     return !_filterFocusNodes.containsValue(focus) &&
@@ -595,7 +610,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           _pickerOpen ||
           !_channelRailFocused.value ||
           _browseFocus.hasFocus ||
-          _channelSearchFocus.hasFocus) {
+          _searchControlsHaveFocus) {
         if (_pendingChannelRebindId == channelId) {
           _pendingChannelRebindId = null;
         }
@@ -616,7 +631,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             _pickerOpen ||
             !_channelRailFocused.value ||
             _browseFocus.hasFocus ||
-            _channelSearchFocus.hasFocus ||
+            _searchControlsHaveFocus ||
             _focusedChannel.value?.id != channelId) {
           if (_pendingChannelRebindId == channelId) {
             _pendingChannelRebindId = null;
@@ -703,7 +718,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _scheduleInitialChannelFocus() {
     if (widget.miniPlayerMode ||
         _didRestoreInitialChannelFocus ||
-        _channelSearchFocus.hasFocus ||
+        _searchControlsHaveFocus ||
         _vm.state != GuideState.ready ||
         _vm.filteredChannels.isEmpty) {
       return;
@@ -721,7 +736,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_channelSearchFocus.hasFocus) {
+        if (mounted && !_searchControlsHaveFocus) {
           _focusChannelRow(index, animate: false);
         }
       });
@@ -852,6 +867,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _focusWindowBarFromGenres() => _focusWindowBar(_lastWindowBarIndex);
 
   void _focusGuideResults() {
+    if (_vm.filteredChannels.isEmpty && _canRetryProgramSearch) {
+      if (!_mayTakeFocus) return;
+      _cancelPendingVerticalMove();
+      _channelSearchRetryFocus.requestFocus();
+      return;
+    }
     _focusLastChannelRow();
   }
 
@@ -990,6 +1011,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _miniPlayerFocusNode.dispose();
     _browseFocus.dispose();
     _channelSearchFocus.dispose();
+    _channelSearchRetryFocus.dispose();
     _channelSearchDebounce?.cancel();
     _channelSearch.dispose();
     for (final node in _channelFocusNodes.values) {
@@ -1748,8 +1770,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildChannelSearchField({bool compact = false}) {
     final status = _vm.programSearchStatus;
-    final hasIssue = status == GuideProgramSearchStatus.partial ||
-        status == GuideProgramSearchStatus.failed;
     final l10n = AppLocalizations.of(context);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 360),
@@ -1766,6 +1786,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                   onChanged: _searchChannels,
                   onTvKeyEvent: (_, event) {
                     if (!event.isActionable) return KeyEventResult.ignored;
+                    if (event.logicalKey.isRightKey && _canRetryProgramSearch) {
+                      _cancelPendingVerticalMove();
+                      _channelSearchRetryFocus.requestFocus();
+                      return KeyEventResult.handled;
+                    }
                     if (event.logicalKey.isLeftKey) {
                       if (_usesPicker) {
                         _browseFocus.requestFocus();
@@ -1791,16 +1816,34 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
               ],
             ),
           ),
-          if (hasIssue) ...[
+          if (_canRetryProgramSearch) ...[
             const SizedBox(width: 4),
-            IconButton(
-              tooltip: status == GuideProgramSearchStatus.partial
+            Tooltip(
+              message: status == GuideProgramSearchStatus.partial
                   ? l10n.guideProgramSearchPartial
                   : l10n.guideProgramSearchFailed,
-              icon: const Icon(Icons.warning_amber_rounded),
-              color: AppColorScheme.statusError,
-              onPressed: _vm.retryProgramTitleSearch,
-              visualDensity: VisualDensity.compact,
+              child: Semantics(
+                button: true,
+                child: _GuidePillButton(
+                  focusNode: _channelSearchRetryFocus,
+                  icon: Icons.refresh,
+                  label: l10n.retry,
+                  compact: compact,
+                  onPressed: _vm.retryProgramTitleSearch,
+                  onKeyEvent: (_, event) {
+                    if (!event.isActionable) return KeyEventResult.ignored;
+                    if (event.logicalKey.isLeftKey) {
+                      _channelSearchFocus.requestFocus();
+                      return KeyEventResult.handled;
+                    }
+                    if (event.logicalKey.isDownKey) {
+                      _focusWindowBarFromGenres();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                ),
+              ),
             ),
           ],
         ],
@@ -1911,23 +1954,15 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             status == GuideProgramSearchStatus.failed)) {
       final l10n = AppLocalizations.of(context);
       return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              status == GuideProgramSearchStatus.partial
-                  ? l10n.guideProgramSearchPartial
-                  : l10n.guideProgramSearchFailed,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white.withAlpha(179)),
-            ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: _vm.retryProgramTitleSearch,
-              icon: const Icon(Icons.refresh),
-              label: Text(l10n.retry),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            status == GuideProgramSearchStatus.partial
+                ? l10n.guideProgramSearchPartial
+                : l10n.guideProgramSearchFailed,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white.withAlpha(179)),
+          ),
         ),
       );
     }
@@ -2794,8 +2829,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     // than by the viewer: when a programme boundary passes it re-resolves the
     // selection and puts focus on the new cell. If the viewer has since opened
     // a channel, that focus lands on a cell behind the player and every remote
-    // key goes to a screen nobody can see -- watching fine for a while, then
-    // the remote stops answering, with nothing the viewer did to cause it.
+    // key goes to a screen nobody can see, leaving the remote apparently dead
+    // because every key goes to the hidden screen. Measured on a Shield with
+    // primaryFocus stranded on `GuideFilter:0` while the player was on top.
     // Keep re-resolving the selection so the guide is correct when they come
     // back; just do not take the remote to do it.
     if (!_mayTakeFocus) return;
