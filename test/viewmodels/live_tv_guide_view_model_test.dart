@@ -204,6 +204,80 @@ void main() {
     expect(emby.first.isNews, isFalse);
   });
 
+  test('Jellyfin and Emby retain completed search pages on failure', () async {
+    for (final server in [ServerType.jellyfin, ServerType.emby]) {
+      when(() => client.serverType).thenReturn(server);
+      final items = _MockItemsApi();
+      when(() => client.itemsApi).thenReturn(items);
+      final type = server == ServerType.jellyfin ? 'LiveTvProgram' : 'Program';
+      final start = DateTime.utc(2026, 11, 14, 19);
+      final page = [
+        for (var i = 0; i < 200; i++)
+          <String, dynamic>{
+            'Id': 'match-$i',
+            'ChannelId': 'channel-$i',
+            'Type': type,
+            'Name': 'Soccer $i',
+            'IsSports': true,
+            'StartDate': start.toIso8601String(),
+            'EndDate': start.add(const Duration(hours: 1)).toIso8601String(),
+          },
+      ];
+      final offsets = <int>[];
+      when(() => items.getItems(
+        searchTerm: 'soccer',
+        includeItemTypes: any(named: 'includeItemTypes'),
+        recursive: true,
+        startIndex: any(named: 'startIndex'),
+        limit: 200,
+      )).thenAnswer((call) async {
+        final offset = call.namedArguments[#startIndex] as int;
+        offsets.add(offset);
+        if (offset == 0) {
+          return {'TotalRecordCount': 400, 'Items': page};
+        }
+        throw StateError('Later page failed');
+      });
+
+      final updates = <List<GuideTitleMatch>>[];
+      GuideProgramSearchPartialException? partial;
+      try {
+        await searchGuideProgramTitles(
+          client, 'soccer', isCurrent: () => true,
+          onPartialResults: updates.add,
+        );
+      } on GuideProgramSearchPartialException catch (error) {
+        partial = error;
+      }
+      expect(offsets, [0, 200]);
+      expect(updates, hasLength(1));
+      expect(updates.single, hasLength(200));
+      expect(partial, isNotNull);
+      final outcome = partial!;
+      expect(outcome.matches, hasLength(200));
+      expect(outcome.matches.first.programId, 'match-0');
+      expect(outcome.matches.last.programId, 'match-199');
+      expect(outcome.cause, isA<StateError>());
+    }
+  });
+
+  test('a first-page failure remains a failed search', () async {
+    final items = _MockItemsApi();
+    when(() => client.itemsApi).thenReturn(items);
+    when(() => items.getItems(
+      searchTerm: 'soccer',
+      includeItemTypes: any(named: 'includeItemTypes'),
+      recursive: true,
+      startIndex: 0,
+      limit: 200,
+    )).thenAnswer((_) async => throw StateError('Offline'));
+
+    await expectLater(
+      searchGuideProgramTitles(client, 'soccer', isCurrent: () => true),
+      throwsA(isA<StateError>()),
+    );
+  });
+
   test('failed title searches are retryable and not reported as no matches', () async {
     final api = _SearchableLiveTvApi();
     when(() => client.serverType).thenReturn(ServerType.plex);
@@ -270,6 +344,184 @@ void main() {
     expect(vm.searchingProgramTitles, isFalse);
     expect(vm.filteredChannels.map((ch) => ch.id), ['c0']);
     expect(vm.futureSearchMatchForChannel('c0'), isNull);
+  });
+
+  test('Plex retry keeps old future results and merges partial replies', () async {
+    final api = _IncrementalSearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    _stubChannels(api, [
+      _channel('tsn', number: '10'),
+      _channel('espn', number: '20'),
+      _channel('cnn', number: '30'),
+    ]);
+    final now = DateTime.utc(2026, 11, 14, 17);
+    final future = now.add(const Duration(days: 1));
+
+    Map<String, dynamic> hit(
+      String id,
+      String channel,
+      DateTime start, {
+      bool sports = true,
+    }) => {
+      'Id': id,
+      'Type': 'Program',
+      'Name': 'Soccer $id',
+      'ChannelId': channel,
+      'IsSports': sports,
+      'StartDate': start.toIso8601String(),
+      'EndDate': start.add(const Duration(hours: 1)).toIso8601String(),
+    };
+    final oldTsn = hit('tsn-showing', 'tsn', future);
+    final oldEspn = hit('espn-showing', 'espn', future);
+    final newTsn = hit('tsn-showing', 'tsn',
+        now.add(const Duration(minutes: 30)));
+    final newCnn = hit('cnn-showing', 'cnn', future, sports: false);
+
+    var searches = 0;
+    late void Function(List<Map<String, dynamic>>) publishRetry;
+    final retryResult = Completer<List<Map<String, dynamic>>>();
+    when(() => api.searchProgramTitlesIncrementally(
+      'soccer',
+      isCurrent: any(named: 'isCurrent'),
+      onBatch: any(named: 'onBatch'),
+    )).thenAnswer((call) {
+      searches++;
+      if (searches == 1) {
+        return Future<List<Map<String, dynamic>>>.error(
+          LiveTvPartialProgramSearchException(
+            [oldTsn, oldEspn], StateError('DVR offline'),
+          ),
+        );
+      }
+      if (searches == 2) {
+        publishRetry = call.namedArguments[#onBatch]
+            as void Function(List<Map<String, dynamic>>);
+        return retryResult.future;
+      }
+      return Future.value([newTsn]);
+    });
+
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('soccer');
+    await pumpEventQueue();
+    expect(vm.programSearchStatus, GuideProgramSearchStatus.partial);
+    expect(vm.filteredChannels.map((c) => c.id), ['tsn', 'espn']);
+    expect(vm.futureSearchMatchForChannel('tsn')?.start, future);
+
+    vm.retryProgramTitleSearch();
+    expect(vm.searchingProgramTitles, isTrue);
+    expect(vm.filteredChannels.map((c) => c.id), ['tsn', 'espn']);
+    expect(vm.futureSearchMatchForChannel('tsn')?.start, future);
+    expect(vm.futureSearchMatchForChannel('espn')?.start, future);
+    expect(vm.nextSearchMatchForChannel('tsn')?.start, future);
+
+    publishRetry([newTsn, newCnn]);
+    // Incremental batches must not drop known future-only rows or move their
+    // next-airing labels while another provider is still loading.
+    expect(vm.filteredChannels.map((c) => c.id), ['tsn', 'espn']);
+    expect(vm.futureSearchMatchForChannel('tsn')?.start, future);
+
+    retryResult.completeError(LiveTvPartialProgramSearchException(
+      [newTsn, newCnn], StateError('Cloud search failed'),
+    ));
+    await pumpEventQueue();
+    expect(vm.programSearchStatus, GuideProgramSearchStatus.partial);
+    expect(vm.searchingProgramTitles, isFalse);
+    expect(vm.filteredChannels.map((c) => c.id), ['tsn', 'espn', 'cnn']);
+    expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+    expect(vm.futureSearchMatchForChannel('espn')?.start, future);
+    expect(vm.futureSearchMatchForChannel('cnn')?.start, future);
+
+    // A successful retry replaces old partial hits rather than keeping them.
+    vm.retryProgramTitleSearch();
+    await pumpEventQueue();
+    expect(vm.programSearchStatus, GuideProgramSearchStatus.complete);
+    expect(vm.filteredChannels.map((c) => c.id), ['tsn']);
+    expect(vm.futureSearchMatchForChannel('espn'), isNull);
+    expect(searches, 3);
+  });
+
+  test('merged retry hits use showing IDs and prefer newer metadata', () {
+    final now = DateTime.utc(2026, 11, 14, 17);
+    GuideTitleMatch match(
+      String id, String title, DateTime start,
+    ) => GuideTitleMatch(
+      channelId: 'tsn',
+      programId: id,
+      title: title,
+      start: start,
+      end: start.add(const Duration(hours: 1)),
+    );
+    final old = match('showing', 'Soccer first', now);
+    final revised = match('showing', 'Soccer revised',
+        now.add(const Duration(minutes: 30)));
+    final other = match('different', 'Soccer other', now);
+    final merged = mergeGuideTitleMatches([old, other], [revised]);
+    expect(merged, hasLength(2));
+    expect(merged.first.title, 'Soccer revised');
+    expect(merged.last.programId, 'different');
+  });
+
+  test('unwrapped incremental retry errors retain both result sets', () async {
+    final api = _IncrementalSearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    _stubChannels(api, [
+      _channel('tsn', number: '10'),
+      _channel('espn', number: '20'),
+    ]);
+    final now = DateTime.utc(2026, 11, 14, 17);
+    Map<String, dynamic> hit(String id, String channel) => {
+      'Id': id,
+      'Type': 'Program',
+      'ChannelId': channel,
+      'Name': 'Soccer $id',
+      'StartDate': now.add(const Duration(days: 1)).toIso8601String(),
+      'EndDate': now.add(const Duration(days: 1, hours: 1)).toIso8601String(),
+    };
+    final tsn = hit('first', 'tsn');
+    final espn = hit('second', 'espn');
+    final pending = Completer<List<Map<String, dynamic>>>();
+    late void Function(List<Map<String, dynamic>>) publish;
+    var calls = 0;
+    when(() => api.searchProgramTitlesIncrementally(
+      'soccer',
+      isCurrent: any(named: 'isCurrent'),
+      onBatch: any(named: 'onBatch'),
+    )).thenAnswer((call) {
+      calls++;
+      if (calls == 1) {
+        return Future<List<Map<String, dynamic>>>.error(
+          LiveTvPartialProgramSearchException(
+            [tsn], StateError('First search incomplete'),
+          ),
+        );
+      }
+      publish = call.namedArguments[#onBatch]
+          as void Function(List<Map<String, dynamic>>);
+      return pending.future;
+    });
+
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('soccer');
+    await pumpEventQueue();
+    vm.retryProgramTitleSearch();
+    publish([espn]);
+    expect(vm.filteredChannels.map((c) => c.id), ['tsn']);
+    pending.completeError(StateError('Unexpected provider error'));
+    await pumpEventQueue();
+
+    expect(vm.programSearchStatus, GuideProgramSearchStatus.partial);
+    expect(vm.filteredChannels.map((c) => c.id), ['tsn', 'espn']);
+    expect(vm.futureSearchMatchForChannel('tsn'), isNotNull);
+    expect(vm.futureSearchMatchForChannel('espn'), isNotNull);
   });
 
   test('Plex guide titles use the DVR search API', () async {

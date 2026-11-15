@@ -10,6 +10,7 @@ class GuideProgramSearchPartialException implements Exception {
 
 class GuideTitleMatch {
   final String channelId;
+  final String? programId;
   final String title;
   final DateTime start;
   final DateTime end;
@@ -23,6 +24,7 @@ class GuideTitleMatch {
 
   const GuideTitleMatch({
     required this.channelId,
+    this.programId,
     required this.title,
     required this.start,
     required this.end,
@@ -33,6 +35,25 @@ class GuideTitleMatch {
     this.isKids,
     this.isPremiere,
   });
+}
+
+/// Merge incomplete searches without repeating the same program.
+/// The newer result wins if a showing's metadata has changed.
+List<GuideTitleMatch> mergeGuideTitleMatches(
+  List<GuideTitleMatch> earlier,
+  List<GuideTitleMatch> newer,
+) {
+  final byShowing = <Object, GuideTitleMatch>{};
+  Object key(GuideTitleMatch match) => match.programId != null
+      ? (match.channelId, match.programId)
+      : (match.channelId, match.title, match.start, match.end);
+  for (final match in earlier) {
+    byShowing[key(match)] = match;
+  }
+  for (final match in newer) {
+    byShowing[key(match)] = match;
+  }
+  return byShowing.values.toList();
 }
 
 Set<String> programChannelsInWindow(
@@ -125,6 +146,7 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
       ].join(' · ');
       results.add(GuideTitleMatch(
         channelId: channelId,
+        programId: id,
         title: title,
         start: start,
         end: end,
@@ -191,43 +213,56 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
 
   var offset = 0;
   String? previousPage;
-  while (isCurrent()) {
-    final response = await client.itemsApi.getItems(
-      searchTerm: term,
-      includeItemTypes: programTypes,
-      recursive: true,
-      startIndex: offset,
-      limit: pageSize,
-    );
-    if (!isCurrent()) return const [];
-    final items = response['Items'] as List? ?? const [];
-    final total = response['TotalRecordCount'];
-    if (items.isEmpty) {
-      if (total is num && total > offset) {
-        throw StateError('Program search returned an incomplete page');
+  try {
+    while (isCurrent()) {
+      final response = await client.itemsApi.getItems(
+        searchTerm: term,
+        includeItemTypes: programTypes,
+        recursive: true,
+        startIndex: offset,
+        limit: pageSize,
+      );
+      if (!isCurrent()) return const [];
+      final items = response['Items'] as List? ?? const [];
+      final total = response['TotalRecordCount'];
+      if (items.isEmpty) {
+        if (total is num && total > offset) {
+          throw StateError('Program search returned an incomplete page');
+        }
+        break;
       }
-      break;
-    }
 
-    // Fail rather than silently show incomplete results if a server ignores
-    // the pagination offset.
-    final signature = [
-      for (final raw in items)
-        if (raw is Map) raw['Id']?.toString() ?? '',
-    ].join(',');
-    if (signature == previousPage) {
-      throw StateError('Program search pagination did not advance');
-    }
-    previousPage = signature;
+      // An ignored pagination offset must not produce silent partial results.
+      final signature = [
+        for (final raw in items)
+          if (raw is Map) raw['Id']?.toString() ?? '',
+      ].join(',');
+      if (signature == previousPage) {
+        throw StateError('Program search pagination did not advance');
+      }
+      previousPage = signature;
 
-    addItems(items);
-
-    offset += items.length;
-    if (total is num && total > 0) {
-      if (offset >= total) break;
-    } else if (items.length < pageSize) {
-      break;
+      final before = results.length;
+      addItems(items);
+      offset += items.length;
+      if (results.length > before && isCurrent()) {
+        onPartialResults?.call(List<GuideTitleMatch>.unmodifiable(results));
+      }
+      if (total is num && total > 0) {
+        if (offset >= total) break;
+      } else if (items.length < pageSize) {
+        break;
+      }
     }
+  } catch (error) {
+    if (!isCurrent()) return const [];
+    if (offset > 0) {
+      throw GuideProgramSearchPartialException(
+        List<GuideTitleMatch>.unmodifiable(results),
+        error,
+      );
+    }
+    rethrow;
   }
   return isCurrent() ? results : const [];
 }

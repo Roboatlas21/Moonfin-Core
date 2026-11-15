@@ -663,6 +663,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String? _selectedGroup;
   String? get selectedGroup => _selectedGroup;
   String _channelQuery = '';
+  bool _preservingTitleMatchesDuringSearch = false;
   List<GuideTitleMatch> _programTitleMatches = const [];
   List<GuideTitleMatch> _activeTitleMatches = const [];
   Map<String, List<GuideTitleMatch>> _searchMatchesByChannel = const {};
@@ -704,7 +705,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Future-only channels join normal search results after the server search
   /// completes, so the next airing cannot change as providers reply.
   GuideTitleMatch? futureSearchMatchForChannel(String channelId) {
-    if (_channelQuery.length < 2 || _searchingProgramTitles) {
+    if (_channelQuery.length < 2 ||
+        (_searchingProgramTitles && !_preservingTitleMatchesDuringSearch)) {
       return null;
     }
     final matches = _searchMatchesByChannel[channelId];
@@ -724,7 +726,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     String channelId, {
     DateTime? after,
   }) {
-    if (_channelQuery.length < 2 || _searchingProgramTitles) {
+    if (_channelQuery.length < 2 ||
+        (_searchingProgramTitles && !_preservingTitleMatchesDuringSearch)) {
       return null;
     }
     final now = _now();
@@ -773,7 +776,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       );
       final futureIds = <String>{};
       if (_channelQuery.length >= 2 &&
-          !_searchingProgramTitles) {
+          (!_searchingProgramTitles || _preservingTitleMatchesDuringSearch)) {
         for (final channelId in _searchMatchesByChannel.keys) {
           if (futureSearchMatchForChannel(channelId) != null) {
             futureIds.add(channelId);
@@ -839,10 +842,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     bool recheckExpiredCategory = false,
   }) {
     final request = ++_titleSearchRequest;
-    // Keep the existing results visible during a full-guide refresh. A
-    // completed search replaces them; an error stays debug-only.
+    // A retry or full-guide refresh keeps its previous results until the
+    // replacement is complete. A different query starts from empty results.
     if (!preserveMatches) _setTitleMatches(const []);
     _searchingProgramTitles = _channelQuery.length >= 2;
+    _preservingTitleMatchesDuringSearch =
+        preserveMatches && _searchingProgramTitles && _programTitleMatches.isNotEmpty;
     _programSearchStatus = _searchingProgramTitles
         ? GuideProgramSearchStatus.searching
         : GuideProgramSearchStatus.idle;
@@ -950,6 +955,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> _searchProgramTitles(String query, int request) async {
     bool current() =>
         !_disposed && request == _titleSearchRequest && _channelQuery == query;
+    final preservePrevious = _preservingTitleMatchesDuringSearch;
+    final previous = preservePrevious
+        ? List<GuideTitleMatch>.of(_programTitleMatches)
+        : const <GuideTitleMatch>[];
+    var incoming = <GuideTitleMatch>[];
     try {
       final found = await searchGuideProgramTitles(
         _client,
@@ -957,28 +967,42 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         isCurrent: current,
         onPartialResults: (matches) {
           if (!current()) return;
-          _setTitleMatches(matches);
-          _applyChannelSearchRows();
+          incoming = matches;
+          // Do not replace an existing snapshot with an incomplete provider
+          // batch. Brand-new searches still display in-window hits promptly.
+          if (!preservePrevious) {
+            _setTitleMatches(matches);
+            _applyChannelSearchRows();
+          }
         },
       );
       if (!current()) return;
+      // A complete search is authoritative, including a zero-results reply.
       _setTitleMatches(found);
       _programSearchStatus = GuideProgramSearchStatus.complete;
     } on GuideProgramSearchPartialException catch (error) {
       if (!current()) return;
-      _setTitleMatches(error.matches);
+      _setTitleMatches(preservePrevious
+          ? mergeGuideTitleMatches(previous, error.matches)
+          : error.matches);
       _programSearchStatus = GuideProgramSearchStatus.partial;
       debugPrint(
         'Live TV program search was incomplete (${_client.serverType}): ${error.cause}',
       );
     } catch (error) {
       if (!current()) return;
+      // Some incremental backends can fail after publishing useful batches
+      // without supplying the specialized partial-search exception.
+      if (preservePrevious && incoming.isNotEmpty) {
+        _setTitleMatches(mergeGuideTitleMatches(previous, incoming));
+      }
       _programSearchStatus = _programTitleMatches.isEmpty
           ? GuideProgramSearchStatus.failed
           : GuideProgramSearchStatus.partial;
       debugPrint('Live TV program search failed (${_client.serverType}): $error');
     }
     _searchingProgramTitles = false;
+    _preservingTitleMatchesDuringSearch = false;
     _applyChannelSearchRows();
   }
 
