@@ -315,6 +315,29 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   bool _reloadAfterRecordingRefresh = false;
   bool _refreshRecordingsAfterLoad = false;
 
+  // The requested window can be ahead of the last successfully loaded one.
+  // Keep its programs too, so failed overlapping navigation can return there.
+  ({
+    DateTime start,
+    DateTime end,
+    DateTime guideDate,
+    bool livePosition,
+    Map<String, List<GuideProgram>> programs,
+    Set<String> loadedIds,
+  })? _confirmedGuideWindow;
+
+  // Track channels successfully replaced while a whole-window read is pending.
+  // A targeted refresh can then satisfy part of that read without requiring it
+  // to fetch every channel again.
+  ({
+    Object token,
+    DateTime start,
+    DateTime end,
+    Set<String> requestedIds,
+    Set<String> coveredIds,
+    Set<Future<void>> pendingWrites,
+  })? _pendingGuideWindow;
+
   // Bumped by every targeted replacement and by every cache reset, so a reply
   // whose window or channel set has since been superseded can be dropped.
   int _programGeneration = 0;
@@ -1270,8 +1293,29 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_disposed || _recordingRefreshDepth > 0) return;
     if (_reloadAfterRecordingRefresh) {
       _reloadAfterRecordingRefresh = false;
-      // The recording refresh may already have replaced this window's
-      // loaded rows. Don't tear the guide down again if it succeeded.
+      final pending = _pendingGuideWindow;
+      if (pending != null &&
+          _state == GuideState.ready &&
+          _windowStart == pending.start &&
+          _windowEnd == pending.end &&
+          !_isCategory(_filter)) {
+        // The refresh may already cover the whole requested window. Otherwise
+        // finish only the channels that still need its listings.
+        unawaited(_completePendingGuideWindow(
+          pending.token,
+          pending.requestedIds.toList(),
+          pending.start,
+          pending.end,
+          _loadGeneration,
+        ).catchError((Object error) {
+          if (_ownsPendingGuideWindow(
+            pending.token, pending.start, pending.end, _loadGeneration,
+          )) {
+            _restoreConfirmedGuideWindow(error);
+          }
+        }));
+        return;
+      }
       if (_state != GuideState.ready ||
           _isCategory(_filter) ||
           _programsLoadedIds.isEmpty ||
@@ -1383,6 +1427,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final lineupRequest = ++_lineupRequest;
+    _pendingGuideWindow = null;
     // Full reloads are the authoritative freshness boundary.
     _clearWindowProgramCache();
     if (window != null) _guideWindow = window;
@@ -1434,6 +1479,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (loadGeneration == _loadGeneration && _state == GuideState.ready) {
         _reloadOnEntry = false;
         _loadedRecordingRevision = max(_loadedRecordingRevision, recordingRevision);
+        _rememberConfirmedGuideWindow();
         // Only a full guide reload refreshes the server's title index.
         // Moving the visible window uses _reloadPrograms or setWindowStart,
         // so those navigation actions keep the existing search results.
@@ -1698,6 +1744,132 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     await _reloadPrograms();
   }
 
+  /// Save both the confirmed window and its programs. A newer requested
+  /// window is not confirmed until all channels it was showing have loaded.
+  void _rememberConfirmedGuideWindow() {
+    if (_isCategory(_filter) ||
+        _state != GuideState.ready ||
+        (_programsLoadedIds.isEmpty && _pageChannels.isNotEmpty)) {
+      return;
+    }
+    _confirmedGuideWindow = (
+      start: _windowStart,
+      end: _windowEnd,
+      guideDate: _guideDate,
+      livePosition: _atLivePosition,
+      programs: Map<String, List<GuideProgram>>.of(_programsByChannel),
+      loadedIds: Set<String>.of(_programsLoadedIds),
+    );
+    _pendingGuideWindow = null;
+  }
+
+  void _restoreConfirmedGuideWindow(Object error) {
+    final saved = _confirmedGuideWindow;
+    _pendingGuideWindow = null;
+    if (saved == null) {
+      // No proven range exists to return to; show a retryable guide error.
+      _listingsStatePage = _pageGeneration;
+      _error = error;
+      _state = GuideState.error;
+      _notifyListeners();
+      return;
+    }
+    // Invalidate outstanding requests for the abandoned window, including
+    // those that have not reached their completion check yet.
+    _programGeneration++;
+    _windowStart = saved.start;
+    _windowEnd = saved.end;
+    _guideDate = saved.guideDate;
+    _atLivePosition = saved.livePosition;
+    _programsByChannel
+      ..clear()
+      ..addAll(saved.programs);
+    _programsLoadedIds
+      ..clear()
+      ..addAll(saved.loadedIds);
+    _processedBoundaries.clear();
+    _updatePageRows();
+    _resetPageCursor();
+    _notifyListeners();
+  }
+
+  bool _ownsPendingGuideWindow(
+    Object token,
+    DateTime start,
+    DateTime end,
+    int loadGeneration,
+  ) {
+    final pending = _pendingGuideWindow;
+    return !_disposed &&
+        pending != null &&
+        identical(pending.token, token) &&
+        _windowStart == start &&
+        _windowEnd == end &&
+        _loadGeneration == loadGeneration &&
+        !_isCategory(_filter);
+  }
+
+  Future<void> _completePendingGuideWindow(
+    Object token,
+    List<String> ids,
+    DateTime start,
+    DateTime end,
+    int loadGeneration,
+  ) async {
+    var fetchRetries = 0;
+    while (true) {
+      if (!_ownsPendingGuideWindow(token, start, end, loadGeneration)) return;
+      final pending = _pendingGuideWindow!;
+      if (pending.pendingWrites.isNotEmpty) {
+        // A targeted request may have taken ownership but not returned yet.
+        // Waiting should not consume one of the bounded fetch retries.
+        await Future.wait(pending.pendingWrites.toList());
+        continue;
+      }
+      final missing = [
+        for (final id in ids)
+          if (!pending.coveredIds.contains(id)) id,
+      ];
+      if (missing.isEmpty) {
+        _processedBoundaries.clear();
+        _rememberConfirmedGuideWindow();
+        _notifyListeners();
+        _resumeInterruptedGuideWork();
+        return;
+      }
+      if (_recordingRefreshDepth > 0 &&
+          _loadedRecordingRevision < liveTvRecordingRevision.value) {
+        // The recording refresh may satisfy these channels itself. Resume
+        // afterwards rather than competing with its in-flight requests.
+        _reloadAfterRecordingRefresh = true;
+        return;
+      }
+
+      final generation = _programGeneration;
+      final fetched = await _fetchProgramReplacements(
+        missing,
+        from: start,
+        to: end,
+        generation: generation,
+      );
+      if (!_ownsPendingGuideWindow(token, start, end, loadGeneration)) return;
+      if (fetched == null || generation != _programGeneration) {
+        if (++fetchRetries >= 3) {
+          throw StateError('Guide window was superseded repeatedly');
+        }
+        continue;
+      }
+
+      _programsByChannel.addAll(fetched);
+      pending.coveredIds.addAll(missing);
+      _processedBoundaries.clear();
+      _rememberConfirmedGuideWindow();
+      _notifyListeners();
+      _resumeInterruptedGuideWork();
+      return;
+    }
+  }
+
   /// Moves the time window without entering the guide-wide loading state.
   Future<void> setWindowStart(
     DateTime start, {
@@ -1712,12 +1884,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
 
-    // Remember the last valid window so a failed request can restore its
-    // schedule without another fetch.
-    final previousWindowStart = _windowStart;
-    final previousWindowEnd = _windowEnd;
-    final previousGuideDate = _guideDate;
-    final previousLivePosition = _atLivePosition;
+    // Scrolling can add more channels after the last confirmed load. Snapshot
+    // them before leaving that window, but never confirm a pending request.
+    final confirmed = _confirmedGuideWindow;
+    if (_pendingGuideWindow == null &&
+        !_isCategory(_filter) &&
+        _state == GuideState.ready &&
+        (confirmed == null ||
+            (confirmed.start == _windowStart && confirmed.end == _windowEnd))) {
+      _rememberConfirmedGuideWindow();
+    }
+
     _windowStart = start;
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
@@ -1733,62 +1910,58 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
     _resetCategory();
+    final end = _windowEnd;
+    final token = Object();
+    _pendingGuideWindow = (
+      token: token,
+      start: start,
+      end: end,
+      requestedIds: ids.toSet(),
+      coveredIds: <String>{},
+      pendingWrites: <Future<void>>{},
+    );
     _notifyListeners();
-    if (ids.isEmpty) return;
+    if (ids.isEmpty) {
+      if (_pageChannels.isEmpty) _rememberConfirmedGuideWindow();
+      return;
+    }
     final loadGeneration = _loadGeneration;
-    final pageGeneration = _pageGeneration;
-    final recordingRevision = liveTvRecordingRevision.value;
-    final cacheRevision = _windowCacheRevision;
 
-    Map<String, List<GuideProgram>>? replacements;
     try {
-      replacements = await _fetchProgramReplacements(
+      final replacements = await _fetchProgramReplacements(
         ids,
         from: start,
-        to: _windowEnd,
+        to: end,
         generation: generation,
       );
-    } catch (_) {
-      // Only the original request may roll back its window. A newer load,
-      // filter change, or access-denied reset already owns the current view.
-      if (!_disposed &&
-          generation == _programGeneration &&
-          loadGeneration == _loadGeneration &&
-          pageGeneration == _pageGeneration &&
-          _windowStart == start &&
-          !_isCategory(_filter)) {
-        _windowStart = previousWindowStart;
-        _windowEnd = previousWindowEnd;
-        _guideDate = previousGuideDate;
-        _atLivePosition = previousLivePosition;
-        if (_channelQuery.isNotEmpty) {
-          _updatePageRows();
-          _resetPageCursor();
-        }
+      if (!_ownsPendingGuideWindow(token, start, end, loadGeneration)) return;
+      if (replacements != null && generation == _programGeneration) {
+        _programsByChannel.addAll(replacements);
+        _pendingGuideWindow!.coveredIds.addAll(ids);
+        _processedBoundaries.clear();
+        _rememberConfirmedGuideWindow();
         _notifyListeners();
+        _resumeInterruptedGuideWork();
+        return;
+      }
+      // A targeted update may have replaced only some channels. Complete the
+      // other channels instead of either abandoning them or reloading all.
+      await _completePendingGuideWindow(
+        token, ids, start, end, loadGeneration,
+      );
+    } catch (error) {
+      if (_ownsPendingGuideWindow(token, start, end, loadGeneration)) {
+        final pending = _pendingGuideWindow!;
+        if (pending.requestedIds.every(pending.coveredIds.contains)) {
+          // Another operation finished the requested window already.
+          _rememberConfirmedGuideWindow();
+          _notifyListeners();
+          return;
+        }
+        _restoreConfirmedGuideWindow(error);
       }
       rethrow;
     }
-    if (replacements == null || generation != _programGeneration) {
-      // A newer guide load already owns the window. Only recover when this
-      // request was interrupted by a recording refresh, not another reload.
-      if (!_disposed &&
-          _windowStart == start &&
-          !_isCategory(_filter) &&
-          loadGeneration == _loadGeneration &&
-          pageGeneration == _pageGeneration &&
-          cacheRevision != _windowCacheRevision &&
-          _loadedRecordingRevision < liveTvRecordingRevision.value &&
-          (_recordingRefreshDepth > 0 ||
-              recordingRevision != liveTvRecordingRevision.value)) {
-        _reloadAfterRecordingRefresh = true;
-        _resumeInterruptedGuideWork();
-      }
-      return;
-    }
-    _programsByChannel.addAll(replacements);
-    _processedBoundaries.clear();
-    _notifyListeners();
   }
 
   Future<void> setWindow(Duration window) async {
@@ -1802,6 +1975,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_channelQuery.isNotEmpty) _updatePageRows();
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
+    _pendingGuideWindow = null;
     final depth = _requestedPageDepth;
     final alreadyShowingPrevious = _showingPreviousCategory;
     final keepRows =
@@ -1825,6 +1999,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final completed = await _replaceProgramPages(current);
       if (!current() || !completed) return;
       _loadedRecordingRevision = max(_loadedRecordingRevision, recordingRevision);
+      _rememberConfirmedGuideWindow();
       _resumeInterruptedGuideWork();
     } catch (e) {
       if (!current()) return;
@@ -2285,6 +2460,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         pageGeneration == _pageGeneration &&
         batch.every((c) => _programsLoadedIds.contains(c.id))) {
       _advanceProgramsCursor();
+      if (_pendingGuideWindow == null &&
+          _state == GuideState.ready &&
+          (_confirmedGuideWindow?.start != _windowStart ||
+              _confirmedGuideWindow?.end != _windowEnd)) {
+        _rememberConfirmedGuideWindow();
+      }
     }
   }
 
@@ -2321,6 +2502,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (!await _loadProgramsBatch(chunk)) return;
       }
     }
+    if (!_usesPlaybackLineup &&
+        _pendingGuideWindow == null &&
+        _state == GuideState.ready &&
+        (_confirmedGuideWindow?.start != _windowStart ||
+            _confirmedGuideWindow?.end != _windowEnd)) {
+      _rememberConfirmedGuideWindow();
+    }
     _notifyListeners();
   }
 
@@ -2344,19 +2532,39 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (channelIds.isEmpty) return false;
     final ids = List<String>.from(channelIds);
     final generation = ++_programGeneration;
+    final pending = _pendingGuideWindow;
+    final coversWindow = pending != null &&
+        _windowStart == pending.start &&
+        _windowEnd == pending.end &&
+        !from.isAfter(pending.start) &&
+        !to.isBefore(pending.end);
+    final done = coversWindow ? Completer<void>() : null;
+    if (done != null) pending!.pendingWrites.add(done.future);
 
-    final response = await _fetchGuide(channelIds: ids, from: from, to: to);
-    // A later replacement or any cache reset supersedes this reply.
-    if (_disposed || generation != _programGeneration) return false;
+    try {
+      final response = await _fetchGuide(channelIds: ids, from: from, to: to);
+      // A later replacement or any cache reset supersedes this reply.
+      if (_disposed || generation != _programGeneration) return false;
 
-    final parsed = _parsePrograms(response);
-    _dropWindowCacheForChannels(ids);
-    for (final id in ids) {
-      _programsByChannel[id] = parsed[id] ?? <GuideProgram>[];
+      final parsed = _parsePrograms(response);
+      _dropWindowCacheForChannels(ids);
+      for (final id in ids) {
+        _programsByChannel[id] = parsed[id] ?? <GuideProgram>[];
+      }
+      _programsLoadedIds.addAll(ids);
+      if (coversWindow &&
+          pending != null &&
+          identical(_pendingGuideWindow?.token, pending.token)) {
+        pending.coveredIds.addAll(ids);
+      }
+      _notifyListeners();
+      return true;
+    } finally {
+      if (done != null) {
+        pending!.pendingWrites.remove(done.future);
+        done.complete();
+      }
     }
-    _programsLoadedIds.addAll(ids);
-    _notifyListeners();
-    return true;
   }
 
   // --- Next-future-boundary refresh -----------------------------------------

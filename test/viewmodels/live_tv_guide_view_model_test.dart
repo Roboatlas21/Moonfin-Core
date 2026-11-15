@@ -1460,6 +1460,235 @@ void main() {
       expect(vm.hasMorePrograms, isFalse);
     });
 
+    test('overlapping window failure restores the last loaded window', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final middle = start.add(const Duration(hours: 3));
+      final later = start.add(const Duration(hours: 6));
+      _stubChannels(liveTv, [_channel('c0')]);
+      final middleReply = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == middle) return middleReply.future;
+        if (from == later) {
+          return Future.error(DioException(
+            requestOptions: RequestOptions(path: '/LiveTv/Programs'),
+            type: DioExceptionType.connectionError,
+          ));
+        }
+        return Future.value({
+          'Items': [_program('confirmed', 'c0', start: start)],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      final middleLoad = vm.setWindowStart(middle);
+      await pumpEventQueue();
+      expect(vm.windowStart, middle);
+
+      await expectLater(
+        vm.setWindowStart(later),
+        throwsA(isA<DioException>()),
+      );
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, start);
+      expect(vm.windowEnd, start.add(vm.guideWindow));
+      expect(vm.guideDate, start);
+      expect(vm.programsForChannel('c0').single.id, 'confirmed');
+
+      middleReply.complete({
+        'Items': [_program('obsolete-middle', 'c0', start: middle)],
+      });
+      await middleLoad;
+      expect(vm.windowStart, start);
+      expect(vm.programsForChannel('c0').single.id, 'confirmed');
+    });
+
+    test('a targeted replacement only leaves the other window channels to fetch', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [
+        for (var i = 0; i < 50; i++) _channel('c$i', number: '$i'),
+      ]);
+      final olderReply = Completer<Map<String, dynamic>>();
+      final laterRequests = <List<String>>[];
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        final ids = List<String>.of(_requestedIds(call));
+        if (from == later) {
+          laterRequests.add(ids);
+          if (ids.length == 50) return olderReply.future;
+          return Future.value({
+            'Items': [
+              for (final id in ids)
+                _program(ids.length == 1 ? 'targeted-$id' : 'loaded-$id',
+                    id, start: later),
+            ],
+          });
+        }
+        return Future.value({
+          'Items': [
+            for (final id in ids) _program('old-$id', id, start: start),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      expect(vm.programsHighWater, 50);
+
+      final navigating = vm.setWindowStart(later);
+      await pumpEventQueue();
+      expect(laterRequests.map((ids) => ids.length), [50]);
+
+      await vm.replacePrograms(
+        channelIds: const ['c0'],
+        from: later,
+        to: later.add(vm.guideWindow),
+      );
+      expect(vm.programsForChannel('c0').single.id, 'targeted-c0');
+
+      olderReply.complete({
+        'Items': [_program('stale-c0', 'c0', start: later)],
+      });
+      await navigating;
+
+      expect(vm.windowStart, later);
+      expect(vm.state, GuideState.ready);
+      expect(vm.hasMorePrograms, isFalse);
+      expect(vm.programsForChannel('c0').single.id, 'targeted-c0');
+      expect(vm.programsForChannel('c1').single.id, 'loaded-c1');
+      expect(vm.programsForChannel('c49').single.id, 'loaded-c49');
+      expect(laterRequests, [
+        [for (var i = 0; i < 50; i++) 'c$i'],
+        ['c0'],
+        [for (var i = 1; i < 50; i++) 'c$i'],
+      ]);
+    });
+
+    test('pending targeted replacement finishes before missing window rows load', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [
+        _channel('c0'), _channel('c1'), _channel('c2'),
+      ]);
+      final olderReply = Completer<Map<String, dynamic>>();
+      final targetedReply = Completer<Map<String, dynamic>>();
+      final laterRequests = <List<String>>[];
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        final ids = List<String>.of(_requestedIds(call));
+        if (from == later) {
+          laterRequests.add(ids);
+          if (ids.length == 3) return olderReply.future;
+          if (ids.length == 1) return targetedReply.future;
+        }
+        return Future.value({
+          'Items': [
+            for (final id in ids)
+              _program(from == later ? 'fresh-$id' : 'old-$id',
+                  id, start: from),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      final navigating = vm.setWindowStart(later);
+      await pumpEventQueue();
+
+      final targeted = vm.replacePrograms(
+        channelIds: const ['c0'],
+        from: later,
+        to: later.add(vm.guideWindow),
+      );
+      await pumpEventQueue();
+
+      olderReply.complete({'Items': [
+        _program('superseded', 'c0', start: later),
+      ]});
+      await pumpEventQueue();
+
+      // The pending c0 update must finish before the window repair chooses
+      // which channels are still missing.
+      expect(laterRequests, [
+        ['c0', 'c1', 'c2'],
+        ['c0'],
+      ]);
+
+      targetedReply.complete({'Items': [
+        _program('targeted-c0', 'c0', start: later),
+      ]});
+      await targeted;
+      await navigating;
+
+      expect(laterRequests, [
+        ['c0', 'c1', 'c2'],
+        ['c0'],
+        ['c1', 'c2'],
+      ]);
+      expect(vm.programsForChannel('c0').single.id, 'targeted-c0');
+      expect(vm.programsForChannel('c1').single.id, 'fresh-c1');
+      expect(vm.programsForChannel('c2').single.id, 'fresh-c2');
+      expect(vm.windowStart, later);
+      expect(vm.state, GuideState.ready);
+    });
+
+    test('failed partial-window repair restores every confirmed channel', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [
+        _channel('c0'), _channel('c1'), _channel('c2'),
+      ]);
+      final olderReply = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        final ids = List<String>.of(_requestedIds(call));
+        if (from == later && ids.length == 3) return olderReply.future;
+        if (from == later && ids.length == 2) {
+          return Future.error(DioException(
+            requestOptions: RequestOptions(path: '/LiveTv/Programs'),
+            type: DioExceptionType.connectionError,
+          ));
+        }
+        return Future.value({
+          'Items': [
+            for (final id in ids)
+              _program(from == later ? 'targeted-$id' : 'old-$id',
+                  id, start: from),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      final navigating = vm.setWindowStart(later);
+      await pumpEventQueue();
+      await vm.replacePrograms(
+        channelIds: const ['c0'],
+        from: later,
+        to: later.add(vm.guideWindow),
+      );
+      expect(vm.programsForChannel('c0').single.id, 'targeted-c0');
+
+      final failure = expectLater(navigating, throwsA(isA<DioException>()));
+      olderReply.complete({'Items': [
+        _program('stale-c0', 'c0', start: later),
+      ]});
+      await failure;
+
+      expect(vm.windowStart, start);
+      expect(vm.state, GuideState.ready);
+      expect(vm.programsHighWater, 3);
+      for (final id in ['c0', 'c1', 'c2']) {
+        expect(vm.programsForChannel(id).single.id, 'old-$id');
+      }
+    });
+
     test('failed guide window change restores the previous valid schedule', () async {
       final start = DateTime.utc(2026, 11, 14, 17);
       final later = start.add(const Duration(hours: 3));
