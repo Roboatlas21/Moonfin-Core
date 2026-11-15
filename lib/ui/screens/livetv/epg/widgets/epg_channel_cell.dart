@@ -16,6 +16,7 @@ class EpgChannelCell extends StatelessWidget {
   final String? number;
   final bool focused;
   final bool apple;
+  final bool hasFutureMatch;
 
   /// Marks the channel as a favourite with a red heart beside the number.
   final bool isFavorite;
@@ -54,6 +55,7 @@ class EpgChannelCell extends StatelessWidget {
     required this.focused,
     required this.apple,
     this.isFavorite = false,
+    this.hasFutureMatch = false,
   });
 
   @override
@@ -117,23 +119,38 @@ class EpgChannelCell extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                 ],
-                focused
-                    ? SizedBox(
-                        width: double.infinity,
-                        child: MarqueeText(
-                          text: name,
-                          style: nameStyle ?? const TextStyle(),
-                          showDotSeparator: false,
-                          textAlign: TextAlign.right,
-                        ),
-                      )
-                    : Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.right,
-                        style: nameStyle,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (hasFutureMatch) ...[
+                      Icon(
+                        Icons.calendar_today_outlined,
+                        size: scaler.scale(_nameSize(width)) * _inlineIconShare,
+                        color: accent,
                       ),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: focused
+                          ? SizedBox(
+                              width: double.infinity,
+                              child: MarqueeText(
+                                text: name,
+                                style: nameStyle ?? const TextStyle(),
+                                showDotSeparator: false,
+                                textAlign: TextAlign.right,
+                              ),
+                            )
+                          : Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.right,
+                              style: nameStyle,
+                            ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),

@@ -171,7 +171,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   late LiveTvCategoryDisplay _categoryDisplay;
   final _browseFocus = FocusNode(debugLabel: 'GuideBrowse');
   final _channelSearchFocus = FocusNode(debugLabel: 'GuideSearch');
-  final _nextAiringFocus = FocusNode(debugLabel: 'GuideNextAiring');
   final _channelSearch = TextEditingController();
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
@@ -853,12 +852,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _focusWindowBarFromGenres() => _focusWindowBar(_lastWindowBarIndex);
 
   void _focusGuideResults() {
-    if (_vm.state == GuideState.ready &&
-        _vm.filteredChannels.isEmpty &&
-        _vm.nextSearchAiring != null) {
-      _nextAiringFocus.requestFocus();
-      return;
-    }
     _focusLastChannelRow();
   }
 
@@ -997,7 +990,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _miniPlayerFocusNode.dispose();
     _browseFocus.dispose();
     _channelSearchFocus.dispose();
-    _nextAiringFocus.dispose();
     _channelSearchDebounce?.cancel();
     _channelSearch.dispose();
     for (final node in _channelFocusNodes.values) {
@@ -1355,6 +1347,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       ]),
       builder: (context, _) {
         final (:channel, program: preview) = _currentPreview();
+        final searchMatch = channel != null &&
+                (preview == null || !_vm.programMatchesSearch(preview))
+            ? _vm.nextSearchMatchForChannel(
+                channel.id,
+                after: preview?.endDate,
+              )
+            : null;
         final now = DateTime.now();
         final isLive =
             preview != null &&
@@ -1425,6 +1424,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           communityRating: preview?.communityRating,
           badgeLabel: badgeLabel,
           synopsis: preview?.overview,
+          searchMatchTitle: searchMatch?.title,
+          searchMatchTime: searchMatch == null
+              ? null
+              : '${_nextAiringDay(searchMatch.start)} · ${_formatTime(searchMatch.start)}',
           isLive: isLive,
           hasTimer: preview?.hasTimer ?? false,
           hasSeriesTimer: preview?.hasSeriesTimer ?? false,
@@ -1872,10 +1875,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _prefs.set(UserPreferences.epgMobileView, next);
   }
 
-  // Both mobile and TV use the same empty search state. Program matches
-  // beyond the visible window can still offer a jump while search continues.
+  // TV and mobile use one empty state. Future-only channels appear as rows
+  // after the full search completes, not as a separate jump suggestion.
   Widget _buildEmptyGuideResults() {
-    if (_vm.searchingProgramTitles && _vm.nextSearchAiring == null) {
+    if (_vm.searchingProgramTitles) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_vm.channelQuery.length >= 2 &&
@@ -1930,6 +1933,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           now: now,
           next: next,
         );
+        final futureMatch = _vm.futureSearchMatchForChannel(channel.id);
         final t = DateTime.now();
         final logoUrl = channel.imageTag == null
             ? null
@@ -1957,11 +1961,16 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                     _formatTime(next.startDate),
                     next.titleWithEpisode,
                   ),
-            matchLabel: match == null
-                ? null
-                : AppLocalizations.of(context).guideSearchMatch(
+            matchLabel: match != null
+                ? AppLocalizations.of(context).guideSearchMatch(
                     _formatTime(match.start),
                     match.title,
+                  )
+                : futureMatch == null
+                ? null
+                : AppLocalizations.of(context).guideSearchMatch(
+                    '${_nextAiringDay(futureMatch.start)} ${_formatTime(futureMatch.start)}',
+                    futureMatch.title,
                   ),
             isLive: isLive,
             apple: _apple,
@@ -2343,9 +2352,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildEmptySearchResults() {
     final l10n = AppLocalizations.of(context);
-    final next = _vm.nextSearchAiring;
-    final nextChannel = next == null ? null : _vm.channelForId(next.channelId);
-    final query = _channelSearch.text.trim();
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 640),
@@ -2357,9 +2363,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
               const Icon(Icons.search_off, color: Colors.white54, size: 36),
               const SizedBox(height: 12),
               Text(
-                next == null
-                    ? l10n.guideNoProgramsFound
-                    : l10n.guideNoProgramsThisWindow,
+                l10n.guideNoProgramsFound,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   color: Colors.white,
@@ -2367,108 +2371,15 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                next == null
-                    ? l10n.guideNoLaterAirings(query)
-                    : l10n.guideNextMatchingAiring(
-                        query,
-                        _nextAiringDay(next.start),
-                        _formatTime(next.start),
-                      ),
+                l10n.guideNoLaterAirings(_channelSearch.text.trim()),
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70),
               ),
-              if (nextChannel != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  nextChannel.number == null || nextChannel.number!.isEmpty
-                      ? nextChannel.name
-                      : '${nextChannel.number} · ${nextChannel.name}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70),
-                ),
-              ],
-              if (next != null) ...[
-                const SizedBox(height: 16),
-                if (!_sidePanel)
-                  FilledButton.icon(
-                    onPressed: () => unawaited(_jumpToNextAiring()),
-                    icon: const Icon(Icons.arrow_forward),
-                    label: Text(l10n.guideJumpToNextAiring),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 48),
-                    ),
-                  )
-                else
-                  _GuidePillButton(
-                    icon: Icons.arrow_forward,
-                    label: l10n.guideJumpToNextAiring,
-                    focusNode: _nextAiringFocus,
-                    onPressed: () => unawaited(_jumpToNextAiring()),
-                    onKeyEvent: (_, event) {
-                      if (event.isActionable && event.logicalKey.isUpKey) {
-                        _focusWindowBar(_lastWindowBarIndex);
-                        return KeyEventResult.handled;
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                  ),
-              ],
             ],
           ),
         ),
       ),
     );
-  }
-
-  Future<void> _jumpToNextAiring() async {
-    final next = _vm.nextSearchAiring;
-    if (next == null) return;
-    _cancelPendingVerticalMove();
-    _selection = null;
-    _lastFocusedRowIndex = null;
-    try {
-      await _vm.setWindowStart(
-        guideLeftEdge(next.start),
-        livePosition: false,
-        priorityChannelId: next.channelId,
-      );
-    } catch (_) {
-      return;
-    }
-    if (!mounted) return;
-    if (!_sidePanel) {
-      FocusManager.instance.primaryFocus?.unfocus();
-      // Now/Next is tied to the current clock. An explicit future jump opens
-      // the timeline so the scheduled program is visible at its actual time.
-      // Do not change the user's saved view preference.
-      if (!_isLandscapeSize(MediaQuery.sizeOf(context)) &&
-          _mobileView == EpgMobileView.list) {
-        setState(() => _mobileView = EpgMobileView.grid);
-      }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final index = _vm.filteredChannels.indexWhere(
-          (channel) => channel.id == next.channelId,
-        );
-        if (index >= 0) _scrollToRow(index, animate: false);
-      });
-      return;
-    }
-    // The matching row is built on the next frame. Mount it before focusing.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final rows = _vm.filteredChannels;
-      final index = rows.indexWhere((ch) => ch.id == next.channelId);
-      if (rows.isEmpty) return;
-      _scrollToRow(index < 0 ? 0 : index, animate: false);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        final current = _vm.filteredChannels;
-        if (current.isEmpty) return;
-        final row = current.indexWhere((ch) => ch.id == next.channelId);
-        _focusChannelRow(row < 0 ? 0 : row, animate: false);
-      });
-    });
   }
 
   Widget _buildGuideGrid(List<GuideChannel> channels) {
@@ -2658,6 +2569,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           focused: focused,
           apple: _apple,
           isFavorite: channel.isFavorite,
+          hasFutureMatch:
+              _vm.futureSearchMatchForChannel(channel.id) != null,
         ),
       ),
     );
@@ -3129,6 +3042,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       },
       onNavigationKey: _onNavigationKey,
       onRowMounted: _scheduleApplyPendingVerticalMove,
+      isSearchMatch: (cell) =>
+          cell.program != null && _vm.programMatchesSearch(cell.program!),
       windowStart: _vm.windowStart,
       windowEnd: _vm.windowEnd,
       pixelsPerMinute: _layoutProfile.pixelsPerMinute,
@@ -3805,6 +3720,7 @@ class _GuideProgramRow extends StatefulWidget {
   /// Fired when this row registers itself, so a move deferred on an unmounted
   /// row can complete.
   final VoidCallback onRowMounted;
+  final bool Function(GuideCell) isSearchMatch;
   final DateTime windowStart;
   final DateTime windowEnd;
   final double pixelsPerMinute;
@@ -3832,6 +3748,7 @@ class _GuideProgramRow extends StatefulWidget {
     required this.onPageRows,
     required this.onNavigationKey,
     required this.onRowMounted,
+    required this.isSearchMatch,
     required this.windowStart,
     required this.windowEnd,
     required this.pixelsPerMinute,
@@ -4086,6 +4003,7 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
           hasTimer: program?.hasTimer ?? false,
           hasSeriesTimer: program?.hasSeriesTimer ?? false,
           focused: focused,
+          searchMatch: program != null && widget.isSearchMatch(cell),
           apple: widget.apple,
           placeholderLabel: cell.kind == GuideCellKind.gap
               ? widget.noProgramDataLabel

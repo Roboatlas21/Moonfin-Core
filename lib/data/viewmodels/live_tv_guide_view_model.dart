@@ -477,7 +477,69 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String? get selectedGroup => _selectedGroup;
   String _channelQuery = '';
   List<GuideTitleMatch> _programTitleMatches = const [];
+  Map<String, List<GuideTitleMatch>> _searchMatchesByChannel = const {};
   String get channelQuery => _channelQuery;
+
+  void _setTitleMatches(List<GuideTitleMatch> matches) {
+    _programTitleMatches = matches;
+    final grouped = <String, List<GuideTitleMatch>>{};
+    for (final match in matches) {
+      grouped.putIfAbsent(match.channelId, () => []).add(match);
+    }
+    for (final channelMatches in grouped.values) {
+      channelMatches.sort((a, b) => a.start.compareTo(b.start));
+    }
+    _searchMatchesByChannel = grouped;
+  }
+
+  bool _matchInWindow(GuideTitleMatch match) =>
+      match.start.isBefore(_windowEnd) && match.end.isAfter(_windowStart);
+
+  /// Future-only channels join normal search results after the server search
+  /// completes, so the next airing cannot change as providers reply.
+  GuideTitleMatch? futureSearchMatchForChannel(String channelId) {
+    if (_channelQuery.length < 2 ||
+        _searchingProgramTitles ||
+        _isCategory(_filter)) {
+      return null;
+    }
+    final matches = _searchMatchesByChannel[channelId];
+    if (matches == null || matches.any(_matchInWindow)) return null;
+    final now = _now();
+    for (final match in matches) {
+      if (!match.start.isBefore(_windowEnd) && match.start.isAfter(now)) {
+        return match;
+      }
+    }
+    return null;
+  }
+
+  /// The hero keeps the selected program but can preview its next search
+  /// match where the synopsis normally appears.
+  GuideTitleMatch? nextSearchMatchForChannel(
+    String channelId, {
+    DateTime? after,
+  }) {
+    if (_channelQuery.length < 2 ||
+        _searchingProgramTitles ||
+        _isCategory(_filter)) {
+      return null;
+    }
+    final now = _now();
+    final cutoff = after != null && after.isAfter(now) ? after : now;
+    for (final match in _searchMatchesByChannel[channelId] ?? const []) {
+      if (!match.start.isBefore(cutoff) && match.start.isAfter(now)) {
+        return match;
+      }
+    }
+    return null;
+  }
+
+  bool programMatchesSearch(GuideProgram program) =>
+      _channelQuery.length >= 2 &&
+      (program.name.toLowerCase().contains(_channelQuery) ||
+          (program.episodeTitle?.toLowerCase().contains(_channelQuery) ??
+              false));
   int _titleSearchRequest = 0;
   bool _searchingProgramTitles = false;
   bool get searchingProgramTitles => _searchingProgramTitles;
@@ -505,11 +567,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _windowStart,
         _windowEnd,
       );
+      final futureIds = <String>{};
+      if (_channelQuery.length >= 2 &&
+          !_searchingProgramTitles &&
+          !_isCategory(_filter)) {
+        for (final channelId in _searchMatchesByChannel.keys) {
+          if (futureSearchMatchForChannel(channelId) != null) {
+            futureIds.add(channelId);
+          }
+        }
+      }
       rows = rows.where(
         (channel) =>
             channel.name.toLowerCase().contains(_channelQuery) ||
             (channel.number?.toLowerCase().contains(_channelQuery) ?? false) ||
-            programIds.contains(channel.id),
+            programIds.contains(channel.id) ||
+            futureIds.contains(channel.id),
       );
     }
     final updatedRows = identical(rows, _channels) ? _channels : rows.toList();
@@ -542,7 +615,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_channelQuery == query) return;
     _channelQuery = query;
     final request = ++_titleSearchRequest;
-    _programTitleMatches = const [];
+    _setTitleMatches(const []);
     _searchingProgramTitles = query.length >= 2;
     _applyChannelSearchRows();
     if (_searchingProgramTitles) {
@@ -577,12 +650,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         isCurrent: current,
         onPartialResults: (matches) {
           if (!current()) return;
-          _programTitleMatches = matches;
+          _setTitleMatches(matches);
           _applyChannelSearchRows();
         },
       );
       if (!current()) return;
-      _programTitleMatches = found;
+      _setTitleMatches(found);
     } catch (error) {
       if (!current()) return;
       debugPrint('Live TV program search failed (${_client.serverType}): $error');

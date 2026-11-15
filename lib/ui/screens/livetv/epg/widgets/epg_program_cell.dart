@@ -35,6 +35,7 @@ class EpgProgramCell extends StatelessWidget {
   final bool hasTimer;
   final bool hasSeriesTimer;
   final bool focused;
+  final bool searchMatch;
   final bool apple;
 
   final String? placeholderLabel;
@@ -58,6 +59,7 @@ class EpgProgramCell extends StatelessWidget {
     required this.hasTimer,
     this.hasSeriesTimer = false,
     required this.focused,
+    this.searchMatch = false,
     required this.apple,
     this.placeholderLabel,
     this.loading = false,
@@ -89,6 +91,12 @@ class EpgProgramCell extends StatelessWidget {
     final focusBorder = focused
         ? Border.all(color: accent, width: apple ? 1.5 : 2)
         : null;
+    final searchBorder = searchMatch && !focused
+        ? Border.all(color: accent.withValues(alpha: 0.45), width: 1)
+        : null;
+    final cellColor = searchMatch && !focused
+        ? Color.alphaBlend(accent.withValues(alpha: 0.09), bg)
+        : bg;
 
     // Loading and failed placeholders span the whole row while programs are
     // unresolved for this channel. Both override the normal program layout.
@@ -157,14 +165,14 @@ class EpgProgramCell extends StatelessWidget {
     final programCell = Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: bg,
+        color: cellColor,
         borderRadius: AppRadius.circular(radius),
       ),
-      foregroundDecoration: focusBorder == null
+      foregroundDecoration: focusBorder == null && searchBorder == null
           ? null
           : BoxDecoration(
               borderRadius: AppRadius.circular(radius),
-              border: focusBorder,
+              border: focusBorder ?? searchBorder,
             ),
       child: Stack(
         children: [

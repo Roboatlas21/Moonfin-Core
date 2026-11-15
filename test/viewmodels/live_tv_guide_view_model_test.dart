@@ -330,9 +330,131 @@ void main() {
     pending.complete([tomorrow, tonight]);
     await Future<void>.delayed(Duration.zero);
     expect(vm.searchingProgramTitles, isFalse);
-    expect(vm.filteredChannels, isEmpty);
+    expect(vm.filteredChannels.map((c) => c.id), ['dvr', 'free']);
+    expect(vm.futureSearchMatchForChannel('dvr')?.title, 'Silo');
+    expect(vm.futureSearchMatchForChannel('free')?.start, tonightStart);
     expect(vm.nextSearchAiring?.channelId, 'free');
     expect(vm.nextSearchAiring?.start, tonightStart);
+  });
+
+  test('search keeps future-only channels without including unrelated ones', () async {
+    final api = _SearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    _stubChannels(api, [
+      {'Id': 'tsn', 'Name': 'TSN'},
+      {'Id': 'onesoccer', 'Name': 'OneSoccer'},
+      {'Id': 'soccertv', 'Name': 'Soccer TV'},
+      {'Id': 'espn', 'Name': 'ESPN'},
+    ]);
+
+    final now = DateTime.utc(2026, 11, 14, 17);
+    final future = now.add(const Duration(days: 1));
+    final inWindow = now.add(const Duration(minutes: 90));
+    Map<String, dynamic> match(
+      String id, String channelId, String title, DateTime start,
+    ) => {
+      'Id': id,
+      'Type': 'Program',
+      'Name': title,
+      'ChannelId': channelId,
+      'StartDate': start.toIso8601String(),
+      'EndDate': start.add(const Duration(minutes: 30)).toIso8601String(),
+    };
+    when(() => api.searchProgramTitles(
+      'soccer', isCurrent: any(named: 'isCurrent'),
+    )).thenAnswer((_) async => [
+      match('tsn-future', 'tsn', 'Soccer: Portugal vs USA', future),
+      match('onesoccer-visible', 'onesoccer', 'Soccer Highlights', inWindow),
+    ]);
+
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('soccer');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      vm.filteredChannels.map((channel) => channel.id),
+      ['tsn', 'onesoccer', 'soccertv'],
+    );
+    expect(vm.futureSearchMatchForChannel('tsn')?.title,
+        'Soccer: Portugal vs USA');
+    expect(vm.futureSearchMatchForChannel('onesoccer'), isNull);
+    expect(vm.futureSearchMatchForChannel('soccertv'), isNull);
+    expect(vm.futureSearchMatchForChannel('espn'), isNull);
+
+    expect(vm.nextSearchMatchForChannel('onesoccer')?.title,
+        'Soccer Highlights');
+    expect(
+      vm.nextSearchMatchForChannel('onesoccer',
+          after: inWindow.add(const Duration(minutes: 30))),
+      isNull,
+    );
+    expect(vm.nextSearchMatchForChannel('tsn')?.start, future);
+    vm.setChannelQuery('');
+    expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+    expect(vm.nextSearchMatchForChannel('tsn'), isNull);
+  });
+
+  test('only matching EPG titles or episode titles get search highlights', () async {
+    final api = _SearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    _stubChannels(api, [{'Id': 'onesoccer', 'Name': 'OneSoccer'}]);
+    final now = DateTime.utc(2026, 11, 14, 17);
+    when(() => _guide(api)).thenAnswer((_) async => {
+      'Items': [
+        _program('Canadian Premier League', 'onesoccer', start: now),
+        _program('Soccer Highlights', 'onesoccer',
+            start: now.add(const Duration(minutes: 30))),
+        {
+          ..._program('Episode', 'onesoccer',
+              start: now.add(const Duration(minutes: 60))),
+          'EpisodeTitle': 'Soccer semifinals',
+        },
+      ],
+    });
+    when(() => api.searchProgramTitles(
+      'soccer', isCurrent: any(named: 'isCurrent'),
+    )).thenAnswer((_) async => [
+      {
+        'Id': 'soccer-highlights',
+        'Type': 'Program',
+        'Name': 'Soccer Highlights',
+        'ChannelId': 'onesoccer',
+        'StartDate': now.add(const Duration(minutes: 30)).toIso8601String(),
+        'EndDate': now.add(const Duration(minutes: 60)).toIso8601String(),
+      },
+      {
+        'Id': 'soccer-episode',
+        'Type': 'Program',
+        'Name': 'Episode',
+        'EpisodeTitle': 'Soccer semifinals',
+        'ChannelId': 'onesoccer',
+        'StartDate': now.add(const Duration(minutes: 60)).toIso8601String(),
+        'EndDate': now.add(const Duration(minutes: 90)).toIso8601String(),
+      },
+    ]);
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('soccer');
+    await Future<void>.delayed(Duration.zero);
+
+    final programs = vm.programsForChannel('onesoccer');
+    final canadian = programs.firstWhere((p) => p.name == 'Canadian Premier League');
+    final highlights = programs.firstWhere((p) => p.name == 'Soccer Highlights');
+    final episode = programs.firstWhere((p) => p.name == 'Episode');
+    expect(vm.programMatchesSearch(canadian), isFalse);
+    expect(vm.programMatchesSearch(highlights), isTrue);
+    expect(vm.programMatchesSearch(episode), isTrue);
+    expect(
+      vm.nextSearchMatchForChannel('onesoccer', after: canadian.endDate)?.title,
+      'Soccer Highlights',
+    );
+    expect(vm.futureSearchMatchForChannel('onesoccer'), isNull);
   });
 
   test('old Plex search batches cannot change a newer query', () async {
@@ -482,7 +604,9 @@ void main() {
       ]);
       await search([airing('future', 'c80', end)]);
       expect(vm.hasProgramsFor('c0'), isTrue);
-      expect(vm.hasProgramsFor('c80'), isFalse);
+      // Future-only matches now appear as normal rows. Their current-window
+      // guide entries may already have been requested by lazy loading.
+      expect(vm.filteredChannels.map((c) => c.id), ['c80']);
       expect(vm.nextSearchAiring?.channelId, 'c80');
 
       final targetReply = Completer<Map<String, dynamic>>();
@@ -554,7 +678,8 @@ void main() {
     test('future-only search keeps its query when jumping to the airing', () async {
       final nextDay = end.add(const Duration(days: 1));
       await search([airing('future', 'espn', nextDay)]);
-      expect(vm.filteredChannels, isEmpty);
+      expect(vm.filteredChannels.map((c) => c.id), ['espn']);
+      expect(vm.futureSearchMatchForChannel('espn')?.start, nextDay);
       expect(vm.nextSearchAiring?.channelId, 'espn');
       expect(vm.nextSearchAiring?.start, nextDay);
 
@@ -567,6 +692,7 @@ void main() {
       expect(vm.channelQuery, 'silo');
       expect(vm.windowStart, nextDay);
       expect(vm.filteredChannels.map((channel) => channel.id), ['espn']);
+      expect(vm.futureSearchMatchForChannel('espn'), isNull);
       expect(vm.nextSearchAiring, isNull);
       verify(
         () => api.searchProgramTitles(

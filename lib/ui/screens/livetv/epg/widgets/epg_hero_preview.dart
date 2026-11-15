@@ -48,6 +48,8 @@ class EpgHeroPreview extends StatelessWidget {
   /// the title. Null shows no badge.
   final String? badgeLabel;
   final String? synopsis;
+  final String? searchMatchTitle;
+  final String? searchMatchTime;
   final bool isLive;
 
   /// Recording state of the focused program, shown at the end of the
@@ -70,6 +72,8 @@ class EpgHeroPreview extends StatelessWidget {
     this.communityRating,
     this.badgeLabel,
     required this.synopsis,
+    this.searchMatchTitle,
+    this.searchMatchTime,
     required this.isLive,
     this.hasTimer = false,
     this.hasSeriesTimer = false,
@@ -209,7 +213,44 @@ class EpgHeroPreview extends StatelessWidget {
             style: metaStyle,
           ),
         ],
-        if (synopsis != null && synopsis!.isNotEmpty) ...[
+        if (searchMatchTitle != null) ...[
+          SizedBox(height: compact ? 4 : 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.calendar_today_outlined,
+                size: compact ? 16 : 18,
+                color: AppColorScheme.accent,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      searchMatchTitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: synopsisStyle.copyWith(
+                        color: AppColorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (searchMatchTime != null)
+                      Text(
+                        searchMatchTime!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: metaStyle,
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ] else if (synopsis != null && synopsis!.isNotEmpty) ...[
           SizedBox(height: compact ? 4 : 8),
           MarqueeText(
             text: synopsis!,
