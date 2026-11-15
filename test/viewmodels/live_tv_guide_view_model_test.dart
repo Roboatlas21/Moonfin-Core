@@ -3237,6 +3237,77 @@ void main() {
       expect(vm.hasMorePrograms, isFalse);
     });
 
+    for (final newerHasPrograms in [true, false]) {
+      test(
+        newerHasPrograms
+            ? 'targeted category result wins over an older paging response'
+            : 'newer negative category result is not replaced by an old match',
+        () async {
+          _stubChannels(liveTv, [
+            for (var i = 0; i < 450; i++) _channel('c$i'),
+          ]);
+          when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+          final olderPage = Completer<Map<String, dynamic>>();
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenAnswer((call) {
+                final ids = _requestedIds(call);
+                if (ids.length == 200 && ids.first == 'c200') {
+                  return olderPage.future;
+                }
+                if (ids.length == 1 && ids.single == 'c210') {
+                  return Future.value({
+                    'Items': [
+                      if (newerHasPrograms)
+                        _program('newer', 'c210', isSports: true),
+                    ],
+                  });
+                }
+                return Future.value({
+                  'Items': [
+                    for (final id in ids)
+                      if (int.parse(id.substring(1)) < 24)
+                        _program('initial-$id', id, isSports: true),
+                  ],
+                });
+              });
+
+          final vm = LiveTvGuideViewModel(client);
+          addTearDown(vm.dispose);
+          await vm.load();
+          vm.setFilter(GuideFilter.sports);
+          await pumpEventQueue();
+          expect(vm.filteredChannels, hasLength(24));
+
+          final paging = vm.loadMorePrograms();
+          await pumpEventQueue();
+          final targeted = await vm.ensureCategoryChannel('c210');
+          expect(targeted, newerHasPrograms);
+          if (newerHasPrograms) {
+            expect(vm.programsForChannel('c210').single.id, 'newer');
+          } else {
+            expect(vm.programsForChannel('c210'), isEmpty);
+          }
+
+          olderPage.complete({
+            'Items': [
+              _program('older', 'c210', isSports: true),
+              for (var i = 200; i < 224; i++)
+                if (i != 210)
+                  _program('sport-c$i', 'c$i', isSports: true),
+            ],
+          });
+          await paging;
+          expect(vm.filteredChannels.any((c) => c.id == 'c210'),
+              newerHasPrograms);
+          if (newerHasPrograms) {
+            expect(vm.programsForChannel('c210').single.id, 'newer');
+          } else {
+            expect(vm.programsForChannel('c210'), isEmpty);
+          }
+        },
+      );
+    }
+
     test('scrolling a category pulls the next batch of channels', () async {
       _stubChannels(
         liveTv,
@@ -3473,6 +3544,35 @@ void main() {
       expect(states, isNot(contains(GuideState.loading)));
       expect(vm.filteredChannels.map((c) => c.id), ['c5']);
       expect(vm.programsForChannel('c5').single.hasTimer, isTrue);
+    });
+
+    test('successful category refresh removes channels with no matching programs', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      var currentSports = true;
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((_) async => {
+            'Items': [
+              if (currentSports)
+                _program('sports-on-c0', 'c0', isSports: true),
+              _program('sports-on-c1', 'c1', isSports: true),
+            ],
+          });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c1']);
+
+      currentSports = false;
+      await vm.recordingChanged();
+      expect(vm.state, GuideState.ready);
+      expect(vm.filteredChannels.map((c) => c.id), ['c1']);
+      expect(vm.programsForChannel('c0'), isEmpty);
+      expect(vm.programsForChannel('c1').single.name, 'sports-on-c1');
+      verify(() => _guide(liveTv, category: GuideFilter.sports)).called(2);
     });
 
     test('reloadIfRecordingsChanged does nothing until a recording changes', () async {

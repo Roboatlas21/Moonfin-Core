@@ -522,6 +522,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     required DateTime from,
     required DateTime to,
     GuideFilter? category,
+    Set<String>? completedIds,
   }) async {
     if (ids.isEmpty) return {};
     final revision = _windowCacheRevision;
@@ -541,8 +542,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         // Refresh expired entries, including previously empty guide results.
         _windowProgramCache.remove(key);
         missing.add(id);
-      } else if (cached.programs.isNotEmpty) {
-        result[id] = List<GuideProgram>.of(cached.programs);
+      } else {
+        completedIds?.add(id);
+        if (cached.programs.isNotEmpty) {
+          result[id] = List<GuideProgram>.of(cached.programs);
+        }
       }
     }
     if (missing.isEmpty) return result;
@@ -567,15 +571,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (category != null) {
           programs.removeWhere((program) => !_matches(category, program));
         }
-        if (programs.isNotEmpty) result[key.channelId] = programs;
-        if (!_disposed &&
-            revision == _windowCacheRevision &&
-            generation == _programGeneration &&
-            (category == null || categoryRequest == _categoryRequest) &&
-            session == userDataSync.session &&
-            identical(_windowCacheRequests[key], request)) {
-          _rememberWindowPrograms(key, programs, fetchedAt);
+        // Cached and visible category rows must obey the same ownership rule.
+        // An older fetch must not publish an earlier result, even an empty one.
+        if (_disposed ||
+            revision != _windowCacheRevision ||
+            generation != _programGeneration ||
+            (category != null && categoryRequest != _categoryRequest) ||
+            session != userDataSync.session ||
+            !identical(_windowCacheRequests[key], request)) {
+          continue;
         }
+        completedIds?.add(key.channelId);
+        if (programs.isNotEmpty) result[key.channelId] = programs;
+        _rememberWindowPrograms(key, programs, fetchedAt);
       }
     } finally {
       for (final key in keys) {
@@ -1178,11 +1186,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final size = _batchSizeFor(filter);
     for (var i = 0; i < channels.length; i += size) {
       final batch = channels.sublist(i, min(i + size, channels.length));
-      final fetched = await _fetchPrograms(batch, category: filter);
+      final completedIds = <String>{};
+      final fetched = await _fetchPrograms(
+        batch, category: filter, completedIds: completedIds,
+      );
       if (request != _categoryRequest) return;
       for (final channel in batch) {
+        if (!completedIds.contains(channel.id)) continue;
         final programs = fetched[channel.id];
-        if (programs != null) _categoryPrograms[channel.id] = programs;
+        if (programs == null) {
+          _categoryPrograms.remove(channel.id);
+        } else {
+          _categoryPrograms[channel.id] = programs;
+        }
       }
     }
     _notifyListeners();
@@ -1363,10 +1379,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (channel == null) return false;
 
     final request = _categoryRequest;
-    final programs = await _fetchPrograms([channel], category: category);
+    final completedIds = <String>{};
+    final programs = await _fetchPrograms(
+      [channel], category: category, completedIds: completedIds,
+    );
     if (_disposed ||
         request != _categoryRequest ||
         category != _filter ||
+        !completedIds.contains(channelId) ||
         !_pageChannels.any((c) => c.id == channelId)) {
       return false;
     }
@@ -1403,13 +1423,20 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           .sublist(_categoryHighWater, end)
           .where((c) => !_categoryQueriedIds.contains(c.id))
           .toList();
-      final fetched = await _fetchPrograms(batch, category: filter);
+      final completedIds = <String>{};
+      final fetched = await _fetchPrograms(
+        batch, category: filter, completedIds: completedIds,
+      );
       if (request != _categoryRequest) return;
-      _categoryQueriedIds.addAll(batch.map((c) => c.id));
+      // An overlapping targeted lookup may own a few of these channels.
+      // Leave those pending rather than treating a stale reply as "no match".
+      _categoryQueriedIds.addAll(completedIds);
       _advanceCategoryCursor();
-      if (fetched.isEmpty) continue;
-      _categoryPrograms.addAll(fetched);
-      _notifyListeners();
+      if (fetched.isNotEmpty) {
+        _categoryPrograms.addAll(fetched);
+        _notifyListeners();
+      }
+      if (completedIds.length != batch.length) return;
     }
   }
 
@@ -2381,11 +2408,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<Map<String, List<GuideProgram>>> _fetchPrograms(
     List<GuideChannel> batch, {
     GuideFilter? category,
+    Set<String>? completedIds,
   }) => _cachedGuidePrograms(
     batch.map((channel) => channel.id).toList(),
     from: _windowStart,
     to: _windowEnd,
     category: category,
+    completedIds: completedIds,
   );
 
   /// Parses a guide response into start-ordered programs keyed by channel id.
