@@ -295,6 +295,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int _categoryHighWater = 0;
   int? _checkedCategorySearchRows;
   final Set<String> _categoryQueriedIds = <String>{};
+  // Failed targeted requests are skipped for this pass, not treated as checked.
+  // A new search or explicit targeted lookup can retry them.
+  final Set<String> _categoryDeferredIds = <String>{};
   // A targeted channel check may overlap a lazy page. Wait for its result
   // instead of issuing another request for the same channel.
   final Map<String, ({int request, Future<bool> done})>
@@ -305,6 +308,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
   int _recordingRefreshDepth = 0;
+  bool _recordingRefreshRemovedCategoryRows = false;
   bool _resumeCategoryPageAfterRefresh = false;
 
   // Bumped by every targeted replacement and by every cache reset, so a reply
@@ -761,7 +765,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // Search candidates or checked IDs changed; recalculate once on next read.
     _checkedCategorySearchRows = null;
     while (_categoryHighWater < _pageChannels.length &&
-        _categoryQueriedIds.contains(_pageChannels[_categoryHighWater].id)) {
+        (_categoryQueriedIds.contains(_pageChannels[_categoryHighWater].id) ||
+            _categoryDeferredIds.contains(_pageChannels[_categoryHighWater].id))) {
       _categoryHighWater++;
     }
   }
@@ -770,6 +775,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final query = text.trim().toLowerCase();
     if (_channelQuery == query) return;
     _channelQuery = query;
+    if (_categoryDeferredIds.isNotEmpty) {
+      // A new search is an explicit opportunity to retry failed channels.
+      _categoryDeferredIds.clear();
+      _categoryHighWater = 0;
+      _advanceCategoryCursor();
+    }
     _startProgramTitleSearch(recheckExpiredCategory: true);
   }
 
@@ -802,7 +813,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         continue;
       }
       if (_categoryPrograms.containsKey(channel.id)) visible++;
-      if (!_categoryQueriedIds.contains(channel.id)) unchecked = true;
+      if (!_categoryQueriedIds.contains(channel.id) &&
+          !_categoryDeferredIds.contains(channel.id)) {
+        unchecked = true;
+      }
     }
     return unchecked && visible < _categoryMinRowsPerPage;
   }
@@ -1181,10 +1195,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } catch (error) {
       if (!_accessDenied(error)) await _reloadPrograms();
     } finally {
+      if (refreshed && removedCategoryRows) {
+        _recordingRefreshRemovedCategoryRows = true;
+      }
       _recordingRefreshDepth--;
       if (_recordingRefreshDepth == 0) {
         final interrupted = _resumeCategoryPageAfterRefresh;
-        final resume = refreshed && (removedCategoryRows || interrupted);
+        final resume = refreshed &&
+            (_recordingRefreshRemovedCategoryRows || interrupted);
+        _recordingRefreshRemovedCategoryRows = false;
         _resumeCategoryPageAfterRefresh = false;
         if (resume &&
             !_disposed &&
@@ -1419,6 +1438,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_categoryPrograms.containsKey(channelId)) return true;
     if (_categoryQueriedIds.contains(channelId)) return false;
     final request = _categoryRequest;
+    if (_categoryDeferredIds.remove(channelId)) {
+      // Explicit targeted retry: this channel belongs in the pending prefix.
+      _categoryHighWater = 0;
+      _advanceCategoryCursor();
+    }
     final pending = _targetedCategoryRequests[channelId];
     if (pending != null && pending.request == request) return pending.done;
     final channel = _pageChannels.where((c) => c.id == channelId).firstOrNull;
@@ -1428,6 +1452,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _targetedCategoryRequests[channelId] = (request: request, done: done);
     try {
       return await done;
+    } catch (_) {
+      if (!_disposed && request == _categoryRequest && category == _filter) {
+        _categoryDeferredIds.add(channelId);
+        _advanceCategoryCursor();
+      }
+      rethrow;
     } finally {
       if (identical(_targetedCategoryRequests[channelId]?.done, done)) {
         _targetedCategoryRequests.remove(channelId);
@@ -1483,7 +1513,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final end = min(_categoryHighWater + size, _pageChannels.length);
       final batch = _pageChannels
           .sublist(_categoryHighWater, end)
-          .where((c) => !_categoryQueriedIds.contains(c.id))
+          .where((c) =>
+              !_categoryQueriedIds.contains(c.id) &&
+              !_categoryDeferredIds.contains(c.id))
           .toList();
       final completedIds = <String>{};
       final fetched = await _fetchPrograms(
@@ -1499,25 +1531,32 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (completedIds.length != batch.length) {
         final unresolved = [
           for (final channel in batch)
-            if (!_categoryQueriedIds.contains(channel.id)) channel.id,
+            if (!_categoryQueriedIds.contains(channel.id) &&
+                !_categoryDeferredIds.contains(channel.id))
+              channel.id,
         ];
         if (unresolved.isNotEmpty) {
-          final waiting = <Future<bool>>[];
+          final waiting = <String, Future<bool>>{};
           for (final id in unresolved) {
             final targeted = _targetedCategoryRequests[id];
             // An invalidated response has no active lookup to await.
             if (targeted == null || targeted.request != request) return false;
-            waiting.add(targeted.done);
+            waiting[id] = targeted.done;
           }
-          try {
-            await Future.wait(waiting);
-          } catch (_) {
-            // A failed lookup is not retried automatically.
-            return false;
+          for (final entry in waiting.entries) {
+            try {
+              await entry.value;
+            } catch (_) {
+              if (request != _categoryRequest) return false;
+              // Skip the failed lookup for now; don't retry it or block others.
+              _categoryDeferredIds.add(entry.key);
+            }
           }
           if (request != _categoryRequest) return false;
           _advanceCategoryCursor();
-          if (unresolved.any((id) => !_categoryQueriedIds.contains(id))) {
+          if (unresolved.any((id) =>
+              !_categoryQueriedIds.contains(id) &&
+              !_categoryDeferredIds.contains(id))) {
             return false;
           }
         }
@@ -1532,6 +1571,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _categoryFetchInFlight = keepRows;
     if (!keepRows) _categoryPrograms.clear();
     _categoryQueriedIds.clear();
+    _categoryDeferredIds.clear();
+    _targetedCategoryRequests.clear();
     _categoryHighWater = 0;
     _categoryLoadedFor = null;
     _categoryRequest++;

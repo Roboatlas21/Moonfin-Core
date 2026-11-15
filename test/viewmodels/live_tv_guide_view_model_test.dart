@@ -3525,6 +3525,88 @@ void main() {
       );
     }
 
+    for (final targetedFailsFirst in [true, false]) {
+      test(
+        targetedFailsFirst
+            ? 'failed targeted lookup does not stop later category pages'
+            : 'background page continues after a pending targeted lookup fails',
+        () async {
+          _stubChannels(liveTv, [
+            for (var i = 0; i < 500; i++) _channel('c$i', number: '$i'),
+          ]);
+          final background = Completer<Map<String, dynamic>>();
+          final firstTarget = Completer<Map<String, dynamic>>();
+          final requested = <List<String>>[];
+          var targetedRequests = 0;
+          when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenAnswer((call) {
+                final ids = List<String>.of(_requestedIds(call));
+                requested.add(ids);
+                if (ids.length == 200 && ids.first == 'c200') {
+                  return background.future;
+                }
+                if (ids.length == 1 && ids.single == 'c210') {
+                  targetedRequests++;
+                  if (targetedRequests == 1) return firstTarget.future;
+                  return Future.value({
+                    'Items': [_program('retried', 'c210', isSports: true)],
+                  });
+                }
+                return Future.value({
+                  'Items': [
+                    for (final id in ids)
+                      if (int.parse(id.substring(1)) < 24 || id == 'c420')
+                        _program('sport-$id', id, isSports: true),
+                  ],
+                });
+              });
+
+          final vm = LiveTvGuideViewModel(client);
+          addTearDown(vm.dispose);
+          await vm.load();
+          vm.setFilter(GuideFilter.sports);
+          await pumpEventQueue();
+          expect(vm.filteredChannels, hasLength(24));
+
+          final paging = vm.loadMorePrograms();
+          await pumpEventQueue();
+          final targeted = vm.ensureCategoryChannel('c210');
+          final failed = expectLater(targeted, throwsA(isA<StateError>()));
+          await pumpEventQueue();
+          expect(targetedRequests, 1);
+
+          if (targetedFailsFirst) {
+            firstTarget.completeError(StateError('Temporary lookup failure'));
+            await failed;
+            background.complete({'Items': []});
+          } else {
+            background.complete({'Items': []});
+            await pumpEventQueue();
+            expect(requested.where((ids) => ids.first == 'c400'), isEmpty);
+            firstTarget.completeError(StateError('Temporary lookup failure'));
+            await failed;
+          }
+          await paging;
+
+          // The unsuccessful lookup is not marked as successfully checked.
+          expect(vm.hasProgramsFor('c210'), isFalse);
+          expect(vm.filteredChannels.map((c) => c.id), [
+            for (var i = 0; i < 24; i++) 'c$i',
+            'c420',
+          ]);
+          expect(requested.where((ids) => ids.first == 'c400'), hasLength(1));
+          expect(targetedRequests, 1);
+          expect(vm.hasMorePrograms, isFalse);
+
+          // An explicit targeted request can retry the previously failed channel.
+          expect(await vm.ensureCategoryChannel('c210'), isTrue);
+          expect(targetedRequests, 2);
+          expect(vm.programsForChannel('c210').single.id, 'retried');
+        },
+      );
+    }
+
     test('scrolling a category pulls the next batch of channels', () async {
       _stubChannels(
         liveTv,
@@ -3841,6 +3923,76 @@ void main() {
         [for (var i = 0; i < 24; i++) 'c$i'],
         [for (var i = 420; i < 426; i++) 'c$i'],
       ]);
+      expect(vm.filteredChannels.map((c) => c.id), [
+        for (var i = 420; i < 426; i++) 'c$i',
+      ]);
+      expect(vm.hasMorePrograms, isFalse);
+    });
+
+    test('overlapping recording refreshes preserve removed-row paging', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 500; i++) {
+          ..._channel('c$i', number: '$i'),
+          if (i < 24 || (i >= 420 && i < 426)) 'Name': 'TSN $i',
+        },
+      ]);
+      final firstRefresh = Completer<Map<String, dynamic>>();
+      var refreshRequests = 0;
+      final requested = <List<String>>[];
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((call) {
+            final ids = List<String>.of(_requestedIds(call));
+            requested.add(ids);
+            if (ids.length == 24 && ids.first == 'c0') {
+              refreshRequests++;
+              if (refreshRequests == 1) return firstRefresh.future;
+              return Future.value({'Items': []});
+            }
+            return Future.value({
+              'Items': [
+                for (final id in ids)
+                  if (int.parse(id.substring(1)) < 24 ||
+                      (int.parse(id.substring(1)) >= 420 &&
+                          int.parse(id.substring(1)) < 426))
+                    _program('sport-$id', id, isSports: true),
+              ],
+            });
+          });
+      when(() => api.searchProgramTitles(
+        'tsn', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(vm.filteredChannels, hasLength(24));
+      expect(vm.hasMorePrograms, isTrue);
+
+      requested.clear();
+      final older = vm.recordingChanged();
+      await pumpEventQueue();
+      expect(refreshRequests, 1);
+      final newer = vm.recordingChanged();
+      await newer;
+      expect(refreshRequests, 2);
+      expect(vm.filteredChannels, isEmpty);
+      expect(requested.any((ids) => ids.contains('c420')), isFalse);
+
+      // The refresh that removed all visible matches finished first.
+      firstRefresh.complete({
+        'Items': [_program('stale', 'c0', isSports: true)],
+      });
+      await older;
+      await pumpEventQueue();
+
+      expect(requested.where((ids) => ids.contains('c420')), hasLength(1));
       expect(vm.filteredChannels.map((c) => c.id), [
         for (var i = 420; i < 426; i++) 'c$i',
       ]);
