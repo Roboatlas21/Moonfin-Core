@@ -409,6 +409,130 @@ void main() {
     expect(vm.nextSearchMatchForChannel('tsn'), isNull);
   });
 
+  group('full guide reload refreshes active program searches', () {
+    late _SearchableLiveTvApi api;
+    late LiveTvGuideViewModel vm;
+    late DateTime clock;
+    final start = DateTime.utc(2026, 11, 14, 17);
+
+    Map<String, dynamic> airing(String id, String channelId) => {
+      'Id': id,
+      'Type': 'Program',
+      'ChannelId': channelId,
+      'Name': 'Soccer $id',
+      'IsSports': true,
+      'StartDate': start.add(const Duration(days: 1)).toIso8601String(),
+      'EndDate': start.add(const Duration(days: 1, hours: 1))
+          .toIso8601String(),
+    };
+
+    setUp(() {
+      clock = start;
+      api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [_channel('tsn'), _channel('espn')]);
+      vm = LiveTvGuideViewModel(client, now: () => clock);
+      addTearDown(vm.dispose);
+    });
+
+    test('full reload replaces stale category search results', () async {
+      var hits = [airing('old', 'tsn')];
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => hits);
+
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['tsn']);
+
+      hits = [airing('new', 'espn')];
+      await vm.load(windowStart: start);
+      await pumpEventQueue();
+
+      expect(vm.channelQuery, 'soccer');
+      expect(vm.searchingProgramTitles, isFalse);
+      expect(vm.filteredChannels.map((c) => c.id), ['espn']);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.futureSearchMatchForChannel('espn')?.title, 'Soccer new');
+      verify(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).called(2);
+    });
+
+    test('stale re-entry refreshes search but a fresh re-entry does not', () async {
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [airing('match', 'espn')]);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      clock = start.add(const Duration(minutes: 29));
+      await vm.reloadIfStale(windowStart: start);
+      await pumpEventQueue();
+      verify(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+
+      clock = start.add(const Duration(minutes: 31));
+      await vm.reloadIfStale(windowStart: start);
+      await pumpEventQueue();
+      verify(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
+    test('moving dates and time windows never reissues title search', () async {
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [airing('match', 'tsn')]);
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+
+      await vm.setWindowStart(start.add(const Duration(minutes: 30)));
+      await vm.shiftWindow(const Duration(hours: 3));
+      await vm.setDate(start.add(const Duration(days: 1)));
+      await vm.setWindow(const Duration(hours: 3));
+      await pumpEventQueue();
+
+      expect(vm.channelQuery, 'soccer');
+      verify(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
+    test('reply from before a reload cannot overwrite refreshed matches', () async {
+      final stale = Completer<List<Map<String, dynamic>>>();
+      var calls = 0;
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) {
+        calls++;
+        return calls == 1
+            ? stale.future
+            : Future.value([airing('new', 'espn')]);
+      });
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      expect(vm.searchingProgramTitles, isTrue);
+      await vm.load(windowStart: start);
+      await pumpEventQueue();
+      stale.complete([airing('stale', 'tsn')]);
+      await pumpEventQueue();
+
+      expect(calls, 2);
+      expect(vm.filteredChannels.map((c) => c.id), ['espn']);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.searchingProgramTitles, isFalse);
+    });
+  });
+
   test('only matching EPG titles or episode titles get search highlights', () async {
     final api = _SearchableLiveTvApi();
     when(() => client.serverType).thenReturn(ServerType.plex);

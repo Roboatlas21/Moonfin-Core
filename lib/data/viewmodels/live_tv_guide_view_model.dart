@@ -635,12 +635,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final query = text.trim().toLowerCase();
     if (_channelQuery == query) return;
     _channelQuery = query;
+    _startProgramTitleSearch();
+  }
+
+  void _startProgramTitleSearch({bool preserveMatches = false}) {
     final request = ++_titleSearchRequest;
-    _setTitleMatches(const []);
-    _searchingProgramTitles = query.length >= 2;
+    // Keep the existing results visible during a full-guide refresh. A
+    // completed search replaces them; an error stays debug-only.
+    if (!preserveMatches) _setTitleMatches(const []);
+    _searchingProgramTitles = _channelQuery.length >= 2;
     _applyChannelSearchRows();
     if (_searchingProgramTitles) {
-      unawaited(_searchProgramTitles(query, request));
+      unawaited(_searchProgramTitles(_channelQuery, request));
     }
   }
 
@@ -1092,6 +1098,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (loadGeneration == _loadGeneration && _state == GuideState.ready) {
         _reloadOnEntry = false;
         _loadedRecordingRevision = recordingRevision;
+        // Only a full guide reload refreshes the server's title index.
+        // Moving the visible window uses _reloadPrograms or setWindowStart,
+        // so those navigation actions keep the existing search results.
+        if (_channelQuery.length >= 2) {
+          _startProgramTitleSearch(preserveMatches: true);
+        }
       }
     } catch (e) {
       if (!current()) return;
