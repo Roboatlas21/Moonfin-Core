@@ -623,21 +623,31 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  // A new query or search reply needn't invalidate the guide if the same
-  // channels are still shown in the same order.
+  // A search changes the candidate rows, not the category or guide window.
+  // Already-checked category programs (including empty results) remain valid.
   void _applyChannelSearchRows() {
-    if (!_updatePageRows()) {
+    final rowsChanged = _updatePageRows();
+    if (_isCategory(_filter)) {
+      _notifyListeners();
+      if (_state == GuideState.ready &&
+          _categoryLoadedFor == _filter &&
+          !_categoryFetchInFlight &&
+          _visibleCategoryRowCount() < _categoryMinRowsPerPage &&
+          hasMorePrograms) {
+        // The category cursor skips queried IDs; only new candidates need EPG.
+        // An existing category fetch keeps running across search updates.
+        unawaited(loadMorePrograms());
+      }
+      return;
+    }
+    if (!rowsChanged) {
       _notifyListeners();
       return;
     }
     _resetPageCursor();
-    if (_isCategory(_filter)) {
-      unawaited(_loadCategoryPrograms());
-    } else {
-      _resetCategory();
-      _notifyListeners();
-      if (_state == GuideState.ready) unawaited(loadMorePrograms());
-    }
+    _resetCategory();
+    _notifyListeners();
+    if (_state == GuideState.ready) unawaited(loadMorePrograms());
   }
 
   Future<void> _searchProgramTitles(String query, int request) async {

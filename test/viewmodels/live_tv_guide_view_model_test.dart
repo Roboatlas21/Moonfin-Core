@@ -2024,6 +2024,181 @@ void main() {
   });
 
   group('category filters', () {
+
+    test('search reuses already-checked category programs', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        _channel('c10'),
+        _channel('c20'),
+        _channel('c30'),
+      ]);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      Map<String, dynamic> program(String id, String channel, String title) => {
+        ..._program(id, channel, start: now, isSports: true),
+        'Name': title,
+      };
+      Map<String, dynamic> hit(String id, String channel, String title) => {
+        ...program(id, channel, title),
+        'Type': 'Program',
+      };
+
+      when(() => _guide(api, category: GuideFilter.sports)).thenAnswer(
+        (invocation) async => {
+          'Items': [
+            for (final id in _requestedIds(invocation))
+              if (id == 'c10') program('s1', id, 'Soccer Highlights'),
+            for (final id in _requestedIds(invocation))
+              if (id == 'c20') program('h1', id, 'Hockey Night'),
+          ],
+        },
+      );
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [hit('s1', 'c10', 'Soccer Highlights')]);
+      when(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [hit('h1', 'c20', 'Hockey Night')]);
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c10', 'c20']);
+
+      clearInteractions(api);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c10']);
+      vm.setChannelQuery('hockey');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c20']);
+      vm.setChannelQuery('');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c10', 'c20']);
+      verifyNever(() => _guide(api, category: GuideFilter.sports));
+    });
+
+    test('incremental search only fetches category listings for new IDs', () async {
+      final api = _IncrementalSearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 250; i++) _channel('c$i', number: '$i'),
+      ]);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      Map<String, dynamic> program(String id, String channel, String title) => {
+        ..._program(id, channel, start: now, isSports: true),
+        'Name': title,
+      };
+      Map<String, dynamic> hit(String id, String channel, String title) => {
+        ...program(id, channel, title),
+        'Type': 'Program',
+      };
+      when(() => _guide(api, category: GuideFilter.sports)).thenAnswer(
+        (invocation) async => {
+          'Items': [
+            for (final id in _requestedIds(invocation))
+              if (int.parse(id.substring(1)) % 5 == 0)
+                program(
+                  'sport-$id',
+                  id,
+                  id == 'c10' ? 'Soccer Highlights' :
+                    id == 'c210' ? 'Soccer Tournament' : 'SportsCentre',
+                ),
+          ],
+        },
+      );
+      final pending = Completer<List<Map<String, dynamic>>>();
+      late void Function(List<Map<String, dynamic>>) publish;
+      when(() => api.searchProgramTitlesIncrementally(
+        'soccer',
+        isCurrent: any(named: 'isCurrent'),
+        onBatch: any(named: 'onBatch'),
+      )).thenAnswer((invocation) {
+        publish = invocation.namedArguments[#onBatch]
+            as void Function(List<Map<String, dynamic>>);
+        return pending.future;
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.programsForChannel('c10').single.name, 'Soccer Highlights');
+      expect(vm.hasMorePrograms, isTrue);
+
+      clearInteractions(api);
+      vm.setChannelQuery('soccer');
+      publish([hit('first', 'c10', 'Soccer Highlights')]);
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c10']);
+      verifyNever(() => _guide(api, category: GuideFilter.sports));
+
+      publish([hit('second', 'c210', 'Soccer Tournament')]);
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c10', 'c210']);
+      final requests = verify(
+        () => _guide(api, category: GuideFilter.sports, captureChannelIds: true),
+      ).captured;
+      expect(requests, hasLength(1));
+      expect(requests.single, ['c210']);
+
+      pending.complete([
+        hit('first', 'c10', 'Soccer Highlights'),
+        hit('second', 'c210', 'Soccer Tournament'),
+      ]);
+      await pumpEventQueue();
+      expect(vm.searchingProgramTitles, isFalse);
+      expect(vm.programsForChannel('c10').single.name, 'Soccer Highlights');
+      expect(vm.programsForChannel('c210').single.name, 'Soccer Tournament');
+      expect(vm.hasMorePrograms, isFalse);
+    });
+
+    test('a search change reuses an in-flight category page', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 200; i++) _channel('c$i'),
+      ]);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      Map<String, dynamic> hit(String id, String channel, String title) => {
+        ..._program(id, channel, start: now, isSports: true),
+        'Type': 'Program',
+        'Name': title,
+      };
+      final page = Completer<Map<String, dynamic>>();
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((_) => page.future);
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [hit('s1', 'c10', 'Soccer Highlights')]);
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      expect(vm.state, GuideState.loading);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+
+      page.complete({
+        'Items': [
+          for (var i = 0; i < 30; i++)
+            hit('p$i', 'c$i',
+              i == 10 ? 'Soccer Highlights' : 'SportsCentre'),
+        ],
+      });
+      await pumpEventQueue();
+      expect(vm.state, GuideState.ready);
+      expect(vm.filteredChannels.map((c) => c.id), ['c10']);
+      verify(() => _guide(api, category: GuideFilter.sports)).called(1);
+    });
+
     test('search checks loaded category programs instead of channel-only EPG hits', () async {
       final api = _SearchableLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);
