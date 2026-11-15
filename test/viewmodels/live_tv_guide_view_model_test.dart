@@ -2089,6 +2089,148 @@ void main() {
   });
 
   group('category filters', () {
+    test('search checks loaded category programs instead of channel-only EPG hits', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        {'Id': 'tsn', 'Name': 'TSN', 'ChannelNumber': '10'},
+        {'Id': 'fox', 'Name': 'FOX Sports', 'ChannelNumber': '20'},
+        {'Id': 'onesoccer', 'Name': 'OneSoccer', 'ChannelNumber': '30'},
+        {'Id': 'soccertv', 'Name': 'Soccer TV', 'ChannelNumber': '40'},
+        {'Id': 'espn', 'Name': 'ESPN', 'ChannelNumber': '50'},
+      ]);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      Map<String, dynamic> airing(
+        String id, String channel, String title, {
+        bool sports = false,
+        bool movie = false,
+      }) => {
+        'Id': id,
+        'Type': 'Program',
+        'ChannelId': channel,
+        'Name': title,
+        'StartDate': now.toIso8601String(),
+        'EndDate': now.add(const Duration(hours: 1)).toIso8601String(),
+        'IsSports': sports,
+        'IsMovie': movie,
+      };
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        airing('doc', 'tsn', 'Soccer Documentary'),
+        airing('highlights', 'fox', 'Soccer Highlights'),
+      ]);
+      when(() => _guide(api, category: GuideFilter.sports)).thenAnswer(
+        (call) async => {
+          'Items': [
+            for (final id in _requestedIds(call))
+              if (id == 'tsn') airing('sportscentre', id, 'SportsCentre', sports: true),
+            for (final id in _requestedIds(call))
+              if (id == 'fox') airing('highlights', id, 'Soccer Highlights', sports: true),
+            for (final id in _requestedIds(call))
+              if (id == 'onesoccer') airing('cpl', id, 'Canadian Premier League', sports: true),
+            for (final id in _requestedIds(call))
+              if (id == 'soccertv') airing('baseball', id, 'Baseball Tonight', sports: true),
+            for (final id in _requestedIds(call))
+              if (id == 'espn') airing('nfl', id, 'NFL Live', sports: true),
+            // Even if a provider returns a movie under Sports, ignore it.
+            for (final id in _requestedIds(call))
+              if (id == 'tsn') airing('doc', id, 'Soccer Documentary', movie: true),
+          ],
+        },
+      );
+      when(() => _guide(api, category: GuideFilter.movies)).thenAnswer(
+        (call) async => {
+          'Items': [
+            for (final id in _requestedIds(call))
+              if (id == 'tsn') airing('doc', id, 'Soccer Documentary', movie: true),
+          ],
+        },
+      );
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(vm.filteredChannels.map((c) => c.id), [
+        'fox', 'onesoccer', 'soccertv',
+      ]);
+      expect(vm.programsForChannel('fox').single.name, 'Soccer Highlights');
+      expect(vm.filteredChannels.any((c) => c.id == 'tsn'), isFalse);
+      expect(vm.hasMorePrograms, isFalse);
+
+      // The same title belongs under Movies, without a new search request.
+      vm.setFilter(GuideFilter.movies);
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['tsn']);
+      expect(vm.programsForChannel('tsn').single.name, 'Soccer Documentary');
+      verify(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
+    test('search category paging skips unrelated hits to find later matches', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i <= 250; i++)
+          {'Id': 'c$i', 'Name': 'Channel $i',
+           'ChannelNumber': i.toString().padLeft(3, '0')},
+      ]);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      Map<String, dynamic> p(String id, String channel, String name) => {
+        'Id': id,
+        'Type': 'Program',
+        'ChannelId': channel,
+        'Name': name,
+        'IsSports': true,
+        'StartDate': now.toIso8601String(),
+        'EndDate': now.add(const Duration(hours: 1)).toIso8601String(),
+      };
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        for (var i = 0; i < 200; i++)
+          p('hit-$i', 'c$i', 'Soccer Documentary'),
+        p('hit-250', 'c250', 'Soccer Tournament'),
+      ]);
+      when(() => _guide(api, category: GuideFilter.sports)).thenAnswer(
+        (call) async => {
+          'Items': [
+            for (final id in _requestedIds(call))
+              p('sport-$id', id,
+                id == 'c250' ? 'Soccer Tournament' : 'SportsCentre'),
+          ],
+        },
+      );
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+
+      expect(vm.filteredChannels.map((c) => c.id), ['c250']);
+      expect(vm.hasMorePrograms, isFalse);
+      final requested = verify(
+        () => _guide(api, category: GuideFilter.sports, captureChannelIds: true),
+      ).captured;
+      expect(requested.length, greaterThanOrEqualTo(2));
+      expect(
+        requested.expand((ids) => ids as List<String>).toSet(),
+        contains('c250'),
+      );
+    });
+
     test('a category chip walks the lineup in flagged batches', () async {
       final channels = List.generate(120, (i) => _channel('c$i', number: '$i'));
       _stubChannels(liveTv, channels);

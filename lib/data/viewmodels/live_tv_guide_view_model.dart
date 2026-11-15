@@ -718,14 +718,34 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   bool get _showingPreviousCategory => _previousWindowCategory == _filter;
 
+  // Keep all EPG title-hit channels available to the existing category loader.
+  // Only display one after its category-filtered guide actually contains a
+  // matching program. Channel-name and number matches still work normally.
+  bool _categoryRowMatchesSearch(GuideChannel channel) {
+    final programs = _categoryPrograms[channel.id];
+    if (programs == null) return false;
+    if (_channelQuery.length < 2 ||
+        channel.name.toLowerCase().contains(_channelQuery) ||
+        (channel.number?.toLowerCase().contains(_channelQuery) ?? false)) {
+      return true;
+    }
+    return programs.any(
+      (program) =>
+          programMatchesSearch(program) &&
+          program.startDate.isBefore(_windowEnd) &&
+          program.endDate.isAfter(_windowStart),
+    );
+  }
+
+  int _visibleCategoryRowCount() =>
+      _pageChannels.where(_categoryRowMatchesSearch).length;
+
   List<GuideChannel> get filteredChannels {
     if (!_isCategory(_filter)) return _pageChannels;
     if (_categoryLoadedFor != _filter && !_showingPreviousCategory) {
       return const [];
     }
-    return _pageChannels
-        .where((ch) => _categoryPrograms.containsKey(ch.id))
-        .toList();
+    return _pageChannels.where(_categoryRowMatchesSearch).toList();
   }
 
   List<GuideProgram> programsForChannel(String channelId) {
@@ -1167,9 +1187,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> _walkCategory() async {
     final request = _categoryRequest;
     final filter = _filter;
-    final startRows = _categoryPrograms.length;
+    // A server-wide title hit can refer to a program outside this category.
+    // Count only rows the filtered guide can actually display; otherwise a
+    // page of unrelated hits can stop paging before a real match is reached.
+    final startRows = _visibleCategoryRowCount();
     while (_categoryHighWater < _pageChannels.length &&
-        _categoryPrograms.length - startRows < _categoryMinRowsPerPage) {
+        _visibleCategoryRowCount() - startRows < _categoryMinRowsPerPage) {
       final size = _batchSizeFor(filter);
       final end = min(_categoryHighWater + size, _pageChannels.length);
       final batch = _pageChannels
