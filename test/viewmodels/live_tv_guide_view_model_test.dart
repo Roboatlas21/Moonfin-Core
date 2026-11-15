@@ -1267,6 +1267,85 @@ void main() {
       expect(requests.last.ids, ['c0', 'c1']);
     });
 
+    test('a refresh invalidates cached hits in a mixed category batch', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      final start = DateTime.utc(2026, 11, 14, 17);
+      _stubChannels(api, [
+        {..._channel('c0'), 'Name': 'TSN One'},
+        {..._channel('c1'), 'Name': 'TSN Two'},
+      ]);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      for (final query in ['one', 'tsn']) {
+        when(() => api.searchProgramTitles(
+          query, isCurrent: any(named: 'isCurrent'),
+        )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+      }
+      final stalePending = Completer<Map<String, dynamic>>();
+      final sportsRequests = <List<String>>[];
+      var seeded = false;
+      var stalled = false;
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((call) {
+            final requested = List<String>.of(_requestedIds(call));
+            sportsRequests.add(requested);
+            if (requested.length == 1 && requested.single == 'c0' && !seeded) {
+              seeded = true;
+              return Future.value({
+                'Items': [_program('old-c0', 'c0', start: start, isSports: true)],
+              });
+            }
+            if (requested.length == 1 && requested.single == 'c1' && !stalled) {
+              stalled = true;
+              return stalePending.future;
+            }
+            return Future.value({
+              'Items': [
+                for (final id in requested)
+                  _program('fresh-$id', id, start: start, isSports: true),
+              ],
+            });
+          });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('one');
+      await pumpEventQueue();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.programsForChannel('c0').single.id, 'old-c0');
+
+      // Retain c0 in the window cache, but reset the category cursor so the
+      // next category page contains a cache hit for c0 and a miss for c1.
+      vm.setFilter(GuideFilter.all);
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      await vm.loadInitialPrograms(channelIds: const []);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+      expect(sportsRequests.last, ['c1']);
+
+      await vm.recordingChanged();
+      stalePending.complete({
+        'Items': [_program('stale-c1', 'c1', start: start, isSports: true)],
+      });
+      await pumpEventQueue();
+
+      // Both channels must be requested again; the earlier cache hit must
+      // not survive just because it was read before the pending API call.
+      expect(sportsRequests, [
+        ['c0'],
+        ['c1'],
+        ['c0', 'c1'],
+      ]);
+      expect(vm.state, GuideState.ready);
+      expect(vm.programsForChannel('c0').single.id, 'fresh-c0');
+      expect(vm.programsForChannel('c1').single.id, 'fresh-c1');
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c1']);
+    });
+
     test('older guide replies cannot replace a newer window cache entry', () async {
       final start = DateTime.utc(2026, 11, 14, 17);
       final later = start.add(const Duration(hours: 3));
@@ -4092,6 +4171,64 @@ void main() {
       await vm.reloadIfRecordingsChanged();
       verifyNever(() => _guide(liveTv));
       expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+    });
+
+    test('a full guide load cannot lower a newer recording revision', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      when(() => _guide(liveTv)).thenAnswer(
+        (_) async => {'Items': [_program('p0', 'c0')]},
+      );
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+
+      final lineupReply = Completer<Map<String, dynamic>>();
+      when(() => _channelsRequest(liveTv))
+          .thenAnswer((_) => lineupReply.future);
+      final loading = vm.load();
+      await pumpEventQueue();
+
+      // The recording refresh finishes while the older full load is still
+      // waiting for the channel lineup.
+      await vm.recordingChanged();
+      lineupReply.complete({'Items': [_channel('c0')]});
+      await loading;
+
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
+    });
+
+    test('a window reload cannot lower a newer recording revision', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      _stubChannels(liveTv, [_channel('c0')]);
+      when(() => _guide(liveTv)).thenAnswer(
+        (_) async => {'Items': [_program('initial', 'c0', start: start)]},
+      );
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+
+      final pending = Completer<Map<String, dynamic>>();
+      var requests = 0;
+      when(() => _guide(liveTv)).thenAnswer((_) {
+        requests++;
+        return pending.future;
+      });
+      final reloading = vm.shiftWindow(const Duration(hours: 3));
+      await pumpEventQueue();
+      expect(requests, 1);
+
+      await vm.recordingChanged();
+      pending.complete({
+        'Items': [_program('old-window', 'c0',
+            start: start.add(const Duration(hours: 3)))],
+      });
+      await reloading;
+
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
     });
 
     test('reloadIfRecordingsChanged does nothing until a recording changes', () async {

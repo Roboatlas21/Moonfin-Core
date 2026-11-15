@@ -542,6 +542,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final now = _now();
     final result = <String, List<GuideProgram>>{};
     final missing = <String>[];
+    final cachedIds = <String>[];
     for (final id in ids) {
       final key = (channelId: id, from: from, to: to, category: category);
       final cached = _windowProgramCache[key];
@@ -553,13 +554,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _windowProgramCache.remove(key);
         missing.add(id);
       } else {
-        completedIds?.add(id);
+        cachedIds.add(id);
         if (cached.programs.isNotEmpty) {
           result[id] = List<GuideProgram>.of(cached.programs);
         }
       }
     }
-    if (missing.isEmpty) return result;
+    if (missing.isEmpty) {
+      completedIds?.addAll(cachedIds);
+      return result;
+    }
     final request = Object();
     final keys = [
       for (final id in missing)
@@ -572,6 +576,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final raw = await _fetchGuide(
         channelIds: missing, from: from, to: to, category: category,
       );
+      // A refresh can invalidate the cached hits while the missing channels
+      // are in flight. Do not return any part of the superseded batch.
+      if (_disposed ||
+          revision != _windowCacheRevision ||
+          generation != _programGeneration ||
+          (category != null && categoryRequest != _categoryRequest) ||
+          session != userDataSync.session) {
+        return {};
+      }
+      completedIds?.addAll(cachedIds);
       final parsed = _parsePrograms(raw);
       final fetchedAt = _now();
       for (final key in keys) {
@@ -1341,7 +1355,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
       if (loadGeneration == _loadGeneration && _state == GuideState.ready) {
         _reloadOnEntry = false;
-        _loadedRecordingRevision = recordingRevision;
+        _loadedRecordingRevision = max(_loadedRecordingRevision, recordingRevision);
         // Only a full guide reload refreshes the server's title index.
         // Moving the visible window uses _reloadPrograms or setWindowStart,
         // so those navigation actions keep the existing search results.
@@ -1676,7 +1690,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     try {
       await _replaceProgramPages(current);
       if (!current()) return;
-      _loadedRecordingRevision = recordingRevision;
+      _loadedRecordingRevision = max(_loadedRecordingRevision, recordingRevision);
     } catch (e) {
       if (!current()) return;
       if (keepRows && !_accessDenied(e)) {
