@@ -1,9 +1,21 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:server_core/server_core.dart';
 import 'package:server_plex/src/api/plex_live_tv_api.dart';
 import 'package:server_plex/src/api/plex_playback_api.dart';
 import 'package:test/test.dart';
+
+Future<LiveTvPartialProgramSearchException> _incompleteSearch(
+  Future<List<Map<String, dynamic>>> request,
+) async {
+  try {
+    await request;
+  } on LiveTvPartialProgramSearchException catch (error) {
+    return error;
+  }
+  throw StateError('Expected an incomplete Live TV program search');
+}
 
 class _FakeServer extends Interceptor {
   _FakeServer(this.answer);
@@ -434,12 +446,11 @@ void main() {
       ),
     );
 
-    final programs = await PlexLiveTvApi(dio).searchProgramTitles(
-      'Sintel',
-      isCurrent: () => true,
+    final incomplete = await _incompleteSearch(
+      PlexLiveTvApi(dio).searchProgramTitles('Sintel', isCurrent: () => true),
     );
     expect(starts, ['0', '200']);
-    expect(programs, hasLength(200));
+    expect(incomplete.results, hasLength(200));
   });
 
   test('publishes DVR matches before the cloud search completes', () async {
@@ -740,10 +751,10 @@ void main() {
     );
 
     final api = PlexLiveTvApi(dio);
-    final results = await api.searchProgramTitles(
-      'Sintel',
-      isCurrent: () => true,
+    final incomplete = await _incompleteSearch(
+      api.searchProgramTitles('Sintel', isCurrent: () => true),
     );
+    final results = incomplete.results;
     expect(results, hasLength(1));
     expect(results.single['ChannelId'], 'channel-2-4');
     expect(cloudAttempts, 1);
@@ -792,10 +803,12 @@ void main() {
         ),
       );
 
-      final results = await PlexLiveTvApi(dio).searchProgramTitles(
-        'World Poker Tour',
-        isCurrent: () => true,
+      final incomplete = await _incompleteSearch(
+        PlexLiveTvApi(dio).searchProgramTitles(
+          'World Poker Tour', isCurrent: () => true,
+        ),
       );
+      final results = incomplete.results;
       expect(dvrAttempts, 1);
       expect(results, hasLength(1));
       expect(results.single['ChannelId'], 'channel-plex-abc-66635fc0');
@@ -842,10 +855,12 @@ void main() {
         ),
       );
 
-      final results = await PlexLiveTvApi(dio).searchProgramTitles(
-        'World Poker Tour',
-        isCurrent: () => true,
+      final incomplete = await _incompleteSearch(
+        PlexLiveTvApi(dio).searchProgramTitles(
+          'World Poker Tour', isCurrent: () => true,
+        ),
       );
+      final results = incomplete.results;
       expect(dvrFailures, 1);
       expect(results, hasLength(1));
       expect(results.single['ChannelId'], 'channel-plex-abc-66635fc0');
@@ -898,11 +913,14 @@ void main() {
     );
 
     final batches = <List<Map<String, dynamic>>>[];
-    final results = await PlexLiveTvApi(dio).searchProgramTitlesIncrementally(
-      'Sintel',
-      isCurrent: () => true,
-      onBatch: (batch) => batches.add(batch),
+    final incomplete = await _incompleteSearch(
+      PlexLiveTvApi(dio).searchProgramTitlesIncrementally(
+        'Sintel',
+        isCurrent: () => true,
+        onBatch: (batch) => batches.add(batch),
+      ),
     );
+    final results = incomplete.results;
     expect(failures, 1);
     expect(batches, hasLength(1));
     expect(batches.single.single['ChannelId'], 'channel-2-4');

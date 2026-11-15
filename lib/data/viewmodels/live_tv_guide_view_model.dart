@@ -235,6 +235,8 @@ enum GuideState { loading, ready, error }
 /// Per-channel program fetch state, distinct from the guide-wide [GuideState].
 enum GuideChannelLoadState { loaded, loading, failed }
 
+enum GuideProgramSearchStatus { idle, searching, complete, partial, failed }
+
 class LiveTvGuideViewModel extends ChangeNotifier {
   final MediaServerClient _client;
   bool _disposed = false;
@@ -743,6 +745,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int _titleSearchRequest = 0;
   bool _searchingProgramTitles = false;
   bool get searchingProgramTitles => _searchingProgramTitles;
+  GuideProgramSearchStatus _programSearchStatus = GuideProgramSearchStatus.idle;
+  GuideProgramSearchStatus get programSearchStatus => _programSearchStatus;
   List<GuideChannel> _pageChannels = const [];
   int _lineupRequest = 0;
   (String, String?)? _groupAccount;
@@ -825,6 +829,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _startProgramTitleSearch(recheckExpiredCategory: true);
   }
 
+  void retryProgramTitleSearch() {
+    if (_disposed || _channelQuery.length < 2) return;
+    _startProgramTitleSearch(preserveMatches: true);
+  }
+
   void _startProgramTitleSearch({
     bool preserveMatches = false,
     bool recheckExpiredCategory = false,
@@ -834,6 +843,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // completed search replaces them; an error stays debug-only.
     if (!preserveMatches) _setTitleMatches(const []);
     _searchingProgramTitles = _channelQuery.length >= 2;
+    _programSearchStatus = _searchingProgramTitles
+        ? GuideProgramSearchStatus.searching
+        : GuideProgramSearchStatus.idle;
     _applyChannelSearchRows(recheckExpiredCategory: recheckExpiredCategory);
     if (_searchingProgramTitles) {
       unawaited(_searchProgramTitles(_channelQuery, request));
@@ -951,8 +963,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       );
       if (!current()) return;
       _setTitleMatches(found);
+      _programSearchStatus = GuideProgramSearchStatus.complete;
+    } on GuideProgramSearchPartialException catch (error) {
+      if (!current()) return;
+      _setTitleMatches(error.matches);
+      _programSearchStatus = GuideProgramSearchStatus.partial;
+      debugPrint(
+        'Live TV program search was incomplete (${_client.serverType}): ${error.cause}',
+      );
     } catch (error) {
       if (!current()) return;
+      _programSearchStatus = _programTitleMatches.isEmpty
+          ? GuideProgramSearchStatus.failed
+          : GuideProgramSearchStatus.partial;
       debugPrint('Live TV program search failed (${_client.serverType}): $error');
     }
     _searchingProgramTitles = false;
@@ -1920,11 +1943,20 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       coveredIds: <String>{},
       pendingWrites: <Future<void>>{},
     );
-    _notifyListeners();
     if (ids.isEmpty) {
+      // No existing listings can establish this window. Do not leave a
+      // pending request behind, and let the first lazy page confirm it.
+      _pendingGuideWindow = null;
+      _programsHighWater = 0;
+      _advanceProgramsCursor();
       if (_pageChannels.isEmpty) _rememberConfirmedGuideWindow();
+      _notifyListeners();
+      if (_state == GuideState.ready && hasMorePrograms) {
+        unawaited(loadMorePrograms());
+      }
       return;
     }
+    _notifyListeners();
     final loadGeneration = _loadGeneration;
 
     try {

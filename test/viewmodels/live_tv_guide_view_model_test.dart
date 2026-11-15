@@ -204,6 +204,74 @@ void main() {
     expect(emby.first.isNews, isFalse);
   });
 
+  test('failed title searches are retryable and not reported as no matches', () async {
+    final api = _SearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    _stubChannels(api, [_channel('c0')]);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    var requests = 0;
+    when(() => api.searchProgramTitles(
+      'soccer', isCurrent: any(named: 'isCurrent'),
+    )).thenAnswer((_) async {
+      requests++;
+      if (requests == 1) throw StateError('Title index unavailable');
+      return <Map<String, dynamic>>[];
+    });
+
+    final now = DateTime.utc(2026, 11, 14, 17);
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('soccer');
+    await pumpEventQueue();
+
+    expect(vm.programSearchStatus, GuideProgramSearchStatus.failed);
+    expect(vm.searchingProgramTitles, isFalse);
+    expect(vm.filteredChannels, isEmpty);
+
+    vm.retryProgramTitleSearch();
+    await pumpEventQueue();
+    expect(requests, 2);
+    expect(vm.programSearchStatus, GuideProgramSearchStatus.complete);
+    vm.setChannelQuery('');
+    expect(vm.programSearchStatus, GuideProgramSearchStatus.idle);
+  });
+
+  test('partial EPG search keeps the valid programs and reports an issue', () async {
+    final api = _SearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    _stubChannels(api, [_channel('c0')]);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+
+    final now = DateTime.utc(2026, 11, 14, 17);
+    final hit = <String, dynamic>{
+      'Id': 'soccer-1',
+      'Type': 'Program',
+      'ChannelId': 'c0',
+      'Name': 'Soccer Final',
+      'StartDate': now.add(const Duration(minutes: 30)).toIso8601String(),
+      'EndDate': now.add(const Duration(minutes: 90)).toIso8601String(),
+    };
+    when(() => api.searchProgramTitles(
+      'soccer', isCurrent: any(named: 'isCurrent'),
+    )).thenThrow(LiveTvPartialProgramSearchException(
+      [hit], StateError('One provider timed out'),
+    ));
+
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('soccer');
+    await pumpEventQueue();
+
+    expect(vm.programSearchStatus, GuideProgramSearchStatus.partial);
+    expect(vm.searchingProgramTitles, isFalse);
+    expect(vm.filteredChannels.map((ch) => ch.id), ['c0']);
+    expect(vm.futureSearchMatchForChannel('c0'), isNull);
+  });
+
   test('Plex guide titles use the DVR search API', () async {
     final api = _SearchableLiveTvApi();
     when(() => client.serverType).thenReturn(ServerType.plex);
@@ -1458,6 +1526,36 @@ void main() {
       expect(vm.hasProgramsFor('c0'), isTrue);
       expect(vm.programsForChannel('c0'), isEmpty);
       expect(vm.hasMorePrograms, isFalse);
+    });
+
+    test('a window with no loaded rows starts its first guide page', () async {
+      final now = DateTime.utc(2026, 11, 14, 17);
+      final later = now.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [_channel('old')]);
+      when(() => _guide(liveTv)).thenAnswer((call) async => {
+        'Items': [
+          for (final id in _requestedIds(call))
+            _program('listing-$id', id, start: now),
+        ],
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      expect(vm.hasProgramsFor('old'), isTrue);
+
+      // The player's new lineup has no loaded program IDs and inherits the
+      // old cursor position. Navigating should fetch its first page anyway.
+      vm.usePlaybackLineup([
+        GuideChannel.fromRawItem(_channel('replacement')),
+      ]);
+      expect(vm.hasProgramsFor('replacement'), isFalse);
+      await vm.setWindowStart(later);
+      await pumpEventQueue();
+
+      expect(vm.windowStart, later);
+      expect(vm.programsForChannel('replacement').single.id, 'listing-replacement');
+      expect(vm.hasProgramsFor('replacement'), isTrue);
     });
 
     test('overlapping window failure restores the last loaded window', () async {

@@ -11211,6 +11211,14 @@
       "query": { "type": "String" }
     }
   },
+  "guideProgramSearchPartial": "Some program results could not be loaded. Retry search.",
+  "@guideProgramSearchPartial": {
+    "description": "Status and retry tooltip when a Live TV search received only partial EPG results."
+  },
+  "guideProgramSearchFailed": "Program search failed. Retry search.",
+  "@guideProgramSearchFailed": {
+    "description": "Status and retry tooltip when the Live TV program search request failed."
+  },
   "guideToday": "Today",
   "guideTomorrow": "Tomorrow",
   "guideSearchGroups": "Search groups",

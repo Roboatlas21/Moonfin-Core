@@ -1,5 +1,13 @@
 import 'package:server_core/server_core.dart';
 
+/// A search can have useful results even when a provider failed.
+class GuideProgramSearchPartialException implements Exception {
+  final List<GuideTitleMatch> matches;
+  final Object cause;
+
+  const GuideProgramSearchPartialException(this.matches, this.cause);
+}
+
 class GuideTitleMatch {
   final String channelId;
   final String title;
@@ -130,30 +138,51 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
     }
   }
 
+  List<GuideTitleMatch> incomplete(
+    LiveTvPartialProgramSearchException error,
+  ) {
+    if (!isCurrent()) return const [];
+    addItems(error.results);
+    throw GuideProgramSearchPartialException(
+      List<GuideTitleMatch>.unmodifiable(results),
+      error.cause,
+    );
+  }
+
   final searchApi = client.liveTvApi;
   if (searchApi is LiveTvIncrementalProgramSearchApi &&
       onPartialResults != null) {
-    final rows = await searchApi.searchProgramTitlesIncrementally(
-      term,
-      isCurrent: isCurrent,
-      onBatch: (batch) {
-        if (!isCurrent()) return;
-        final before = results.length;
-        addItems(batch);
-        if (results.length > before) {
-          onPartialResults(List<GuideTitleMatch>.of(results));
-        }
-      },
-    );
-    if (!isCurrent()) return const [];
-    addItems(rows);
-    return results;
+    try {
+      final rows = await searchApi.searchProgramTitlesIncrementally(
+        term,
+        isCurrent: isCurrent,
+        onBatch: (batch) {
+          if (!isCurrent()) return;
+          final before = results.length;
+          addItems(batch);
+          if (results.length > before) {
+            onPartialResults(List<GuideTitleMatch>.of(results));
+          }
+        },
+      );
+      if (!isCurrent()) return const [];
+      addItems(rows);
+      return results;
+    } on LiveTvPartialProgramSearchException catch (error) {
+      return incomplete(error);
+    }
   }
   if (searchApi is LiveTvProgramSearchApi) {
-    final rows = await searchApi.searchProgramTitles(term, isCurrent: isCurrent);
-    if (!isCurrent()) return const [];
-    addItems(rows);
-    return results;
+    try {
+      final rows = await searchApi.searchProgramTitles(
+        term, isCurrent: isCurrent,
+      );
+      if (!isCurrent()) return const [];
+      addItems(rows);
+      return results;
+    } on LiveTvPartialProgramSearchException catch (error) {
+      return incomplete(error);
+    }
   }
   if (client.serverType == ServerType.plex ||
       client.serverType == ServerType.silo) {

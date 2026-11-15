@@ -1746,43 +1746,67 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
   }
 
-  Widget _buildChannelSearchField({bool compact = false}) => ConstrainedBox(
-    constraints: const BoxConstraints(maxWidth: 360),
-    child: Stack(
-      children: [
-        LocalSearchField(
-          controller: _channelSearch,
-          focusNode: _channelSearchFocus,
-          hint: AppLocalizations.of(context).guideSearchChannels,
-          compact: compact,
-          onChanged: _searchChannels,
-          onTvKeyEvent: (_, event) {
-            if (!event.isActionable) return KeyEventResult.ignored;
-            if (event.logicalKey.isLeftKey) {
-              if (_usesPicker) {
-                _browseFocus.requestFocus();
-              } else {
-                _focusFilterRail();
-              }
-              return KeyEventResult.handled;
-            }
-            if (event.logicalKey.isDownKey) {
-              _focusWindowBarFromGenres();
-              return KeyEventResult.handled;
-            }
-            return KeyEventResult.ignored;
-          },
-        ),
-        if (_vm.searchingProgramTitles)
-          const Positioned(
-            left: 12,
-            right: 12,
-            bottom: 0,
-            child: LinearProgressIndicator(minHeight: 2),
+  Widget _buildChannelSearchField({bool compact = false}) {
+    final status = _vm.programSearchStatus;
+    final hasIssue = status == GuideProgramSearchStatus.partial ||
+        status == GuideProgramSearchStatus.failed;
+    final l10n = AppLocalizations.of(context);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 360),
+      child: Row(
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                LocalSearchField(
+                  controller: _channelSearch,
+                  focusNode: _channelSearchFocus,
+                  hint: l10n.guideSearchChannels,
+                  compact: compact,
+                  onChanged: _searchChannels,
+                  onTvKeyEvent: (_, event) {
+                    if (!event.isActionable) return KeyEventResult.ignored;
+                    if (event.logicalKey.isLeftKey) {
+                      if (_usesPicker) {
+                        _browseFocus.requestFocus();
+                      } else {
+                        _focusFilterRail();
+                      }
+                      return KeyEventResult.handled;
+                    }
+                    if (event.logicalKey.isDownKey) {
+                      _focusWindowBarFromGenres();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                ),
+                if (_vm.searchingProgramTitles)
+                  const Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 0,
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+              ],
+            ),
           ),
-      ],
-    ),
-  );
+          if (hasIssue) ...[
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: status == GuideProgramSearchStatus.partial
+                  ? l10n.guideProgramSearchPartial
+                  : l10n.guideProgramSearchFailed,
+              icon: const Icon(Icons.warning_amber_rounded),
+              color: AppColorScheme.statusError,
+              onPressed: _vm.retryProgramTitleSearch,
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _buildFilterRail({
     EdgeInsetsGeometry padding = const EdgeInsets.fromLTRB(16, 6, 16, 6),
@@ -1880,6 +1904,32 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Widget _buildEmptyGuideResults() {
     if (_vm.searchingProgramTitles) {
       return const Center(child: CircularProgressIndicator());
+    }
+    final status = _vm.programSearchStatus;
+    if (_vm.channelQuery.length >= 2 &&
+        (status == GuideProgramSearchStatus.partial ||
+            status == GuideProgramSearchStatus.failed)) {
+      final l10n = AppLocalizations.of(context);
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              status == GuideProgramSearchStatus.partial
+                  ? l10n.guideProgramSearchPartial
+                  : l10n.guideProgramSearchFailed,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white.withAlpha(179)),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _vm.retryProgramTitleSearch,
+              icon: const Icon(Icons.refresh),
+              label: Text(l10n.retry),
+            ),
+          ],
+        ),
+      );
     }
     if (_vm.channelQuery.length >= 2 &&
         (_vm.filter == GuideFilter.all ||

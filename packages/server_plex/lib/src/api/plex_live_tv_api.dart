@@ -173,6 +173,7 @@ class PlexLiveTvApi
     if (term.length < 2 || !isCurrent()) return const [];
     final folded = term.toLowerCase();
     final programs = <Map<String, dynamic>>[];
+    Object? partialError;
 
     // DVR discovery is optional. Free channels still work when a DVR is offline.
     List<_Dvr> dvrs;
@@ -181,6 +182,7 @@ class PlexLiveTvApi
     } on DioException catch (error, stackTrace) {
       if (!isCurrent()) return const [];
       if (error.response?.statusCode != 404) {
+        partialError ??= error;
         developer.log(
           'Plex DVR discovery failed; searching free channels',
           name: 'PlexLiveTvApi',
@@ -277,6 +279,7 @@ class PlexLiveTvApi
                 );
               } catch (error, stackTrace) {
                 if (!isCurrent()) return;
+                partialError ??= error;
                 // Earlier pages have already been published. A later failure
                 // must not discard those airings or block the next show.
                 developer.log(
@@ -293,6 +296,7 @@ class PlexLiveTvApi
         );
       } catch (error, stackTrace) {
         if (!isCurrent()) return const [];
+        partialError ??= error;
         developer.log(
           'Plex DVR program search failed (${dvr.key}); continuing',
           name: 'PlexLiveTvApi',
@@ -311,6 +315,7 @@ class PlexLiveTvApi
     } catch (error, stackTrace) {
       if (!isCurrent()) return const [];
       if (programs.isEmpty) rethrow;
+      partialError ??= error;
       developer.log(
         'Plex free-channel search failed; keeping DVR matches',
         name: 'PlexLiveTvApi',
@@ -318,7 +323,15 @@ class PlexLiveTvApi
         stackTrace: stackTrace,
       );
     }
-    return isCurrent() ? programs : const [];
+    if (!isCurrent()) return const [];
+    final failure = partialError;
+    if (failure != null) {
+      throw LiveTvPartialProgramSearchException(
+        List<Map<String, dynamic>>.unmodifiable(programs),
+        failure,
+      );
+    }
+    return programs;
   }
 
   // Plex Discover searches the free lineup in one request. Standard paging

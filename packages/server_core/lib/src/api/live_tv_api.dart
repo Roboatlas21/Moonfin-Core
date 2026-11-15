@@ -1,5 +1,17 @@
 import 'package:dio/dio.dart';
 
+/// A provider can fail after others have already returned valid program hits.
+/// Preserve those hits without calling the search complete.
+class LiveTvPartialProgramSearchException implements Exception {
+  final List<Map<String, dynamic>> results;
+  final Object cause;
+
+  const LiveTvPartialProgramSearchException(this.results, this.cause);
+
+  @override
+  String toString() => 'Live TV program search was incomplete: $cause';
+}
+
 /// Backends with their own EPG search can provide program rows in the same
 /// shape as a Live TV guide response.
 abstract interface class LiveTvProgramSearchApi {
