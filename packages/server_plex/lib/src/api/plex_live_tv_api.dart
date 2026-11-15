@@ -227,13 +227,7 @@ class PlexLiveTvApi
                     : item;
                 for (final media in item['Media'] as List? ?? const []) {
                   if (media is! Map) continue;
-                  final program = _program(
-                    dvr.key,
-                    media['channelIdentifier'],
-                    source,
-                    media,
-                    channelName: media['channelTitle'],
-                  );
+                  final program = _dvrProgram(dvr, source, media);
                   if (program != null) batch.add(program);
                 }
               }

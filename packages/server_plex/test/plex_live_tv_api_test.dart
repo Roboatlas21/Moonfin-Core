@@ -44,6 +44,19 @@ const _teletubbies = {
   ],
 };
 
+// Plex's XMLTV provider calls this a movie, but the guide knows it isn't.
+const _superKitties = {
+  'type': 'movie',
+  'title': 'SuperKitties',
+  'Media': [
+    {
+      'beginsAt': 1792703040,
+      'endsAt': 1792704540,
+      'channelIdentifier': '4',
+    },
+  ],
+};
+
 (Dio, _FakeServer) _server() {
   final server = _FakeServer(
     (options) => switch (options.uri.path) {
@@ -144,6 +157,7 @@ const _teletubbies = {
                 ],
               },
             },
+            {'Metadata': _superKitties},
             {
               'Metadata': {
                 'ratingKey': 'teletubbies',
@@ -162,17 +176,7 @@ const _teletubbies = {
         'MediaContainer': {
           'Metadata': [
             _teletubbies,
-            {
-              'type': 'movie',
-              'title': 'SuperKitties',
-              'Media': [
-                {
-                  'beginsAt': 1792703040,
-                  'endsAt': 1792704540,
-                  'channelIdentifier': '4',
-                },
-              ],
-            },
+            _superKitties,
           ],
         },
       },
@@ -300,6 +304,30 @@ void main() {
       ),
       hasLength(2),
     );
+  });
+
+  test('XMLTV search and guide classify the same airing alike', () async {
+    final (dio, _) = _server();
+    final api = PlexLiveTvApi(dio);
+    final search = await api.searchProgramTitles(
+      'SuperKitties',
+      isCurrent: () => true,
+    );
+    final guide = await api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22),
+      endDate: DateTime.utc(2026, 10, 23),
+      channelIds: ['channel-2-4'],
+    );
+    final matchingGuideProgram = (guide['Items'] as List)
+        .cast<Map<String, dynamic>>()
+        .singleWhere((p) => p['Id'] == search.single['Id']);
+
+    expect(search, hasLength(1));
+    expect(search.single['IsMovie'], isFalse);
+    expect(search.single['IsMovie'], matchingGuideProgram['IsMovie']);
+    expect(search.single['IsSeries'], matchingGuideProgram['IsSeries']);
+    expect(search.single['ChannelId'], matchingGuideProgram['ChannelId']);
+    expect(search.single['StartDate'], matchingGuideProgram['StartDate']);
   });
 
   test('paginates distinct DVR pages even without ratingKeys', () async {
