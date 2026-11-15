@@ -2270,6 +2270,69 @@ void main() {
       );
     }
 
+    test('category search prefetch counts checked matching rows, not all cached programs', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 500; i++) {
+          ..._channel('c$i', number: '$i'),
+          if (i < 24 || (i >= 420 && i < 426)) 'Name': 'TSN $i',
+        },
+      ]);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((invocation) async => {
+            'Items': [
+              for (final id in _requestedIds(invocation))
+                if (int.parse(id.substring(1)) < 100 ||
+                    (int.parse(id.substring(1)) >= 420 &&
+                        int.parse(id.substring(1)) < 426))
+                  _program('sport-$id', id, start: now, isSports: true),
+            ],
+          });
+      when(() => api.searchProgramTitles(
+        'tsn', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.filteredChannels, hasLength(100));
+      expect(vm.programsHighWater, 100);
+
+      clearInteractions(api);
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(vm.filteredChannels, hasLength(24));
+      // The other 76 cached Sports channels must not delay prefetch.
+      expect(vm.programsHighWater, 24);
+      expect(vm.hasMorePrograms, isTrue);
+      verifyNever(() => _guide(api, category: GuideFilter.sports));
+
+      // A scroll near the 24th row should now ask for the next page.
+      if (23 + 12 >= vm.programsHighWater) {
+        await vm.loadMorePrograms();
+      }
+      expect(vm.filteredChannels, hasLength(30));
+      expect(vm.programsHighWater, 30);
+      expect(vm.hasMorePrograms, isFalse);
+      final requested = verify(() => _guide(
+        api, category: GuideFilter.sports, captureChannelIds: true,
+      )).captured;
+      expect(requested, hasLength(1));
+      expect(requested.single, [
+        for (var i = 420; i < 426; i++) 'c$i',
+      ]);
+      // The unrelated cache remains intact, without another EPG search.
+      expect(vm.programsForChannel('c99').single.isSports, isTrue);
+      verify(() => api.searchProgramTitles(
+        'tsn', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
     test('search reuses already-checked category programs', () async {
       final api = _SearchableLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);

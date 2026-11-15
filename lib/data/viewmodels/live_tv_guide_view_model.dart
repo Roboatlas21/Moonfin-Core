@@ -318,14 +318,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       ? _categoryHighWater < _pageChannels.length
       : _programsHighWater < _pageChannels.length;
 
-  /// How far the guide has been loaded for scroll prefetch.
-  /// Category title hits already qualify even without a program in this window,
-  /// so count checked channels rather than just channels with current programs.
-  int get programsHighWater => _isCategory(_filter)
-      ? (_channelQuery.length >= 2 && _searchMatchesByChannel.isNotEmpty
-            ? _categoryHighWater
-            : _categoryPrograms.length)
-      : _programsHighWater;
+  /// How many visible rows have been checked for scroll prefetch.
+  /// Search results may include category programs cached for unrelated channels
+  /// or server-classified title hits beyond the loaded guide batch.
+  int get programsHighWater {
+    if (!_isCategory(_filter)) return _programsHighWater;
+    if (_channelQuery.isEmpty) return _categoryPrograms.length;
+    return _pageChannels
+        .take(_categoryHighWater)
+        .where(_categoryRowMatchesSearch)
+        .length;
+  }
 
   bool get listingsAccessDenied =>
       _state == GuideState.error &&
