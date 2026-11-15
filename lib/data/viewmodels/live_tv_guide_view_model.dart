@@ -710,9 +710,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         );
 
   /// Finds the next search hit after this window in the current lineup.
+  /// Wait for the full search: progressive matches may not arrive in time order.
   /// Program categories need genre information the search hits do not carry.
   GuideTitleMatch? get nextSearchAiring {
-    if (_channelQuery.length < 2 ||
+    if (_searchingProgramTitles ||
+        _channelQuery.length < 2 ||
         (_filter != GuideFilter.all && _filter != GuideFilter.favorites)) {
       return null;
     }

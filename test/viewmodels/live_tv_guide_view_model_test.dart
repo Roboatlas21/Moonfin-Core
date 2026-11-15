@@ -257,7 +257,7 @@ void main() {
     };
     final future = hit('tomorrow', 'dvr', now.add(const Duration(days: 1)));
     publish([future]);
-    expect(vm.nextSearchAiring?.channelId, 'dvr');
+    expect(vm.nextSearchAiring, isNull);
     expect(vm.searchingProgramTitles, isTrue);
 
     final dvr = hit('dvr-now', 'dvr', now.add(const Duration(minutes: 30)));
@@ -274,6 +274,65 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(vm.searchingProgramTitles, isFalse);
     expect(vm.filteredChannels.map((ch) => ch.id), ['dvr', 'free']);
+    expect(vm.nextSearchAiring?.channelId, 'dvr');
+  });
+
+  test('holds future-airing suggestion until the full search completes', () async {
+    final api = _IncrementalSearchableLiveTvApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+    _stubChannels(api, [_channel('dvr'), _channel('free')]);
+
+    final pending = Completer<List<Map<String, dynamic>>>();
+    late void Function(List<Map<String, dynamic>>) publish;
+    when(
+      () => api.searchProgramTitlesIncrementally(
+        'silo',
+        isCurrent: any(named: 'isCurrent'),
+        onBatch: any(named: 'onBatch'),
+      ),
+    ).thenAnswer((invocation) {
+      publish = invocation.namedArguments[#onBatch]
+          as void Function(List<Map<String, dynamic>>);
+      return pending.future;
+    });
+
+    final now = DateTime.utc(2026, 11, 14, 17);
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: now);
+    vm.setChannelQuery('silo');
+
+    Map<String, dynamic> hit(String id, String channel, DateTime start) => {
+      'Id': id,
+      'Type': 'Program',
+      'Name': 'Silo',
+      'ChannelId': channel,
+      'StartDate': start.toIso8601String(),
+      'EndDate': start.add(const Duration(hours: 1)).toIso8601String(),
+    };
+    final tomorrow = hit('tomorrow', 'dvr', now.add(const Duration(days: 1)));
+    final tonightStart = vm.windowEnd.add(const Duration(minutes: 30));
+    final tonight = hit('tonight', 'free', tonightStart);
+
+    publish([tomorrow]);
+    expect(vm.filteredChannels, isEmpty);
+    expect(vm.searchingProgramTitles, isTrue);
+    expect(vm.nextSearchAiring, isNull);
+
+    // A later provider can reveal an earlier airing. Don't offer the jump yet.
+    publish([tonight]);
+    expect(vm.filteredChannels, isEmpty);
+    expect(vm.searchingProgramTitles, isTrue);
+    expect(vm.nextSearchAiring, isNull);
+
+    pending.complete([tomorrow, tonight]);
+    await Future<void>.delayed(Duration.zero);
+    expect(vm.searchingProgramTitles, isFalse);
+    expect(vm.filteredChannels, isEmpty);
+    expect(vm.nextSearchAiring?.channelId, 'free');
+    expect(vm.nextSearchAiring?.start, tonightStart);
   });
 
   test('old Plex search batches cannot change a newer query', () async {
