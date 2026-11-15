@@ -11200,9 +11200,9 @@
       "title": { "type": "String" }
     }
   },
-  "guideNoProgramsFound": "No programs found",
+  "guideNoProgramsFound": "No channels or programs found",
   "@guideNoProgramsFound": {
-    "description": "Empty Live TV guide search with no later matches."
+    "description": "Empty combined Live TV guide search with no matching channels or EPG programs."
   },
   "guideNoLaterAirings": "No later airings matching \"{query}\" were found in the available guide data.",
   "@guideNoLaterAirings": {
