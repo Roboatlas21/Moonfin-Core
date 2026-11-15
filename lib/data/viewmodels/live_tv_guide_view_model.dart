@@ -300,6 +300,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   GuideFilter? _previousWindowCategory;
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
+  int _recordingRefreshDepth = 0;
+  bool _resumeCategoryPageAfterRefresh = false;
 
   // Bumped by every targeted replacement and by every cache reset, so a reply
   // whose window or channel set has since been superseded can be dropped.
@@ -1161,23 +1163,46 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// reloads in full.
   Future<void> _refreshRecordingState() async {
     final recordingRevision = liveTvRecordingRevision.value;
+    _recordingRefreshDepth++;
     _clearWindowProgramCache();
+    var removedCategoryRows = false;
+    var refreshed = false;
     try {
       if (_isCategory(_filter) && !_showingPreviousCategory) {
-        await _refreshCategoryRows();
+        removedCategoryRows = await _refreshCategoryRows();
       }
       await _refreshLoadedChannels(_now());
       _loadedRecordingRevision = recordingRevision;
+      refreshed = true;
     } catch (error) {
       if (!_accessDenied(error)) await _reloadPrograms();
+    } finally {
+      _recordingRefreshDepth--;
+      if (_recordingRefreshDepth == 0) {
+        final resume = refreshed &&
+            (removedCategoryRows || _resumeCategoryPageAfterRefresh);
+        _resumeCategoryPageAfterRefresh = false;
+        if (resume &&
+            !_disposed &&
+            _state == GuideState.ready &&
+            _isCategory(_filter) &&
+            _categoryLoadedFor == _filter &&
+            !_categoryFetchInFlight &&
+            hasMorePrograms &&
+            _needsCategorySearchPage()) {
+          // A page still in flight will resume itself when it finishes.
+          unawaited(loadMorePrograms());
+        }
+      }
     }
   }
 
   /// A category view keeps its own program lists. A recording change doesn't
   /// change which programs belong to the category, so the channels already
   /// shown are fetched again and their lists swapped.
-  Future<void> _refreshCategoryRows() async {
+  Future<bool> _refreshCategoryRows() async {
     final request = _categoryRequest;
+    var removed = false;
     final filter = _filter;
     final channels = _categoryPrograms.keys
         .map(channelForId)
@@ -1190,18 +1215,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final fetched = await _fetchPrograms(
         batch, category: filter, completedIds: completedIds,
       );
-      if (request != _categoryRequest) return;
+      if (request != _categoryRequest) return false;
       for (final channel in batch) {
         if (!completedIds.contains(channel.id)) continue;
         final programs = fetched[channel.id];
         if (programs == null) {
-          _categoryPrograms.remove(channel.id);
+          removed = _categoryPrograms.remove(channel.id) != null || removed;
         } else {
           _categoryPrograms[channel.id] = programs;
         }
       }
     }
     _notifyListeners();
+    return removed;
   }
 
   /// Records the showings of this program's series that [episodes] picks, or
@@ -1867,6 +1893,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final generation = _programGeneration;
     final pageGeneration = _pageGeneration;
     final searchRequest = _titleSearchRequest;
+    final cacheRevision = _windowCacheRevision;
     final page = _isCategory(_filter)
         ? (_filter, _categoryRequest)
         : (null, pageGeneration);
@@ -1929,10 +1956,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (searchChangedDuringPage && _state == GuideState.ready) {
           _expireCheckedCategorySearchResults();
         }
+        final cacheInvalidatedDuringPage =
+            categoryPageCompleted &&
+            _isCategory(_filter) &&
+            (_filter, _categoryRequest) == page &&
+            cacheRevision != _windowCacheRevision;
+        if (cacheInvalidatedDuringPage && _recordingRefreshDepth > 0) {
+          // Wait for the recording refresh to finish before fetching again.
+          _resumeCategoryPageAfterRefresh = true;
+        }
         final needsSearchCatchUp =
-            searchChangedDuringPage && _needsCategorySearchPage();
+            (searchChangedDuringPage || cacheInvalidatedDuringPage) &&
+            _needsCategorySearchPage();
         if (!_disposed &&
+            _recordingRefreshDepth == 0 &&
             _state == GuideState.ready &&
+            (!_isCategory(_filter) || categoryPageCompleted) &&
             (generation != _programGeneration ||
                 pageGeneration != _pageGeneration ||
                 needsSearchCatchUp) &&

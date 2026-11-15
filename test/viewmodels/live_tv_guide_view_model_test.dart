@@ -3308,6 +3308,88 @@ void main() {
       );
     }
 
+    for (final completeOldPageFirst in [true, false]) {
+      test(
+        completeOldPageFirst
+            ? 'recording refresh resumes an invalidated page after the refresh'
+            : 'recording refresh resumes an in-flight page when it finishes',
+        () async {
+          final api = _SearchableLiveTvApi();
+          when(() => client.liveTvApi).thenReturn(api);
+          _stubChannels(api, [
+            for (var i = 0; i < 500; i++) {
+              ..._channel('c$i', number: '$i'),
+              if (i == 420 || i == 430) 'Name': 'TSN $i',
+            },
+          ]);
+          final oldPage = Completer<Map<String, dynamic>>();
+          final refreshGuide = Completer<Map<String, dynamic>>();
+          var holdUnfilteredRefresh = false;
+          final requested = <List<String>>[];
+          when(() => _guide(api)).thenAnswer((_) =>
+              holdUnfilteredRefresh ? refreshGuide.future :
+              Future.value({'Items': []}));
+          when(() => _guide(api, category: GuideFilter.sports))
+              .thenAnswer((call) {
+                final ids = List<String>.of(_requestedIds(call));
+                requested.add(ids);
+                if (ids.first == 'c200') return oldPage.future;
+                return Future.value({
+                  'Items': [
+                    for (final id in ids)
+                      if (int.parse(id.substring(1)) < 24 || id == 'c420')
+                        _program('sport-$id', id, isSports: true),
+                  ],
+                });
+              });
+          when(() => api.searchProgramTitles(
+            'tsn', isCurrent: any(named: 'isCurrent'),
+          )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+
+          final vm = LiveTvGuideViewModel(client);
+          addTearDown(vm.dispose);
+          await vm.load();
+          vm.setFilter(GuideFilter.sports);
+          await pumpEventQueue();
+          expect(vm.filteredChannels, hasLength(24));
+
+          final paging = vm.loadMorePrograms();
+          await pumpEventQueue();
+          expect(requested.last.first, 'c200');
+          vm.setChannelQuery('tsn');
+          await pumpEventQueue();
+          expect(vm.filteredChannels, isEmpty);
+
+          holdUnfilteredRefresh = true;
+          final refreshing = vm.recordingChanged();
+          await pumpEventQueue();
+
+          if (completeOldPageFirst) {
+            oldPage.complete({
+              'Items': [_program('old', 'c210', isSports: true)],
+            });
+            await paging;
+            expect(requested.where((ids) => ids.contains('c420')), isEmpty);
+            refreshGuide.complete({'Items': []});
+            await refreshing;
+          } else {
+            refreshGuide.complete({'Items': []});
+            await refreshing;
+            expect(requested.where((ids) => ids.contains('c420')), isEmpty);
+            oldPage.complete({
+              'Items': [_program('old', 'c210', isSports: true)],
+            });
+            await paging;
+          }
+          await pumpEventQueue();
+          expect(requested.where((ids) => ids.contains('c420')), hasLength(1));
+          expect(vm.filteredChannels.map((c) => c.id), ['c420']);
+          expect(vm.programsForChannel('c420').single.isSports, isTrue);
+          expect(vm.hasMorePrograms, isFalse);
+        },
+      );
+    }
+
     test('scrolling a category pulls the next batch of channels', () async {
       _stubChannels(
         liveTv,
@@ -3573,6 +3655,61 @@ void main() {
       expect(vm.programsForChannel('c0'), isEmpty);
       expect(vm.programsForChannel('c1').single.name, 'sports-on-c1');
       verify(() => _guide(liveTv, category: GuideFilter.sports)).called(2);
+    });
+
+    test('refresh refills a category search after its visible rows disappear', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 500; i++) {
+          ..._channel('c$i', number: '$i'),
+          if (i < 24 || (i >= 420 && i < 426)) 'Name': 'TSN $i',
+        },
+      ]);
+      var oldSportsRemoved = false;
+      final requested = <List<String>>[];
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((call) async {
+            final ids = List<String>.of(_requestedIds(call));
+            requested.add(ids);
+            return {
+              'Items': [
+                for (final id in ids)
+                  if ((!oldSportsRemoved && int.parse(id.substring(1)) < 24) ||
+                      (int.parse(id.substring(1)) >= 420 &&
+                          int.parse(id.substring(1)) < 426))
+                    _program('sport-$id', id, isSports: true),
+              ],
+            };
+          });
+      when(() => api.searchProgramTitles(
+        'tsn', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(vm.filteredChannels, hasLength(24));
+      expect(vm.hasMorePrograms, isTrue);
+
+      requested.clear();
+      oldSportsRemoved = true;
+      await vm.recordingChanged();
+      await pumpEventQueue();
+
+      expect(requested, [
+        [for (var i = 0; i < 24; i++) 'c$i'],
+        [for (var i = 420; i < 426; i++) 'c$i'],
+      ]);
+      expect(vm.filteredChannels.map((c) => c.id), [
+        for (var i = 420; i < 426; i++) 'c$i',
+      ]);
+      expect(vm.hasMorePrograms, isFalse);
     });
 
     test('reloadIfRecordingsChanged does nothing until a recording changes', () async {
