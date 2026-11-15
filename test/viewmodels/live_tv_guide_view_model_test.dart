@@ -257,7 +257,7 @@ void main() {
     };
     final future = hit('tomorrow', 'dvr', now.add(const Duration(days: 1)));
     publish([future]);
-    expect(vm.nextSearchAiring, isNull);
+    expect(vm.futureSearchMatchForChannel('dvr'), isNull);
     expect(vm.searchingProgramTitles, isTrue);
 
     final dvr = hit('dvr-now', 'dvr', now.add(const Duration(minutes: 30)));
@@ -274,10 +274,16 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(vm.searchingProgramTitles, isFalse);
     expect(vm.filteredChannels.map((ch) => ch.id), ['dvr', 'free']);
-    expect(vm.nextSearchAiring?.channelId, 'dvr');
+    expect(
+      vm.nextSearchMatchForChannel(
+        'dvr',
+        after: now.add(const Duration(hours: 2)),
+      )?.start,
+      now.add(const Duration(days: 1)),
+    );
   });
 
-  test('holds future-airing suggestion until the full search completes', () async {
+  test('holds future-only channels until the full search completes', () async {
     final api = _IncrementalSearchableLiveTvApi();
     when(() => client.serverType).thenReturn(ServerType.plex);
     when(() => client.liveTvApi).thenReturn(api);
@@ -319,13 +325,13 @@ void main() {
     publish([tomorrow]);
     expect(vm.filteredChannels, isEmpty);
     expect(vm.searchingProgramTitles, isTrue);
-    expect(vm.nextSearchAiring, isNull);
+    expect(vm.futureSearchMatchForChannel('dvr'), isNull);
 
-    // A later provider can reveal an earlier airing. Don't offer the jump yet.
+    // Later providers may return earlier airings. Wait before showing future-only rows.
     publish([tonight]);
     expect(vm.filteredChannels, isEmpty);
     expect(vm.searchingProgramTitles, isTrue);
-    expect(vm.nextSearchAiring, isNull);
+    expect(vm.futureSearchMatchForChannel('free'), isNull);
 
     pending.complete([tomorrow, tonight]);
     await Future<void>.delayed(Duration.zero);
@@ -333,8 +339,7 @@ void main() {
     expect(vm.filteredChannels.map((c) => c.id), ['dvr', 'free']);
     expect(vm.futureSearchMatchForChannel('dvr')?.title, 'Silo');
     expect(vm.futureSearchMatchForChannel('free')?.start, tonightStart);
-    expect(vm.nextSearchAiring?.channelId, 'free');
-    expect(vm.nextSearchAiring?.start, tonightStart);
+    expect(vm.futureSearchMatchForChannel('free')?.start, tonightStart);
   });
 
   test('search keeps future-only channels without including unrelated ones', () async {
@@ -502,7 +507,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(vm.channelQuery, 'hockey');
     expect(vm.filteredChannels, isEmpty);
-    expect(vm.nextSearchAiring, isNull);
+    expect(vm.futureSearchMatchForChannel('dvr'), isNull);
   });
 
   test('shows the earliest later program, not Now or Next', () {
@@ -535,7 +540,7 @@ void main() {
     expect(find([match('tsn', 150)]), isNull);
   });
 
-  group('next guide search airing', () {
+  group('future guide search matches', () {
     late _SearchableLiveTvApi api;
     late LiveTvGuideViewModel vm;
     final now = DateTime.utc(2026, 11, 14, 17);
@@ -570,18 +575,20 @@ void main() {
       expect(vm.searchingProgramTitles, isFalse);
     }
 
-    test('uses the earliest later airing on a known channel', () async {
+    test('future matches respond to the visible guide window', () async {
       await search([
         airing('late', 'tsn', end.add(const Duration(minutes: 30))),
         airing('unknown', 'not-in-lineup', end.add(const Duration(minutes: 1))),
         airing('early', 'espn', end),
         airing('visible', 'tsn', now.add(const Duration(minutes: 30))),
       ]);
-      expect(vm.nextSearchAiring?.channelId, 'espn');
-      expect(vm.nextSearchAiring!.start.isAtSameMomentAs(end), isTrue);
-      expect(vm.nextSearchAiring?.title, 'Silo');
+      expect(vm.futureSearchMatchForChannel('espn')?.start, end);
+      // TSN already has a visible match, so it needs no calendar marker.
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.nextSearchMatchForChannel('tsn', after: end)?.title, 'Silo');
       await vm.setWindowStart(end, livePosition: false);
-      expect(vm.nextSearchAiring?.channelId, 'tsn');
+      expect(vm.futureSearchMatchForChannel('espn'), isNull);
+      expect(vm.filteredChannels.map((ch) => ch.id), containsAll(['tsn', 'espn']));
     });
 
     test('same-time airings both appear after moving the window', () async {
@@ -589,111 +596,29 @@ void main() {
         airing('one', 'tsn', end),
         airing('two', 'espn', end),
       ]);
-      expect(vm.nextSearchAiring!.start.isAtSameMomentAs(end), isTrue);
+      expect(vm.futureSearchMatchForChannel('tsn')?.start, end);
+      expect(vm.futureSearchMatchForChannel('espn')?.start, end);
       await vm.setWindowStart(end, livePosition: false);
       expect(vm.filteredChannels.map((ch) => ch.id), containsAll(['tsn', 'espn']));
-      expect(vm.nextSearchAiring, isNull);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.futureSearchMatchForChannel('espn'), isNull);
       verify(() => api.searchProgramTitles(
         'silo', isCurrent: any(named: 'isCurrent'),
       )).called(1);
     });
 
-    test('search jump fetches its channel without waiting', () async {
-      _stubChannels(api, [
-        for (var i = 0; i < 100; i++) _channel('c$i'),
-      ]);
-      await search([airing('future', 'c80', end)]);
-      expect(vm.hasProgramsFor('c0'), isTrue);
-      // Future-only matches now appear as normal rows. Their current-window
-      // guide entries may already have been requested by lazy loading.
-      expect(vm.filteredChannels.map((c) => c.id), ['c80']);
-      expect(vm.nextSearchAiring?.channelId, 'c80');
-
-      final targetReply = Completer<Map<String, dynamic>>();
-      final requests = <List<String>>[];
-      when(() => _guide(api, captureChannelIds: true)).thenAnswer((call) {
-        requests.add(_requestedIds(call));
-        return targetReply.future;
-      });
-
-      // Returning from the jump must not wait for the target's EPG reply.
-      await vm.setWindowStart(
-        end,
-        priorityChannelId: 'c80',
-        livePosition: false,
-      );
-      expect(vm.windowStart, end);
-      expect(vm.filteredChannels.map((channel) => channel.id), ['c80']);
-      expect(vm.hasProgramsFor('c0'), isFalse);
-      expect(vm.hasProgramsFor('c80'), isFalse);
-      expect(requests, [
-        ['c80'],
-      ]);
-
-      targetReply.complete({
-        'Items': [_program('new-c80', 'c80', start: end)],
-      });
-      await pumpEventQueue();
-      expect(vm.programsForChannel('c80').map((program) => program.id), [
-        'new-c80',
-      ]);
-      expect(vm.programsHighWater, 1);
-      expect(requests, [
-        ['c80'],
-      ]);
-    });
-
-    test('an older search jump cannot overwrite a newer window', () async {
-      _stubChannels(api, [_channel('tsn')]);
-      final later = end.add(const Duration(hours: 4));
-      await search([
-        airing('first-airing', 'tsn', end),
-        airing('second-airing', 'tsn', later),
-      ]);
-
-      final replies = <Completer<Map<String, dynamic>>>[];
-      when(() => _guide(api, captureChannelIds: true)).thenAnswer((_) {
-        final reply = Completer<Map<String, dynamic>>();
-        replies.add(reply);
-        return reply.future;
-      });
-
-      await vm.setWindowStart(end, priorityChannelId: 'tsn');
-      await vm.setWindowStart(later, priorityChannelId: 'tsn');
-      expect(replies, hasLength(2));
-
-      replies[1].complete({
-        'Items': [_program('new-window', 'tsn', start: later)],
-      });
-      await pumpEventQueue();
-      replies[0].complete({
-        'Items': [_program('old-window', 'tsn', start: end)],
-      });
-      await pumpEventQueue();
-      expect(vm.programsForChannel('tsn').map((program) => program.id), [
-        'new-window',
-      ]);
-    });
-
-    test('future-only search keeps its query when jumping to the airing', () async {
+    test('future-only search keeps its query when moving the window', () async {
       final nextDay = end.add(const Duration(days: 1));
       await search([airing('future', 'espn', nextDay)]);
       expect(vm.filteredChannels.map((c) => c.id), ['espn']);
       expect(vm.futureSearchMatchForChannel('espn')?.start, nextDay);
-      expect(vm.nextSearchAiring?.channelId, 'espn');
-      expect(vm.nextSearchAiring?.start, nextDay);
 
-      await vm.setWindowStart(
-        nextDay,
-        priorityChannelId: 'espn',
-        livePosition: false,
-      );
+      await vm.setWindowStart(nextDay, livePosition: false);
 
       expect(vm.channelQuery, 'silo');
       expect(vm.windowStart, nextDay);
       expect(vm.filteredChannels.map((channel) => channel.id), ['espn']);
       expect(vm.futureSearchMatchForChannel('espn'), isNull);
-      expect(vm.nextSearchAiring, isNull);
       verify(
         () => api.searchProgramTitles(
           'silo',
@@ -702,11 +627,11 @@ void main() {
       ).called(1);
     });
 
-    test('no result, cleared search and failed search offer no jump', () async {
+    test('cleared and failed searches leave no future matches', () async {
       await search([]);
-      expect(vm.nextSearchAiring, isNull);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
       vm.setChannelQuery('');
-      expect(vm.nextSearchAiring, isNull);
+      expect(vm.nextSearchMatchForChannel('tsn'), isNull);
       when(() => api.searchProgramTitles(
         'tsn', isCurrent: any(named: 'isCurrent'),
       )).thenThrow(StateError('EPG unavailable'));
@@ -714,10 +639,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(vm.searchingProgramTitles, isFalse);
       expect(vm.filteredChannels.map((ch) => ch.id).toList(), ['tsn']);
-      expect(vm.nextSearchAiring, isNull);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
     });
 
-    test('does not suggest airings while a search is pending', () async {
+    test('does not show future matches while a search is pending', () async {
       final pending = Completer<List<Map<String, dynamic>>>();
       when(() => api.searchProgramTitles(
         'silo', isCurrent: any(named: 'isCurrent'),
@@ -725,10 +650,11 @@ void main() {
       await vm.load(windowStart: now);
       vm.setChannelQuery('silo');
       expect(vm.searchingProgramTitles, isTrue);
-      expect(vm.nextSearchAiring, isNull);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
       pending.complete([airing('future', 'tsn', end)]);
       await Future<void>.delayed(Duration.zero);
-      expect(vm.nextSearchAiring?.channelId, 'tsn');
+      expect(vm.filteredChannels.map((ch) => ch.id), ['tsn']);
+      expect(vm.futureSearchMatchForChannel('tsn')?.start, end);
     });
 
     test('respects Favorites when only some channels are saved', () async {
@@ -741,7 +667,11 @@ void main() {
         airing('tsn-late', 'tsn', end.add(const Duration(hours: 1))),
       ]);
       vm.setFilter(GuideFilter.favorites);
-      expect(vm.nextSearchAiring?.channelId, 'tsn');
+      expect(vm.filteredChannels.map((ch) => ch.id), ['tsn']);
+      expect(
+        vm.futureSearchMatchForChannel('tsn')?.start,
+        end.add(const Duration(hours: 1)),
+      );
     });
 
     test('respects the selected channel group', () async {
@@ -768,18 +698,23 @@ void main() {
       groupedVm.setGroup('Sports');
       groupedVm.setChannelQuery('silo');
       await Future<void>.delayed(Duration.zero);
-      expect(groupedVm.nextSearchAiring?.channelId, 'tsn');
+      expect(groupedVm.filteredChannels.map((ch) => ch.id), ['tsn']);
+      expect(
+        groupedVm.futureSearchMatchForChannel('tsn')?.start,
+        end.add(const Duration(hours: 1)),
+      );
     });
 
-    test('does not suggest airings outside Favorites or genre scope', () async {
+    test('does not show future-only channels outside the active filter', () async {
       await search([
         airing('espn-early', 'espn', end),
         airing('tsn-late', 'tsn', end.add(const Duration(hours: 1))),
       ]);
       vm.setFilter(GuideFilter.favorites);
-      expect(vm.nextSearchAiring, isNull);
+      expect(vm.filteredChannels, isEmpty);
       vm.setFilter(GuideFilter.sports);
-      expect(vm.nextSearchAiring, isNull);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.filteredChannels, isEmpty);
     });
   });
 

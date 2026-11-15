@@ -11200,22 +11200,9 @@
       "title": { "type": "String" }
     }
   },
-  "guideNoProgramsThisWindow": "No programs found in this time window",
-  "@guideNoProgramsThisWindow": {
-    "description": "Empty Live TV guide search when matching programs are scheduled later."
-  },
   "guideNoProgramsFound": "No programs found",
   "@guideNoProgramsFound": {
     "description": "Empty Live TV guide search with no later matches."
-  },
-  "guideNextMatchingAiring": "Next airing matching \"{query}\": {date} at {time}",
-  "@guideNextMatchingAiring": {
-    "description": "Shows the next matching EPG airing after the current guide window.",
-    "placeholders": {
-      "query": { "type": "String" },
-      "date": { "type": "String" },
-      "time": { "type": "String" }
-    }
   },
   "guideNoLaterAirings": "No later airings matching \"{query}\" were found in the available guide data.",
   "@guideNoLaterAirings": {
@@ -11223,10 +11210,6 @@
     "placeholders": {
       "query": { "type": "String" }
     }
-  },
-  "guideJumpToNextAiring": "Jump to next airing",
-  "@guideJumpToNextAiring": {
-    "description": "TV remote button to move the Live TV guide to the next matching program."
   },
   "guideToday": "Today",
   "guideTomorrow": "Tomorrow",

@@ -802,35 +802,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           nextStart: next?.startDate,
         );
 
-  /// Finds the next search hit after this window in the current lineup.
-  /// Wait for the full search: progressive matches may not arrive in time order.
-  /// Program categories need genre information the search hits do not carry.
-  GuideTitleMatch? get nextSearchAiring {
-    if (_searchingProgramTitles ||
-        _channelQuery.length < 2 ||
-        (_filter != GuideFilter.all && _filter != GuideFilter.favorites)) {
-      return null;
-    }
-    final eligible = {
-      for (final channel in _channels)
-        if ((_selectedGroup == null ||
-                _channelGroups[channel.id]?.contains(_selectedGroup) == true) &&
-            (_filter != GuideFilter.favorites || channel.isFavorite))
-          channel.id,
-    };
-    final now = _now();
-    GuideTitleMatch? next;
-    for (final match in _programTitleMatches) {
-      if (!eligible.contains(match.channelId) ||
-          match.start.isBefore(_windowEnd) ||
-          !match.start.isAfter(now)) {
-        continue;
-      }
-      if (next == null || match.start.isBefore(next.start)) next = match;
-    }
-    return next;
-  }
-
   static bool _isCategory(GuideFilter filter) =>
       filter != GuideFilter.all && filter != GuideFilter.favorites;
 
@@ -1236,12 +1207,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   /// Moves the time window without entering the guide-wide loading state.
-  /// A search jump loads its matching channel first and leaves other rows to
-  /// the normal lazy loader, rather than waiting on old-window pages.
   Future<void> setWindowStart(
     DateTime start, {
     bool livePosition = false,
-    String? priorityChannelId,
   }) async {
     if (_disposed) return;
     if (start == _windowStart) {
@@ -1256,23 +1224,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
     _atLivePosition = livePosition;
-    if (priorityChannelId != null && !_isCategory(_filter)) {
-      // Old-window guide pages aren't useful to this search jump. Let the
-      // matched channel load immediately; other rows load as they are viewed.
-      _resetPrograms();
-      _updatePageRows();
-      final priorityChannel = _pageChannels
-          .where((channel) => channel.id == priorityChannelId)
-          .firstOrNull;
-      if (priorityChannel != null) {
-        unawaited(
-          _loadPriorityGuideChannel(priorityChannel, _programGeneration),
-        );
-      }
-      _notifyListeners();
-      return;
-    }
-
     final ids = _programsLoadedIds.toList();
     final generation = ++_programGeneration;
     if (_channelQuery.isNotEmpty) {
@@ -1296,22 +1247,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (replacements == null || generation != _programGeneration) return;
     _programsByChannel.addAll(replacements);
     _processedBoundaries.clear();
-    _notifyListeners();
-  }
-
-  Future<void> _loadPriorityGuideChannel(
-    GuideChannel channel,
-    int generation,
-  ) async {
-    try {
-      await _loadProgramsBatch([channel]);
-    } catch (error) {
-      if (!_disposed && generation == _programGeneration) {
-        debugPrint('Live TV search jump listings unavailable: $error');
-      }
-    }
-    if (_disposed || generation != _programGeneration) return;
-    _advanceProgramsCursor();
     _notifyListeners();
   }
 
