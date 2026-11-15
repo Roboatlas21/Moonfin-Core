@@ -471,6 +471,82 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   final Map<String, List<GuideProgram>> _programsByChannel = {};
 
+  // Small, session-local cache for returning to an already viewed EPG window.
+  // Every channel (including one with no listings) has an independent entry,
+  // so a different batch or channel search can still reuse its programs.
+  static const _windowCacheLimit = 4000;
+  final Map<
+    ({String channelId, DateTime from, DateTime to, GuideFilter? category}),
+    List<GuideProgram>
+  > _windowProgramCache = {};
+  int _windowCacheRevision = 0;
+
+  void _clearWindowProgramCache() {
+    _windowCacheRevision++;
+    _windowProgramCache.clear();
+  }
+
+  void _dropWindowCacheForChannels(Iterable<String> ids) {
+    final removed = ids.toSet();
+    _windowProgramCache.removeWhere((key, _) => removed.contains(key.channelId));
+    // Prevent any earlier in-flight response from refilling invalidated entries.
+    _windowCacheRevision++;
+  }
+
+  void _rememberWindowPrograms(
+    ({String channelId, DateTime from, DateTime to, GuideFilter? category}) key,
+    List<GuideProgram> programs,
+  ) {
+    _windowProgramCache.remove(key);
+    if (_windowProgramCache.length >= _windowCacheLimit) {
+      _windowProgramCache.remove(_windowProgramCache.keys.first);
+    }
+    _windowProgramCache[key] = List<GuideProgram>.unmodifiable(programs);
+  }
+
+  Future<Map<String, List<GuideProgram>>> _cachedGuidePrograms(
+    List<String> ids, {
+    required DateTime from,
+    required DateTime to,
+    GuideFilter? category,
+  }) async {
+    if (ids.isEmpty) return {};
+    final revision = _windowCacheRevision;
+    final session = userDataSync.session;
+    final result = <String, List<GuideProgram>>{};
+    final missing = <String>[];
+    for (final id in ids) {
+      final key = (channelId: id, from: from, to: to, category: category);
+      final cached = _windowProgramCache[key];
+      if (cached == null) {
+        missing.add(id);
+      } else if (cached.isNotEmpty) {
+        result[id] = List<GuideProgram>.of(cached);
+      }
+    }
+    if (missing.isEmpty) return result;
+    final raw = await _fetchGuide(
+      channelIds: missing, from: from, to: to, category: category,
+    );
+    final parsed = _parsePrograms(raw);
+    for (final id in missing) {
+      final programs = List<GuideProgram>.of(parsed[id] ?? const []);
+      if (category != null) {
+        programs.removeWhere((program) => !_matches(category, program));
+      }
+      if (programs.isNotEmpty) result[id] = programs;
+      if (!_disposed &&
+          revision == _windowCacheRevision &&
+          session == userDataSync.session) {
+        _rememberWindowPrograms(
+          (channelId: id, from: from, to: to, category: category),
+          programs,
+        );
+      }
+    }
+    return result;
+  }
+
   Map<String, Set<String>> _channelGroups = {};
   Set<String>? _programmeCategories;
   Iterable<GuideFilter> get availableProgrammeCategories => filters.where(
@@ -986,6 +1062,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// reloads in full.
   Future<void> _refreshRecordingState() async {
     final recordingRevision = liveTvRecordingRevision.value;
+    _clearWindowProgramCache();
     try {
       if (_isCategory(_filter) && !_showingPreviousCategory) {
         await _refreshCategoryRows();
@@ -1052,6 +1129,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final lineupRequest = ++_lineupRequest;
+    // Full reloads are the authoritative freshness boundary.
+    _clearWindowProgramCache();
     if (window != null) _guideWindow = window;
     _windowStart =
         windowStart ??
@@ -1816,6 +1895,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (generation != _programGeneration) return;
 
     final parsed = _parsePrograms(response);
+    _dropWindowCacheForChannels(ids);
     for (final id in ids) {
       _programsByChannel[id] = parsed[id] ?? <GuideProgram>[];
     }
@@ -1936,6 +2016,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _clearWindowProgramCache();
 
     _programGeneration++;
     _loadGeneration++;
@@ -2088,9 +2169,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final replacements = <String, List<GuideProgram>>{};
     for (var i = 0; i < ids.length; i += _programBatchSize) {
       final chunk = ids.sublist(i, min(i + _programBatchSize, ids.length));
-      final response = await _fetchGuide(channelIds: chunk, from: from, to: to);
+      final parsed = await _cachedGuidePrograms(chunk, from: from, to: to);
       if (_disposed || generation != _programGeneration) return null;
-      final parsed = _parsePrograms(response);
       for (final id in chunk) {
         replacements[id] = parsed[id] ?? <GuideProgram>[];
       }
@@ -2180,6 +2260,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void _discardDeniedListings(List<String> ids, DioException error) {
     _loadGeneration++;
     _programGeneration++;
+    _clearWindowProgramCache();
     _categoryRequest++;
     _categoryFetchInFlight = false;
     _previousWindowCategory = null;
@@ -2203,23 +2284,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<Map<String, List<GuideProgram>>> _fetchPrograms(
     List<GuideChannel> batch, {
     GuideFilter? category,
-  }) async {
-    if (batch.isEmpty) return {};
-    final response = await _fetchGuide(
-      channelIds: batch.map((c) => c.id).toList(),
-      from: _windowStart,
-      to: _windowEnd,
-      category: category,
-    );
-    final byChannel = _parsePrograms(response);
-    if (category != null) {
-      byChannel.removeWhere((_, programs) {
-        programs.removeWhere((p) => !_matches(category, p));
-        return programs.isEmpty;
-      });
-    }
-    return byChannel;
-  }
+  }) => _cachedGuidePrograms(
+    batch.map((channel) => channel.id).toList(),
+    from: _windowStart,
+    to: _windowEnd,
+    category: category,
+  );
 
   /// Parses a guide response into start-ordered programs keyed by channel id.
   Map<String, List<GuideProgram>> _parsePrograms(
@@ -2521,25 +2591,27 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         final now = _usesPlaybackLineup && _state == GuideState.ready
             ? _now()
             : null;
-        Future<Map<String, dynamic>?> read() async {
+        Future<Map<String, List<GuideProgram>>?> read() async {
           if (!current()) return null;
-          return _fetchGuide(
-            channelIds: ids,
-            from: now?.subtract(rollingRefreshLookback) ?? _windowStart,
-            to: now?.add(rollingRefreshHorizon) ?? _windowEnd,
+          final from = now?.subtract(rollingRefreshLookback) ?? _windowStart;
+          final to = now?.add(rollingRefreshHorizon) ?? _windowEnd;
+          if (!_usesPlaybackLineup) {
+            return _cachedGuidePrograms(ids, from: from, to: to);
+          }
+          final response = await _fetchGuide(
+            channelIds: ids, from: from, to: to,
           );
+          return _parsePrograms(response);
         }
 
         // Share the retry between cards waiting for the same listings.
-        final response = _usesPlaybackLineup
+        final parsed = _usesPlaybackLineup
             ? await retryOnTransientFailure(
                 read,
                 backoff: const [Duration(milliseconds: 250)],
               )
             : await read();
-        if (response == null || !current()) return false;
-
-        final parsed = _parsePrograms(response);
+        if (parsed == null || !current()) return false;
         _failedCarouselIds.removeAll(ids);
         for (final id in ids) {
           // Don't overwrite newer listings if a page refresh finished first.

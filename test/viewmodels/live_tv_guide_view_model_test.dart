@@ -1184,6 +1184,72 @@ void main() {
     expect(vm.programsHighWater, 120);
   });
 
+  group('guide window cache', () {
+    test('revisiting a window reuses listings including empty channels', () async {
+      final now = DateTime.utc(2026, 11, 14, 17);
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      final requested = <DateTime>[];
+      when(() => _guide(liveTv)).thenAnswer((call) async {
+        final from = call.namedArguments[#startDate] as DateTime;
+        requested.add(from);
+        return {'Items': [_program('p-${from.hour}', 'c0', start: from)]};
+      });
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      expect(vm.programsForChannel('c0').single.id, 'p-17');
+      await vm.shiftWindow(const Duration(hours: 3));
+      expect(vm.programsForChannel('c0').single.id, 'p-20');
+      await vm.shiftWindow(const Duration(hours: -3));
+      expect(vm.programsForChannel('c0').single.id, 'p-17');
+      expect(vm.programsForChannel('c1'), isEmpty);
+      expect(requested, [now, now.add(const Duration(hours: 3))]);
+    });
+
+    test('category windows reuse the cached filtered guide', () async {
+      final now = DateTime.utc(2026, 11, 14, 17);
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      final requests = <DateTime>[];
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((call) async {
+            final from = call.namedArguments[#startDate] as DateTime;
+            requests.add(from);
+            return {'Items': [_program('sport', 'c0', start: from, isSports: true)]};
+          });
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c0']);
+      await vm.shiftWindow(const Duration(hours: 3));
+      await vm.shiftWindow(const Duration(hours: -3));
+      expect(vm.filteredChannels.map((c) => c.id), ['c0']);
+      expect(requests, [now, now.add(const Duration(hours: 3))]);
+    });
+
+    test('full reload discards cached guide windows', () async {
+      final now = DateTime.utc(2026, 11, 14, 17);
+      _stubChannels(liveTv, [_channel('c0')]);
+      var revisions = 0;
+      when(() => _guide(liveTv)).thenAnswer((call) async {
+        revisions++;
+        final from = call.namedArguments[#startDate] as DateTime;
+        return {'Items': [_program('v$revisions', 'c0', start: from)]};
+      });
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      await vm.shiftWindow(const Duration(hours: 3));
+      await vm.shiftWindow(const Duration(hours: -3));
+      expect(revisions, 2);
+      await vm.load(windowStart: now);
+      expect(revisions, 3);
+      expect(vm.programsForChannel('c0').single.id, 'v3');
+    });
+  });
+
   test('a stale response for a superseded window is discarded', () async {
     final pending = <Completer<Map<String, dynamic>>>[];
     when(
