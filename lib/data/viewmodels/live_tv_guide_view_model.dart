@@ -1668,6 +1668,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> loadMorePrograms() async {
     final generation = _programGeneration;
     final pageGeneration = _pageGeneration;
+    final searchRequest = _titleSearchRequest;
     final page = _isCategory(_filter)
         ? (_filter, _categoryRequest)
         : (null, pageGeneration);
@@ -1688,9 +1689,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         generation == _programGeneration &&
         pageGeneration == _pageGeneration;
     _loadingMorePage = page;
+    var categoryPageCompleted = false;
     try {
       if (_isCategory(_filter)) {
         await _walkCategory();
+        categoryPageCompleted = true;
       } else {
         await _loadNextBatch();
       }
@@ -1717,11 +1720,20 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } finally {
       if (_loadingMorePage == page) {
         _loadingMorePage = null;
-        // If a reload interrupted this batch, continue once the guide is ready.
+        // Resume a search that changed during this lazy category page, without
+        // retrying failed requests or fetching already-checked channels.
+        final needsSearchCatchUp =
+            categoryPageCompleted &&
+            _isCategory(_filter) &&
+            (_filter, _categoryRequest) == page &&
+            _categoryLoadedFor == _filter &&
+            searchRequest != _titleSearchRequest &&
+            _needsCategorySearchPage();
         if (!_disposed &&
             _state == GuideState.ready &&
             (generation != _programGeneration ||
-                pageGeneration != _pageGeneration) &&
+                pageGeneration != _pageGeneration ||
+                needsSearchCatchUp) &&
             hasMorePrograms) {
           unawaited(loadMorePrograms());
         }

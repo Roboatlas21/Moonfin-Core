@@ -2464,6 +2464,76 @@ void main() {
       expect(vm.hasMorePrograms, isTrue);
     });
 
+    test('search changes during lazy category paging load only missing matches', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 500; i++) {
+          ..._channel('c$i', number: '$i'),
+          if (i == 420 || i == 430) 'Name': 'TSN $i',
+        },
+      ]);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      final pendingPage = Completer<Map<String, dynamic>>();
+      final requested = <List<String>>[];
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((invocation) {
+            final ids = List<String>.from(_requestedIds(invocation));
+            requested.add(ids);
+            if (ids.first == 'c200') return pendingPage.future;
+            return Future.value({
+              'Items': [
+                for (final id in ids)
+                  if (int.parse(id.substring(1)) < 24 || id == 'c420')
+                    _program('sport-$id', id, start: now, isSports: true),
+              ],
+            });
+          });
+      when(() => api.searchProgramTitles(
+        'tsn', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.filteredChannels, hasLength(24));
+      expect(requested, hasLength(1));
+
+      final lazyPage = vm.loadMorePrograms();
+      await pumpEventQueue();
+      expect(requested, hasLength(2));
+      expect(requested.last.first, 'c200');
+
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(vm.filteredChannels, isEmpty);
+      expect(requested, hasLength(2));
+
+      // The previous page completes with enough unrelated Sports programs
+      // that its original paging loop would stop without checking TSN.
+      pendingPage.complete({
+        'Items': [
+          for (var i = 200; i < 224; i++)
+            _program('sport-c$i', 'c$i', start: now, isSports: true),
+        ],
+      });
+      await lazyPage;
+      await pumpEventQueue();
+
+      expect(requested, hasLength(3));
+      expect(requested.last, ['c420', 'c430']);
+      expect(vm.filteredChannels.map((c) => c.id), ['c420']);
+      expect(vm.programsForChannel('c0').single.isSports, isTrue);
+      expect(vm.programsForChannel('c200').single.isSports, isTrue);
+      expect(vm.hasMorePrograms, isFalse);
+      verify(() => api.searchProgramTitles(
+        'tsn', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
     test('a search change reuses an in-flight category page', () async {
       final api = _SearchableLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);
