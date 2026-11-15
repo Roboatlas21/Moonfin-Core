@@ -295,6 +295,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int _categoryHighWater = 0;
   int? _checkedCategorySearchRows;
   final Set<String> _categoryQueriedIds = <String>{};
+  // A targeted channel check may overlap a lazy page. Wait for its result
+  // instead of issuing another request for the same channel.
+  final Map<String, ({int request, Future<bool> done})>
+  _targetedCategoryRequests = {};
   GuideFilter? _categoryLoadedFor;
   // Keep the current listings visible while the new window loads.
   GuideFilter? _previousWindowCategory;
@@ -1179,8 +1183,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } finally {
       _recordingRefreshDepth--;
       if (_recordingRefreshDepth == 0) {
-        final resume = refreshed &&
-            (removedCategoryRows || _resumeCategoryPageAfterRefresh);
+        final interrupted = _resumeCategoryPageAfterRefresh;
+        final resume = refreshed && (removedCategoryRows || interrupted);
         _resumeCategoryPageAfterRefresh = false;
         if (resume &&
             !_disposed &&
@@ -1189,7 +1193,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             _categoryLoadedFor == _filter &&
             !_categoryFetchInFlight &&
             hasMorePrograms &&
-            _needsCategorySearchPage()) {
+            (_needsCategorySearchPage() ||
+                (interrupted && _categoryHighWater == 0))) {
           // A page still in flight will resume itself when it finishes.
           unawaited(loadMorePrograms());
         }
@@ -1370,13 +1375,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> _loadCategoryPrograms() async {
     _resetCategory();
     final request = _categoryRequest;
+    final cacheRevision = _windowCacheRevision;
+    var interrupted = false;
     _categoryFetchInFlight = true;
     _listingsStatePage = null;
     _error = null;
     _state = GuideState.loading;
     _notifyListeners();
     try {
-      await _walkCategory();
+      interrupted = !await _walkCategory();
       if (request != _categoryRequest) return;
       _categoryLoadedFor = _filter;
       _state = GuideState.ready;
@@ -1392,6 +1399,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_state == GuideState.ready && _channelQuery.isNotEmpty) {
       _applyChannelSearchRows();
     }
+    if (_state == GuideState.ready &&
+        interrupted &&
+        cacheRevision != _windowCacheRevision &&
+        hasMorePrograms) {
+      if (_recordingRefreshDepth > 0) {
+        _resumeCategoryPageAfterRefresh = true;
+      } else {
+        unawaited(loadMorePrograms());
+      }
+    }
   }
 
   /// Look up one channel outside the loaded page of a program category.
@@ -1401,10 +1418,29 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (!_isCategory(category) || _categoryLoadedFor != category) return false;
     if (_categoryPrograms.containsKey(channelId)) return true;
     if (_categoryQueriedIds.contains(channelId)) return false;
+    final request = _categoryRequest;
+    final pending = _targetedCategoryRequests[channelId];
+    if (pending != null && pending.request == request) return pending.done;
     final channel = _pageChannels.where((c) => c.id == channelId).firstOrNull;
     if (channel == null) return false;
 
-    final request = _categoryRequest;
+    final done = _loadTargetedCategoryChannel(channel, category, request);
+    _targetedCategoryRequests[channelId] = (request: request, done: done);
+    try {
+      return await done;
+    } finally {
+      if (identical(_targetedCategoryRequests[channelId]?.done, done)) {
+        _targetedCategoryRequests.remove(channelId);
+      }
+    }
+  }
+
+  Future<bool> _loadTargetedCategoryChannel(
+    GuideChannel channel,
+    GuideFilter category,
+    int request,
+  ) async {
+    final channelId = channel.id;
     final completedIds = <String>{};
     final programs = await _fetchPrograms(
       [channel], category: category, completedIds: completedIds,
@@ -1430,7 +1466,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       ? _categoryBatchSize
       : _programBatchSize;
 
-  Future<void> _walkCategory() async {
+  Future<bool> _walkCategory() async {
     final request = _categoryRequest;
     final filter = _filter;
     // Server-classified search hits need no separate category verification.
@@ -1453,17 +1489,41 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final fetched = await _fetchPrograms(
         batch, category: filter, completedIds: completedIds,
       );
-      if (request != _categoryRequest) return;
-      // An overlapping targeted lookup may own a few of these channels.
-      // Leave those pending rather than treating a stale reply as "no match".
+      if (request != _categoryRequest) return false;
       _categoryQueriedIds.addAll(completedIds);
       _advanceCategoryCursor();
       if (fetched.isNotEmpty) {
         _categoryPrograms.addAll(fetched);
         _notifyListeners();
       }
-      if (completedIds.length != batch.length) return;
+      if (completedIds.length != batch.length) {
+        final unresolved = [
+          for (final channel in batch)
+            if (!_categoryQueriedIds.contains(channel.id)) channel.id,
+        ];
+        if (unresolved.isNotEmpty) {
+          final waiting = <Future<bool>>[];
+          for (final id in unresolved) {
+            final targeted = _targetedCategoryRequests[id];
+            // An invalidated response has no active lookup to await.
+            if (targeted == null || targeted.request != request) return false;
+            waiting.add(targeted.done);
+          }
+          try {
+            await Future.wait(waiting);
+          } catch (_) {
+            // A failed lookup is not retried automatically.
+            return false;
+          }
+          if (request != _categoryRequest) return false;
+          _advanceCategoryCursor();
+          if (unresolved.any((id) => !_categoryQueriedIds.contains(id))) {
+            return false;
+          }
+        }
+      }
     }
+    return true;
   }
 
   void _resetCategory({bool keepRows = false}) {
@@ -1915,9 +1975,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         pageGeneration == _pageGeneration;
     _loadingMorePage = page;
     var categoryPageCompleted = false;
+    var categoryPageInterrupted = false;
     try {
       if (_isCategory(_filter)) {
-        await _walkCategory();
+        categoryPageInterrupted = !await _walkCategory();
         categoryPageCompleted = true;
       } else {
         await _loadNextBatch();
@@ -1958,6 +2019,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         }
         final cacheInvalidatedDuringPage =
             categoryPageCompleted &&
+            categoryPageInterrupted &&
             _isCategory(_filter) &&
             (_filter, _categoryRequest) == page &&
             cacheRevision != _windowCacheRevision;
@@ -1966,7 +2028,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           _resumeCategoryPageAfterRefresh = true;
         }
         final needsSearchCatchUp =
-            (searchChangedDuringPage || cacheInvalidatedDuringPage) &&
+            ((searchChangedDuringPage && !categoryPageInterrupted) ||
+                cacheInvalidatedDuringPage) &&
             _needsCategorySearchPage();
         if (!_disposed &&
             _recordingRefreshDepth == 0 &&

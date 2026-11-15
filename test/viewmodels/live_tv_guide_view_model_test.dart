@@ -3244,7 +3244,7 @@ void main() {
             : 'newer negative category result is not replaced by an old match',
         () async {
           _stubChannels(liveTv, [
-            for (var i = 0; i < 450; i++) _channel('c$i'),
+            for (var i = 0; i < 450; i++) _channel('c$i', number: '$i'),
           ]);
           when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
           final olderPage = Completer<Map<String, dynamic>>();
@@ -3304,6 +3304,73 @@ void main() {
           } else {
             expect(vm.programsForChannel('c210'), isEmpty);
           }
+        },
+      );
+    }
+
+    for (final finishCategoryFirst in [true, false]) {
+      test(
+        finishCategoryFirst
+            ? 'initial category resumes after recording refresh completes'
+            : 'initial category resumes after late page arrives',
+        () async {
+          _stubChannels(liveTv, [
+            for (var i = 0; i < 450; i++) _channel('c$i', number: '$i'),
+          ]);
+          final firstCategory = Completer<Map<String, dynamic>>();
+          final recordingGuide = Completer<Map<String, dynamic>>();
+          var holdRecordingGuide = false;
+          final requested = <List<String>>[];
+          when(() => _guide(liveTv)).thenAnswer((_) =>
+              holdRecordingGuide ? recordingGuide.future :
+              Future.value({'Items': []}));
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenAnswer((call) {
+                final ids = List<String>.of(_requestedIds(call));
+                requested.add(ids);
+                if (requested.length == 1) return firstCategory.future;
+                return Future.value({
+                  'Items': [
+                    for (final id in ids.take(25))
+                      _program('current-$id', id, isSports: true),
+                  ],
+                });
+              });
+
+          final vm = LiveTvGuideViewModel(client);
+          addTearDown(vm.dispose);
+          await vm.load();
+          vm.setFilter(GuideFilter.sports);
+          await pumpEventQueue();
+          expect(vm.state, GuideState.loading);
+          expect(requested, hasLength(1));
+
+          holdRecordingGuide = true;
+          final refreshing = vm.recordingChanged();
+          await pumpEventQueue();
+          if (finishCategoryFirst) {
+            firstCategory.complete({'Items': [
+              _program('superseded', 'c0', isSports: true),
+            ]});
+            await pumpEventQueue();
+            expect(requested, hasLength(1));
+            recordingGuide.complete({'Items': []});
+            await refreshing;
+          } else {
+            recordingGuide.complete({'Items': []});
+            await refreshing;
+            expect(requested, hasLength(1));
+            firstCategory.complete({'Items': [
+              _program('superseded', 'c0', isSports: true),
+            ]});
+          }
+          await pumpEventQueue();
+          expect(vm.state, GuideState.ready);
+          expect(requested, hasLength(2));
+          expect(requested.last.first, 'c0');
+          expect(vm.filteredChannels, hasLength(25));
+          expect(vm.programsForChannel('c0').single.id, 'current-c0');
+          expect(vm.hasMorePrograms, isTrue);
         },
       );
     }
@@ -3385,6 +3452,74 @@ void main() {
           expect(requested.where((ids) => ids.contains('c420')), hasLength(1));
           expect(vm.filteredChannels.map((c) => c.id), ['c420']);
           expect(vm.programsForChannel('c420').single.isSports, isTrue);
+          expect(vm.hasMorePrograms, isFalse);
+        },
+      );
+    }
+
+    for (final targetedFinishesFirst in [true, false]) {
+      test(
+        targetedFinishesFirst
+            ? 'completed targeted lookup lets category paging advance'
+            : 'category paging waits for a pending targeted lookup',
+        () async {
+          _stubChannels(liveTv, [
+            for (var i = 0; i < 500; i++) _channel('c$i', number: '$i'),
+          ]);
+          final oldPage = Completer<Map<String, dynamic>>();
+          final targetReply = Completer<Map<String, dynamic>>();
+          final requested = <List<String>>[];
+          when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenAnswer((call) {
+                final ids = List<String>.of(_requestedIds(call));
+                requested.add(ids);
+                if (ids.first == 'c200') return oldPage.future;
+                if (ids.length == 1 && ids.single == 'c210') {
+                  return targetReply.future;
+                }
+                return Future.value({
+                  'Items': [
+                    for (final id in ids)
+                      if (int.parse(id.substring(1)) < 24 || id == 'c420')
+                        _program('sport-$id', id, isSports: true),
+                  ],
+                });
+              });
+
+          final vm = LiveTvGuideViewModel(client);
+          addTearDown(vm.dispose);
+          await vm.load();
+          vm.setFilter(GuideFilter.sports);
+          await pumpEventQueue();
+          expect(vm.filteredChannels, hasLength(24));
+
+          final paging = vm.loadMorePrograms();
+          await pumpEventQueue();
+          expect(requested.last.first, 'c200');
+          final targeted = vm.ensureCategoryChannel('c210');
+          await pumpEventQueue();
+          expect(requested.last, ['c210']);
+
+          if (targetedFinishesFirst) {
+            targetReply.complete({'Items': []});
+            expect(await targeted, isFalse);
+            oldPage.complete({'Items': []});
+          } else {
+            oldPage.complete({'Items': []});
+            await pumpEventQueue();
+            expect(requested.any((ids) => ids.first == 'c400'), isFalse);
+            targetReply.complete({'Items': []});
+            expect(await targeted, isFalse);
+          }
+          await paging;
+          expect(requested.where((ids) => ids.first == 'c400'), hasLength(1));
+          expect(requested.where((ids) =>
+              ids.length == 1 && ids.single == 'c210'), hasLength(1));
+          expect(vm.filteredChannels.map((c) => c.id), [
+            for (var i = 0; i < 24; i++) 'c$i',
+            'c420',
+          ]);
           expect(vm.hasMorePrograms, isFalse);
         },
       );
