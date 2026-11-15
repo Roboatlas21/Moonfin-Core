@@ -1267,6 +1267,49 @@ void main() {
       expect(requests.last.ids, ['c0', 'c1']);
     });
 
+    test('older guide replies cannot replace a newer window cache entry', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [_channel('c0')]);
+      final laterReplies = <Completer<Map<String, dynamic>>>[];
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == later) {
+          final pending = Completer<Map<String, dynamic>>();
+          laterReplies.add(pending);
+          return pending.future;
+        }
+        return Future.value({
+          'Items': [_program('base', 'c0', start: start)],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      final older = vm.setWindowStart(later);
+      await pumpEventQueue();
+      expect(laterReplies, hasLength(1));
+      await vm.setWindowStart(start);
+      final newer = vm.setWindowStart(later);
+      await pumpEventQueue();
+      expect(laterReplies, hasLength(2));
+
+      laterReplies.last.complete({
+        'Items': [_program('newer', 'c0', start: later)],
+      });
+      await newer;
+      laterReplies.first.complete({
+        'Items': [_program('older', 'c0', start: later)],
+      });
+      await older;
+
+      await vm.setWindowStart(start);
+      await vm.setWindowStart(later);
+      expect(laterReplies, hasLength(2));
+      expect(vm.programsForChannel('c0').single.id, 'newer');
+    });
+
     test('expired category windows refetch on demand', () async {
       final start = DateTime.utc(2026, 11, 14, 17);
       var clock = start;
@@ -2408,6 +2451,73 @@ void main() {
         },
       );
     }
+
+    test('revisiting category search refreshes expired positive and negative matches', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 450; i++) {
+          ..._channel('c$i', number: '$i'),
+          if (i == 420 || i == 430) 'Name': 'TSN $i',
+        },
+      ]);
+      final start = DateTime.utc(2026, 11, 14, 17);
+      var clock = start;
+      final searched = <List<String>>[];
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((call) async {
+            final ids = List<String>.of(_requestedIds(call));
+            var revision = searched.length;
+            if (ids.contains('c420')) {
+              searched.add(ids);
+              revision = searched.length;
+            }
+            return {
+              'Items': [
+                for (final id in ids)
+                  if (int.parse(id.substring(1)) < 24 ||
+                      (id == 'c420' && revision == 1) ||
+                      (id == 'c430' && revision == 2))
+                    _program('sport-$id', id, start: start, isSports: true),
+              ],
+            };
+          });
+      when(() => api.searchProgramTitles(
+        'tsn', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+
+      final vm = LiveTvGuideViewModel(client, now: () => clock);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c420']);
+      expect(searched, [['c420', 'c430']]);
+
+      // A fresh positive/negative cache pair should not be requested again.
+      vm.setChannelQuery('');
+      await pumpEventQueue();
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(searched, hasLength(1));
+      expect(vm.filteredChannels.map((c) => c.id), ['c420']);
+
+      // The old positive disappears and the old negative becomes a match.
+      clock = clock.add(const Duration(minutes: 31));
+      vm.setChannelQuery('');
+      await pumpEventQueue();
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(searched, [
+        ['c420', 'c430'],
+        ['c420', 'c430'],
+      ]);
+      expect(vm.filteredChannels.map((c) => c.id), ['c430']);
+      expect(vm.programsForChannel('c430').single.isSports, isTrue);
+    });
 
     test('category prefetch count updates when the search candidates change', () async {
       final api = _SearchableLiveTvApi();

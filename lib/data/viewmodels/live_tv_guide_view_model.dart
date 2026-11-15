@@ -481,16 +481,23 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     ({String channelId, DateTime from, DateTime to, GuideFilter? category}),
     ({List<GuideProgram> programs, DateTime fetchedAt})
   > _windowProgramCache = {};
+  // Only the most recent request for each channel/window may populate it.
+  final Map<
+    ({String channelId, DateTime from, DateTime to, GuideFilter? category}),
+    Object
+  > _windowCacheRequests = {};
   int _windowCacheRevision = 0;
 
   void _clearWindowProgramCache() {
     _windowCacheRevision++;
     _windowProgramCache.clear();
+    _windowCacheRequests.clear();
   }
 
   void _dropWindowCacheForChannels(Iterable<String> ids) {
     final removed = ids.toSet();
     _windowProgramCache.removeWhere((key, _) => removed.contains(key.channelId));
+    _windowCacheRequests.removeWhere((key, _) => removed.contains(key.channelId));
     // Prevent any earlier in-flight response from refilling invalidated entries.
     _windowCacheRevision++;
   }
@@ -519,6 +526,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (ids.isEmpty) return {};
     final revision = _windowCacheRevision;
     final session = userDataSync.session;
+    final generation = _programGeneration;
+    final categoryRequest = _categoryRequest;
     final now = _now();
     final result = <String, List<GuideProgram>>{};
     final missing = <String>[];
@@ -537,25 +546,42 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
     }
     if (missing.isEmpty) return result;
-    final raw = await _fetchGuide(
-      channelIds: missing, from: from, to: to, category: category,
-    );
-    final parsed = _parsePrograms(raw);
-    final fetchedAt = _now();
-    for (final id in missing) {
-      final programs = List<GuideProgram>.of(parsed[id] ?? const []);
-      if (category != null) {
-        programs.removeWhere((program) => !_matches(category, program));
-      }
-      if (programs.isNotEmpty) result[id] = programs;
-      if (!_disposed &&
-          revision == _windowCacheRevision &&
-          session == userDataSync.session) {
-        _rememberWindowPrograms(
-          (channelId: id, from: from, to: to, category: category),
-          programs,
-          fetchedAt,
+    final request = Object();
+    final keys = [
+      for (final id in missing)
+        (channelId: id, from: from, to: to, category: category),
+    ];
+    for (final key in keys) {
+      _windowCacheRequests[key] = request;
+    }
+    try {
+      final raw = await _fetchGuide(
+        channelIds: missing, from: from, to: to, category: category,
+      );
+      final parsed = _parsePrograms(raw);
+      final fetchedAt = _now();
+      for (final key in keys) {
+        final programs = List<GuideProgram>.of(
+          parsed[key.channelId] ?? const [],
         );
+        if (category != null) {
+          programs.removeWhere((program) => !_matches(category, program));
+        }
+        if (programs.isNotEmpty) result[key.channelId] = programs;
+        if (!_disposed &&
+            revision == _windowCacheRevision &&
+            generation == _programGeneration &&
+            (category == null || categoryRequest == _categoryRequest) &&
+            session == userDataSync.session &&
+            identical(_windowCacheRequests[key], request)) {
+          _rememberWindowPrograms(key, programs, fetchedAt);
+        }
+      }
+    } finally {
+      for (final key in keys) {
+        if (identical(_windowCacheRequests[key], request)) {
+          _windowCacheRequests.remove(key);
+        }
       }
     }
     return result;
@@ -730,16 +756,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final query = text.trim().toLowerCase();
     if (_channelQuery == query) return;
     _channelQuery = query;
-    _startProgramTitleSearch();
+    _startProgramTitleSearch(recheckExpiredCategory: true);
   }
 
-  void _startProgramTitleSearch({bool preserveMatches = false}) {
+  void _startProgramTitleSearch({
+    bool preserveMatches = false,
+    bool recheckExpiredCategory = false,
+  }) {
     final request = ++_titleSearchRequest;
     // Keep the existing results visible during a full-guide refresh. A
     // completed search replaces them; an error stays debug-only.
     if (!preserveMatches) _setTitleMatches(const []);
     _searchingProgramTitles = _channelQuery.length >= 2;
-    _applyChannelSearchRows();
+    _applyChannelSearchRows(recheckExpiredCategory: recheckExpiredCategory);
     if (_searchingProgramTitles) {
       unawaited(_searchProgramTitles(_channelQuery, request));
     }
@@ -764,11 +793,57 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     return unchecked && visible < _categoryMinRowsPerPage;
   }
 
+  // Only revisit expired channel-name results; program-title hits already
+  // carry server classification and need no category verification.
+  void _expireCheckedCategorySearchResults() {
+    if (_channelQuery.isEmpty ||
+        !_isCategory(_filter) ||
+        _categoryLoadedFor != _filter ||
+        _showingPreviousCategory) {
+      return;
+    }
+    final now = _now();
+    var changed = false;
+    for (final channel in _pageChannels) {
+      final id = channel.id;
+      if (!_categoryQueriedIds.contains(id) ||
+          (!channel.name.toLowerCase().contains(_channelQuery) &&
+              !(channel.number?.toLowerCase().contains(_channelQuery) ?? false))) {
+        continue;
+      }
+      final key = (
+        channelId: id,
+        from: _windowStart,
+        to: _windowEnd,
+        category: _filter,
+      );
+      final cached = _windowProgramCache[key];
+      if (cached != null &&
+          !now.isBefore(cached.fetchedAt) &&
+          now.difference(cached.fetchedAt) < _windowCacheTtl) {
+        continue;
+      }
+      _categoryQueriedIds.remove(id);
+      _categoryPrograms.remove(id);
+      changed = true;
+    }
+    if (changed) {
+      _categoryHighWater = 0;
+      _advanceCategoryCursor();
+    }
+  }
+
   // A search changes the candidate rows, not the category or guide window.
   // Already-checked category programs (including empty results) remain valid.
-  void _applyChannelSearchRows() {
+  void _applyChannelSearchRows({bool recheckExpiredCategory = false}) {
     final rowsChanged = _updatePageRows();
     if (_isCategory(_filter)) {
+      // Let an in-flight page finish first; its completion path will recheck.
+      if (recheckExpiredCategory &&
+          !_categoryFetchInFlight &&
+          _loadingMorePage != (_filter, _categoryRequest)) {
+        _expireCheckedCategorySearchResults();
+      }
       _notifyListeners();
       if (_state == GuideState.ready &&
           _categoryLoadedFor == _filter &&
@@ -1818,13 +1893,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _loadingMorePage = null;
         // Resume a search that changed during this lazy category page, without
         // retrying failed requests or fetching already-checked channels.
-        final needsSearchCatchUp =
+        final searchChangedDuringPage =
             categoryPageCompleted &&
             _isCategory(_filter) &&
             (_filter, _categoryRequest) == page &&
             _categoryLoadedFor == _filter &&
-            searchRequest != _titleSearchRequest &&
-            _needsCategorySearchPage();
+            searchRequest != _titleSearchRequest;
+        if (searchChangedDuringPage && _state == GuideState.ready) {
+          _expireCheckedCategorySearchResults();
+        }
+        final needsSearchCatchUp =
+            searchChangedDuringPage && _needsCategorySearchPage();
         if (!_disposed &&
             _state == GuideState.ready &&
             (generation != _programGeneration ||
