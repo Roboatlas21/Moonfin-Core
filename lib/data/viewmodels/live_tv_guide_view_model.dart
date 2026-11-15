@@ -731,8 +731,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // Keep all EPG title-hit channels available to the existing category loader.
   // Only display one after its category-filtered guide actually contains a
   // matching program. Channel-name and number matches still work normally.
-  bool _categoryRowMatchesSearch(GuideChannel channel) {
-    final programs = _categoryPrograms[channel.id];
+  bool _categoryRowMatchesSearch(
+    GuideChannel channel, {
+    Map<String, List<GuideProgram>>? programsByChannel,
+  }) {
+    final programs = (programsByChannel ?? _categoryPrograms)[channel.id];
     if (programs == null) return false;
     if (_channelQuery.length < 2 ||
         channel.name.toLowerCase().contains(_channelQuery) ||
@@ -747,8 +750,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     );
   }
 
-  int _visibleCategoryRowCount() =>
-      _pageChannels.where(_categoryRowMatchesSearch).length;
+  int _visibleCategoryRowCount({
+    Map<String, List<GuideProgram>>? programsByChannel,
+    List<GuideChannel>? rows,
+  }) => (rows ?? _pageChannels).where(
+    (channel) => _categoryRowMatchesSearch(
+      channel,
+      programsByChannel: programsByChannel,
+    ),
+  ).length;
 
   List<GuideChannel> get filteredChannels {
     if (!_isCategory(_filter)) return _pageChannels;
@@ -1531,7 +1541,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           );
           if (!samePage()) break;
           if (end >= _requestedPageDepth &&
-              (category == null || fetched.length >= _categoryMinRowsPerPage)) {
+              (category == null ||
+                  _visibleCategoryRowCount(
+                    rows: rows,
+                    programsByChannel: fetched,
+                  ) >= _categoryMinRowsPerPage)) {
             break;
           }
         }

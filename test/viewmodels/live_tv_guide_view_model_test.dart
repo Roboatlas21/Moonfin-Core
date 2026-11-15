@@ -2025,6 +2025,123 @@ void main() {
 
   group('category filters', () {
 
+    for (final hasLaterMatch in [true, false]) {
+      test(
+        hasLaterMatch
+            ? 'window reload reaches a matching category program beyond page one'
+            : 'window reload exhausts candidates when zero category programs match',
+        () async {
+          final api = _SearchableLiveTvApi();
+          when(() => client.liveTvApi).thenReturn(api);
+          when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+          _stubChannels(api, [
+            for (var i = 0; i < 450; i++) _channel('c$i'),
+          ]);
+          final now = DateTime.utc(2026, 11, 14, 17);
+          final later = now.add(const Duration(hours: 3));
+          final laterPages = <List<String>>[];
+
+          when(() => _guide(api, category: GuideFilter.sports)).thenAnswer(
+            (invocation) async {
+              final start = invocation.namedArguments[#startDate] as DateTime;
+              final ids = _requestedIds(invocation);
+              final laterWindow = start.isAtSameMomentAs(later);
+              if (laterWindow) laterPages.add(ids);
+              return {
+                'Items': [
+                  for (final id in ids)
+                    {
+                      ..._program(
+                        'sport-$id',
+                        id,
+                        start: start,
+                        isSports: true,
+                      ),
+                      'Name': laterWindow && hasLaterMatch && id == 'c420'
+                          ? 'Soccer Tournament'
+                          : 'SportsCentre',
+                    },
+                ],
+              };
+            },
+          );
+          when(() => api.searchProgramTitles(
+            'soccer',
+            isCurrent: any(named: 'isCurrent'),
+          )).thenAnswer((_) async => [
+            for (var i = 0; i < 450; i++)
+              {
+                'Id': 'airing-$i',
+                'Type': 'Program',
+                'ChannelId': 'c$i',
+                'Name': 'Soccer',
+                'StartDate': later.toIso8601String(),
+                'EndDate': later.add(const Duration(minutes: 30))
+                    .toIso8601String(),
+              },
+          ]);
+
+          final vm = LiveTvGuideViewModel(client, now: () => now);
+          addTearDown(vm.dispose);
+          await vm.load(windowStart: now);
+          vm.setFilter(GuideFilter.sports);
+          await pumpEventQueue();
+          vm.setChannelQuery('soccer');
+          await pumpEventQueue();
+          // The only search hits are beyond the initial guide window.
+          expect(vm.filteredChannels, isEmpty);
+
+          await vm.shiftWindow(const Duration(hours: 3));
+          expect(vm.state, GuideState.ready);
+          expect(laterPages.map((ids) => ids.length), [200, 200, 50]);
+          expect(laterPages.last, contains('c420'));
+          expect(
+            vm.filteredChannels.map((c) => c.id),
+            hasLaterMatch ? ['c420'] : isEmpty,
+          );
+          expect(vm.hasMorePrograms, isFalse);
+          verify(() => api.searchProgramTitles(
+            'soccer',
+            isCurrent: any(named: 'isCurrent'),
+          )).called(1);
+        },
+      );
+    }
+
+    test('window reload without a search retains normal category paging', () async {
+      _stubChannels(
+        liveTv,
+        [for (var i = 0; i < 450; i++) _channel('c$i')],
+      );
+      final now = DateTime.utc(2026, 11, 14, 17);
+      final later = now.add(const Duration(hours: 3));
+      final laterPages = <List<String>>[];
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(
+        (invocation) async {
+          final start = invocation.namedArguments[#startDate] as DateTime;
+          final ids = _requestedIds(invocation);
+          if (start.isAtSameMomentAs(later)) laterPages.add(ids);
+          return {
+            'Items': [
+              for (final id in ids)
+                _program('sport-$id', id, start: start, isSports: true),
+            ],
+          };
+        },
+      );
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      await vm.shiftWindow(const Duration(hours: 3));
+
+      expect(laterPages.map((ids) => ids.length), [200]);
+      expect(vm.filteredChannels, hasLength(200));
+      expect(vm.hasMorePrograms, isTrue);
+    });
+
     test('search reuses already-checked category programs', () async {
       final api = _SearchableLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);
