@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'dart:developer' as developer;
 
 import 'package:dio/dio.dart';
@@ -405,15 +407,11 @@ class PlexLiveTvApi
         }
         break;
       }
-      final signature = [
-        for (final row in page)
-          if (row is Map)
-            (row['Metadata'] is Map
-                    ? (row['Metadata'] as Map)['ratingKey']
-                    : row['ratingKey'])
-                ?.toString() ??
-                '',
-      ].join(',');
+      // ratingKey alone is not reliable for guide entries: different pages
+      // can contain items without one (or multiple airings of the same item).
+      // Compare the returned contents so only a genuinely repeated page stops
+      // pagination.
+      final signature = jsonEncode(page);
       if (signature == previousPage) {
         throw StateError('Plex EPG search pagination did not advance');
       }

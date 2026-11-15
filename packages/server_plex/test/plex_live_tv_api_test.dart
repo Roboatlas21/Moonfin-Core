@@ -302,6 +302,118 @@ void main() {
     );
   });
 
+  test('paginates distinct DVR pages even without ratingKeys', () async {
+    final (dio, server) = _server();
+    const path = '/tv.plex.providers.epg.xmltv:2/library/search';
+    final starts = <int>[];
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path != path) {
+            handler.next(options);
+            return;
+          }
+          final start = int.parse(
+            options.uri.queryParameters['X-Plex-Container-Start'] ?? '0',
+          );
+          starts.add(start);
+          handler.resolve(
+            Response(
+              requestOptions: options,
+              data: {
+                'MediaContainer': {
+                  'totalSize': 400,
+                  'SearchResult': [
+                    for (var i = start; i < start + 200; i++)
+                      {
+                        'Metadata': {
+                          // Two different full pages contain no ratingKey.
+                          'type': 'movie',
+                          'title': 'Sintel $i',
+                          'Media': [
+                            {
+                              'channelIdentifier': '4',
+                              'beginsAt': 1792699380 + i * 3600,
+                              'endsAt': 1792702980 + i * 3600,
+                            },
+                          ],
+                        },
+                      },
+                  ],
+                },
+              },
+            ),
+          );
+        },
+      ),
+    );
+
+    final programs = await PlexLiveTvApi(dio).searchProgramTitles(
+      'Sintel',
+      isCurrent: () => true,
+    );
+    expect(starts, [0, 200]);
+    expect(programs, hasLength(400));
+    expect(programs.map((p) => p['Id']).toSet(), hasLength(400));
+    expect(programs.first['Name'], 'Sintel 0');
+    expect(programs.last['Name'], 'Sintel 399');
+    expect(
+      server.requests.where((request) => request.uri.path == path),
+      isEmpty,
+      reason: 'The interceptor should provide both pagination responses',
+    );
+  });
+
+  test('stops if a DVR repeats the exact same search page', () async {
+    final (dio, _) = _server();
+    const path = '/tv.plex.providers.epg.xmltv:2/library/search';
+    final starts = <String?>[];
+    final page = [
+      for (var i = 0; i < 200; i++)
+        {
+          'Metadata': {
+            'type': 'movie',
+            'title': 'Sintel $i',
+            'Media': [
+              {
+                'channelIdentifier': '4',
+                'beginsAt': 1792699380 + i * 3600,
+                'endsAt': 1792702980 + i * 3600,
+              },
+            ],
+          },
+        },
+    ];
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path != path) {
+            handler.next(options);
+            return;
+          }
+          starts.add(options.uri.queryParameters['X-Plex-Container-Start']);
+          handler.resolve(
+            Response(
+              requestOptions: options,
+              data: {
+                'MediaContainer': {'totalSize': 600, 'SearchResult': page},
+              },
+            ),
+          );
+        },
+      ),
+    );
+
+    final programs = await PlexLiveTvApi(dio).searchProgramTitles(
+      'Sintel',
+      isCurrent: () => true,
+    );
+    expect(starts, ['0', '200']);
+    expect(programs, hasLength(200));
+  });
+
   test('publishes DVR matches before the cloud search completes', () async {
     final (dio, _) = _server();
     final cloudRequested = Completer<void>();
