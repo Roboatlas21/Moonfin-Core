@@ -90,6 +90,20 @@ class EpgChannelCell extends StatelessWidget {
           ? null
           : _numberChip(number!, accent, _numberSize(width));
       final hasTopRow = chip != null || isFavorite;
+      // Keep the icon beside the focused name instead of giving a short
+      // marquee the full rail width. Long names still use the available width
+      // and scroll as before.
+      double? focusedNameWidth;
+      if (focused && hasFutureMatch) {
+        final painter = TextPainter(
+          text: TextSpan(text: name, style: nameStyle ?? const TextStyle()),
+          textDirection: Directionality.of(context),
+          textScaler: scaler,
+          maxLines: 1,
+        )..layout();
+        focusedNameWidth = painter.width + 2;
+        painter.dispose();
+      }
       return Row(
         children: [
           _logo((width * _logoWidthFactor).clamp(_logoMinWidth, _logoMaxWidth)),
@@ -133,7 +147,7 @@ class EpgChannelCell extends StatelessWidget {
                     Flexible(
                       child: focused
                           ? SizedBox(
-                              width: double.infinity,
+                              width: focusedNameWidth ?? double.infinity,
                               child: MarqueeText(
                                 text: name,
                                 style: nameStyle ?? const TextStyle(),
