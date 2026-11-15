@@ -1229,6 +1229,79 @@ void main() {
       expect(requests, [now, now.add(const Duration(hours: 3))]);
     });
 
+    test('guide windows expire after 30 minutes, including empty channels', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      var clock = start;
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      final requests = <({DateTime from, List<String> ids})>[];
+      when(() => _guide(liveTv)).thenAnswer((call) async {
+        final from = call.namedArguments[#startDate] as DateTime;
+        final ids = List<String>.of(_requestedIds(call));
+        requests.add((from: from, ids: ids));
+        return {
+          'Items': [
+            _program('revision-${requests.length}', 'c0', start: from),
+          ],
+        };
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => clock);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      await vm.shiftWindow(const Duration(hours: 3));
+      clock = clock.add(const Duration(minutes: 29, seconds: 59));
+      await vm.shiftWindow(const Duration(hours: -3));
+      expect(vm.programsForChannel('c0').single.id, 'revision-1');
+      expect(vm.programsForChannel('c1'), isEmpty);
+      expect(requests, hasLength(2));
+
+      clock = clock.add(const Duration(seconds: 1));
+      await vm.shiftWindow(const Duration(hours: 3));
+      expect(vm.programsForChannel('c0').single.id, 'revision-3');
+      expect(requests.map((r) => r.from), [
+        start,
+        start.add(const Duration(hours: 3)),
+        start.add(const Duration(hours: 3)),
+      ]);
+      // Both the positive and negative channel entries have expired.
+      expect(requests.last.ids, ['c0', 'c1']);
+    });
+
+    test('expired category windows refetch on demand', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      var clock = start;
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      final requests = <DateTime>[];
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((call) async {
+            final from = call.namedArguments[#startDate] as DateTime;
+            requests.add(from);
+            return {
+              'Items': [
+                _program('sport-${requests.length}', 'c0',
+                    start: from, isSports: true),
+              ],
+            };
+          });
+
+      final vm = LiveTvGuideViewModel(client, now: () => clock);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      await vm.shiftWindow(const Duration(hours: 3));
+      clock = clock.add(const Duration(minutes: 30));
+      await vm.shiftWindow(const Duration(hours: -3));
+      expect(vm.filteredChannels.map((c) => c.id), ['c0']);
+      expect(vm.programsForChannel('c0').single.id, 'sport-3');
+      expect(requests, [
+        start,
+        start.add(const Duration(hours: 3)),
+        start,
+      ]);
+    });
+
     test('full reload discards cached guide windows', () async {
       final now = DateTime.utc(2026, 11, 14, 17);
       _stubChannels(liveTv, [_channel('c0')]);
@@ -2335,6 +2408,56 @@ void main() {
         },
       );
     }
+
+    test('category prefetch count updates when the search candidates change', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 200; i++) {
+          ..._channel('c$i', number: '$i'),
+          if (i < 24) 'Name': 'TSN $i',
+          if (i >= 24 && i < 34) 'Name': 'ESPN $i',
+        },
+      ]);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((call) async => {
+            'Items': [
+              for (final id in _requestedIds(call))
+                if (int.parse(id.substring(1)) < 48)
+                  _program('sport-$id', id, start: now, isSports: true),
+            ],
+          });
+      for (final query in ['tsn', 'espn']) {
+        when(() => api.searchProgramTitles(
+          query, isCurrent: any(named: 'isCurrent'),
+        )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+      }
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.programsHighWater, 48);
+
+      clearInteractions(api);
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(vm.programsHighWater, 24);
+      // Row builders can consult this repeatedly without another traversal.
+      for (var i = 0; i < 30; i++) {
+        expect(vm.programsHighWater, 24);
+      }
+      vm.setChannelQuery('espn');
+      await pumpEventQueue();
+      expect(vm.programsHighWater, 10);
+      vm.setChannelQuery('');
+      await pumpEventQueue();
+      expect(vm.programsHighWater, 48);
+      verifyNever(() => _guide(api, category: GuideFilter.sports));
+    });
 
     test('category search prefetch counts checked matching rows, not all cached programs', () async {
       final api = _SearchableLiveTvApi();

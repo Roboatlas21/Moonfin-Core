@@ -293,6 +293,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   };
   final Map<String, List<GuideProgram>> _categoryPrograms = {};
   int _categoryHighWater = 0;
+  int? _checkedCategorySearchRows;
   final Set<String> _categoryQueriedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
   // Keep the current listings visible while the new window loads.
@@ -324,7 +325,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int get programsHighWater {
     if (!_isCategory(_filter)) return _programsHighWater;
     if (_channelQuery.isEmpty) return _categoryPrograms.length;
-    return _pageChannels
+    return _checkedCategorySearchRows ??= _pageChannels
         .take(_categoryHighWater)
         .where(_categoryRowMatchesSearch)
         .length;
@@ -475,9 +476,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // Every channel (including one with no listings) has an independent entry,
   // so a different batch or channel search can still reuse its programs.
   static const _windowCacheLimit = 4000;
+  static const _windowCacheTtl = Duration(minutes: 30);
   final Map<
     ({String channelId, DateTime from, DateTime to, GuideFilter? category}),
-    List<GuideProgram>
+    ({List<GuideProgram> programs, DateTime fetchedAt})
   > _windowProgramCache = {};
   int _windowCacheRevision = 0;
 
@@ -496,12 +498,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void _rememberWindowPrograms(
     ({String channelId, DateTime from, DateTime to, GuideFilter? category}) key,
     List<GuideProgram> programs,
+    DateTime fetchedAt,
   ) {
     _windowProgramCache.remove(key);
     if (_windowProgramCache.length >= _windowCacheLimit) {
       _windowProgramCache.remove(_windowProgramCache.keys.first);
     }
-    _windowProgramCache[key] = List<GuideProgram>.unmodifiable(programs);
+    _windowProgramCache[key] = (
+      programs: List<GuideProgram>.unmodifiable(programs),
+      fetchedAt: fetchedAt,
+    );
   }
 
   Future<Map<String, List<GuideProgram>>> _cachedGuidePrograms(
@@ -513,6 +519,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (ids.isEmpty) return {};
     final revision = _windowCacheRevision;
     final session = userDataSync.session;
+    final now = _now();
     final result = <String, List<GuideProgram>>{};
     final missing = <String>[];
     for (final id in ids) {
@@ -520,8 +527,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final cached = _windowProgramCache[key];
       if (cached == null) {
         missing.add(id);
-      } else if (cached.isNotEmpty) {
-        result[id] = List<GuideProgram>.of(cached);
+      } else if (now.isBefore(cached.fetchedAt) ||
+          now.difference(cached.fetchedAt) >= _windowCacheTtl) {
+        // Refresh expired entries, including previously empty guide results.
+        _windowProgramCache.remove(key);
+        missing.add(id);
+      } else if (cached.programs.isNotEmpty) {
+        result[id] = List<GuideProgram>.of(cached.programs);
       }
     }
     if (missing.isEmpty) return result;
@@ -529,6 +541,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       channelIds: missing, from: from, to: to, category: category,
     );
     final parsed = _parsePrograms(raw);
+    final fetchedAt = _now();
     for (final id in missing) {
       final programs = List<GuideProgram>.of(parsed[id] ?? const []);
       if (category != null) {
@@ -541,6 +554,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _rememberWindowPrograms(
           (channelId: id, from: from, to: to, category: category),
           programs,
+          fetchedAt,
         );
       }
     }
@@ -704,6 +718,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // If favorites change the order while loading, continue with the first
   // channel we haven't checked.
   void _advanceCategoryCursor() {
+    // Search candidates or checked IDs changed; recalculate once on next read.
+    _checkedCategorySearchRows = null;
     while (_categoryHighWater < _pageChannels.length &&
         _categoryQueriedIds.contains(_pageChannels[_categoryHighWater].id)) {
       _categoryHighWater++;
@@ -1323,6 +1339,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   void _resetCategory({bool keepRows = false}) {
+    _checkedCategorySearchRows = null;
     _previousWindowCategory = keepRows ? _filter : null;
     _categoryFetchInFlight = keepRows;
     if (!keepRows) _categoryPrograms.clear();
@@ -2273,6 +2290,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _programsHighWater = 0;
     _categoryHighWater = 0;
+    _checkedCategorySearchRows = null;
     cancelBoundaryRefresh();
     _listingsStatePage = _pageGeneration;
     _reloadOnEntry = true;
