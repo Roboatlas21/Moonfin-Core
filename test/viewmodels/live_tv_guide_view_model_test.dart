@@ -2374,6 +2374,147 @@ void main() {
       expect(results.last.isSeries, isNull);
     });
 
+    test('Emby search carries program category flags', () async {
+      final items = _MockItemsApi();
+      when(() => client.itemsApi).thenReturn(items);
+      when(() => client.serverType).thenReturn(ServerType.emby);
+      when(() => items.getItems(
+        searchTerm: 'soccer',
+        includeItemTypes: any(named: 'includeItemTypes'),
+        recursive: true,
+        startIndex: 0,
+        limit: 200,
+      )).thenAnswer((invocation) async {
+        expect(invocation.namedArguments[#includeItemTypes], ['Program']);
+        return {
+          'TotalRecordCount': 1,
+          'Items': [{
+            'Id': 'match',
+            'Type': 'Program',
+            'ChannelId': 'tsn',
+            'Name': 'Soccer Final',
+            'StartDate': '2026-11-16T19:00:00Z',
+            'EndDate': '2026-11-16T20:00:00Z',
+            'IsSports': true,
+            'IsMovie': false,
+            'IsNews': true,
+          }],
+        };
+      });
+      final matches = await searchGuideProgramTitles(
+        client, 'soccer', isCurrent: () => true,
+      );
+      expect(matches, hasLength(1));
+      expect(matches.single.isSports, isTrue);
+      expect(matches.single.isMovie, isFalse);
+      expect(matches.single.isNews, isTrue);
+      expect(matches.single.isKids, isNull);
+    });
+
+    test('mobile later-match uses only the selected program category', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      final nextTime = now.add(const Duration(minutes: 30));
+      final soccerTime = now.add(const Duration(minutes: 60));
+      final movieTime = now.add(const Duration(minutes: 90));
+      _stubChannels(api, [{'Id': 'tsn', 'Name': 'TSN'}]);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((_) async => {
+            'Items': [
+              _program('SportsCentre', 'tsn', start: now, isSports: true),
+              _program('Hockey Tonight', 'tsn', start: nextTime, isSports: true),
+              _program('Soccer Highlights', 'tsn', start: soccerTime, isSports: true),
+            ],
+          });
+      Map<String, dynamic> hit(String id, DateTime start, bool? isSports) => {
+        'Id': id,
+        'Type': 'Program',
+        'ChannelId': 'tsn',
+        'Name': id,
+        'StartDate': start.toIso8601String(),
+        'EndDate': start.add(const Duration(minutes: 30)).toIso8601String(),
+        if (isSports != null) 'IsSports': isSports,
+      };
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        hit('Soccer Movie', movieTime, false),
+        hit('Soccer Highlights', soccerTime, true),
+        hit('Soccer Special', movieTime.add(const Duration(minutes: 30)), null),
+      ]);
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      final nowNext = vm.nowNextForChannel('tsn');
+      expect(nowNext.now?.name, 'SportsCentre');
+      expect(nowNext.next?.name, 'Hockey Tonight');
+      final match = vm.laterSearchMatchForChannel(
+        'tsn', now: nowNext.now, next: nowNext.next,
+      );
+      expect(match?.title, 'Soccer Highlights');
+      expect(match?.start, soccerTime);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.nextSearchMatchForChannel('tsn',
+        after: soccerTime.add(const Duration(minutes: 30))), isNull);
+    });
+
+    test('future-only category hits prefetch pages only near the loaded edge', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      final now = DateTime.utc(2026, 11, 14, 17);
+      final future = now.add(const Duration(days: 1));
+      _stubChannels(api, [
+        for (var i = 0; i < 250; i++)
+          _channel('c$i', number: '$i'),
+      ]);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((_) async => {'Items': []});
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        for (var i = 0; i < 250; i++)
+          {
+            'Id': 'future-$i',
+            'Type': 'Program',
+            'ChannelId': 'c$i',
+            'Name': 'Soccer Tournament',
+            'IsSports': true,
+            'StartDate': future.toIso8601String(),
+            'EndDate': future.add(const Duration(hours: 1))
+                .toIso8601String(),
+          },
+      ]);
+
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: now);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      expect(vm.filteredChannels, hasLength(250));
+      expect(vm.programsForChannel('c0'), isEmpty);
+      expect(vm.programsHighWater, 200);
+      expect(vm.hasMorePrograms, isTrue);
+      verify(() => _guide(api, category: GuideFilter.sports)).called(1);
+      clearInteractions(api);
+
+      // Only an explicit next-page request loads the remaining channels.
+      await vm.loadMorePrograms();
+      expect(vm.programsHighWater, 250);
+      expect(vm.hasMorePrograms, isFalse);
+      verify(() => _guide(api, category: GuideFilter.sports)).called(1);
+    });
+
     test('category search does not scan later windows for verification', () async {
       final api = _SearchableLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);

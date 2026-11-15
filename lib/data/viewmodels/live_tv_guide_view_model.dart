@@ -318,9 +318,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       ? _categoryHighWater < _pageChannels.length
       : _programsHighWater < _pageChannels.length;
 
-  /// How many channels (in list order) have been requested so far.
-  int get programsHighWater =>
-      _isCategory(_filter) ? _categoryPrograms.length : _programsHighWater;
+  /// How far the guide has been loaded for scroll prefetch.
+  /// Category title hits already qualify even without a program in this window,
+  /// so count checked channels rather than just channels with current programs.
+  int get programsHighWater => _isCategory(_filter)
+      ? (_channelQuery.length >= 2 && _searchMatchesByChannel.isNotEmpty
+            ? _categoryHighWater
+            : _categoryPrograms.length)
+      : _programsHighWater;
 
   bool get listingsAccessDenied =>
       _state == GuideState.error &&
