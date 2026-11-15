@@ -1460,6 +1460,162 @@ void main() {
       expect(vm.hasMorePrograms, isFalse);
     });
 
+    test('failed guide window change restores the previous valid schedule', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [_channel('c0')]);
+      when(() => _guide(liveTv)).thenAnswer((call) async {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == later) {
+          throw DioException(
+            requestOptions: RequestOptions(path: '/LiveTv/Programs'),
+            type: DioExceptionType.connectionError,
+          );
+        }
+        return {'Items': [_program('original', 'c0', start: start)]};
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      final previousDate = vm.guideDate;
+      final previousEnd = vm.windowEnd;
+      final previousLivePosition = vm.atLivePosition;
+
+      await expectLater(
+        vm.setWindowStart(later, livePosition: false),
+        throwsA(isA<DioException>()),
+      );
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, start);
+      expect(vm.windowEnd, previousEnd);
+      expect(vm.guideDate, previousDate);
+      expect(vm.atLivePosition, previousLivePosition);
+      expect(vm.programsForChannel('c0').single.id, 'original');
+      expect(vm.hasProgramsFor('c0'), isTrue);
+    });
+
+    test('late failed window request does not roll back a newer guide load', () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [_channel('c0')]);
+      final oldReply = Completer<Map<String, dynamic>>();
+      var laterCalls = 0;
+      when(() => _guide(liveTv)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == later) {
+          laterCalls++;
+          if (laterCalls == 1) return oldReply.future;
+          return Future.value({
+            'Items': [_program('current', 'c0', start: later)],
+          });
+        }
+        return Future.value({
+          'Items': [_program('previous', 'c0', start: start)],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      final older = vm.setWindowStart(later);
+      await pumpEventQueue();
+      expect(laterCalls, 1);
+      await vm.load(windowStart: later);
+      expect(vm.programsForChannel('c0').single.id, 'current');
+
+      final failure = expectLater(older, throwsA(isA<StateError>()));
+      oldReply.completeError(StateError('older request failed'));
+      await failure;
+      await pumpEventQueue();
+
+      expect(vm.windowStart, later);
+      expect(vm.state, GuideState.ready);
+      expect(vm.programsForChannel('c0').single.id, 'current');
+      expect(laterCalls, 2);
+    });
+
+    for (final refreshFinishesFirst in [true, false]) {
+      test(
+        refreshFinishesFirst
+            ? 'completed recording refresh avoids another window reload'
+            : 'pending recording refresh avoids another window reload when done',
+        () async {
+          final start = DateTime.utc(2026, 11, 14, 17);
+          final later = start.add(const Duration(hours: 3));
+          _stubChannels(liveTv, [_channel('c0')]);
+          final oldWindowReply = Completer<Map<String, dynamic>>();
+          final freshRecordingReply = Completer<Map<String, dynamic>>();
+          var recordingStarted = false;
+          var windowRequests = 0;
+          var recordingRequests = 0;
+          when(() => _guide(liveTv)).thenAnswer((call) {
+            final from = call.namedArguments[#startDate] as DateTime;
+            if (from == later) {
+              windowRequests++;
+              if (windowRequests == 1) return oldWindowReply.future;
+              return Future.value({
+                'Items': [_program('redundant', 'c0', start: later)],
+              });
+            }
+            if (recordingStarted) {
+              recordingRequests++;
+              return freshRecordingReply.future;
+            }
+            return Future.value({
+              'Items': [_program('initial', 'c0', start: start)],
+            });
+          });
+
+          final vm = LiveTvGuideViewModel(client, now: () => start);
+          addTearDown(vm.dispose);
+          await vm.load(windowStart: start);
+          final windowChange = vm.setWindowStart(later);
+          await pumpEventQueue();
+          expect(windowRequests, 1);
+
+          recordingStarted = true;
+          final refreshing = vm.recordingChanged();
+          await pumpEventQueue();
+          expect(recordingRequests, 1);
+
+          final updated = {
+            'Items': [{
+              ..._program('recorded', 'c0', start: later),
+              'TimerId': 'timer-new',
+            }],
+          };
+          if (refreshFinishesFirst) {
+            freshRecordingReply.complete(updated);
+            await refreshing;
+            oldWindowReply.complete({
+              'Items': [_program('stale', 'c0', start: later)],
+            });
+            await windowChange;
+          } else {
+            oldWindowReply.complete({
+              'Items': [_program('stale', 'c0', start: later)],
+            });
+            await windowChange;
+            freshRecordingReply.complete(updated);
+            await refreshing;
+          }
+          await pumpEventQueue();
+
+          expect(vm.windowStart, later);
+          expect(vm.state, GuideState.ready);
+          expect(vm.programsForChannel('c0').single.id, 'recorded');
+          expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+          expect(windowRequests, 1);
+          expect(recordingRequests, 1);
+
+          clearInteractions(liveTv);
+          await vm.reloadIfRecordingsChanged();
+          verifyNever(() => _guide(liveTv));
+        },
+      );
+    }
+
     test('older window reply does not reload a successful full guide load', () async {
       final start = DateTime.utc(2026, 11, 14, 17);
       final later = start.add(const Duration(hours: 3));

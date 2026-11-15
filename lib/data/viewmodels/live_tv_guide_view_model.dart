@@ -1270,8 +1270,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_disposed || _recordingRefreshDepth > 0) return;
     if (_reloadAfterRecordingRefresh) {
       _reloadAfterRecordingRefresh = false;
-      unawaited(_reloadPrograms());
-      return;
+      // The recording refresh may already have replaced this window's
+      // loaded rows. Don't tear the guide down again if it succeeded.
+      if (_state != GuideState.ready ||
+          _isCategory(_filter) ||
+          _programsLoadedIds.isEmpty ||
+          _loadedRecordingRevision < liveTvRecordingRevision.value) {
+        unawaited(_reloadPrograms());
+        return;
+      }
     }
     if (_state != GuideState.ready) return;
     if (_refreshRecordingsAfterLoad) {
@@ -1705,6 +1712,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
 
+    // Remember the last valid window so a failed request can restore its
+    // schedule without another fetch.
+    final previousWindowStart = _windowStart;
+    final previousWindowEnd = _windowEnd;
+    final previousGuideDate = _guideDate;
+    final previousLivePosition = _atLivePosition;
     _windowStart = start;
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
@@ -1727,12 +1740,35 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final recordingRevision = liveTvRecordingRevision.value;
     final cacheRevision = _windowCacheRevision;
 
-    final replacements = await _fetchProgramReplacements(
-      ids,
-      from: start,
-      to: _windowEnd,
-      generation: generation,
-    );
+    Map<String, List<GuideProgram>>? replacements;
+    try {
+      replacements = await _fetchProgramReplacements(
+        ids,
+        from: start,
+        to: _windowEnd,
+        generation: generation,
+      );
+    } catch (_) {
+      // Only the original request may roll back its window. A newer load,
+      // filter change, or access-denied reset already owns the current view.
+      if (!_disposed &&
+          generation == _programGeneration &&
+          loadGeneration == _loadGeneration &&
+          pageGeneration == _pageGeneration &&
+          _windowStart == start &&
+          !_isCategory(_filter)) {
+        _windowStart = previousWindowStart;
+        _windowEnd = previousWindowEnd;
+        _guideDate = previousGuideDate;
+        _atLivePosition = previousLivePosition;
+        if (_channelQuery.isNotEmpty) {
+          _updatePageRows();
+          _resetPageCursor();
+        }
+        _notifyListeners();
+      }
+      rethrow;
+    }
     if (replacements == null || generation != _programGeneration) {
       // A newer guide load already owns the window. Only recover when this
       // request was interrupted by a recording refresh, not another reload.
@@ -1742,6 +1778,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           loadGeneration == _loadGeneration &&
           pageGeneration == _pageGeneration &&
           cacheRevision != _windowCacheRevision &&
+          _loadedRecordingRevision < liveTvRecordingRevision.value &&
           (_recordingRefreshDepth > 0 ||
               recordingRevision != liveTvRecordingRevision.value)) {
         _reloadAfterRecordingRefresh = true;
