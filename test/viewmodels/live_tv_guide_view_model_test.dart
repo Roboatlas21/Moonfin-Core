@@ -2065,6 +2065,87 @@ void main() {
       expect(vm.hasMorePrograms, isTrue);
     });
 
+    for (final duringInitialLoad in [false, true]) {
+      test(
+        duringInitialLoad
+            ? 'search checks uncached channel names during category loading'
+            : 'search checks uncached channel names despite unrelated cached rows',
+        () async {
+          final api = _SearchableLiveTvApi();
+          when(() => client.liveTvApi).thenReturn(api);
+          when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+          _stubChannels(api, [
+            for (var i = 0; i < 450; i++) {
+              ..._channel('c$i', number: '$i'),
+              if (i == 420) 'Name': 'TSN',
+              if (i == 430) 'Name': 'TSN Two',
+            },
+          ]);
+          final now = DateTime.utc(2026, 11, 14, 17);
+          final initialPage = Completer<Map<String, dynamic>>();
+          Map<String, dynamic> responseFor(List<String> ids) => {
+            'Items': [
+              for (final id in ids)
+                if (int.parse(id.substring(1)) < 24 || id == 'c420')
+                  _program('sport-$id', id, start: now, isSports: true),
+            ],
+          };
+          when(() => _guide(api, category: GuideFilter.sports))
+              .thenAnswer((invocation) {
+                final ids = _requestedIds(invocation);
+                if (duringInitialLoad && ids.contains('c0')) {
+                  return initialPage.future;
+                }
+                return Future.value(responseFor(ids));
+              });
+          when(() => api.searchProgramTitles(
+            'tsn', isCurrent: any(named: 'isCurrent'),
+          )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+
+          final vm = LiveTvGuideViewModel(client, now: () => now);
+          addTearDown(vm.dispose);
+          await vm.load(windowStart: now);
+          vm.setFilter(GuideFilter.sports);
+          if (duringInitialLoad) {
+            vm.setChannelQuery('tsn');
+            await pumpEventQueue();
+            clearInteractions(api);
+            initialPage.complete(responseFor([
+              for (var i = 0; i < 200; i++) 'c$i',
+            ]));
+          } else {
+            await pumpEventQueue();
+            expect(vm.filteredChannels, hasLength(24));
+            clearInteractions(api);
+            vm.setChannelQuery('tsn');
+          }
+          await pumpEventQueue();
+
+          expect(vm.filteredChannels.map((c) => c.id), ['c420']);
+          expect(vm.programsForChannel('c420').single.isSports, isTrue);
+          expect(vm.hasMorePrograms, isFalse);
+          final requested = verify(
+            () => _guide(
+              api,
+              category: GuideFilter.sports,
+              captureChannelIds: true,
+            ),
+          ).captured;
+          expect(requested, hasLength(1));
+          expect(requested.single, ['c420', 'c430']);
+
+          // Negative category results are cached too.
+          clearInteractions(api);
+          vm.setChannelQuery('');
+          await pumpEventQueue();
+          vm.setChannelQuery('tsn');
+          await pumpEventQueue();
+          expect(vm.filteredChannels.map((c) => c.id), ['c420']);
+          verifyNever(() => _guide(api, category: GuideFilter.sports));
+        },
+      );
+    }
+
     test('search reuses already-checked category programs', () async {
       final api = _SearchableLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);

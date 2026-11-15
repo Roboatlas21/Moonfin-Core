@@ -644,6 +644,25 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
+  // Cached category programs from other channels must not hide a new
+  // channel-name or number match. EPG title hits already have category flags.
+  bool _needsCategorySearchPage() {
+    if (_channelQuery.isEmpty) {
+      return _categoryPrograms.length < _categoryMinRowsPerPage;
+    }
+    var visible = 0;
+    var unchecked = false;
+    for (final channel in _pageChannels) {
+      if (!channel.name.toLowerCase().contains(_channelQuery) &&
+          !(channel.number?.toLowerCase().contains(_channelQuery) ?? false)) {
+        continue;
+      }
+      if (_categoryPrograms.containsKey(channel.id)) visible++;
+      if (!_categoryQueriedIds.contains(channel.id)) unchecked = true;
+    }
+    return unchecked && visible < _categoryMinRowsPerPage;
+  }
+
   // A search changes the candidate rows, not the category or guide window.
   // Already-checked category programs (including empty results) remain valid.
   void _applyChannelSearchRows() {
@@ -653,8 +672,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (_state == GuideState.ready &&
           _categoryLoadedFor == _filter &&
           !_categoryFetchInFlight &&
-          (_channelQuery.length < 2 || _searchMatchesByChannel.isEmpty) &&
-          _categoryPrograms.length < _categoryMinRowsPerPage &&
+          _needsCategorySearchPage() &&
           hasMorePrograms) {
         // The category cursor skips queried IDs; only new candidates need EPG.
         // An existing category fetch keeps running across search updates.
@@ -1143,6 +1161,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _categoryFetchInFlight = false;
     _notifyListeners();
+    // A channel-name search can arrive while the first category page loads.
+    if (_state == GuideState.ready && _channelQuery.isNotEmpty) {
+      _applyChannelSearchRows();
+    }
   }
 
   /// Look up one channel outside the loaded page of a program category.
