@@ -266,12 +266,24 @@ class PlexLiveTvApi
                   !key.endsWith('/children')) {
                 continue;
               }
-              final items = await _providerPages(
-                '${key.substring(0, key.length - '/children'.length)}/grandchildren',
-                'Metadata',
-                const {},
-                isCurrent,
-              );
+              List<Map> items;
+              try {
+                items = await _providerPages(
+                  '${key.substring(0, key.length - '/children'.length)}/grandchildren',
+                  'Metadata',
+                  const {},
+                  isCurrent,
+                );
+              } catch (error, stackTrace) {
+                if (!isCurrent()) return;
+                developer.log(
+                  'Plex series search failed (${dvr.key}, $key); continuing',
+                  name: 'PlexLiveTvApi',
+                  error: error,
+                  stackTrace: stackTrace,
+                );
+                continue;
+              }
               if (!isCurrent()) return;
               final batch = <Map<String, dynamic>>[];
               appendPrograms(show, items, batch);

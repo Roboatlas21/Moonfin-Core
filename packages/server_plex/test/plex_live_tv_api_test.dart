@@ -405,6 +405,91 @@ void main() {
     );
   });
 
+  test('continues after a failed series lookup', () async {
+    final (dio, server) = _server();
+    const epg = '/tv.plex.providers.epg.xmltv:2';
+    const searchPath = '$epg/library/search';
+    const brokenPath = '$epg/metadata/broken/grandchildren';
+    const goodPath = '$epg/metadata/tubbies/grandchildren';
+    var failures = 0;
+
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == searchPath) {
+            final container =
+                (server.answer(options) as Map)['MediaContainer'] as Map;
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: {
+                  'MediaContainer': {
+                    ...container,
+                    'SearchResult': [
+                      {
+                        'Metadata': {
+                          'ratingKey': 'broken',
+                          'type': 'show',
+                          'title': 'Teletubbies Broken',
+                          'key': '$epg/metadata/broken/children',
+                        },
+                      },
+                      ...(container['SearchResult'] as List),
+                    ],
+                  },
+                },
+              ),
+            );
+          } else if (options.uri.path == brokenPath) {
+            failures++;
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                type: DioExceptionType.badResponse,
+                response: Response(requestOptions: options, statusCode: 500),
+                message: 'Broken series details',
+              ),
+            );
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+
+    final batches = <List<Map<String, dynamic>>>[];
+    final programs = await PlexLiveTvApi(dio).searchProgramTitlesIncrementally(
+      'tel',
+      isCurrent: () => true,
+      onBatch: batches.add,
+    );
+
+    expect(failures, 1);
+    expect(
+      server.requests.where((request) => request.uri.path == goodPath),
+      hasLength(1),
+    );
+    expect(
+      batches.map((batch) => batch.map((p) => p['Name']).toList()).toList(),
+      [
+        ['Sintel'],
+        ['Teletubbies', 'Teletubbies'],
+      ],
+    );
+    expect(programs.map((p) => p['Name']).toList(), [
+      'Sintel',
+      'Teletubbies',
+      'Teletubbies',
+    ]);
+    expect(
+      server.requests.where(
+        (request) => request.uri.host == 'discover.provider.plex.tv',
+      ),
+      hasLength(1),
+    );
+  });
+
   test('keeps DVR matches if Plex Discover search fails', () async {
     final (dio, server) = _server();
     var cloudAttempts = 0;
