@@ -1,11 +1,31 @@
 import 'package:server_core/server_core.dart';
 
-typedef GuideTitleMatch = ({
-  String channelId,
-  String title,
-  DateTime start,
-  DateTime end,
-});
+class GuideTitleMatch {
+  final String channelId;
+  final String title;
+  final DateTime start;
+  final DateTime end;
+  // Null means this classification was not supplied by the search response.
+  final bool? isMovie;
+  final bool? isSeries;
+  final bool? isSports;
+  final bool? isNews;
+  final bool? isKids;
+  final bool? isPremiere;
+
+  const GuideTitleMatch({
+    required this.channelId,
+    required this.title,
+    required this.start,
+    required this.end,
+    this.isMovie,
+    this.isSeries,
+    this.isSports,
+    this.isNews,
+    this.isKids,
+    this.isPremiere,
+  });
+}
 
 Set<String> programChannelsInWindow(
   List<GuideTitleMatch> matches,
@@ -95,11 +115,17 @@ Future<List<GuideTitleMatch>> searchGuideProgramTitles(
         if (name.isNotEmpty) name,
         if (episode.isNotEmpty && episode != name) episode,
       ].join(' · ');
-      results.add((
+      results.add(GuideTitleMatch(
         channelId: channelId,
         title: title,
         start: start,
         end: end,
+        isMovie: raw['IsMovie'] is bool ? raw['IsMovie'] as bool : null,
+        isSeries: raw['IsSeries'] is bool ? raw['IsSeries'] as bool : null,
+        isSports: raw['IsSports'] is bool ? raw['IsSports'] as bool : null,
+        isNews: raw['IsNews'] is bool ? raw['IsNews'] as bool : null,
+        isKids: raw['IsKids'] is bool ? raw['IsKids'] as bool : null,
+        isPremiere: raw['IsPremiere'] is bool ? raw['IsPremiere'] as bool : null,
       ));
     }
   }

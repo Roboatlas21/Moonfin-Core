@@ -335,7 +335,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   bool hasProgramsFor(String channelId) => _isCategory(_filter)
-      ? _categoryPrograms.containsKey(channelId)
+      ? _categoryPrograms.containsKey(channelId) ||
+            (_categoryQueriedIds.contains(channelId) &&
+                _searchMatchesByChannel.containsKey(channelId))
       : _programsLoadedIds.contains(channelId);
 
   LiveTvGuideViewModel(
@@ -477,13 +479,27 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   String? get selectedGroup => _selectedGroup;
   String _channelQuery = '';
   List<GuideTitleMatch> _programTitleMatches = const [];
+  List<GuideTitleMatch> _activeTitleMatches = const [];
   Map<String, List<GuideTitleMatch>> _searchMatchesByChannel = const {};
   String get channelQuery => _channelQuery;
 
-  void _setTitleMatches(List<GuideTitleMatch> matches) {
-    _programTitleMatches = matches;
+  bool _titleMatchInCategory(GuideTitleMatch match) => switch (_filter) {
+    GuideFilter.all || GuideFilter.favorites => true,
+    GuideFilter.movies => match.isMovie == true,
+    GuideFilter.series => match.isSeries == true,
+    GuideFilter.sports => match.isSports == true,
+    GuideFilter.news => match.isNews == true,
+    GuideFilter.kids => match.isKids == true,
+    GuideFilter.premiere => match.isPremiere == true,
+  };
+
+  void _rebuildTitleMatchScope() {
+    _activeTitleMatches = [
+      for (final match in _programTitleMatches)
+        if (_titleMatchInCategory(match)) match,
+    ];
     final grouped = <String, List<GuideTitleMatch>>{};
-    for (final match in matches) {
+    for (final match in _activeTitleMatches) {
       grouped.putIfAbsent(match.channelId, () => []).add(match);
     }
     for (final channelMatches in grouped.values) {
@@ -492,15 +508,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _searchMatchesByChannel = grouped;
   }
 
+  void _setTitleMatches(List<GuideTitleMatch> matches) {
+    _programTitleMatches = matches;
+    _rebuildTitleMatchScope();
+  }
+
   bool _matchInWindow(GuideTitleMatch match) =>
       match.start.isBefore(_windowEnd) && match.end.isAfter(_windowStart);
 
   /// Future-only channels join normal search results after the server search
   /// completes, so the next airing cannot change as providers reply.
   GuideTitleMatch? futureSearchMatchForChannel(String channelId) {
-    if (_channelQuery.length < 2 ||
-        _searchingProgramTitles ||
-        _isCategory(_filter)) {
+    if (_channelQuery.length < 2 || _searchingProgramTitles) {
       return null;
     }
     final matches = _searchMatchesByChannel[channelId];
@@ -520,9 +539,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     String channelId, {
     DateTime? after,
   }) {
-    if (_channelQuery.length < 2 ||
-        _searchingProgramTitles ||
-        _isCategory(_filter)) {
+    if (_channelQuery.length < 2 || _searchingProgramTitles) {
       return null;
     }
     final now = _now();
@@ -563,14 +580,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     if (_channelQuery.isNotEmpty) {
       final programIds = programChannelsInWindow(
-        _programTitleMatches,
+        _activeTitleMatches,
         _windowStart,
         _windowEnd,
       );
       final futureIds = <String>{};
       if (_channelQuery.length >= 2 &&
-          !_searchingProgramTitles &&
-          !_isCategory(_filter)) {
+          !_searchingProgramTitles) {
         for (final channelId in _searchMatchesByChannel.keys) {
           if (futureSearchMatchForChannel(channelId) != null) {
             futureIds.add(channelId);
@@ -632,7 +648,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (_state == GuideState.ready &&
           _categoryLoadedFor == _filter &&
           !_categoryFetchInFlight &&
-          _visibleCategoryRowCount() < _categoryMinRowsPerPage &&
+          (_channelQuery.length < 2 || _searchMatchesByChannel.isEmpty) &&
+          _categoryPrograms.length < _categoryMinRowsPerPage &&
           hasMorePrograms) {
         // The category cursor skips queried IDs; only new candidates need EPG.
         // An existing category fetch keeps running across search updates.
@@ -728,37 +745,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   bool get _showingPreviousCategory => _previousWindowCategory == _filter;
 
-  // Keep all EPG title-hit channels available to the existing category loader.
-  // Only display one after its category-filtered guide actually contains a
-  // matching program. Channel-name and number matches still work normally.
-  bool _categoryRowMatchesSearch(
-    GuideChannel channel, {
-    Map<String, List<GuideProgram>>? programsByChannel,
-  }) {
-    final programs = (programsByChannel ?? _categoryPrograms)[channel.id];
-    if (programs == null) return false;
-    if (_channelQuery.length < 2 ||
-        channel.name.toLowerCase().contains(_channelQuery) ||
-        (channel.number?.toLowerCase().contains(_channelQuery) ?? false)) {
+  // Search hits are categorized from their own EPG metadata, regardless of
+  // when they air. Channel-name matches still follow category guide loading.
+  bool _categoryRowMatchesSearch(GuideChannel channel) {
+    if (_channelQuery.length >= 2 &&
+        _searchMatchesByChannel.containsKey(channel.id)) {
       return true;
     }
-    return programs.any(
-      (program) =>
-          programMatchesSearch(program) &&
-          program.startDate.isBefore(_windowEnd) &&
-          program.endDate.isAfter(_windowStart),
-    );
+    return _categoryPrograms.containsKey(channel.id);
   }
-
-  int _visibleCategoryRowCount({
-    Map<String, List<GuideProgram>>? programsByChannel,
-    List<GuideChannel>? rows,
-  }) => (rows ?? _pageChannels).where(
-    (channel) => _categoryRowMatchesSearch(
-      channel,
-      programsByChannel: programsByChannel,
-    ),
-  ).length;
 
   List<GuideChannel> get filteredChannels {
     if (!_isCategory(_filter)) return _pageChannels;
@@ -813,7 +808,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }) => _channelQuery.length < 2
       ? null
       : laterProgramSearchMatch(
-          _programTitleMatches,
+          _activeTitleMatches,
           channelId: channelId,
           windowStart: _windowStart,
           windowEnd: _windowEnd,
@@ -1097,12 +1092,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         value == GuideFilter.favorites;
     _selectedGroup = group;
     _filter = value;
+    _rebuildTitleMatchScope();
     if (scopeChanged) {
       _updatePageRows();
       _resetPageCursor();
     } else {
-      // The channel order can stay the same, but pending requests and errors
-      // shouldn't carry over between filters.
+      // The channel list can change when the active program category changes,
+      // even if its channel group stays the same.
+      _updatePageRows();
       _advancePage();
     }
     _categoryRequest++;
@@ -1178,12 +1175,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> _walkCategory() async {
     final request = _categoryRequest;
     final filter = _filter;
-    // A server-wide title hit can refer to a program outside this category.
-    // Count only rows the filtered guide can actually display; otherwise a
-    // page of unrelated hits can stop paging before a real match is reached.
-    final startRows = _visibleCategoryRowCount();
+    // Server-classified search hits need no separate category verification.
+    // Fetch the first matching batch for the timeline, then load more on scroll.
+    final startRows = _categoryPrograms.length;
+    final startCursor = _categoryHighWater;
+    final titleHits = _channelQuery.length >= 2 &&
+        _searchMatchesByChannel.isNotEmpty;
     while (_categoryHighWater < _pageChannels.length &&
-        _visibleCategoryRowCount() - startRows < _categoryMinRowsPerPage) {
+        (titleHits
+            ? _categoryHighWater - startCursor < _categoryBatchSize
+            : _categoryPrograms.length - startRows < _categoryMinRowsPerPage)) {
       final size = _batchSizeFor(filter);
       final end = min(_categoryHighWater + size, _pageChannels.length);
       final batch = _pageChannels
@@ -1542,10 +1543,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           if (!samePage()) break;
           if (end >= _requestedPageDepth &&
               (category == null ||
-                  _visibleCategoryRowCount(
-                    rows: rows,
-                    programsByChannel: fetched,
-                  ) >= _categoryMinRowsPerPage)) {
+                  (_channelQuery.length >= 2 &&
+                      _searchMatchesByChannel.isNotEmpty) ||
+                  fetched.length >= _categoryMinRowsPerPage)) {
             break;
           }
         }
