@@ -2569,6 +2569,62 @@ void main() {
       verifyNever(() => _guide(api, category: GuideFilter.sports));
     });
 
+    test('category refresh recalculates the search prefetch count', () async {
+      final api = _SearchableLiveTvApi();
+      when(() => client.liveTvApi).thenReturn(api);
+      when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
+      _stubChannels(api, [
+        for (var i = 0; i < 500; i++) {
+          ..._channel('c$i', number: '$i'),
+          if (i < 90 || (i >= 420 && i < 426)) 'Name': 'TSN $i',
+        },
+      ]);
+      var removeEarlierSports = false;
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((call) async => {
+            'Items': [
+              for (final id in _requestedIds(call))
+                if ((int.parse(id.substring(1)) < 90 &&
+                        (!removeEarlierSports ||
+                            int.parse(id.substring(1)) >= 50)) ||
+                    (int.parse(id.substring(1)) >= 420 &&
+                        int.parse(id.substring(1)) < 426))
+                  _program('sport-$id', id, isSports: true),
+            ],
+          });
+      when(() => api.searchProgramTitles(
+        'tsn', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => <Map<String, dynamic>>[]);
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('tsn');
+      await pumpEventQueue();
+      expect(vm.filteredChannels, hasLength(90));
+      // Prime the memoized high-water count before the refresh.
+      expect(vm.programsHighWater, 90);
+      expect(vm.hasMorePrograms, isTrue);
+
+      removeEarlierSports = true;
+      await vm.recordingChanged();
+      expect(vm.filteredChannels, hasLength(40));
+      // The cursor didn't move, but the number of visible matches did.
+      expect(vm.programsHighWater, 40);
+      expect(vm.hasMorePrograms, isTrue);
+
+      // The row-builder's prefetch threshold must now reach the next page.
+      expect(39 + 12 >= vm.programsHighWater, isTrue);
+      await vm.loadMorePrograms();
+      expect(vm.filteredChannels.map((c) => c.id), [
+        for (var i = 50; i < 90; i++) 'c$i',
+        for (var i = 420; i < 426; i++) 'c$i',
+      ]);
+      expect(vm.hasMorePrograms, isFalse);
+    });
+
     test('category search prefetch counts checked matching rows, not all cached programs', () async {
       final api = _SearchableLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);
@@ -3997,6 +4053,45 @@ void main() {
         for (var i = 420; i < 426; i++) 'c$i',
       ]);
       expect(vm.hasMorePrograms, isFalse);
+    });
+
+    test('an older recording refresh cannot lower the loaded revision', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      when(() => _guide(liveTv)).thenAnswer(
+        (_) async => {'Items': [_program('p0', 'c0')]},
+      );
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+
+      final olderReply = Completer<Map<String, dynamic>>();
+      var refreshCalls = 0;
+      when(() => _guide(liveTv)).thenAnswer((_) {
+        refreshCalls++;
+        if (refreshCalls == 1) return olderReply.future;
+        return Future.value({
+          'Items': [{
+            ..._program('p0', 'c0'),
+            'TimerId': 'timer-new',
+          }],
+        });
+      });
+
+      final older = vm.recordingChanged();
+      await pumpEventQueue();
+      expect(refreshCalls, 1);
+      final newer = vm.recordingChanged();
+      await newer;
+      expect(refreshCalls, 2);
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+
+      olderReply.complete({'Items': [_program('p0', 'c0')]});
+      await older;
+      clearInteractions(liveTv);
+
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv));
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
     });
 
     test('reloadIfRecordingsChanged does nothing until a recording changes', () async {

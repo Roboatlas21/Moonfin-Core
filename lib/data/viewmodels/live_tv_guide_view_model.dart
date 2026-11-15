@@ -1190,7 +1190,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         removedCategoryRows = await _refreshCategoryRows();
       }
       await _refreshLoadedChannels(_now());
-      _loadedRecordingRevision = recordingRevision;
+      // A slower, older refresh must not undo a newer completed revision.
+      if (recordingRevision > _loadedRecordingRevision) {
+        _loadedRecordingRevision = recordingRevision;
+      }
       refreshed = true;
     } catch (error) {
       if (!_accessDenied(error)) await _reloadPrograms();
@@ -1249,6 +1252,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           _categoryPrograms[channel.id] = programs;
         }
       }
+      // The visible category count changed without advancing the page cursor.
+      if (completedIds.isNotEmpty) _checkedCategorySearchRows = null;
     }
     _notifyListeners();
     return removed;
