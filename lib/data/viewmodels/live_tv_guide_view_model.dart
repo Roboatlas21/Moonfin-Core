@@ -748,6 +748,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // Full guide loads own the next title search. Defer query changes until
   // their listings have loaded so search callbacks cannot invalidate a page.
   int? _fullGuideLoadGeneration;
+  // Unlike _listingsStatePage, this tracks whether a window reload is still
+  // actually running. A failed page can retain its marker for manual retry.
+  int? _activeWindowReloadGeneration;
   // A full load still owes one fresh title search if date/window navigation
   // supersedes it. Ordinary guide navigation never sets this on its own.
   bool _pendingTitleSearchRefresh = false;
@@ -862,14 +865,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // replacement is complete. A different query starts from empty results.
     if (!preserveMatches) _setTitleMatches(const []);
     if (_fullGuideLoadGeneration == _loadGeneration ||
-        (_pendingTitleSearchRefresh && _listingsStatePage != null)) {
-      // The current guide load owns the replacement search. Even an updated
-      // query must not invalidate its in-flight listings page.
+        (_pendingTitleSearchRefresh &&
+            _activeWindowReloadGeneration == _loadGeneration)) {
+      // Only an active guide reload owns the replacement search; an error
+      // marker left by a finished reload must not block new search text.
       _pendingTitleSearchRefresh = true;
       _programSearchStatus = GuideProgramSearchStatus.idle;
       _preservingTitleMatchesDuringSearch = false;
       return;
     }
+    // An explicit query change or retry after a failed load supersedes any
+    // deferred refresh. It must not fire again after the guide recovers.
+    _pendingTitleSearchRefresh = false;
     _programSearchStatus = _channelQuery.length >= 2
         ? GuideProgramSearchStatus.searching
         : GuideProgramSearchStatus.idle;
@@ -970,7 +977,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _notifyListeners();
       return;
     }
-    _resetPageCursor();
+    // Searching after a failed guide request must not dismiss its error.
+    // Only a successful guide retry may clear the listings error state.
+    _resetPageCursor(advancePage: _state != GuideState.error);
     _resetCategory();
     _notifyListeners();
     if (_state == GuideState.ready) unawaited(loadMorePrograms());
@@ -2088,6 +2097,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // This window reload supersedes any full load; it inherits its pending
     // title refresh without allowing the old load to clear that obligation.
     _fullGuideLoadGeneration = null;
+    _activeWindowReloadGeneration = loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     _pendingGuideWindow = null;
     final depth = _requestedPageDepth;
@@ -2114,6 +2124,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!current() || !completed) return;
       _loadedRecordingRevision = max(_loadedRecordingRevision, recordingRevision);
       _rememberConfirmedGuideWindow();
+      if (_activeWindowReloadGeneration == loadGeneration) {
+        _activeWindowReloadGeneration = null;
+      }
       _resumePendingTitleSearchRefresh();
       _resumeInterruptedGuideWork();
     } catch (e) {
@@ -2126,6 +2139,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _error = e;
       _state = GuideState.error;
       _notifyListeners();
+    } finally {
+      if (_activeWindowReloadGeneration == loadGeneration) {
+        _activeWindowReloadGeneration = null;
+      }
     }
   }
 

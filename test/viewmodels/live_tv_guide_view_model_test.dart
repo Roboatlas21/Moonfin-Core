@@ -1226,6 +1226,106 @@ void main() {
       expect(vm.futureSearchMatchForChannel('tsn'), isNull);
     });
 
+
+    test('failed full reload allows a new query without hiding guide error',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        {..._channel('hockeytv'), 'Name': 'Hockey TV'},
+        _channel('espn'),
+      ]);
+      final stale = Completer<List<Map<String, dynamic>>>();
+      var failing = false;
+      var failedGuideCalls = 0;
+      when(() => _guide(api)).thenAnswer((_) {
+        if (failing) {
+          failedGuideCalls++;
+          return Future<Map<String, dynamic>>.error(StateError('offline'));
+        }
+        return Future.value({'Items': []});
+      });
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) => stale.future);
+      when(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        {...airing('game', 'espn'), 'Name': 'Hockey playoffs'},
+      ]);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      expect(vm.searchingProgramTitles, isTrue);
+
+      failing = true;
+      await vm.load(windowStart: start);
+      expect(failedGuideCalls, 1);
+      expect(vm.state, GuideState.error);
+
+      vm.setChannelQuery('hockey');
+      await pumpEventQueue();
+      expect(vm.channelQuery, 'hockey');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.complete);
+      expect(vm.state, GuideState.error);
+      expect(vm.error, isA<StateError>());
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'hockeytv', 'espn'});
+      verify(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+
+      stale.complete([airing('old', 'soccertv')]);
+      await pumpEventQueue();
+      expect(vm.channelQuery, 'hockey');
+      expect(vm.state, GuideState.error);
+      expect(vm.futureSearchMatchForChannel('soccertv'), isNull);
+    });
+
+    test('clearing search after failed reload restores channels and cancels refresh',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('espn'),
+      ]);
+      final stale = Completer<List<Map<String, dynamic>>>();
+      var failing = false;
+      when(() => _guide(api)).thenAnswer((_) => failing
+          ? Future<Map<String, dynamic>>.error(StateError('offline'))
+          : Future.value({'Items': []}));
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) => stale.future);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      expect(vm.searchingProgramTitles, isTrue);
+
+      failing = true;
+      await vm.load(windowStart: start);
+      expect(vm.state, GuideState.error);
+
+      vm.setChannelQuery('');
+      expect(vm.channelQuery, '');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.idle);
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'soccertv', 'espn'});
+      expect(vm.state, GuideState.error);
+
+      stale.complete([airing('late', 'espn')]);
+      await pumpEventQueue();
+      expect(vm.futureSearchMatchForChannel('espn'), isNull);
+      expect(vm.state, GuideState.error);
+
+      failing = false;
+      await vm.load(windowStart: start);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.ready);
+      expect(vm.channelQuery, '');
+      verify(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
     test('reply from before a reload cannot overwrite refreshed matches', () async {
       final stale = Completer<List<Map<String, dynamic>>>();
       var calls = 0;
