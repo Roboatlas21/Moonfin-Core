@@ -1575,6 +1575,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }) async {
     final loadGeneration = ++_loadGeneration;
     _fullGuideLoadGeneration = loadGeneration;
+    // Supersede any older category page immediately, not only after the
+    // replacement channel lineup returns. It must not mark this load ready.
+    _categoryRequest++;
+    _categoryFetchInFlight = false;
     // Discard pre-reload search replies before awaiting any lineup/listings.
     // Preserve the obligation to refresh if another guide operation takes over.
     _pendingTitleSearchRefresh =

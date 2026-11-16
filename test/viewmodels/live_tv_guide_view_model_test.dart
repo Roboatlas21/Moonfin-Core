@@ -1429,6 +1429,63 @@ void main() {
     });
 
 
+
+    test('old Sports reply cannot finish a newer full load before its lineup',
+        () async {
+      final delayedLineup = Completer<Map<String, dynamic>>();
+      final oldSports = Completer<Map<String, dynamic>>();
+      var lineupReads = 0;
+      var sportsReads = 0;
+      when(() => _channelsRequest(api)).thenAnswer((_) {
+        lineupReads++;
+        return lineupReads == 2
+            ? delayedLineup.future
+            : Future.value({'Items': [_channel('old')]});
+      });
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((_) {
+        sportsReads++;
+        return sportsReads == 1
+            ? oldSports.future
+            : Future.value({
+                'Items': [_program('fresh-game', 'fresh', isSports: true)],
+              });
+      });
+
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+      expect(sportsReads, 1);
+
+      final refreshing = vm.load(windowStart: start);
+      await pumpEventQueue();
+      expect(lineupReads, 2);
+      expect(vm.state, GuideState.loading);
+
+      // The older category result arrives while the new lineup is still
+      // pending. It must not publish rows or complete the guide load.
+      oldSports.complete({
+        'Items': [_program('stale-game', 'old', isSports: true)],
+      });
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+      expect(vm.filter, GuideFilter.sports);
+      expect(vm.filteredChannels, isEmpty);
+      expect(sportsReads, 1);
+
+      delayedLineup.complete({'Items': [_channel('fresh')]});
+      await refreshing;
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(vm.filter, GuideFilter.sports);
+      expect(vm.filteredChannels.map((c) => c.id), ['fresh']);
+      expect(vm.programsForChannel('fresh').single.id, 'fresh-game');
+      expect(vm.programsForChannel('old'), isEmpty);
+      expect(sportsReads, 2);
+    });
+
     test(
       'category switches do not page the old lineup during a full lineup fetch',
       () async {
