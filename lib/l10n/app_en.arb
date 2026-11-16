@@ -11211,11 +11211,11 @@
       "query": { "type": "String" }
     }
   },
-  "guideProgramSearchPartial": "Some program results could not be loaded. Retry search.",
+  "guideProgramSearchPartial": "Some program results could not be loaded. Use Retry beside the search box.",
   "@guideProgramSearchPartial": {
     "description": "Status and retry tooltip when a Live TV search received only partial EPG results."
   },
-  "guideProgramSearchFailed": "Program search failed. Retry search.",
+  "guideProgramSearchFailed": "Program search couldn't be completed. Use Retry beside the search box.",
   "@guideProgramSearchFailed": {
     "description": "Status and retry tooltip when the Live TV program search request failed."
   },

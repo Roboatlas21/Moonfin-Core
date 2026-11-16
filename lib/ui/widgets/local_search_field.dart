@@ -1,11 +1,13 @@
 import 'package:custom_tv_text_field/custom_tv_text_field.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../preference/user_preferences.dart';
 import '../../util/focus/dpad_keys.dart';
+import '../../util/focus/key_event_utils.dart';
 import '../../util/platform_detection.dart';
 
 /// The search box a library screen puts in its header.
@@ -102,10 +104,15 @@ class _LocalSearchFieldState extends State<LocalSearchField> {
       return Focus(
         focusNode: widget.focusNode,
         onKeyEvent: (node, event) {
-          if (event.isActionable && event.logicalKey.isSelectKey) {
-            if (!node.hasFocus) node.requestFocus();
-            effectiveTvKey.currentState?.openKeyboard();
-            return KeyEventResult.handled;
+          if (event.logicalKey.isSelectKey) {
+            // Retry can hand focus back here while Select is still held.
+            // Consume repeats instead of opening the keyboard again.
+            if (event is KeyRepeatEvent) return KeyEventResult.handled;
+            final select = handleOneShotSelect(event, () {
+              if (!node.hasFocus) node.requestFocus();
+              effectiveTvKey.currentState?.openKeyboard();
+            });
+            if (select != KeyEventResult.ignored) return select;
           }
           if (widget.onTvKeyEvent != null) {
             return widget.onTvKeyEvent!(node, event);
