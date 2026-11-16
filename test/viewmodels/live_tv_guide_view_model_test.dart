@@ -1428,6 +1428,91 @@ void main() {
       expect(searches, 1);
     });
 
+
+    test(
+      'category switches do not page the old lineup during a full lineup fetch',
+      () async {
+        final channels = [
+          for (var i = 0; i < 120; i++) _channel('c$i', number: '$i'),
+        ];
+        final oldSportsPage = Completer<Map<String, dynamic>>();
+        final newLineup = Completer<Map<String, dynamic>>();
+        var lineupReads = 0;
+        when(() => _channelsRequest(api)).thenAnswer((_) {
+          lineupReads++;
+          return lineupReads == 2
+              ? newLineup.future
+              : Future.value({'Items': channels});
+        });
+        final allPages = <List<String>>[];
+        when(() => _guide(api)).thenAnswer((invocation) async {
+          allPages.add(List<String>.of(_requestedIds(invocation)));
+          return {'Items': []};
+        });
+        var sportsReads = 0;
+        when(() => _guide(api, category: GuideFilter.sports))
+            .thenAnswer((_) {
+              sportsReads++;
+              return oldSportsPage.future;
+            });
+
+        await vm.load(windowStart: start);
+        expect(allPages, hasLength(1));
+        expect(vm.hasMorePrograms, isTrue);
+
+        vm.setFilter(GuideFilter.sports);
+        await pumpEventQueue();
+        expect(sportsReads, 1);
+        expect(vm.state, GuideState.loading);
+
+        final reloading = vm.load(windowStart: start);
+        await pumpEventQueue();
+        expect(lineupReads, 2);
+        expect(vm.state, GuideState.loading);
+
+        // The old category request has not returned. Switching to All must
+        // not expose the old lineup or permit a second lazy-page fetch.
+        vm.setFilter(GuideFilter.all);
+        expect(vm.state, GuideState.loading);
+        await vm.loadMorePrograms();
+        await pumpEventQueue();
+        expect(allPages, hasLength(1));
+
+        // Repeated category changes during the same lineup must also wait.
+        vm.setFilter(GuideFilter.sports);
+        vm.setFilter(GuideFilter.all);
+        await vm.loadMorePrograms();
+        await pumpEventQueue();
+        expect(vm.state, GuideState.loading);
+        expect(sportsReads, 1);
+        expect(allPages, hasLength(1));
+
+        newLineup.complete({'Items': channels});
+        await reloading;
+        await pumpEventQueue();
+
+        expect(vm.filter, GuideFilter.all);
+        expect(vm.state, GuideState.ready);
+        expect(allPages, hasLength(2));
+        expect(allPages.last, [
+          for (var i = 0; i < 50; i++) 'c$i',
+        ]);
+        await vm.loadMorePrograms();
+        expect(allPages, hasLength(3));
+        expect(allPages.last.first, 'c50');
+
+        // The late category reply must not reinstate its cancelled results.
+        oldSportsPage.complete({
+          'Items': [_program('obsolete', 'c1', isSports: true)],
+        });
+        await pumpEventQueue();
+        expect(vm.filter, GuideFilter.all);
+        expect(vm.state, GuideState.ready);
+        expect(vm.filteredChannels, hasLength(120));
+        expect(vm.programsForChannel('c1'), isEmpty);
+      },
+    );
+
     test(
       'category selection waits for the lineup before fetching programs',
       () async {

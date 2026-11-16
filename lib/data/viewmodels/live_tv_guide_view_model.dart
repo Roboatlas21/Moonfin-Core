@@ -1706,7 +1706,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     if (_categoryFetchInFlight) {
       _categoryFetchInFlight = false;
-      _state = GuideState.ready;
+      // The older category page is cancelled, but the current full reload
+      // still owns the guide until its replacement lineup has arrived.
+      if (!awaitingLineup) _state = GuideState.ready;
     }
     if (awaitingLineup) {
       _notifyListeners();
@@ -1726,6 +1728,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadCategoryPrograms() async {
+    // Never start a category request against channels being replaced by a
+    // pending full lineup fetch; that load will start the chosen category.
+    if (_lineupLoadGeneration == _loadGeneration) return;
     _resetCategory();
     final request = _categoryRequest;
     final cacheRevision = _windowCacheRevision;
@@ -1774,6 +1779,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Look up one channel outside the loaded page of a program category.
   /// A missing match means the channel doesn't belong to this category now.
   Future<bool> ensureCategoryChannel(String channelId) async {
+    if (_lineupLoadGeneration == _loadGeneration) return false;
     final category = _filter;
     if (!_isCategory(category) || _categoryLoadedFor != category) return false;
     if (_categoryPrograms.containsKey(channelId)) return true;
@@ -2583,6 +2589,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Loads the next batch of channels (in list order) as the guide is scrolled
   /// toward the loaded edge. No-op once every channel has been requested.
   Future<void> loadMorePrograms() async {
+    // A category switch may have cancelled the old page while a new lineup
+    // is pending. The full load owns the first page of that new lineup.
+    if (_lineupLoadGeneration == _loadGeneration) return;
     final generation = _programGeneration;
     final pageGeneration = _pageGeneration;
     final searchRequest = _titleSearchRequest;
