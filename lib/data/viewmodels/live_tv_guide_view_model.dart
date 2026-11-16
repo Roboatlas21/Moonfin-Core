@@ -2103,6 +2103,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
     _atLivePosition = livePosition;
+    // The pending full reload will fetch this latest window with its new lineup.
+    if (_lineupLoadGeneration == _loadGeneration) return;
     if (_fullGuideLoadGeneration == _loadGeneration) {
       // A full load has discarded its loaded rows. Use the normal window
       // loader rather than trying to replace an empty in-flight snapshot.
@@ -2197,6 +2199,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> _reloadPrograms({bool keepCategoryRows = false}) async {
+    // Date, window, and span changes have already updated the target window.
+    // Wait for the owning full load to fetch it with the replacement lineup.
+    if (_lineupLoadGeneration == _loadGeneration) return;
     if (_channelQuery.isNotEmpty) _updatePageRows();
     final loadGeneration = ++_loadGeneration;
     // This window reload supersedes any full load; it inherits its pending

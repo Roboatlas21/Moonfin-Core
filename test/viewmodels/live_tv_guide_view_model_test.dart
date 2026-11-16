@@ -1429,6 +1429,71 @@ void main() {
     });
 
 
+    test('pending lineup fetch uses latest requested guide window', () async {
+      final original = start;
+      final latest = start.add(const Duration(days: 1, hours: 6));
+      const finalSpan = Duration(hours: 4);
+      final replacementLineup = Completer<Map<String, dynamic>>();
+      var lineupReads = 0;
+      when(() => _channelsRequest(api)).thenAnswer((_) {
+        lineupReads++;
+        return lineupReads == 2
+            ? replacementLineup.future
+            : Future.value({'Items': [_channel('old')]});
+      });
+
+      final requests = <({DateTime from, DateTime to, List<String> ids})>[];
+      when(() => _guide(api)).thenAnswer((invocation) async {
+        final from = invocation.namedArguments[#startDate] as DateTime;
+        final to = invocation.namedArguments[#endDate] as DateTime;
+        final ids = List<String>.of(_requestedIds(invocation));
+        requests.add((from: from, to: to, ids: ids));
+        return {
+          'Items': [
+            for (final id in ids)
+              _program('$id-program', id, start: from),
+          ],
+        };
+      });
+
+      await vm.load(windowStart: original);
+      expect(requests, hasLength(1));
+      expect(vm.playbackChannels.map((c) => c.id), ['old']);
+
+      final reloading = vm.load(windowStart: original);
+      await pumpEventQueue();
+      expect(lineupReads, 2);
+      expect(vm.state, GuideState.loading);
+
+      // Date, paging, explicit window navigation, and span changes must
+      // update the target without fetching programs for the stale lineup.
+      await vm.setDate(start.add(const Duration(days: 1)));
+      await vm.shiftWindow(const Duration(hours: 3));
+      await vm.setWindowStart(latest);
+      await vm.setWindow(finalSpan);
+      await pumpEventQueue();
+
+      expect(vm.windowStart, latest);
+      expect(vm.windowEnd, latest.add(finalSpan));
+      expect(vm.guideWindow, finalSpan);
+      expect(vm.state, GuideState.loading);
+      expect(requests, hasLength(1));
+
+      replacementLineup.complete({'Items': [_channel('fresh')]});
+      await reloading;
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, latest);
+      expect(vm.windowEnd, latest.add(finalSpan));
+      expect(vm.playbackChannels.map((c) => c.id), ['fresh']);
+      expect(requests, hasLength(2));
+      expect(requests.last.ids, ['fresh']);
+      expect(requests.last.from, latest);
+      expect(requests.last.to, latest.add(finalSpan));
+      expect(vm.programsForChannel('fresh').single.id, 'fresh-program');
+      expect(vm.hasProgramsFor('old'), isFalse);
+    });
 
     test('old Sports reply cannot finish a newer full load before its lineup',
         () async {
