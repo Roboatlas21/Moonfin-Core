@@ -841,6 +841,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _startProgramTitleSearch(preserveMatches: true);
   }
 
+  // Category selection discards the previous search, including a deferred
+  // replacement from a full guide reload. The following filter change rebuilds
+  // the channel rows, so don't start another load for the old filter here.
+  void clearChannelSearchForCategoryChange() {
+    ++_titleSearchRequest;
+    _pendingTitleSearchRefresh = false;
+    _channelQuery = '';
+    _setTitleMatches(const []);
+    _programSearchStatus = GuideProgramSearchStatus.idle;
+    _preservingTitleMatchesDuringSearch = false;
+  }
+
   void _startProgramTitleSearch({
     bool preserveMatches = false,
     bool recheckExpiredCategory = false,

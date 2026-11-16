@@ -1862,6 +1862,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         onSelect: (i) {
           _cancelPendingVerticalMove();
           if (_vm.filter != filters[i]) {
+            // Match the picker: a different category starts a fresh browse.
+            _channelSearchDebounce?.cancel();
+            _channelSearchDebounce = null;
+            _vm.clearChannelSearchForCategoryChange();
+            if (_channelSearch.text.isNotEmpty) _channelSearch.clear();
             _lastFocusedRowIndex = 0;
             _focusedChannel.value = null;
           }

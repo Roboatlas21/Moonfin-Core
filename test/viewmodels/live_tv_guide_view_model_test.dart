@@ -1118,6 +1118,75 @@ void main() {
       expect(searches, 2);
     });
 
+
+    test('category selection clears the search and rejects its late reply',
+        () async {
+      final pending = Completer<List<Map<String, dynamic>>>();
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) => pending.future);
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((_) async => {'Items': []});
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      expect(vm.searchingProgramTitles, isTrue);
+
+      vm.clearChannelSearchForCategoryChange();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.channelQuery, '');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.idle);
+      expect(vm.searchingProgramTitles, isFalse);
+
+      pending.complete([airing('stale', 'tsn')]);
+      await pumpEventQueue();
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.channelQuery, '');
+      expect(vm.filter, GuideFilter.sports);
+    });
+
+    test('category selection cancels a full reload pending title refresh',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('tsn'),
+      ]);
+      final delayedGuide = Completer<Map<String, dynamic>>();
+      var reloading = false;
+      when(() => _guide(api)).thenAnswer((_) =>
+          reloading ? delayedGuide.future : Future.value({'Items': []}));
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((_) async => {'Items': []});
+      var searches = 0;
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) {
+        searches++;
+        return Future.value([airing('match', 'tsn')]);
+      });
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(searches, 1);
+
+      reloading = true;
+      final refresh = vm.load(windowStart: start);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+      vm.clearChannelSearchForCategoryChange();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      delayedGuide.complete({'Items': []});
+      await refresh;
+      await pumpEventQueue();
+      expect(vm.channelQuery, '');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.idle);
+      expect(searches, 1);
+    });
+
     test('failed full reload does not leave cancelled title search loading',
         () async {
       // A channel-name match ensures the reload actually requests listings.
