@@ -745,6 +745,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           (program.episodeTitle?.toLowerCase().contains(_channelQuery) ??
               false));
   int _titleSearchRequest = 0;
+  // Full guide loads own the next title search. Defer query changes until
+  // their listings have loaded so search callbacks cannot invalidate a page.
+  int? _fullGuideLoadGeneration;
   GuideProgramSearchStatus _programSearchStatus = GuideProgramSearchStatus.idle;
   GuideProgramSearchStatus get programSearchStatus => _programSearchStatus;
   bool get searchingProgramTitles =>
@@ -843,6 +846,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // A retry or full-guide refresh keeps its previous results until the
     // replacement is complete. A different query starts from empty results.
     if (!preserveMatches) _setTitleMatches(const []);
+    if (_fullGuideLoadGeneration == _loadGeneration) {
+      // The successful full load will search the latest query. Starting one
+      // now could change _pageGeneration and abandon the in-flight listings.
+      _programSearchStatus = GuideProgramSearchStatus.idle;
+      _preservingTitleMatchesDuringSearch = false;
+      return;
+    }
     _programSearchStatus = _channelQuery.length >= 2
         ? GuideProgramSearchStatus.searching
         : GuideProgramSearchStatus.idle;
@@ -1468,6 +1478,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     bool livePosition = true,
   }) async {
     final loadGeneration = ++_loadGeneration;
+    _fullGuideLoadGeneration = loadGeneration;
+    // Discard pre-reload search replies before awaiting any lineup/listings.
+    // Keep the current query and matches visible until the fresh search runs.
+    final titleRequestAtLoadStart = ++_titleSearchRequest;
+    _programSearchStatus = GuideProgramSearchStatus.idle;
+    _preservingTitleMatchesDuringSearch = false;
     final recordingRevision = liveTvRecordingRevision.value;
     final lineupRequest = ++_lineupRequest;
     _pendingGuideWindow = null;
@@ -1526,8 +1542,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         // Only a full guide reload refreshes the server's title index.
         // Moving the visible window uses _reloadPrograms or setWindowStart,
         // so those navigation actions keep the existing search results.
+        if (_fullGuideLoadGeneration == loadGeneration) {
+          _fullGuideLoadGeneration = null;
+        }
         if (_channelQuery.length >= 2) {
           _startProgramTitleSearch(preserveMatches: true);
+        } else if (_titleSearchRequest != titleRequestAtLoadStart) {
+          // A short or cleared query needs its channel rows rebuilt too.
+          _applyChannelSearchRows();
         }
         _resumeInterruptedGuideWork();
       }
@@ -1535,6 +1557,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!current()) return;
       _error = e;
       _state = GuideState.error;
+    } finally {
+      // Older overlapping loads must not clear a newer load's ownership.
+      if (_fullGuideLoadGeneration == loadGeneration) {
+        _fullGuideLoadGeneration = null;
+      }
     }
     _notifyListeners();
   }

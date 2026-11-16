@@ -826,6 +826,168 @@ void main() {
       )).called(1);
     });
 
+
+    test('old search response during full reload cannot supersede its listings',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('tsn'),
+        _channel('espn'),
+      ]);
+      final stale = Completer<List<Map<String, dynamic>>>();
+      final delayedGuide = Completer<Map<String, dynamic>>();
+      var refreshing = false;
+      var calls = 0;
+      when(() => _guide(api)).thenAnswer((_) =>
+          refreshing ? delayedGuide.future : Future.value({'Items': []}));
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) {
+        calls++;
+        return calls == 1
+            ? stale.future
+            : Future.value([airing('fresh', 'espn')]);
+      });
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      expect(vm.searchingProgramTitles, isTrue);
+
+      refreshing = true;
+      final loading = vm.load(windowStart: start);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+
+      // This hit would add TSN to the search rows and invalidate the
+      // in-flight guide page if the old search were still allowed to publish.
+      stale.complete([airing('stale', 'tsn')]);
+      await pumpEventQueue();
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.searchingProgramTitles, isFalse);
+
+      delayedGuide.complete({'Items': []});
+      await loading;
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(calls, 2);
+      expect(vm.channelQuery, 'soccer');
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'soccertv', 'espn'});
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.futureSearchMatchForChannel('espn')?.title, 'Soccer fresh');
+    });
+
+    test('query changed during full reload searches only the latest text',
+        () async {
+      final delayedGuide = Completer<Map<String, dynamic>>();
+      var refreshing = false;
+      when(() => _guide(api)).thenAnswer((_) =>
+          refreshing ? delayedGuide.future : Future.value({'Items': []}));
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [airing('old', 'tsn')]);
+      when(() => api.searchProgramTitles(
+        'news', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        {...airing('bulletin', 'espn'), 'Name': 'Evening News'},
+      ]);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(vm.futureSearchMatchForChannel('tsn'), isNotNull);
+
+      refreshing = true;
+      final loading = vm.load(windowStart: start);
+      await pumpEventQueue();
+      vm.setChannelQuery('news');
+      expect(vm.channelQuery, 'news');
+      expect(vm.searchingProgramTitles, isFalse);
+      verifyNever(() => api.searchProgramTitles(
+        'news', isCurrent: any(named: 'isCurrent'),
+      ));
+
+      delayedGuide.complete({'Items': []});
+      await loading;
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(vm.channelQuery, 'news');
+      expect(vm.searchingProgramTitles, isFalse);
+      expect(vm.filteredChannels.map((c) => c.id), ['espn']);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+      expect(vm.futureSearchMatchForChannel('espn')?.title, 'Evening News');
+      verify(() => api.searchProgramTitles(
+        'news', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
+
+    test('clearing search mid-reload restores the unfiltered channel rows',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('espn'),
+      ]);
+      final delayedGuide = Completer<Map<String, dynamic>>();
+      var refreshing = false;
+      when(() => _guide(api)).thenAnswer((_) =>
+          refreshing ? delayedGuide.future : Future.value({'Items': []}));
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => []);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['soccertv']);
+
+      refreshing = true;
+      final loading = vm.load(windowStart: start);
+      await pumpEventQueue();
+      vm.setChannelQuery('');
+      expect(vm.channelQuery, '');
+
+      delayedGuide.complete({'Items': []});
+      await loading;
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'soccertv', 'espn'});
+      expect(vm.channelQuery, '');
+      expect(vm.searchingProgramTitles, isFalse);
+    });
+
+    test('failed full reload does not leave cancelled title search loading',
+        () async {
+      final pendingSearch = Completer<List<Map<String, dynamic>>>();
+      var failing = false;
+      when(() => _guide(api)).thenAnswer((_) =>
+          failing
+              ? Future<Map<String, dynamic>>.error(StateError('offline'))
+              : Future.value({'Items': []}));
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) => pendingSearch.future);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      expect(vm.searchingProgramTitles, isTrue);
+
+      failing = true;
+      await vm.load(windowStart: start);
+      expect(vm.state, GuideState.error);
+      expect(vm.searchingProgramTitles, isFalse);
+      expect(vm.channelQuery, 'soccer');
+
+      pendingSearch.complete([airing('stale', 'tsn')]);
+      await pumpEventQueue();
+      expect(vm.searchingProgramTitles, isFalse);
+      expect(vm.futureSearchMatchForChannel('tsn'), isNull);
+    });
+
     test('reply from before a reload cannot overwrite refreshed matches', () async {
       final stale = Completer<List<Map<String, dynamic>>>();
       var calls = 0;
