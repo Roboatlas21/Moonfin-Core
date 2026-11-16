@@ -1820,7 +1820,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             const SizedBox(width: 4),
             Tooltip(
               message: status == GuideProgramSearchStatus.partial
-                  ? l10n.guideProgramSearchPartial
+                  ? l10n.guideProgramSearchPartialTooltip
                   : l10n.guideProgramSearchFailed,
               child: Semantics(
                 button: true,
