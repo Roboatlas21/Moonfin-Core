@@ -402,6 +402,57 @@ void main() {
       expect(rail.selectedIndex, 0);
     },
   );
+
+  testWidgets('category rail clears text and cancels the pending search debounce',
+      (tester) async {
+    channelCount = 5;
+    when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
+      (_) async => const ChannelGroupLineup(
+        {},
+        programmeCategories: {'sports'},
+      ),
+    );
+    await pumpGuide(tester);
+    final rail = find.byType(EpgFilterRail);
+    expect(rail, findsOneWidget);
+    final search = tester
+        .widget<LocalSearchField>(find.byType(LocalSearchField))
+        .controller;
+
+    // Change categories before the 180 ms typing timer fires.
+    await tester.enterText(find.byType(TextField), 'Channel 1');
+    expect(search.text, 'Channel 1');
+    await tester.tap(find.descendant(
+      of: rail,
+      matching: find.text('Sports'),
+    ));
+    await tester.pump(const Duration(milliseconds: 220));
+    await _pumpFrames(tester);
+
+    expect(search.text, isEmpty);
+    expect(
+      tester.widget<EpgFilterRail>(rail).selectedIndex,
+      tester.widget<EpgFilterRail>(rail).labels.indexOf('Sports'),
+    );
+    expect(
+      tester.widgetList<EpgChannelCell>(find.byType(EpgChannelCell))
+          .any((channel) => channel.name == 'Channel 2'),
+      isTrue,
+      reason: 'the cancelled Channel 1 debounce must not filter Sports',
+    );
+
+    // The cleared field must accept a fresh query in the new category.
+    await tester.enterText(find.byType(TextField), 'Channel 2');
+    await tester.pump(const Duration(milliseconds: 220));
+    await _pumpFrames(tester);
+    final visible = tester
+        .widgetList<EpgChannelCell>(find.byType(EpgChannelCell))
+        .map((channel) => channel.name)
+        .toList();
+    expect(visible, contains('Channel 2'));
+    expect(visible, isNot(contains('Channel 1')));
+  });
+
   testWidgets('empty group mode keeps categories', (tester) async {
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvCategoryDisplay,

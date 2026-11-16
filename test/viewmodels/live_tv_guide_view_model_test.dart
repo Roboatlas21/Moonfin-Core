@@ -1119,6 +1119,164 @@ void main() {
     });
 
 
+
+    test('category retyping is not deferred behind an obsolete full reload',
+        () async {
+      final oldGuide = Completer<Map<String, dynamic>>();
+      final sportsGuide = Completer<Map<String, dynamic>>();
+      var reloading = false;
+      when(() => _guide(api)).thenAnswer((_) =>
+          reloading ? oldGuide.future : Future.value({'Items': []}));
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((_) => sportsGuide.future);
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [airing('old', 'tsn')]);
+      when(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        {...airing('game', 'espn'), 'Name': 'Hockey playoffs'},
+      ]);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+
+      reloading = true;
+      final fullReload = vm.load(windowStart: start);
+      await pumpEventQueue();
+      vm.clearChannelSearchForCategoryChange();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('hockey');
+      await pumpEventQueue();
+
+      expect(vm.channelQuery, 'hockey');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.complete);
+      verify(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+
+      sportsGuide.complete({'Items': []});
+      await pumpEventQueue();
+      oldGuide.complete({'Items': []});
+      await fullReload;
+      await pumpEventQueue();
+
+      expect(vm.filter, GuideFilter.sports);
+      expect(vm.channelQuery, 'hockey');
+      expect(vm.filteredChannels.map((c) => c.id), ['espn']);
+      expect(vm.futureSearchMatchForChannel('espn')?.title, 'Hockey playoffs');
+    });
+
+    test('sorting during a full reload hands the title refresh to lazy paging',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('tsn'),
+        _channel('espn'),
+      ]);
+      final oldGuide = Completer<Map<String, dynamic>>();
+      var delayNextGuide = false;
+      when(() => _guide(api)).thenAnswer((_) {
+        if (delayNextGuide) {
+          delayNextGuide = false;
+          return oldGuide.future;
+        }
+        return Future.value({'Items': []});
+      });
+      var searches = 0;
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) {
+        searches++;
+        return Future.value([
+          airing(searches == 1 ? 'old' : 'fresh',
+              searches == 1 ? 'tsn' : 'espn'),
+        ]);
+      });
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(searches, 1);
+
+      delayNextGuide = true;
+      final fullReload = vm.load(windowStart: start);
+      await pumpEventQueue();
+      vm.setSortBy(ChannelSortBy.name);
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(searches, 2);
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'soccertv', 'espn'});
+
+      oldGuide.complete({'Items': []});
+      await fullReload;
+      await pumpEventQueue();
+      expect(searches, 2);
+    });
+
+    test('two quick window shifts resume only after the latest lazy page',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('tsn'),
+        _channel('espn'),
+      ]);
+      final oldFullPage = Completer<Map<String, dynamic>>();
+      final oldWindowPage = Completer<Map<String, dynamic>>();
+      final firstWindow = start.add(const Duration(hours: 3));
+      final latestWindow = start.add(const Duration(hours: 6));
+      var delaying = false;
+      when(() => _guide(api)).thenAnswer((invocation) {
+        if (!delaying) return Future.value({'Items': []});
+        final from = invocation.namedArguments[#startDate] as DateTime;
+        if (from.isAtSameMomentAs(start)) return oldFullPage.future;
+        if (from.isAtSameMomentAs(firstWindow)) return oldWindowPage.future;
+        return Future.value({'Items': []});
+      });
+      var searches = 0;
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) {
+        searches++;
+        return Future.value([
+          airing(searches == 1 ? 'old' : 'fresh',
+              searches == 1 ? 'tsn' : 'espn'),
+        ]);
+      });
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(searches, 1);
+
+      delaying = true;
+      final fullReload = vm.load(windowStart: start);
+      await pumpEventQueue();
+      final firstShift = vm.setWindowStart(firstWindow);
+      await pumpEventQueue();
+      expect(searches, 1);
+
+      await vm.setWindowStart(latestWindow);
+      await pumpEventQueue();
+      expect(vm.windowStart, latestWindow);
+      expect(vm.state, GuideState.ready);
+      expect(searches, 2);
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'soccertv', 'espn'});
+
+      oldWindowPage.complete({'Items': []});
+      await firstShift;
+      oldFullPage.complete({'Items': []});
+      await fullReload;
+      await pumpEventQueue();
+      expect(searches, 2);
+      expect(vm.windowStart, latestWindow);
+    });
+
     test('category selection clears the search and rejects its late reply',
         () async {
       final pending = Completer<List<Map<String, dynamic>>>();

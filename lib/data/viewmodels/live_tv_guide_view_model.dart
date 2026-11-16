@@ -417,6 +417,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_sortBy == value) return;
     _programGeneration++;
     _advancePage();
+    // Sorting replaces the old listings page, so an older reload cannot
+    // keep a title-search refresh deferred behind a page it no longer owns.
+    _fullGuideLoadGeneration = null;
+    _activeWindowReloadGeneration = null;
     _sortBy = value;
     _channels = List<GuideChannel>.from(_channels)..sort(comparatorFor(value));
     _updatePageRows();
@@ -430,7 +434,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _categoryHighWater = 0;
     _categoryRequest++;
     _notifyListeners();
-    unawaited(loadMorePrograms());
+    if (hasMorePrograms) {
+      unawaited(loadMorePrograms());
+    } else {
+      _resumePendingTitleSearchRefresh();
+    }
   }
 
   /// Shared with the single-channel player loader so zapping order always
@@ -1041,7 +1049,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // Complete a full reload's deferred search only after the current guide
   // operation succeeds. A short/cleared query merely restores channel rows.
   void _resumePendingTitleSearchRefresh() {
-    if (!_pendingTitleSearchRefresh || _state != GuideState.ready) return;
+    if (!_pendingTitleSearchRefresh ||
+        _state != GuideState.ready ||
+        _fullGuideLoadGeneration == _loadGeneration ||
+        _activeWindowReloadGeneration == _loadGeneration) {
+      return;
+    }
     _pendingTitleSearchRefresh = false;
     if (_channelQuery.length >= 2) {
       _startProgramTitleSearch(preserveMatches: true);
@@ -1626,6 +1639,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _advancePage();
     }
     _categoryRequest++;
+    // Changing filters invalidates the preceding guide page, including any
+    // full/window reload that was waiting for its old channel selection.
+    _fullGuideLoadGeneration = null;
+    _activeWindowReloadGeneration = null;
     if (_categoryFetchInFlight) {
       _categoryFetchInFlight = false;
       _state = GuideState.ready;
@@ -1637,6 +1654,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _notifyListeners();
     if (!_isCategory(value) && (scopeChanged || _programsHighWater == 0)) {
       unawaited(loadMorePrograms());
+    }
+    if (_state == GuideState.ready && !hasMorePrograms) {
+      _resumePendingTitleSearchRefresh();
     }
   }
 
@@ -1681,6 +1701,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_state == GuideState.ready &&
         !interrupted &&
         request == _categoryRequest) {
+      _resumePendingTitleSearchRefresh();
       _resumeInterruptedGuideWork();
     }
   }
@@ -2035,15 +2056,24 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       pendingWrites: <Future<void>>{},
     );
     if (ids.isEmpty) {
-      // No existing listings can establish this window. Do not leave a
-      // pending request behind, and let the first lazy page confirm it.
+      // A newer window with no loaded rows is owned by its next lazy page,
+      // not by the superseded window reload. Invalidate that old page even
+      // when the query is empty (and did not already advance it above).
+      if (_activeWindowReloadGeneration == _loadGeneration) {
+        _activeWindowReloadGeneration = null;
+        if (_channelQuery.isEmpty) _resetPageCursor();
+      }
       _pendingGuideWindow = null;
       _programsHighWater = 0;
       _advanceProgramsCursor();
       if (_pageChannels.isEmpty) _rememberConfirmedGuideWindow();
       _notifyListeners();
-      if (_state == GuideState.ready && hasMorePrograms) {
-        unawaited(loadMorePrograms());
+      if (_state == GuideState.ready) {
+        if (hasMorePrograms) {
+          unawaited(loadMorePrograms());
+        } else {
+          _resumePendingTitleSearchRefresh();
+        }
       }
       return;
     }
@@ -2504,12 +2534,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _loadingMorePage = page;
     var categoryPageCompleted = false;
     var categoryPageInterrupted = false;
+    var pageSucceeded = false;
     try {
       if (_isCategory(_filter)) {
         categoryPageInterrupted = !await _walkCategory();
         categoryPageCompleted = true;
+        pageSucceeded = !categoryPageInterrupted;
       } else {
+        final previousHighWater = _programsHighWater;
         await _loadNextBatch();
+        pageSucceeded = _programsHighWater > previousHighWater;
       }
       if (current() &&
           _listingsStatePage == pageGeneration &&
@@ -2572,6 +2606,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
     }
     _notifyListeners();
+    // Only the latest successfully completed lazy page may fulfill the title
+    // refresh inherited from a superseded full load. Ordinary paging leaves
+    // this flag false and never starts a new program-title search.
+    if (pageSucceeded && current() && _state == GuideState.ready) {
+      _resumePendingTitleSearchRefresh();
+    }
     _resumeInterruptedGuideWork();
   }
 
