@@ -344,6 +344,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // whose window or channel set has since been superseded can be dropped.
   int _programGeneration = 0;
   int _loadGeneration = 0;
+  // While fetching the channel lineup, filter/sort changes are applied by
+  // the owning full load rather than issuing program requests for old channels.
+  int? _lineupLoadGeneration;
   bool _reloadOnEntry = false;
 
   /// [liveTvRecordingRevision] as of the last complete load, so re-entry can
@@ -417,16 +420,23 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_sortBy == value) return;
     _programGeneration++;
     _advancePage();
-    // Sorting replaces the old listings page, so an older reload cannot
-    // keep a title-search refresh deferred behind a page it no longer owns.
-    _fullGuideLoadGeneration = null;
-    _activeWindowReloadGeneration = null;
+    // The full load still owns its channel lineup if that request has not
+    // returned. Let it apply this new sort before fetching the first page.
+    final awaitingLineup = _lineupLoadGeneration == _loadGeneration;
+    if (!awaitingLineup) {
+      _fullGuideLoadGeneration = null;
+      _activeWindowReloadGeneration = null;
+    }
     _sortBy = value;
     _channels = List<GuideChannel>.from(_channels)..sort(comparatorFor(value));
     _updatePageRows();
     // The lazy-load prefix follows list order, so walk it again from the top.
     // Already-fetched channels are skipped in _loadNextBatch.
     _programsHighWater = 0;
+    if (awaitingLineup) {
+      _notifyListeners();
+      return;
+    }
     if (_isCategory(_filter) && _categoryLoadedFor != _filter) {
       unawaited(_loadCategoryPrograms());
       return;
@@ -762,6 +772,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // A full load still owes one fresh title search if date/window navigation
   // supersedes it. Ordinary guide navigation never sets this on its own.
   bool _pendingTitleSearchRefresh = false;
+  // Unlike a refresh inherited from load(), an explicit edit/retry deferred
+  // during that load must still run if the guide request fails.
+  ({bool preserveMatches, bool recheckExpiredCategory})? _deferredTitleSearch;
   GuideProgramSearchStatus _programSearchStatus = GuideProgramSearchStatus.idle;
   GuideProgramSearchStatus get programSearchStatus => _programSearchStatus;
   bool get searchingProgramTitles =>
@@ -858,6 +871,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void clearChannelSearchForCategoryChange() {
     ++_titleSearchRequest;
     _pendingTitleSearchRefresh = false;
+    _deferredTitleSearch = null;
     _channelQuery = '';
     _setTitleMatches(const []);
     _programSearchStatus = GuideProgramSearchStatus.idle;
@@ -878,6 +892,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       // Only an active guide reload owns the replacement search; an error
       // marker left by a finished reload must not block new search text.
       _pendingTitleSearchRefresh = true;
+      _deferredTitleSearch = (
+        preserveMatches: preserveMatches,
+        recheckExpiredCategory: recheckExpiredCategory,
+      );
       _programSearchStatus = GuideProgramSearchStatus.idle;
       _preservingTitleMatchesDuringSearch = false;
       return;
@@ -885,6 +903,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // An explicit query change or retry after a failed load supersedes any
     // deferred refresh. It must not fire again after the guide recovers.
     _pendingTitleSearchRefresh = false;
+    _deferredTitleSearch = null;
     _programSearchStatus = _channelQuery.length >= 2
         ? GuideProgramSearchStatus.searching
         : GuideProgramSearchStatus.idle;
@@ -1055,12 +1074,38 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _activeWindowReloadGeneration == _loadGeneration) {
       return;
     }
+    final deferred = _deferredTitleSearch;
     _pendingTitleSearchRefresh = false;
+    _deferredTitleSearch = null;
     if (_channelQuery.length >= 2) {
-      _startProgramTitleSearch(preserveMatches: true);
+      _startProgramTitleSearch(
+        preserveMatches: deferred?.preserveMatches ?? true,
+        recheckExpiredCategory: deferred?.recheckExpiredCategory ?? false,
+      );
     } else {
       _applyChannelSearchRows();
     }
+  }
+
+  // A failed guide request must keep its error visible, but it no longer
+  // owns a user-edited search query. Old refresh obligations stay pending
+  // for a future successful load; only explicit edits/retries run here.
+  void _resumeDeferredTitleSearchAfterFailure() {
+    final deferred = _deferredTitleSearch;
+    if (_disposed ||
+        _state != GuideState.error ||
+        !_pendingTitleSearchRefresh ||
+        deferred == null ||
+        _fullGuideLoadGeneration == _loadGeneration ||
+        _activeWindowReloadGeneration == _loadGeneration) {
+      return;
+    }
+    _pendingTitleSearchRefresh = false;
+    _deferredTitleSearch = null;
+    _startProgramTitleSearch(
+      preserveMatches: deferred.preserveMatches,
+      recheckExpiredCategory: deferred.recheckExpiredCategory,
+    );
   }
 
   void _advancePage() {
@@ -1539,6 +1584,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _preservingTitleMatchesDuringSearch = false;
     final recordingRevision = liveTvRecordingRevision.value;
     final lineupRequest = ++_lineupRequest;
+    if (!_usesPlaybackLineup) _lineupLoadGeneration = loadGeneration;
     _pendingGuideWindow = null;
     // Full reloads are the authoritative freshness boundary.
     _clearWindowProgramCache();
@@ -1571,11 +1617,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           lineupRequest != _lineupRequest) {
         return;
       }
+      if (_lineupLoadGeneration == loadGeneration) {
+        _lineupLoadGeneration = null;
+      }
       if (loadGeneration != _loadGeneration) {
         // The channel list is still valid, but the new date needs its own listings.
         await _reloadPrograms();
         return;
       }
+      // Another guide operation may have replaced this load while its lineup
+      // was pending. Never reset that operation's programs or category page.
+      if (_fullGuideLoadGeneration != loadGeneration) return;
 
       final initial = loadInitialPrograms(channelIds: initialChannelIds);
       listingsPage = _pageGeneration;
@@ -1607,8 +1659,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _state = GuideState.error;
     } finally {
       // Older overlapping loads must not clear a newer load's ownership.
+      if (_lineupLoadGeneration == loadGeneration) {
+        _lineupLoadGeneration = null;
+      }
       if (_fullGuideLoadGeneration == loadGeneration) {
         _fullGuideLoadGeneration = null;
+      }
+      if (loadGeneration == _loadGeneration) {
+        _resumeDeferredTitleSearchAfterFailure();
       }
     }
     _notifyListeners();
@@ -1639,13 +1697,20 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _advancePage();
     }
     _categoryRequest++;
-    // Changing filters invalidates the preceding guide page, including any
-    // full/window reload that was waiting for its old channel selection.
-    _fullGuideLoadGeneration = null;
-    _activeWindowReloadGeneration = null;
+    // If the channel lineup is still loading, this selection belongs to that
+    // full load. It will load the chosen category once it has the new lineup.
+    final awaitingLineup = _lineupLoadGeneration == _loadGeneration;
+    if (!awaitingLineup) {
+      _fullGuideLoadGeneration = null;
+      _activeWindowReloadGeneration = null;
+    }
     if (_categoryFetchInFlight) {
       _categoryFetchInFlight = false;
       _state = GuideState.ready;
+    }
+    if (awaitingLineup) {
+      _notifyListeners();
+      return;
     }
     if (_isCategory(value) && _categoryLoadedFor != value) {
       unawaited(_loadCategoryPrograms());
@@ -2172,6 +2237,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } finally {
       if (_activeWindowReloadGeneration == loadGeneration) {
         _activeWindowReloadGeneration = null;
+      }
+      if (current()) {
+        // A kept-category failure can return in the ready state; otherwise
+        // only an explicitly changed query is searched after an error.
+        // Never let a page superseded by sorting resume the old obligation.
+        if (_state == GuideState.ready) {
+          _resumePendingTitleSearchRefresh();
+        } else {
+          _resumeDeferredTitleSearchAfterFailure();
+        }
       }
     }
   }

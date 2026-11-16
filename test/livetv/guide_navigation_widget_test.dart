@@ -403,8 +403,9 @@ void main() {
     },
   );
 
-  testWidgets('category rail clears text and cancels the pending search debounce',
-      (tester) async {
+  testWidgets(
+    'category rail clears text and cancels the pending search debounce',
+    (tester) async {
     channelCount = 5;
     when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
       (_) async => const ChannelGroupLineup(
@@ -412,6 +413,35 @@ void main() {
         programmeCategories: {'sports'},
       ),
     );
+    // The category API must actually classify the returned programs.
+    when(
+      () => liveTvApi.getGuide(
+        startDate: any(named: 'startDate'),
+        endDate: any(named: 'endDate'),
+        channelIds: any(named: 'channelIds'),
+        isSports: any(named: 'isSports'),
+        fields: any(named: 'fields'),
+        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+        enableImages: any(named: 'enableImages'),
+        enableUserData: any(named: 'enableUserData'),
+        userId: any(named: 'userId'),
+      ),
+    ).thenAnswer((invocation) async {
+      final ids = (invocation.namedArguments[#channelIds] as List?)
+              ?.cast<String>() ??
+          const <String>[];
+      final sports = invocation.namedArguments[#isSports] == true;
+      return {
+        'Items': [
+          for (final id in ids)
+            for (final program in _programsFor(id))
+              <String, dynamic>{
+                ...program,
+                if (sports) 'IsSports': true,
+              },
+        ],
+      };
+    });
     await pumpGuide(tester);
     final rail = find.byType(EpgFilterRail);
     expect(rail, findsOneWidget);
@@ -422,10 +452,9 @@ void main() {
     // Change categories before the 180 ms typing timer fires.
     await tester.enterText(find.byType(TextField), 'Channel 1');
     expect(search.text, 'Channel 1');
-    await tester.tap(find.descendant(
-      of: rail,
-      matching: find.text('Sports'),
-    ));
+    await tester.tap(
+      find.descendant(of: rail, matching: find.text('Sports')),
+    );
     await tester.pump(const Duration(milliseconds: 220));
     await _pumpFrames(tester);
 

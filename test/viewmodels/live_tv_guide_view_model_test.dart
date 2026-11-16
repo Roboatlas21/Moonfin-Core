@@ -1345,6 +1345,201 @@ void main() {
       expect(searches, 1);
     });
 
+
+    test(
+      'query typed during a failed reload still runs without hiding guide error',
+      () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        {..._channel('hockeytv'), 'Name': 'Hockey TV'},
+        _channel('espn'),
+      ]);
+      final failedPage = Completer<Map<String, dynamic>>();
+      var refreshing = false;
+      when(() => _guide(api)).thenAnswer((_) =>
+          refreshing ? failedPage.future : Future.value({'Items': []}));
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [airing('old', 'soccertv')]);
+      when(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        {...airing('playoffs', 'espn'), 'Name': 'Hockey playoffs'},
+      ]);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      refreshing = true;
+      final reloading = vm.load(windowStart: start);
+      await pumpEventQueue();
+
+      vm.setChannelQuery('hockey');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.idle);
+      verifyNever(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      ));
+
+      failedPage.completeError(StateError('offline'));
+      await reloading;
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.error);
+      expect(vm.error, isA<StateError>());
+      expect(vm.channelQuery, 'hockey');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.complete);
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'hockeytv', 'espn'});
+      expect(vm.futureSearchMatchForChannel('soccertv'), isNull);
+      verify(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
+    test('unchanged query is not searched again after a failed full reload',
+        () async {
+      final failedPage = Completer<Map<String, dynamic>>();
+      var refreshing = false;
+      when(() => _guide(api)).thenAnswer((_) =>
+          refreshing ? failedPage.future : Future.value({'Items': []}));
+      var searches = 0;
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) {
+        searches++;
+        return Future.value([airing('old', 'tsn')]);
+      });
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(searches, 1);
+
+      refreshing = true;
+      final reloading = vm.load(windowStart: start);
+      await pumpEventQueue();
+      failedPage.completeError(StateError('offline'));
+      await reloading;
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.error);
+      expect(vm.channelQuery, 'soccer');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.idle);
+      expect(searches, 1);
+    });
+
+    test(
+      'category selection waits for the lineup before fetching programs',
+      () async {
+      final channels = [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        {..._channel('hockeytv'), 'Name': 'Hockey TV'},
+        _channel('espn'),
+      ];
+      final delayedLineup = Completer<Map<String, dynamic>>();
+      var lineupReads = 0;
+      when(() => _channelsRequest(api)).thenAnswer((_) {
+        lineupReads++;
+        return lineupReads == 2
+            ? delayedLineup.future
+            : Future.value({'Items': channels});
+      });
+      var allGuideReads = 0;
+      var sportsGuideReads = 0;
+      when(() => _guide(api)).thenAnswer((_) async {
+        allGuideReads++;
+        return {'Items': []};
+      });
+      when(() => _guide(api, category: GuideFilter.sports))
+          .thenAnswer((_) async {
+        sportsGuideReads++;
+        return {'Items': []};
+      });
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [airing('old', 'tsn')]);
+      when(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        {...airing('game', 'espn'), 'Name': 'Hockey playoffs'},
+      ]);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(allGuideReads, 1);
+
+      final reloading = vm.load(windowStart: start);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+      vm.clearChannelSearchForCategoryChange();
+      vm.setFilter(GuideFilter.sports);
+      vm.setChannelQuery('hockey');
+      await pumpEventQueue();
+      expect(vm.filter, GuideFilter.sports);
+      expect(vm.channelQuery, 'hockey');
+      expect(vm.state, GuideState.loading);
+      expect(allGuideReads, 1);
+      expect(sportsGuideReads, 0);
+      verifyNever(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      ));
+
+      delayedLineup.complete({'Items': channels});
+      await reloading;
+      await pumpEventQueue();
+
+      expect(lineupReads, 2);
+      expect(allGuideReads, 2);
+      expect(sportsGuideReads, 1);
+      expect(vm.state, GuideState.ready);
+      expect(vm.filter, GuideFilter.sports);
+      expect(vm.channelQuery, 'hockey');
+      expect(vm.programSearchStatus, GuideProgramSearchStatus.complete);
+      expect(vm.filteredChannels.map((c) => c.id), ['espn']);
+      verify(() => api.searchProgramTitles(
+        'hockey', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+    });
+
+    test(
+      'sort selection during a delayed lineup does not load stale pages',
+      () async {
+      final channels = [
+        {..._channel('tsn'), 'Name': 'Z TSN'},
+        {..._channel('espn'), 'Name': 'A ESPN'},
+      ];
+      final delayedLineup = Completer<Map<String, dynamic>>();
+      var lineupReads = 0;
+      when(() => _channelsRequest(api)).thenAnswer((_) {
+        lineupReads++;
+        return lineupReads == 2
+            ? delayedLineup.future
+            : Future.value({'Items': channels});
+      });
+      var guideReads = 0;
+      when(() => _guide(api)).thenAnswer((_) async {
+        guideReads++;
+        return {'Items': []};
+      });
+      await vm.load(windowStart: start);
+      expect(guideReads, 1);
+
+      final reloading = vm.load(windowStart: start);
+      await pumpEventQueue();
+      vm.setSortBy(ChannelSortBy.name);
+      await pumpEventQueue();
+      expect(guideReads, 1);
+
+      delayedLineup.complete({'Items': channels});
+      await reloading;
+      await pumpEventQueue();
+      expect(guideReads, 2);
+      expect(vm.state, GuideState.ready);
+      expect(vm.sortBy, ChannelSortBy.name);
+      expect(vm.filteredChannels.map((c) => c.id), ['espn', 'tsn']);
+    });
+
     test('failed full reload does not leave cancelled title search loading',
         () async {
       // A channel-name match ensures the reload actually requests listings.
