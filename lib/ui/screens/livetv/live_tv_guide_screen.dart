@@ -1769,7 +1769,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   Widget _buildChannelSearchField({bool compact = false}) {
-    final status = _vm.programSearchStatus;
     final l10n = AppLocalizations.of(context);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 360),
@@ -1818,31 +1817,26 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           ),
           if (_canRetryProgramSearch) ...[
             const SizedBox(width: 4),
-            Tooltip(
-              message: status == GuideProgramSearchStatus.partial
-                  ? l10n.guideProgramSearchPartialTooltip
-                  : l10n.guideProgramSearchFailed,
-              child: Semantics(
-                button: true,
-                child: _GuidePillButton(
-                  focusNode: _channelSearchRetryFocus,
-                  icon: Icons.refresh,
-                  label: l10n.retry,
-                  compact: compact,
-                  onPressed: _vm.retryProgramTitleSearch,
-                  onKeyEvent: (_, event) {
-                    if (!event.isActionable) return KeyEventResult.ignored;
-                    if (event.logicalKey.isLeftKey) {
-                      _channelSearchFocus.requestFocus();
-                      return KeyEventResult.handled;
-                    }
-                    if (event.logicalKey.isDownKey) {
-                      _focusWindowBarFromGenres();
-                      return KeyEventResult.handled;
-                    }
-                    return KeyEventResult.ignored;
-                  },
-                ),
+            Semantics(
+              button: true,
+              child: _GuidePillButton(
+                focusNode: _channelSearchRetryFocus,
+                icon: Icons.refresh,
+                label: l10n.retry,
+                compact: compact,
+                onPressed: _vm.retryProgramTitleSearch,
+                onKeyEvent: (_, event) {
+                  if (!event.isActionable) return KeyEventResult.ignored;
+                  if (event.logicalKey.isLeftKey) {
+                    _channelSearchFocus.requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  if (event.logicalKey.isDownKey) {
+                    _focusWindowBarFromGenres();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
               ),
             ),
           ],

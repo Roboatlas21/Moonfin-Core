@@ -11215,13 +11215,9 @@
   "@guideProgramSearchPartial": {
     "description": "Message in the empty Live TV guide when the EPG search returned partial results."
   },
-  "guideProgramSearchPartialTooltip": "Some program results couldn't be loaded. Press to retry.",
-  "@guideProgramSearchPartialTooltip": {
-    "description": "Tooltip on the Retry button when the Live TV EPG search returned partial results."
-  },
   "guideProgramSearchFailed": "Program search couldn't be completed. Use Retry beside the search box.",
   "@guideProgramSearchFailed": {
-    "description": "Status and retry tooltip when the Live TV program search request failed."
+    "description": "Message in the empty Live TV guide when the EPG search fails."
   },
   "guideToday": "Today",
   "guideTomorrow": "Tomorrow",
