@@ -748,6 +748,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // Full guide loads own the next title search. Defer query changes until
   // their listings have loaded so search callbacks cannot invalidate a page.
   int? _fullGuideLoadGeneration;
+  // A full load still owes one fresh title search if date/window navigation
+  // supersedes it. Ordinary guide navigation never sets this on its own.
+  bool _pendingTitleSearchRefresh = false;
   GuideProgramSearchStatus _programSearchStatus = GuideProgramSearchStatus.idle;
   GuideProgramSearchStatus get programSearchStatus => _programSearchStatus;
   bool get searchingProgramTitles =>
@@ -846,9 +849,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // A retry or full-guide refresh keeps its previous results until the
     // replacement is complete. A different query starts from empty results.
     if (!preserveMatches) _setTitleMatches(const []);
-    if (_fullGuideLoadGeneration == _loadGeneration) {
-      // The successful full load will search the latest query. Starting one
-      // now could change _pageGeneration and abandon the in-flight listings.
+    if (_fullGuideLoadGeneration == _loadGeneration ||
+        (_pendingTitleSearchRefresh && _listingsStatePage != null)) {
+      // The current guide load owns the replacement search. Even an updated
+      // query must not invalidate its in-flight listings page.
+      _pendingTitleSearchRefresh = true;
       _programSearchStatus = GuideProgramSearchStatus.idle;
       _preservingTitleMatchesDuringSearch = false;
       return;
@@ -1010,6 +1015,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _preservingTitleMatchesDuringSearch = false;
     _applyChannelSearchRows();
+  }
+
+  // Complete a full reload's deferred search only after the current guide
+  // operation succeeds. A short/cleared query merely restores channel rows.
+  void _resumePendingTitleSearchRefresh() {
+    if (!_pendingTitleSearchRefresh || _state != GuideState.ready) return;
+    _pendingTitleSearchRefresh = false;
+    if (_channelQuery.length >= 2) {
+      _startProgramTitleSearch(preserveMatches: true);
+    } else {
+      _applyChannelSearchRows();
+    }
   }
 
   void _advancePage() {
@@ -1480,8 +1497,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final loadGeneration = ++_loadGeneration;
     _fullGuideLoadGeneration = loadGeneration;
     // Discard pre-reload search replies before awaiting any lineup/listings.
-    // Keep the current query and matches visible until the fresh search runs.
-    final titleRequestAtLoadStart = ++_titleSearchRequest;
+    // Preserve the obligation to refresh if another guide operation takes over.
+    _pendingTitleSearchRefresh =
+        _pendingTitleSearchRefresh || _channelQuery.length >= 2;
+    ++_titleSearchRequest;
     _programSearchStatus = GuideProgramSearchStatus.idle;
     _preservingTitleMatchesDuringSearch = false;
     final recordingRevision = liveTvRecordingRevision.value;
@@ -1545,12 +1564,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (_fullGuideLoadGeneration == loadGeneration) {
           _fullGuideLoadGeneration = null;
         }
-        if (_channelQuery.length >= 2) {
-          _startProgramTitleSearch(preserveMatches: true);
-        } else if (_titleSearchRequest != titleRequestAtLoadStart) {
-          // A short or cleared query needs its channel rows rebuilt too.
-          _applyChannelSearchRows();
-        }
+        _resumePendingTitleSearchRefresh();
         _resumeInterruptedGuideWork();
       }
     } catch (e) {
@@ -1884,6 +1898,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _processedBoundaries.clear();
     _rememberConfirmedGuideWindow();
     _notifyListeners();
+    _resumePendingTitleSearchRefresh();
     _resumeInterruptedGuideWork();
   }
 
@@ -1971,6 +1986,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
     _atLivePosition = livePosition;
+    if (_fullGuideLoadGeneration == _loadGeneration) {
+      // A full load has discarded its loaded rows. Use the normal window
+      // loader rather than trying to replace an empty in-flight snapshot.
+      await _reloadPrograms();
+      return;
+    }
     final ids = _programsLoadedIds.toList();
     final generation = ++_programGeneration;
     if (_channelQuery.isNotEmpty) {
@@ -2052,6 +2073,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> _reloadPrograms({bool keepCategoryRows = false}) async {
     if (_channelQuery.isNotEmpty) _updatePageRows();
     final loadGeneration = ++_loadGeneration;
+    // This window reload supersedes any full load; it inherits its pending
+    // title refresh without allowing the old load to clear that obligation.
+    _fullGuideLoadGeneration = null;
     final recordingRevision = liveTvRecordingRevision.value;
     _pendingGuideWindow = null;
     final depth = _requestedPageDepth;
@@ -2078,6 +2102,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!current() || !completed) return;
       _loadedRecordingRevision = max(_loadedRecordingRevision, recordingRevision);
       _rememberConfirmedGuideWindow();
+      _resumePendingTitleSearchRefresh();
       _resumeInterruptedGuideWork();
     } catch (e) {
       if (!current()) return;

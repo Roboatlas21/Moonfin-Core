@@ -960,14 +960,182 @@ void main() {
       expect(vm.searchingProgramTitles, isFalse);
     });
 
+
+    test('date navigation completes a full reload pending title search',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('tsn'),
+        _channel('espn'),
+      ]);
+      final oldGuide = Completer<Map<String, dynamic>>();
+      var blockReload = false;
+      when(() => _guide(api)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (blockReload && from.isAtSameMomentAs(start)) {
+          return oldGuide.future;
+        }
+        return Future.value({'Items': []});
+      });
+      var searches = 0;
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) {
+        searches++;
+        return Future.value([
+          airing(searches == 1 ? 'old' : 'fresh',
+              searches == 1 ? 'tsn' : 'espn'),
+        ]);
+      });
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+      expect(searches, 1);
+      expect(vm.filteredChannels.map((c) => c.id), contains('tsn'));
+
+      blockReload = true;
+      final fullReload = vm.load(windowStart: start);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+
+      // This date reload supersedes Now while its listings are still pending.
+      await vm.setDate(start.add(const Duration(days: 1)));
+      await pumpEventQueue();
+      expect(vm.state, GuideState.ready);
+      expect(searches, 2);
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'soccertv', 'espn'});
+
+      oldGuide.complete({'Items': []});
+      await fullReload;
+      await pumpEventQueue();
+      expect(searches, 2);
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'soccertv', 'espn'});
+    });
+
+    test('query change during superseding date reload is searched only once',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('tsn'),
+        _channel('espn'),
+      ]);
+      final oldGuide = Completer<Map<String, dynamic>>();
+      final newGuide = Completer<Map<String, dynamic>>();
+      var blockReload = false;
+      final later = start.add(const Duration(days: 1));
+      when(() => _guide(api)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (!blockReload) return Future.value({'Items': []});
+        return from.isAtSameMomentAs(start)
+            ? oldGuide.future : newGuide.future;
+      });
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [airing('old', 'tsn')]);
+      when(() => api.searchProgramTitles(
+        'news', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) async => [
+        {...airing('bulletin', 'espn'), 'Name': 'Evening News'},
+      ]);
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+
+      blockReload = true;
+      final fullReload = vm.load(windowStart: start);
+      await pumpEventQueue();
+      final dateReload = vm.setDate(later);
+      await pumpEventQueue();
+      vm.setChannelQuery('news');
+      verifyNever(() => api.searchProgramTitles(
+        'news', isCurrent: any(named: 'isCurrent'),
+      ));
+
+      newGuide.complete({'Items': []});
+      await dateReload;
+      await pumpEventQueue();
+      expect(vm.channelQuery, 'news');
+      expect(vm.filteredChannels.map((c) => c.id), ['espn']);
+      verify(() => api.searchProgramTitles(
+        'news', isCurrent: any(named: 'isCurrent'),
+      )).called(1);
+
+      oldGuide.complete({'Items': []});
+      await fullReload;
+      await pumpEventQueue();
+      verifyNever(() => api.searchProgramTitles(
+        'news', isCurrent: any(named: 'isCurrent'),
+      ));
+    });
+
+    test('window paging during full reload completes the deferred search',
+        () async {
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('tsn'),
+        _channel('espn'),
+      ]);
+      final oldGuide = Completer<Map<String, dynamic>>();
+      var blockReload = false;
+      when(() => _guide(api)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (blockReload && from.isAtSameMomentAs(start)) {
+          return oldGuide.future;
+        }
+        return Future.value({'Items': []});
+      });
+      var searches = 0;
+      when(() => api.searchProgramTitles(
+        'soccer', isCurrent: any(named: 'isCurrent'),
+      )).thenAnswer((_) {
+        searches++;
+        return Future.value([
+          airing(searches == 1 ? 'old' : 'fresh',
+              searches == 1 ? 'tsn' : 'espn'),
+        ]);
+      });
+
+      await vm.load(windowStart: start);
+      vm.setChannelQuery('soccer');
+      await pumpEventQueue();
+
+      blockReload = true;
+      final fullReload = vm.load(windowStart: start);
+      await pumpEventQueue();
+      await vm.setWindowStart(start.add(const Duration(hours: 3)));
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(searches, 2);
+      expect(vm.filteredChannels.map((c) => c.id).toSet(),
+          {'soccertv', 'espn'});
+      oldGuide.complete({'Items': []});
+      await fullReload;
+      expect(searches, 2);
+    });
+
     test('failed full reload does not leave cancelled title search loading',
         () async {
+      // A channel-name match ensures the reload actually requests listings.
+      _stubChannels(api, [
+        {..._channel('soccertv'), 'Name': 'Soccer TV'},
+        _channel('tsn'),
+        _channel('espn'),
+      ]);
       final pendingSearch = Completer<List<Map<String, dynamic>>>();
       var failing = false;
-      when(() => _guide(api)).thenAnswer((_) =>
-          failing
-              ? Future<Map<String, dynamic>>.error(StateError('offline'))
-              : Future.value({'Items': []}));
+      var failedGuideCalls = 0;
+      when(() => _guide(api)).thenAnswer((_) {
+        if (failing) {
+          failedGuideCalls++;
+          return Future<Map<String, dynamic>>.error(StateError('offline'));
+        }
+        return Future.value({'Items': []});
+      });
       when(() => api.searchProgramTitles(
         'soccer', isCurrent: any(named: 'isCurrent'),
       )).thenAnswer((_) => pendingSearch.future);
@@ -978,6 +1146,7 @@ void main() {
 
       failing = true;
       await vm.load(windowStart: start);
+      expect(failedGuideCalls, 1);
       expect(vm.state, GuideState.error);
       expect(vm.searchingProgramTitles, isFalse);
       expect(vm.channelQuery, 'soccer');
