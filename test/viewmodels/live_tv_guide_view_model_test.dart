@@ -3134,6 +3134,102 @@ void main() {
       expect(vm.hasProgramsFor('c0'), isTrue);
     });
 
+    test('failed Sports window change restores its confirmed time and listings',
+        () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [_channel('sports'), _channel('other')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      var failNextWindow = true;
+      final sportsRequests = <DateTime>[];
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        sportsRequests.add(from);
+        if (from == later && failNextWindow) {
+          return Future.error(StateError('Sports listings unavailable'));
+        }
+        return Future.value({
+          'Items': [
+            _program(
+              from == later ? 'new-sport' : 'old-sport',
+              'sports',
+              start: from,
+              isSports: true,
+            ),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.ready);
+      expect(vm.programsForChannel('sports').single.id, 'old-sport');
+
+      await vm.setWindowStart(later, livePosition: false);
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, start);
+      expect(vm.windowEnd, start.add(vm.guideWindow));
+      expect(vm.guideDate, start);
+      expect(vm.atLivePosition, isTrue);
+      expect(vm.programsForChannel('sports').single.id, 'old-sport');
+      expect(vm.filteredChannels.map((c) => c.id), ['sports']);
+      expect(vm.hasMorePrograms, isFalse);
+
+      // A new attempt should fetch the requested window, not reuse a failed one.
+      failNextWindow = false;
+      await vm.setWindowStart(later, livePosition: false);
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, later);
+      expect(vm.programsForChannel('sports').single.id, 'new-sport');
+      expect(sportsRequests, [start, later, later]);
+    });
+
+    test('late failed Sports window cannot roll back a newer successful window',
+        () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final middle = start.add(const Duration(hours: 3));
+      final later = start.add(const Duration(hours: 6));
+      final delayedMiddle = Completer<Map<String, dynamic>>();
+      _stubChannels(liveTv, [_channel('sports')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == middle) return delayedMiddle.future;
+        return Future.value({
+          'Items': [
+            _program(
+              from == later ? 'latest-sport' : 'old-sport',
+              'sports',
+              start: from,
+              isSports: true,
+            ),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      final older = vm.setWindowStart(middle);
+      await pumpEventQueue();
+      await vm.setWindowStart(later);
+      delayedMiddle.completeError(StateError('obsolete Sports request failed'));
+      await older;
+
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, later);
+      expect(vm.guideDate, later);
+      expect(vm.programsForChannel('sports').single.id, 'latest-sport');
+    });
+
     test('late failed window request does not roll back a newer guide load', () async {
       final start = DateTime.utc(2026, 11, 14, 17);
       final later = start.add(const Duration(hours: 3));

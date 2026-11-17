@@ -2878,7 +2878,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     } catch (_) {
       return;
     }
-    if (!mounted) return;
+    // A failed category reload can restore the previous time window.
+    if (!mounted || _vm.windowStart != clamped) return;
     final selection = _selection;
     if (selection == null) return;
     final cells = _cellsForChannel(selection.channelId);

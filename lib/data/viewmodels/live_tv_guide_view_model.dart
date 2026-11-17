@@ -328,6 +328,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     Set<String> loadedIds,
   })? _confirmedGuideWindow;
 
+  // Retained program-category rows belong to a confirmed time window.
+  // A failed window change must restore both the rows and their time header.
+  ({
+    GuideFilter filter,
+    DateTime start,
+    DateTime end,
+    DateTime guideDate,
+    bool livePosition,
+    Map<String, List<GuideProgram>> programs,
+    Set<String> queriedIds,
+    Set<String> deferredIds,
+  })? _confirmedCategoryWindow;
+
   // Track channels successfully replaced while a whole-window read is pending.
   // A targeted refresh can then satisfy part of that read without requiring it
   // to fetch every channel again.
@@ -1575,6 +1588,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }) async {
     final loadGeneration = ++_loadGeneration;
     _fullGuideLoadGeneration = loadGeneration;
+    _confirmedCategoryWindow = null;
     // Supersede any older category page immediately, not only after the
     // replacement channel lineup returns. It must not mark this load ready.
     _categoryRequest++;
@@ -1684,6 +1698,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   void _selectFilter(GuideFilter value, String? group) {
     if (_filter == value && _selectedGroup == group) return;
+    _confirmedCategoryWindow = null;
     final scopeChanged =
         _selectedGroup != group ||
         _filter == GuideFilter.favorites ||
@@ -1964,6 +1979,60 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _pendingGuideWindow = null;
   }
 
+  void _rememberConfirmedCategoryWindow() {
+    if (!_isCategory(_filter) ||
+        _state != GuideState.ready ||
+        _categoryLoadedFor != _filter ||
+        _categoryFetchInFlight ||
+        _showingPreviousCategory) {
+      return;
+    }
+    _confirmedCategoryWindow = (
+      filter: _filter,
+      start: _windowStart,
+      end: _windowEnd,
+      guideDate: _guideDate,
+      livePosition: _atLivePosition,
+      programs: Map<String, List<GuideProgram>>.of(_categoryPrograms),
+      queriedIds: Set<String>.of(_categoryQueriedIds),
+      deferredIds: Set<String>.of(_categoryDeferredIds),
+    );
+  }
+
+  bool _restoreConfirmedCategoryWindow() {
+    final saved = _confirmedCategoryWindow;
+    if (saved == null || saved.filter != _filter) return false;
+    // Invalidate any old page or targeted lookup before republishing the
+    // confirmed category rows.
+    _programGeneration++;
+    _categoryRequest++;
+    _windowStart = saved.start;
+    _windowEnd = saved.end;
+    _guideDate = saved.guideDate;
+    _atLivePosition = saved.livePosition;
+    _categoryPrograms
+      ..clear()
+      ..addAll(saved.programs);
+    _categoryQueriedIds
+      ..clear()
+      ..addAll(saved.queriedIds);
+    _categoryDeferredIds
+      ..clear()
+      ..addAll(saved.deferredIds);
+    _categoryLoadedFor = saved.filter;
+    _previousWindowCategory = null;
+    _categoryFetchInFlight = false;
+    _reloadDepth = 0;
+    _listingsStatePage = null;
+    _error = null;
+    _state = GuideState.ready;
+    _updatePageRows();
+    // The aborted reload's page can no longer resume a deferred title search.
+    _resetPageCursor();
+    _notifyListeners();
+    return true;
+  }
+
   void _restoreConfirmedGuideWindow(Object error) {
     final saved = _confirmedGuideWindow;
     _pendingGuideWindow = null;
@@ -2099,6 +2168,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _rememberConfirmedGuideWindow();
     }
 
+    if (_isCategory(_filter)) _rememberConfirmedCategoryWindow();
     _windowStart = start;
     _windowEnd = start.add(_guideWindow);
     _guideDate = start;
@@ -2241,9 +2311,21 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _resumeInterruptedGuideWork();
     } catch (e) {
       if (!current()) return;
-      if (keepRows && !_accessDenied(e)) {
-        // If a refresh fails, keep the old listings and retry on the next request.
-        _categoryFetchInFlight = false;
+      if (keepCategoryRows &&
+          !_accessDenied(e) &&
+          _restoreConfirmedCategoryWindow()) {
+        // Only an explicit query edit/retry should run after the rollback.
+        // The inherited title refresh still needs a successful guide load.
+        final deferred = _deferredTitleSearch;
+        if (deferred != null) {
+          _activeWindowReloadGeneration = null;
+          _pendingTitleSearchRefresh = false;
+          _deferredTitleSearch = null;
+          _startProgramTitleSearch(
+            preserveMatches: deferred.preserveMatches,
+            recheckExpiredCategory: deferred.recheckExpiredCategory,
+          );
+        }
         return;
       }
       _error = e;
@@ -2254,8 +2336,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _activeWindowReloadGeneration = null;
       }
       if (current()) {
-        // A kept-category failure can return in the ready state; otherwise
-        // only an explicitly changed query is searched after an error.
+        // A restored category window invalidates the failed page; otherwise
+        // only successful loads may fulfill the old title refresh.
         // Never let a page superseded by sorting resume the old obligation.
         if (_state == GuideState.ready) {
           _resumePendingTitleSearchRefresh();
