@@ -2794,15 +2794,22 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// puts focus back on the cell the new anchor lands on.
   Future<void> _reanchor(DateTime now) async {
     if (!_vm.atLivePosition) return;
+    final requestedWindow = guideLeftEdge(now);
     try {
-      await _vm.setWindowStart(guideLeftEdge(now), livePosition: true);
+      await _vm.setWindowStart(requestedWindow, livePosition: true);
     } catch (_) {
       if (mounted) _vm.scheduleBoundaryRefresh();
       return;
     }
-    if (!mounted) return;
+    // A failed category request can restore the last confirmed window without
+    // throwing. Do not move focus using an unconfirmed time position.
+    if (!mounted || !_vm.atLivePosition || _vm.windowStart != requestedWindow) {
+      return;
+    }
     await _vm.refreshAtQuarterHour();
-    if (!mounted) return;
+    if (!mounted || !_vm.atLivePosition || _vm.windowStart != requestedWindow) {
+      return;
+    }
     final selection = _selection;
     if (selection == null) return;
     final cells = _cellsForChannel(selection.channelId);

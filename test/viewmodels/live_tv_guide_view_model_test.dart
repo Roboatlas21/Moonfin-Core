@@ -3188,6 +3188,135 @@ void main() {
       expect(sportsRequests, [start, later, later]);
     });
 
+      test('empty successful Sports window advances and remains a rollback target',
+        () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final emptyWindow = start.add(const Duration(hours: 3));
+      final failedWindow = start.add(const Duration(hours: 6));
+      _stubChannels(liveTv, [_channel('sports')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      final sportsWindows = <DateTime>[];
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        sportsWindows.add(from);
+        if (from == failedWindow) {
+          return Future.error(StateError('EPG temporarily unavailable'));
+        }
+        return Future.value({
+          'Items': [
+            if (from == start)
+              _program('current-sport', 'sports',
+                  start: start, isSports: true),
+          ],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      await vm.setWindowStart(emptyWindow, livePosition: false);
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, emptyWindow);
+      expect(vm.windowEnd, emptyWindow.add(vm.guideWindow));
+      expect(vm.filteredChannels, isEmpty);
+      expect(vm.programsForChannel('sports'), isEmpty);
+      expect(vm.hasMorePrograms, isFalse);
+
+      // An empty but successfully fetched window is still a valid fallback.
+      await vm.setWindowStart(failedWindow, livePosition: false);
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, emptyWindow);
+      expect(vm.guideDate, emptyWindow);
+      expect(vm.filteredChannels, isEmpty);
+      expect(vm.hasMorePrograms, isFalse);
+      expect(sportsWindows, [start, emptyWindow, failedWindow]);
+    });
+
+    test('failed live Sports reanchor retains its confirmed time and live flag',
+        () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final nextHalfHour = start.add(const Duration(minutes: 30));
+      _stubChannels(liveTv, [_channel('sports')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == nextHalfHour) {
+          return Future.error(StateError('EPG unavailable at new boundary'));
+        }
+        return Future.value({
+          'Items': [_program('current-sport', 'sports',
+              start: start, isSports: true)],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start, livePosition: true);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      await vm.setWindowStart(nextHalfHour, livePosition: true);
+      expect(vm.state, GuideState.ready);
+      expect(vm.windowStart, start);
+      expect(vm.atLivePosition, isTrue);
+      expect(vm.programsForChannel('sports').single.id, 'current-sport');
+    });
+
+    test('recording change during failed Sports window refreshes restored rows',
+        () async {
+      final start = DateTime.utc(2026, 11, 14, 17);
+      final later = start.add(const Duration(hours: 3));
+      final failedPage = Completer<Map<String, dynamic>>();
+      var recorded = false;
+      var currentWindowRequests = 0;
+      _stubChannels(liveTv, [_channel('sports')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        if (from == later) return failedPage.future;
+        currentWindowRequests++;
+        return Future.value({
+          'Items': [{
+            ..._program('current-sport', 'sports',
+                start: start, isSports: true),
+            if (recorded) 'TimerId': 'new-timer',
+          }],
+        });
+      });
+
+      final vm = LiveTvGuideViewModel(client, now: () => start);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.programsForChannel('sports').single.hasTimer, isFalse);
+      expect(currentWindowRequests, 1);
+
+      final changingWindow = vm.setWindowStart(later, livePosition: false);
+      await pumpEventQueue();
+      recorded = true;
+      await vm.recordingChanged();
+      expect(vm.windowStart, later);
+
+      failedPage.completeError(StateError('future Sports guide failed'));
+      await changingWindow;
+      await pumpEventQueue();
+
+      expect(vm.windowStart, start);
+      expect(vm.state, GuideState.ready);
+      expect(vm.programsForChannel('sports').single.hasTimer, isTrue);
+      expect(currentWindowRequests, 2);
+      clearInteractions(liveTv);
+      await vm.reloadIfRecordingsChanged();
+      verifyNever(() => _guide(liveTv, category: GuideFilter.sports));
+    });
+
     test('late failed Sports window cannot roll back a newer successful window',
         () async {
       final start = DateTime.utc(2026, 11, 14, 17);

@@ -2285,7 +2285,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final keepRows =
         keepCategoryRows &&
         _state == GuideState.ready &&
-        _categoryPrograms.isNotEmpty &&
         (_categoryLoadedFor == _filter || alreadyShowingPrevious);
     _resetPrograms(keepCategoryRows: keepRows);
     _reloadDepth = depth;
@@ -2326,6 +2325,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             recheckExpiredCategory: deferred.recheckExpiredCategory,
           );
         }
+        // A recording change during the failed load belongs to the restored
+        // window. Refresh those rows, not the abandoned window's full page.
+        _reloadAfterRecordingRefresh = false;
+        if (_loadedRecordingRevision < liveTvRecordingRevision.value) {
+          _refreshRecordingsAfterLoad = true;
+        }
+        _resumeInterruptedGuideWork();
         return;
       }
       _error = e;
