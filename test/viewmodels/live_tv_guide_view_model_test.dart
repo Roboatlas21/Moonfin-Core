@@ -3188,7 +3188,7 @@ void main() {
       expect(sportsRequests, [start, later, later]);
     });
 
-      test('empty successful Sports window advances and remains a rollback target',
+    test('empty successful Sports window advances and remains a rollback target',
         () async {
       final start = DateTime.utc(2026, 11, 14, 17);
       final emptyWindow = start.add(const Duration(hours: 3));
