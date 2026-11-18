@@ -15375,10 +15375,6 @@
   "@settingsPlaybackSubtitle": {
     "description": "Subtitle for the Playback settings root entry"
   },
-  "settingsLiveTvSubtitle": "Guide filters and channel playback",
-  "@settingsLiveTvSubtitle": {
-    "description": "Description of the Live TV category in the main settings."
-  },
   "settingsStorageSubtitle": "Downloads, storage location, and the image cache",
   "@settingsStorageSubtitle": {
     "description": "Subtitle for the Storage & Downloads settings root entry"

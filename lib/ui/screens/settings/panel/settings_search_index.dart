@@ -351,12 +351,6 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
     icon: Icons.play_circle,
     open: () => push(const _PlaybackCategoryScreen()),
   );
-  final liveTv = _SearchSection(
-    slug: 'live-tv',
-    path: [l10n.liveTV],
-    icon: Icons.live_tv,
-    open: () => push(const _LiveTvSettingsScreen()),
-  );
   final video = _SearchSection(
     slug: 'player',
     path: [l10n.playback, l10n.player],
@@ -618,6 +612,13 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
         l10n.gamepadNavigation,
         subtitle: l10n.gamepadNavigationDescription,
         keywords: ['gamepad', 'controller', 'input'],
+      ),
+    if (liveTvOnAnyServer)
+      style.leaf(
+        'live_tv_category_display',
+        l10n.liveTvCategoryDisplay,
+        header: l10n.layout,
+        keywords: ['live tv', 'guide', 'channel groups', 'categories'],
       ),
     style.leaf('pref_interface_style', l10n.interfaceStyle, keywords: [
       'classic',
@@ -1681,6 +1682,13 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
       '1080p',
       'transcode',
     ]),
+    if (liveTvOnAnyServer)
+      quality.leaf(
+        'pref_live_direct',
+        l10n.settingsLiveTvDirect,
+        subtitle: l10n.settingsLiveTvDirectSubtitle,
+        keywords: ['live tv'],
+      ),
     if (!PlatformDetection.isWeb && !PlatformDetection.isAppleTV)
       quality.leaf(
         'hardware_decoding',
@@ -2002,21 +2010,6 @@ List<_SettingsSearchEntry> _buildSettingsSearchIndex({
       subtitle: 'Prompt to Continue Watching after X consecutive episodes.',
       keywords: ['are you still watching'],
     ),
-
-    if (liveTvOnAnyServer) ...[
-      liveTv.screen(keywords: ['guide', 'channels', 'EPG']),
-      liveTv.leaf(
-        'live_tv_category_display',
-        l10n.liveTvCategoryDisplay,
-        keywords: ['live tv', 'guide', 'channel groups', 'categories'],
-      ),
-      liveTv.leaf(
-        'pref_live_direct',
-        l10n.settingsLiveTvDirect,
-        subtitle: l10n.settingsLiveTvDirectSubtitle,
-        keywords: ['live tv'],
-      ),
-    ],
 
     if (!PlatformDetection.isWeb) ...[
       downloads.screen(keywords: ['offline', 'storage']),
