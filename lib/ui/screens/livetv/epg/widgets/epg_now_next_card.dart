@@ -23,6 +23,7 @@ class EpgNowNextCard extends StatelessWidget {
   final VoidCallback? onLongPress;
   final bool isFavorite;
   final FocusNode? focusNode;
+  final FocusOnKeyEventCallback? onKeyEvent;
 
   const EpgNowNextCard({
     super.key,
@@ -39,6 +40,7 @@ class EpgNowNextCard extends StatelessWidget {
     this.onLongPress,
     this.isFavorite = false,
     this.focusNode,
+    this.onKeyEvent,
   });
 
   @override
@@ -146,7 +148,8 @@ class EpgNowNextCard extends StatelessWidget {
       focusNode: focusNode,
       onSelect: onTap,
       onLongPress: onLongPress,
-      enableLongPress: onLongPress != null,
+      onKeyEvent: onKeyEvent,
+      enableLongPress: onKeyEvent == null && onLongPress != null,
       borderRadius: radius,
       child: apple
           ? adaptiveGlass(

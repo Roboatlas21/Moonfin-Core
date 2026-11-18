@@ -37,6 +37,19 @@ class _MockUserLibrary extends Mock implements UserLibraryApi {}
 
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
 
+class _PickerPreferences extends UserPreferences {
+  _PickerPreferences(super.store);
+  Completer<void>? save;
+
+  @override
+  Future<void> set<T>(Preference<T> pref, T value) async {
+    if (pref.key == UserPreferences.liveTvSavedFilters.key && save != null) {
+      await save!.future;
+    }
+    await super.set(pref, value);
+  }
+}
+
 /// Deliberately asymmetric row shapes: differing program durations give the
 /// rows differing cell counts and boundaries, which is what makes a drifting
 /// vertical move visible as a different cell index.
@@ -633,7 +646,9 @@ void main() {
       addTearDown(
         () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
       );
-      final prefs = GetIt.instance<UserPreferences>();
+      final prefs = _PickerPreferences(GetIt.instance<PreferenceStore>());
+      await GetIt.instance.unregister<UserPreferences>();
+      GetIt.instance.registerSingleton<UserPreferences>(prefs);
       await prefs.set(
         UserPreferences.liveTvCategoryDisplay,
         LiveTvCategoryDisplay.both,
@@ -693,8 +708,15 @@ void main() {
       expect(find.text('Favorite groups and categories'), findsNothing);
       expect(node('CA| SPORTS').hasFocus, isTrue);
       expect(tester.widget<ListTile>(rows('US| SPORTS')).selected, isTrue);
+      prefs.save = Completer<void>();
       await hold(LogicalKeyboardKey.select);
-      expect(node('CA| SPORTS', last: true).hasFocus, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await _pumpFrames(tester);
+      expect(node('US| SPORTS').hasFocus, isTrue);
+      prefs.save!.complete();
+      await _pumpFrames(tester);
+      expect(rows('CA| SPORTS'), findsNWidgets(2));
+      expect(node('US| SPORTS').hasFocus, isTrue);
       await hold(LogicalKeyboardKey.arrowUp);
       expect(
         tester
@@ -858,6 +880,56 @@ void main() {
       expect(find.byType(EpgChannelCell), findsNothing);
       expect(_focusedLabel(), 'GuideBrowse');
       expect(find.byType(GuideFilterPicker), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'releasing Enter after removing the bottom mobile favorite stays in the guide',
+    (tester) async {
+      userDataSync.reset();
+      addTearDown(userDataSync.reset);
+      final prefs = GetIt.instance<UserPreferences>();
+      await prefs.set(
+        UserPreferences.liveTvCategoryDisplay,
+        LiveTvCategoryDisplay.groups,
+      );
+      await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
+      final api = _MockUserLibrary();
+      when(() => client.userLibraryApi).thenReturn(api);
+      when(() => api.unmarkFavorite('ch1')).thenAnswer((_) async {});
+      when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {
+            'ch0': {'Local'},
+          },
+          channels: [
+            for (var i = 0; i < 2; i++)
+              {
+                ..._channelRaw(i),
+                'UserData': {'IsFavorite': true},
+              },
+          ],
+        ),
+      );
+      await pumpGuide(tester, surface: const Size(390, 844));
+      await tester.tap(find.byTooltip('Filters'));
+      await _pumpFrames(tester);
+      await tester.tap(find.text('Favorites'));
+      await _pumpFrames(tester);
+      _nodeLabelled(tester, 'GuideChannel:1').requestFocus();
+      await _pumpFrames(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      await tester.pump(const Duration(milliseconds: 550));
+      await _pumpFrames(tester);
+      expect(_focusedLabel(), 'GuideChannel:0');
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+      await _pumpFrames(tester);
+      verify(() => api.unmarkFavorite('ch1')).called(1);
+      expect(
+        tester.widget<EpgNowNextCard>(find.byType(EpgNowNextCard)).channelName,
+        'Channel 0',
+      );
+      expect(prefs.get(UserPreferences.liveTvLastChannelId), isEmpty);
     },
   );
 

@@ -112,9 +112,10 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
     await widget.vm.toggleSavedFilter(choice);
     if (!mounted || !restore || _query.isNotEmpty) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && ModalRoute.isCurrentOf(context) == true) {
-        _focusRow(target);
-      }
+      if (!mounted || ModalRoute.isCurrentOf(context) != true) return;
+      final focused = _focusedRow.value;
+      if (_searchFocus.hasFocus || (focused != null && focused != id)) return;
+      _focusRow(target);
     });
     WidgetsBinding.instance.scheduleFrame();
   }

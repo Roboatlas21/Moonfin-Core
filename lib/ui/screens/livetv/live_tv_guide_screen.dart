@@ -2128,6 +2128,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             onLongPress: () => _toggleGuideChannelFavorite(channel.id, index),
             onTap: () => _watchChannel(channel.id),
             focusNode: _channelFocusNodeFor(index),
+            onKeyEvent: (node, event) =>
+                _handleChannelSelect(node, event, channel.id, index),
           ),
         );
       },
@@ -2627,6 +2629,24 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     }
   }
 
+  KeyEventResult _handleChannelSelect(
+    FocusNode node,
+    KeyEvent event,
+    String channelId,
+    int index,
+  ) {
+    if (!event.logicalKey.isSelectKey) return KeyEventResult.ignored;
+    return _channelHold.start(
+      event,
+      stillFocused: () =>
+          _mayTakeFocus &&
+          node.hasFocus &&
+          _vm.filteredChannels.elementAtOrNull(index)?.id == channelId,
+      onTap: () => _watchChannel(channelId),
+      onHold: () => _toggleGuideChannelFavorite(channelId, index),
+    );
+  }
+
   Widget _buildChannelCell(GuideChannel channel, int index) {
     final imageUrl = channel.imageTag != null
         ? _vm.imageApi.getPrimaryImageUrl(
@@ -2644,17 +2664,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       onPressed: () => _watchChannel(channel.id),
       onLongPress: () => _toggleGuideChannelFavorite(channel.id, index),
       onKeyEvent: (node, event) {
-        if (event.logicalKey.isSelectKey) {
-          return _channelHold.start(
-            event,
-            stillFocused: () =>
-                _mayTakeFocus &&
-                node.hasFocus &&
-                _vm.filteredChannels.elementAtOrNull(index)?.id == channel.id,
-            onTap: () => _watchChannel(channel.id),
-            onHold: () => _toggleGuideChannelFavorite(channel.id, index),
-          );
-        }
+        final select = _handleChannelSelect(node, event, channel.id, index);
+        if (select != KeyEventResult.ignored) return select;
         if (!event.isActionable) return KeyEventResult.ignored;
         final pageDirection = event.logicalKey.pageDirection;
         if (pageDirection != 0) {

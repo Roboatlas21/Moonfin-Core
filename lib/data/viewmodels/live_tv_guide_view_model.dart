@@ -379,6 +379,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   void setSortBy(ChannelSortBy value) {
     if (_sortBy == value) return;
+    _windowRequest++;
     _programGeneration++;
     _advancePage();
     _sortBy = value;
@@ -576,6 +577,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void setChannelQuery(String text) {
     final query = text.trim().toLowerCase();
     if (_channelQuery == query) return;
+    _windowRequest++;
     _channelQuery = query;
     _updatePageRows();
     _resetPageCursor();
@@ -900,6 +902,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final opening = _usesPlaybackLineup ? null : Completer<bool>();
     _openingLineup?.complete(false);
     _openingLineup = opening;
+    // Older listings must not publish under the new time while the lineup loads.
+    _resetPrograms();
     if (window != null) _guideWindow = window;
     _windowStart =
         windowStart ??
@@ -990,6 +994,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   void _selectFilter(GuideFilter value, String? group) {
     if (_filter == value && _selectedGroup == group) return;
+    _windowRequest++;
     final scopeChanged =
         _selectedGroup != group ||
         _filter == GuideFilter.favorites ||
@@ -1160,12 +1165,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final request = ++_windowRequest;
     final load = _loadGeneration;
     final session = userDataSync.session;
-    var page = _pageGeneration;
+    // A favorite can reorder rows during the move. _replaceProgramPages
+    // retries those rows for the same target time.
     bool current() =>
         !_disposed &&
         request == _windowRequest &&
         load == _loadGeneration &&
-        page == _pageGeneration &&
         session == userDataSync.session;
     final move = (
       start: start,
@@ -1176,10 +1181,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     var moved = false;
     _pendingWindow = move;
     try {
-      if (opening != null) {
-        if (!await opening.future) return false;
-        page = _pageGeneration;
-      }
+      if (opening != null && !await opening.future) return false;
       moved = await _replaceProgramPages(
         current,
         windowStart: start,
