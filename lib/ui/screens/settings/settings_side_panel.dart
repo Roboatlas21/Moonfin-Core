@@ -145,6 +145,7 @@ part 'panel/plugin_screen.dart';
 part 'panel/about_category_screen.dart';
 part 'panel/keyboard_shortcuts_screen.dart';
 part 'panel/playback_category_screen.dart';
+part 'panel/live_tv_settings_screen.dart';
 part 'panel/video_playback_screen.dart';
 part 'panel/quality_decoding_screen.dart';
 part 'panel/playback_time_layout_screen.dart';
@@ -613,6 +614,13 @@ class _SettingsSidePanelState extends ConsumerState<SettingsSidePanel>
         l10n.settingsPlaybackSubtitle,
         () => const _PlaybackCategoryScreen(),
       ),
+      if (liveTvOnAnySignedInServer())
+        _SettingsCategory(
+          l10n.liveTV,
+          l10n.settingsLiveTvSubtitle,
+          () => const _LiveTvSettingsScreen(),
+          preview: false,
+        ),
       // The image cache lives here, so the entry stays on every native
       // platform. The download sections inside gate themselves.
       if (!PlatformDetection.isWeb)
