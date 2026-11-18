@@ -301,7 +301,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Set<String> _categoryQueriedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
   int _windowRequest = 0;
-  ({DateTime start, bool Function() current})? _pendingWindow;
+  ({DateTime start, bool Function() current, Completer<void> settled})?
+      _pendingWindow;
   _OpeningLineup? _openingLineup;
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
@@ -1077,6 +1078,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_disposed || listingsAccessDenied) return false;
     if (start == _windowStart) {
       _windowRequest++;
+      _finishPendingWindow();
       _openingLineup?.windowMove = null;
       _atLivePosition = livePosition;
       return true;
@@ -1085,11 +1087,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // Once the lineup is ready, paging can run alongside the opening listings.
     if (_state == GuideState.loading &&
         opening == null &&
+        !_categoryFetchInFlight &&
         _listingsStatePage != _pageGeneration) {
       return false;
     }
     // Paging fetches listings and cannot recover a failed channel list.
     if (_state == GuideState.error && _listingsStatePage == null) return false;
+    _finishPendingWindow();
     final request = ++_windowRequest;
     final move = _moveWindow(start, livePosition, request, opening);
     opening?.windowMove = move;
@@ -1111,7 +1115,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         load == _loadGeneration &&
         page == _pageGeneration &&
         session == userDataSync.session;
-    final move = (start: start, current: current);
+    final move = (start: start, current: current, settled: Completer<void>());
     _pendingWindow = move;
     try {
       if (opening != null) {
@@ -1124,8 +1128,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         livePosition: livePosition,
       );
     } finally {
-      if (_pendingWindow == move) _pendingWindow = null;
+      if (_pendingWindow == move) _finishPendingWindow();
     }
+  }
+
+  void _finishPendingWindow() {
+    _pendingWindow?.settled.complete();
+    _pendingWindow = null;
   }
 
   Future<void> setWindow(Duration window) async {
@@ -1384,14 +1393,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           (windowStart == null ||
               recordingRevision == liveTvRecordingRevision.value);
       final category = _isCategory(_filter) ? _filter : null;
-      // Favorites and the carousel can have loaded rows beyond the scroll cursor.
-      final useLoadedRows =
-          windowStart != null &&
-          category == null &&
-          _programsLoadedIds.isNotEmpty;
-      final rows = useLoadedRows
-          ? _channels.where((ch) => _programsLoadedIds.contains(ch.id)).toList()
-          : _pageChannels;
+      // Carry over rows already loaded or requested within the active filter.
+      final requestedRows = windowStart != null && category == null
+          ? _pageChannels.where((channel) {
+              return _programsLoadedIds.contains(channel.id) ||
+                  _programsPending[channel.id]?.generation == generation;
+            }).toList()
+          : const <GuideChannel>[];
+      final rows = requestedRows.isEmpty ? _pageChannels : requestedRows;
       final size = _batchSizeFor(category);
       final fetched = <String, List<GuideProgram>>{};
       var end = 0;
@@ -1409,7 +1418,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             ),
           );
           if (!samePage()) break;
-          if (!useLoadedRows &&
+          if (requestedRows.isEmpty &&
               end >= _requestedPageDepth &&
               (category == null || fetched.length >= _categoryMinRowsPerPage)) {
             break;
@@ -1516,8 +1525,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         !_disposed &&
         generation == _programGeneration &&
         pageGeneration == _pageGeneration;
+    final requestedEnd = min(
+      _programsHighWater + _programBatchSize,
+      _pageChannels.length,
+    );
     _loadingMorePage = page;
     try {
+      // Fetch the scroll batch for whichever window actually stays on screen.
+      var move = _pendingWindow;
+      while (move != null && move.current()) {
+        await move.settled.future;
+        if (!current()) return;
+        move = _pendingWindow;
+      }
       if (_isCategory(_filter)) {
         await _walkCategory();
       } else {
@@ -1551,8 +1571,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             _state == GuideState.ready &&
             (generation != _programGeneration ||
                 pageGeneration != _pageGeneration) &&
-            hasMorePrograms) {
-          unawaited(loadMorePrograms());
+            hasMorePrograms &&
+            (_isCategory(_filter) || _programsHighWater < requestedEnd)) {
+          await loadMorePrograms();
         }
       }
     }
@@ -1753,6 +1774,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _finishPendingWindow();
     _openingLineup?.ready.complete(false);
     _openingLineup = null;
 

@@ -1019,6 +1019,29 @@ void main() {
     },
   );
 
+  testWidgets('Next pages Sports while its initial listings are pending', (
+    tester,
+  ) async {
+    channelCount = 2;
+    await pumpGuide(tester);
+    final start = _windowRangeText(tester);
+    deferredChannelId = 'ch0';
+    await _activateGuideControl(
+      tester,
+      'GuideFilter:${GuideFilter.sports.index}',
+    );
+    await _activateGuideControl(tester, 'GuideWindowBar:2');
+    expect(releaseDeferredGuide, hasLength(2));
+    expect(_windowRangeText(tester), start);
+    releaseDeferredGuide.last();
+    await _pumpFrames(tester);
+    final next = _windowRangeText(tester);
+    expect(next, isNot(start));
+    releaseDeferredGuide.first();
+    await _pumpFrames(tester);
+    expect(_windowRangeText(tester), next);
+  });
+
   testWidgets('Next can page Favorites while the All request is pending', (
     tester,
   ) async {

@@ -324,6 +324,9 @@ void main() {
     vm.setGroup('Kids');
     await Future<void>.delayed(Duration.zero);
     expect(pages.length, 3);
+    pages.clear();
+    expect(await vm.setWindowStart(vm.windowEnd), isTrue);
+    expect(pages.expand((ids) => ids), vm.filteredChannels.map((ch) => ch.id));
     verify(() => grouped.getChannelGroups(userId: 'user')).called(1);
     when(() => grouped.getChannelGroups(userId: 'user'))
         .thenAnswer((_) async => const ChannelGroupLineup({}));
@@ -569,6 +572,48 @@ void main() {
     // The ordered scroll prefix is untouched by a targeted open.
     expect(vm.programsHighWater, 0);
   });
+
+  for (final fails in [false, true]) {
+    final outcome = fails ? 'fails' : 'succeeds';
+    test('scroll loads one batch when Next $outcome', () async {
+      _stubChannels(liveTv, [
+        for (var i = 0; i < 120; i++) _channel('c$i', number: '$i'),
+      ]);
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      final start = vm.windowStart;
+      final next = vm.windowEnd;
+      final hold = Completer<void>();
+      final calls = <(DateTime, String)>[];
+      when(() => _guide(liveTv)).thenAnswer((call) async {
+        final time = call.namedArguments[#startDate] as DateTime;
+        final ids = _requestedIds(call);
+        calls.add((time, ids.first));
+        if (time == next && ids.first == 'c0') {
+          await hold.future;
+          if (fails) throw Exception('listings unavailable');
+        }
+        return {'Items': [_program('row', ids.first, start: time)]};
+      });
+      final moving = vm.setWindowStart(next);
+      final scrolling = vm.loadMorePrograms();
+      // A second visible row requests the same batch.
+      await vm.loadMorePrograms();
+      hold.complete();
+      if (fails) {
+        await expectLater(moving, throwsException);
+      } else {
+        expect(await moving, isTrue);
+      }
+      await scrolling;
+      final displayed = fails ? start : next;
+      expect(vm.windowStart, displayed);
+      expect(calls, [(next, 'c0'), (displayed, 'c50')]);
+      expect(vm.programsHighWater, 100);
+      expect(vm.programsForChannel('c50').single.startDate, displayed);
+    });
+  }
 
   test('a slow lineup loads listings for the latest requested window', () async {
     final lineup = Completer<Map<String, dynamic>>();
