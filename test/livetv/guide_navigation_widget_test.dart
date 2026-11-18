@@ -445,12 +445,22 @@ void main() {
     },
   );
   testWidgets('empty group mode keeps categories', (tester) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvCategoryDisplay,
       LiveTvCategoryDisplay.groups,
     );
     await pumpGuide(tester);
     expect(find.byType(EpgFilterRail), findsOneWidget);
+    _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
+    await _pumpFrames(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideWindowBar:0');
+    expect(find.byType(GuideFilterPicker), findsNothing);
   });
 
   testWidgets('TV picker OK selects and Right or Back cancels', (tester) async {
@@ -530,6 +540,21 @@ void main() {
     expect(picker, findsNothing);
     expect(find.text('Sports'), findsOneWidget);
     expect(_focusedLabel(), 'GuideChannel:0');
+
+    final range = _windowRangeText(tester);
+    for (final control in ['GuideWindowBar:0', 'GuideBrowse']) {
+      await key(LogicalKeyboardKey.arrowUp);
+      expect(_focusedLabel(), control);
+      await key(LogicalKeyboardKey.arrowLeft);
+      expect(picker, findsOneWidget);
+      await key(LogicalKeyboardKey.arrowRight);
+      expect(picker, findsNothing);
+      expect(_focusedLabel(), control);
+      expect(_windowRangeText(tester), range);
+    }
+    await key(LogicalKeyboardKey.arrowDown);
+    await key(LogicalKeyboardKey.select);
+    expect(_windowRangeText(tester), isNot(range));
   });
 
   // Opening the picker clears the channel search. A program category then

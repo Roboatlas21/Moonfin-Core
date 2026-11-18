@@ -1712,6 +1712,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
               canRequestFocus: false,
               onKeyEvent: (_, event) {
                 if (!event.isActionable) return KeyEventResult.ignored;
+                if (event.logicalKey.isLeftKey && PlatformDetection.isTV) {
+                  unawaited(_openFilterPicker());
+                  return KeyEventResult.handled;
+                }
                 if (event.logicalKey.isRightKey) {
                   _pendingPickerRestore = null;
                   _channelSearchFocus.requestFocus();
@@ -2257,7 +2261,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         if (!event.isActionable) return KeyEventResult.ignored;
         final key = event.logicalKey;
         if (key.isLeftKey) {
-          _focusWindowBar(index - 1);
+          if (index == _kWindowBarPrevious &&
+              _usesPicker &&
+              PlatformDetection.isTV) {
+            unawaited(_openFilterPicker());
+          } else {
+            _focusWindowBar(index - 1);
+          }
           return KeyEventResult.handled;
         }
         if (key.isRightKey) {
