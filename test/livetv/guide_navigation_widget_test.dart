@@ -8,6 +8,7 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:moonfin_design/moonfin_design.dart' show AppColorScheme;
 import 'package:playback_core/playback_core.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
@@ -542,9 +543,23 @@ void main() {
     expect(_focusedLabel(), 'GuideChannel:0');
 
     final range = _windowRangeText(tester);
+    Color? filterFill() => tester
+        .widget<Material>(
+          find.descendant(
+            of: find.byTooltip('Filters'),
+            matching: find.byType(Material),
+          ),
+        )
+        .color;
+    final idleFill = Colors.white.withValues(alpha: 0.10);
+    expect(filterFill(), idleFill);
     for (final control in ['GuideWindowBar:0', 'GuideBrowse']) {
       await key(LogicalKeyboardKey.arrowUp);
       expect(_focusedLabel(), control);
+      expect(
+        filterFill(),
+        control == 'GuideBrowse' ? AppColorScheme.accent : idleFill,
+      );
       await key(LogicalKeyboardKey.arrowLeft);
       expect(picker, findsOneWidget);
       await key(LogicalKeyboardKey.arrowRight);
@@ -553,6 +568,7 @@ void main() {
       expect(_windowRangeText(tester), range);
     }
     await key(LogicalKeyboardKey.arrowDown);
+    expect(filterFill(), idleFill);
     await key(LogicalKeyboardKey.select);
     expect(_windowRangeText(tester), isNot(range));
   });
