@@ -239,10 +239,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// The single deferred vertical move, or null when nothing is pending.
   _PendingVerticalMove? _pendingVerticalMove;
 
-  /// One-shot timer to the next half hour. Rescheduled when it fires.
-  ({DateTime target, Future<bool> move})? _pendingPageMove;
+  ({DateTime target, GuideFilterChoice filter, Future<bool> move})?
+      _pendingPageMove;
   DateTime? _failedPageTarget;
   Timer? _windowNoticeTimer;
+
+  /// One-shot timer to the next half hour. Rescheduled when it fires.
   Timer? _reanchorTimer;
   Timer? _displayClockTimer;
 
@@ -393,6 +395,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   void _onChanged() {
     if (!mounted) return;
+    final paging = _pendingPageMove;
+    if (paging != null && paging.filter != (_vm.filter, _vm.selectedGroup)) {
+      _pendingPageMove = null;
+    }
     if (_vm.filter != GuideFilter.all &&
         _vm.filter != GuideFilter.favorites &&
         (!_vm.availableProgrammeCategories.contains(_vm.filter) ||
@@ -2724,15 +2730,16 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       _windowNoticeTimer?.cancel();
       setState(() => _failedPageTarget = null);
     }
+    final filter = (_vm.filter, _vm.selectedGroup);
     final move = _vm.setWindowStart(
       clamped,
       livePosition: clamped == liveStart,
     );
-    _pendingPageMove = (target: clamped, move: move);
+    _pendingPageMove = (target: clamped, filter: filter, move: move);
     try {
-      if (!await move) return;
+      if (!await move || _pendingPageMove?.move != move) return;
     } catch (_) {
-      if (_mayTakeFocus) {
+      if (_pendingPageMove?.move == move && _mayTakeFocus) {
         setState(() => _failedPageTarget = clamped);
         _windowNoticeTimer?.cancel();
         _windowNoticeTimer = Timer(const Duration(seconds: 3), () {

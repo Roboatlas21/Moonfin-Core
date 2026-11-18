@@ -1012,6 +1012,50 @@ void main() {
     },
   );
 
+  testWidgets('Next can page Favorites while the All request is pending', (
+    tester,
+  ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
+    when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
+      (_) async => ChannelGroupLineup({}, channels: [
+        _channelRaw(0),
+        {..._channelRaw(1), 'UserData': {'IsFavorite': true}},
+      ]),
+    );
+    await pumpGuide(tester);
+    final start = _windowRangeText(tester);
+    deferredChannelId = 'ch1';
+    Future<void> activate(String label) async {
+      _nodeLabelled(tester, label).requestFocus();
+      await _pumpFrames(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await _pumpFrames(tester);
+    }
+
+    const next = 'GuideWindowBar:2';
+    await activate(next);
+    await activate(next);
+    expect(releaseDeferredGuide, hasLength(1));
+    await activate('GuideFilter:${GuideFilter.favorites.index}');
+    final channel = find.byType(EpgChannelCell);
+    expect(tester.widget<EpgChannelCell>(channel).name, 'Channel 1');
+    await activate(next);
+    expect(releaseDeferredGuide, hasLength(2));
+    expect(_windowRangeText(tester), start);
+
+    releaseDeferredGuide.last();
+    await _pumpFrames(tester);
+    final favoritesRange = _windowRangeText(tester);
+    expect(favoritesRange, isNot(start));
+    releaseDeferredGuide.first();
+    await _pumpFrames(tester);
+    expect(_windowRangeText(tester), favoritesRange);
+    expect(tester.widget<EpgChannelCell>(channel).name, 'Channel 1');
+  });
+
   testWidgets('Right retries a failed page without moving remote focus', (
     tester,
   ) async {
