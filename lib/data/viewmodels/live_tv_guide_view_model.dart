@@ -234,6 +234,12 @@ enum GuideState { loading, ready, error }
 /// Per-channel program fetch state, distinct from the guide-wide [GuideState].
 enum GuideChannelLoadState { loaded, loading, failed }
 
+// A full load can use a time chosen while its channel list is in flight.
+class _OpeningLineup {
+  final ready = Completer<bool>();
+  Future<bool>? windowMove;
+}
+
 class LiveTvGuideViewModel extends ChangeNotifier {
   final MediaServerClient _client;
   bool _disposed = false;
@@ -295,6 +301,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Set<String> _categoryQueriedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
   int _windowRequest = 0;
+  _OpeningLineup? _openingLineup;
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
 
@@ -830,6 +837,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final lineupRequest = ++_lineupRequest;
+    final opening = _usesPlaybackLineup ? null : _OpeningLineup();
+    _openingLineup?.ready.complete(false);
+    _openingLineup = opening;
     if (window != null) _guideWindow = window;
     _windowStart =
         windowStart ??
@@ -859,10 +869,29 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           lineupRequest != _lineupRequest) {
         return;
       }
+      _openingLineup = null;
       if (loadGeneration != _loadGeneration) {
         // The channel list is still valid, but the new date needs its own listings.
         await _reloadPrograms();
         return;
+      }
+
+      final move = opening?.windowMove;
+      if (opening != null && move != null) {
+        _resetPrograms();
+        listingsPage = _pageGeneration;
+        _listingsStatePage = listingsPage;
+        final session = userDataSync.session;
+        opening.ready.complete(true);
+        try {
+          if (await move) {
+            if (loadGeneration == _loadGeneration) _reloadOnEntry = false;
+            return;
+          }
+        } catch (_) {
+          // The paging caller reports the failure. Try the original time below.
+        }
+        if (!current() || session != userDataSync.session) return;
       }
 
       final initial = loadInitialPrograms(channelIds: initialChannelIds);
@@ -884,6 +913,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!current()) return;
       _error = e;
       _state = GuideState.error;
+    } finally {
+      if (identical(_openingLineup, opening)) _openingLineup = null;
+      if (opening != null && !opening.ready.isCompleted) {
+        opening.ready.complete(false);
+      }
     }
     _notifyListeners();
   }
@@ -1033,18 +1067,33 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     DateTime start, {
     bool livePosition = false,
   }) async {
-    final request = ++_windowRequest;
     if (_disposed || listingsAccessDenied) return false;
     if (start == _windowStart) {
+      _windowRequest++;
+      _openingLineup?.windowMove = null;
       _atLivePosition = livePosition;
       return true;
     }
-    if (_state == GuideState.loading) return false;
+    final opening = _openingLineup;
+    if (_state == GuideState.loading && opening == null) return false;
     // Paging fetches listings and cannot recover a failed channel list.
     if (_state == GuideState.error && _listingsStatePage == null) return false;
+    final request = ++_windowRequest;
+    final move = _moveWindow(start, livePosition, request, opening);
+    opening?.windowMove = move;
+    return move;
+  }
+
+  Future<bool> _moveWindow(
+    DateTime start,
+    bool livePosition,
+    int request,
+    _OpeningLineup? opening,
+  ) async {
     final load = _loadGeneration;
-    final page = _pageGeneration;
     final session = userDataSync.session;
+    if (opening != null && !await opening.ready.future) return false;
+    final page = _pageGeneration;
     bool current() =>
         !_disposed &&
         request == _windowRequest &&
@@ -1683,6 +1732,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _openingLineup?.ready.complete(false);
+    _openingLineup = null;
 
     _programGeneration++;
     _loadGeneration++;
