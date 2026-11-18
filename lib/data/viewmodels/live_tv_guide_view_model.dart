@@ -294,8 +294,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int _categoryHighWater = 0;
   final Set<String> _categoryQueriedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
-  // Keep the current listings visible while the new window loads.
-  GuideFilter? _previousWindowCategory;
+  int _windowRequest = 0;
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
 
@@ -325,16 +324,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _state == GuideState.error &&
       _listingsStatePage == _pageGeneration &&
       _accessDenied(_error);
-
-  bool get canRetryCategoryListings =>
-      _isCategory(_filter) &&
-      _state == GuideState.error &&
-      _listingsStatePage == _pageGeneration &&
-      !_accessDenied(_error);
-
-  Future<void> retryCategoryListings() async {
-    if (canRetryCategoryListings) await _reloadPrograms();
-  }
 
   GuideChannelLoadState loadStateFor(String channelId) {
     if (hasProgramsFor(channelId)) return GuideChannelLoadState.loaded;
@@ -590,11 +579,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   DateTime _windowEnd;
   DateTime get windowEnd => _windowEnd;
 
-  bool get _showingPreviousCategory => _previousWindowCategory == _filter;
-
   List<GuideChannel> get filteredChannels {
     if (!_isCategory(_filter)) return _pageChannels;
-    if (_categoryLoadedFor != _filter && !_showingPreviousCategory) {
+    if (_categoryLoadedFor != _filter) {
       return const [];
     }
     return _pageChannels
@@ -774,10 +761,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// that would rebuild the grid and drop the focused cell. A failed refresh
   /// reloads in full.
   Future<void> _refreshRecordingState() async {
-    // A window replacement must find all matching channels again. Refreshing
-    // only the previous window's rows could miss newly recorded programs.
     if (_isCategory(_filter) && _listingsStatePage == _pageGeneration) {
-      if (!listingsAccessDenied) await _reloadPrograms(keepCategoryRows: true);
+      if (!listingsAccessDenied) await _reloadPrograms();
       return;
     }
     final recordingRevision = liveTvRecordingRevision.value;
@@ -1017,10 +1002,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  void _resetCategory({bool keepRows = false}) {
-    _previousWindowCategory = keepRows ? _filter : null;
-    _categoryFetchInFlight = keepRows;
-    if (!keepRows) _categoryPrograms.clear();
+  void _resetCategory() {
+    _categoryFetchInFlight = false;
+    _categoryPrograms.clear();
     _categoryQueriedIds.clear();
     _categoryHighWater = 0;
     _categoryLoadedFor = null;
@@ -1043,43 +1027,33 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     await _reloadPrograms();
   }
 
-  /// Moves the time window without entering the guide-wide loading state.
-  /// Existing rows stay visible until every requested replacement is ready.
-  Future<void> setWindowStart(
+  /// Publishes the requested time and listings together. A superseded move
+  /// returns false; a failed request leaves the displayed window available.
+  Future<bool> setWindowStart(
     DateTime start, {
     bool livePosition = false,
   }) async {
-    if (_disposed) return;
+    final request = ++_windowRequest;
+    if (_disposed || listingsAccessDenied) return false;
     if (start == _windowStart) {
       _atLivePosition = livePosition;
-      await retryCategoryListings();
-      return;
+      return true;
     }
-
-    final ids = _programsLoadedIds.toList();
-    final generation = ++_programGeneration;
-    _windowStart = start;
-    _windowEnd = start.add(_guideWindow);
-    _guideDate = start;
-    _atLivePosition = livePosition;
-    if (_isCategory(_filter)) {
-      await _reloadPrograms(keepCategoryRows: true);
-      return;
-    }
-    _resetCategory();
-    _notifyListeners();
-    if (ids.isEmpty) return;
-
-    final replacements = await _fetchProgramReplacements(
-      ids,
-      from: start,
-      to: _windowEnd,
-      generation: generation,
+    if (_state == GuideState.loading) return false;
+    final load = _loadGeneration;
+    final page = _pageGeneration;
+    final session = userDataSync.session;
+    bool current() =>
+        !_disposed &&
+        request == _windowRequest &&
+        load == _loadGeneration &&
+        page == _pageGeneration &&
+        session == userDataSync.session;
+    return _replaceProgramPages(
+      current,
+      windowStart: start,
+      livePosition: livePosition,
     );
-    if (replacements == null || generation != _programGeneration) return;
-    _programsByChannel.addAll(replacements);
-    _processedBoundaries.clear();
-    _notifyListeners();
   }
 
   Future<void> setWindow(Duration window) async {
@@ -1089,23 +1063,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     await _reloadPrograms();
   }
 
-  Future<void> _reloadPrograms({bool keepCategoryRows = false}) async {
+  Future<void> _reloadPrograms() async {
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final depth = _requestedPageDepth;
-    final alreadyShowingPrevious = _showingPreviousCategory;
-    final keepRows =
-        keepCategoryRows &&
-        _state == GuideState.ready &&
-        _categoryPrograms.isNotEmpty &&
-        (_categoryLoadedFor == _filter || alreadyShowingPrevious);
-    _resetPrograms(keepCategoryRows: keepRows);
+    _resetPrograms();
     _reloadDepth = depth;
     final page = _pageGeneration;
     _listingsStatePage = page;
     _error = null;
-    _state = keepRows ? GuideState.ready : GuideState.loading;
-    if (!alreadyShowingPrevious || !keepRows) _notifyListeners();
+    _state = GuideState.loading;
+    _notifyListeners();
 
     bool current() =>
         !_disposed &&
@@ -1117,7 +1085,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _loadedRecordingRevision = recordingRevision;
     } catch (e) {
       if (!current()) return;
-      if (keepRows) _resetCategory();
       _error = e;
       _state = GuideState.error;
       _notifyListeners();
@@ -1148,6 +1115,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Call when the guide is left after paging the window ahead or to another
   /// date, so the next entry starts live instead of wherever it wandered to.
   void resetWindowOnExit({DateTime? windowStart}) {
+    _windowRequest++;
     final now = _now();
     final nextStart =
         windowStart ?? DateTime(now.year, now.month, now.day, now.hour);
@@ -1326,16 +1294,32 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   /// Reload the pages the viewer had already reached.
-  Future<void> _replaceProgramPages(bool Function() current) async {
+  Future<bool> _replaceProgramPages(
+    bool Function() current, {
+    DateTime? windowStart,
+    bool livePosition = false,
+  }) async {
     while (current()) {
       final page = _pageGeneration;
       final generation = _programGeneration;
+      final recordingRevision = liveTvRecordingRevision.value;
+      final from = windowStart ?? _windowStart;
+      final to = from.add(_guideWindow);
       bool samePage() =>
           current() &&
           page == _pageGeneration &&
-          generation == _programGeneration;
-      final rows = _pageChannels;
+          generation == _programGeneration &&
+          (windowStart == null ||
+              recordingRevision == liveTvRecordingRevision.value);
       final category = _isCategory(_filter) ? _filter : null;
+      // Favorites and the carousel can have loaded rows beyond the scroll cursor.
+      final useLoadedRows =
+          windowStart != null &&
+          category == null &&
+          _programsLoadedIds.isNotEmpty;
+      final rows = useLoadedRows
+          ? _channels.where((ch) => _programsLoadedIds.contains(ch.id)).toList()
+          : _pageChannels;
       final size = _batchSizeFor(category);
       final fetched = <String, List<GuideProgram>>{};
       var end = 0;
@@ -1344,10 +1328,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           final start = end;
           end = min(start + size, rows.length);
           fetched.addAll(
-            await _fetchPrograms(rows.sublist(start, end), category: category),
+            await _fetchPrograms(
+              rows.sublist(start, end),
+              category: category,
+              current: current,
+              from: from,
+              to: to,
+            ),
           );
           if (!samePage()) break;
-          if (end >= _requestedPageDepth &&
+          if (!useLoadedRows &&
+              end >= _requestedPageDepth &&
               (category == null || fetched.length >= _categoryMinRowsPerPage)) {
             break;
           }
@@ -1357,18 +1348,26 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (samePage() || (current() && identical(error, _error))) rethrow;
       }
       if (!samePage()) continue;
+      if (windowStart != null) {
+        // Invalidate old-window reads and commit without an intermediate notification.
+        _resetPrograms();
+        _windowStart = windowStart;
+        _windowEnd = to;
+        _guideDate = windowStart;
+        _atLivePosition = livePosition;
+        _loadedRecordingRevision = recordingRevision;
+      }
       final ids = rows.take(end).map((c) => c.id);
       if (category == null) {
         for (final id in ids) {
           _programsByChannel[id] = fetched[id] ?? const [];
         }
         _programsLoadedIds.addAll(ids);
-        _programsHighWater = end;
+        _advanceProgramsCursor();
       } else {
         _categoryPrograms
           ..clear()
           ..addAll(fetched);
-        _previousWindowCategory = null;
         _categoryFetchInFlight = false;
         _categoryQueriedIds.addAll(ids);
         _advanceCategoryCursor();
@@ -1379,8 +1378,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _state = GuideState.ready;
       _error = null;
       _notifyListeners();
-      return;
+      return true;
     }
+    return false;
   }
 
   bool _accessDenied(Object? error) =>
@@ -1406,7 +1406,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _rebuildGroupChoices(complete: !partial || unresolved != null);
   }
 
-  void _resetPrograms({bool keepCategoryRows = false}) {
+  void _resetPrograms() {
     _advancePage();
     _programGeneration++;
     _programsByChannel.clear();
@@ -1414,7 +1414,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _failedCarouselIds.clear();
     _programsHighWater = 0;
     _processedBoundaries.clear();
-    _resetCategory(keepRows: keepCategoryRows);
+    _resetCategory();
   }
 
   Future<void> loadInitialPrograms({List<String>? channelIds}) {
@@ -1886,6 +1886,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     required DateTime from,
     required DateTime to,
     GuideFilter? category,
+    bool Function()? current,
   }) async {
     final generation = _programGeneration;
     final lineup = _lineupRequest;
@@ -1912,6 +1913,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           !_disposed &&
           generation == _programGeneration &&
           lineup == _lineupRequest &&
+          (current?.call() ?? true) &&
           page == _pageGeneration &&
           session == userDataSync.session &&
           (_groupAccount == null ||
@@ -1927,7 +1929,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programGeneration++;
     _categoryRequest++;
     _categoryFetchInFlight = false;
-    _previousWindowCategory = null;
     _categoryLoadedFor = null;
     for (final id in ids) {
       _programsByChannel.remove(id);
@@ -1948,13 +1949,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<Map<String, List<GuideProgram>>> _fetchPrograms(
     List<GuideChannel> batch, {
     GuideFilter? category,
+    DateTime? from,
+    DateTime? to,
+    bool Function()? current,
   }) async {
     if (batch.isEmpty) return {};
     final response = await _fetchGuide(
       channelIds: batch.map((c) => c.id).toList(),
-      from: _windowStart,
-      to: _windowEnd,
+      from: from ?? _windowStart,
+      to: to ?? _windowEnd,
       category: category,
+      current: current,
     );
     final byChannel = _parsePrograms(response);
     if (category != null) {

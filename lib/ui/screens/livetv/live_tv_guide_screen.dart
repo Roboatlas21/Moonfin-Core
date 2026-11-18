@@ -240,6 +240,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   _PendingVerticalMove? _pendingVerticalMove;
 
   /// One-shot timer to the next half hour. Rescheduled when it fires.
+  ({DateTime target, Future<bool> move})? _pendingPageMove;
+  DateTime? _failedPageTarget;
+  Timer? _windowNoticeTimer;
   Timer? _reanchorTimer;
   Timer? _displayClockTimer;
 
@@ -969,6 +972,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     widget.backController?._onBackPressed = null;
     _reanchorTimer?.cancel();
     _displayClockTimer?.cancel();
+    _windowNoticeTimer?.cancel();
     _artworkLookupDebounce?.cancel();
     _artworkPrefetchScrollDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
@@ -1172,7 +1176,30 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           Directionality.of(context) == TextDirection.ltr ? offset : -offset,
           0,
         ),
-        child: body,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            body,
+            if (_failedPageTarget case final target?)
+              IgnorePointer(
+                child: Align(
+                  alignment: const Alignment(0, 0.96),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: ExcludeFocus(
+                      child: Chip(
+                        label: Text(
+                          AppLocalizations.of(context).guideWindowLoadFailed(
+                            _formatTime(target),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
     if (widget.embedded) {
@@ -1849,23 +1876,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildGuideError() {
     final l10n = AppLocalizations.of(context);
-    final message = Text(
-      l10n.failedToLoadGuide(describeError(_vm.error!, l10n)),
-      style: TextStyle(color: Colors.white.withAlpha(179)),
-    );
-    if (!_vm.canRetryCategoryListings) return Center(child: message);
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          message,
-          const SizedBox(height: 8),
-          FilledButton(
-            autofocus: PlatformDetection.isTV,
-            onPressed: _vm.retryCategoryListings,
-            child: Text(l10n.retry),
-          ),
-        ],
+      child: Text(
+        l10n.failedToLoadGuide(describeError(_vm.error!, l10n)),
+        style: TextStyle(color: Colors.white.withAlpha(179)),
       ),
     );
   }
@@ -2623,9 +2637,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// Re-resolves the selection against the window as the clock moves it, and
   /// puts focus back on the cell the new anchor lands on.
   Future<void> _reanchor(DateTime now) async {
-    if (!_vm.atLivePosition) return;
+    if (!_vm.atLivePosition || _pendingPageMove != null) return;
     try {
-      await _vm.setWindowStart(guideLeftEdge(now), livePosition: true);
+      final moved = await _vm.setWindowStart(
+        guideLeftEdge(now),
+        livePosition: true,
+      );
+      if (!moved) return;
     } catch (_) {
       if (mounted) _vm.scheduleBoundaryRefresh();
       return;
@@ -2700,14 +2718,32 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final clamped = amount.isNegative && target.isBefore(floor)
         ? floor
         : target;
-    if (clamped == oldStart) return;
+    if (clamped == oldStart || clamped == _pendingPageMove?.target) return;
 
-    try {
-      await _vm.setWindowStart(clamped, livePosition: clamped == liveStart);
-    } catch (_) {
-      return;
+    if (_failedPageTarget != null) {
+      _windowNoticeTimer?.cancel();
+      setState(() => _failedPageTarget = null);
     }
-    if (!mounted) return;
+    final move = _vm.setWindowStart(
+      clamped,
+      livePosition: clamped == liveStart,
+    );
+    _pendingPageMove = (target: clamped, move: move);
+    try {
+      if (!await move) return;
+    } catch (_) {
+      if (_mayTakeFocus) {
+        setState(() => _failedPageTarget = clamped);
+        _windowNoticeTimer?.cancel();
+        _windowNoticeTimer = Timer(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _failedPageTarget = null);
+        });
+      }
+      return;
+    } finally {
+      if (_pendingPageMove?.move == move) _pendingPageMove = null;
+    }
+    if (!mounted || _vm.windowStart != clamped) return;
     final selection = _selection;
     if (selection == null) return;
     final cells = _cellsForChannel(selection.channelId);
@@ -2823,10 +2859,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       // Not _goToNow(): its full reload tears the grid down. This keeps the
       // rows up and only refetches programs when the window was paged away.
       _cancelPendingVerticalMove();
-      await _vm.setWindowStart(
+      final moved = await _vm.setWindowStart(
         guideLeftEdge(DateTime.now()),
         livePosition: true,
       );
+      if (!moved) {
+        _resettingToEntryState = false;
+        return;
+      }
       if (mounted) _anchorToWindowStart();
     } catch (_) {
       // Fall back to the full reload, which shows its own error state.

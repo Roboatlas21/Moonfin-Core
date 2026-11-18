@@ -148,6 +148,7 @@ void main() {
 
   /// Overridable per test so a lineup can outgrow a single program batch.
   late int channelCount;
+  late bool failGuideRequests;
 
   /// When set, any guide request covering this channel is held open until the
   /// test releases it, so its row can be observed mid-load.
@@ -167,6 +168,7 @@ void main() {
       LiveTvCategoryDisplay.programmes,
     );
     channelCount = _channelCount;
+    failGuideRequests = false;
     _fixtureWindowStart = guideLeftEdge(DateTime.now());
     deferredChannelId = null;
     releaseDeferredGuide = <VoidCallback>[];
@@ -215,6 +217,7 @@ void main() {
         userId: any(named: 'userId'),
       ),
     ).thenAnswer((invocation) async {
+      if (failGuideRequests) throw Exception('offline');
       final ids =
           (invocation.namedArguments[#channelIds] as List?)?.cast<String>() ??
           const <String>[];
@@ -1007,6 +1010,31 @@ void main() {
       expect(_focusedLabel(), 'GuideWindowBar:2');
     },
   );
+
+  testWidgets('Right retries a failed page without moving remote focus', (
+    tester,
+  ) async {
+    await pumpGuide(tester);
+    // Row 4 has one long program spanning the fixture's current window.
+    final cell = _nodeLabelled(tester, 'GuideProgramRow4:0');
+    cell.requestFocus();
+    await _pumpFrames(tester);
+    final range = _windowRangeText(tester);
+    final notice = find.textContaining('Couldn’t load');
+
+    failGuideRequests = true;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await _pumpFrames(tester);
+    expect(_windowRangeText(tester), range);
+    expect(FocusManager.instance.primaryFocus, same(cell));
+    expect(notice, findsOneWidget);
+
+    failGuideRequests = false;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await _pumpFrames(tester);
+    expect(_windowRangeText(tester), isNot(range));
+    expect(notice, findsNothing);
+  });
 
   testWidgets('the channel column handles ordinary vertical arrows', (
     tester,

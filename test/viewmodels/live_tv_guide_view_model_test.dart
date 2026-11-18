@@ -618,13 +618,19 @@ void main() {
       await pumpEventQueue();
 
       expect(vm.state, GuideState.ready);
-      expect(vm.windowStart, secondStart);
+      expect(vm.windowStart, firstStart);
       expect(vm.programsForChannel('c0').single.id, 'old');
 
       replacement.complete({
         'Items': [_program('new', 'c0', start: secondStart)],
       });
-      await moving;
+      expect(await moving, isTrue);
+      expect(vm.windowStart, secondStart);
+      expect(vm.programsForChannel('c0').single.id, 'new');
+
+      when(() => _guide(liveTv)).thenThrow(Exception('offline'));
+      await expectLater(vm.setWindowStart(firstStart), throwsException);
+      expect(vm.windowStart, secondStart);
       expect(vm.programsForChannel('c0').single.id, 'new');
     },
   );
@@ -1566,95 +1572,130 @@ void main() {
       });
 
       test(
-        'a failed window can be retried and an empty reply is valid',
+        'failed paging keeps the displayed window; an empty retry advances',
         () async {
           final failure = Exception('offline');
+          final oldEnd = vm.windowEnd;
+          final oldDate = vm.guideDate;
+          final notifications = <DateTime>[];
+          vm.addListener(() => notifications.add(vm.windowStart));
           when(() => _guide(liveTv, category: GuideFilter.sports))
               .thenThrow(failure);
-          await vm.setWindowStart(next);
-
-          expect(vm.windowStart, next);
-          expect(vm.state, GuideState.error);
-          expect(vm.error, same(failure));
-          expect(vm.canRetryCategoryListings, isTrue);
-          expect(vm.filteredChannels, isEmpty);
-          expect(vm.programsForChannel('c1'), isEmpty);
+          await expectLater(vm.setWindowStart(next), throwsA(same(failure)));
+          expect(vm.windowStart, start);
+          expect(vm.windowEnd, oldEnd);
+          expect(vm.guideDate, oldDate);
+          expect(vm.atLivePosition, isTrue);
+          expect(vm.state, GuideState.ready);
+          expect(vm.filteredChannels.map((c) => c.id), ['c1']);
+          expect(vm.programsForChannel('c1').single.id, 'old');
+          expect(notifications, isEmpty);
 
           when(() => _guide(liveTv, category: GuideFilter.sports))
               .thenAnswer((inv) async {
                 expect(inv.namedArguments[#startDate], next);
                 return {'Items': []};
               });
-          await vm.retryCategoryListings();
-
+          expect(await vm.setWindowStart(next), isTrue);
+          expect(notifications, [next]);
+          expect(vm.windowEnd, next.add(vm.guideWindow));
+          expect(vm.atLivePosition, isFalse);
           expect(vm.state, GuideState.ready);
-          expect(vm.error, isNull);
-          expect(vm.canRetryCategoryListings, isFalse);
-          expect(vm.filter, GuideFilter.sports);
-          expect(vm.windowStart, next);
           expect(vm.filteredChannels, isEmpty);
         },
       );
 
-      test(
-        'a recording change recovers the full window after a failed refresh',
-        () async {
-          when(() => _guide(liveTv, category: GuideFilter.sports))
-              .thenThrow(Exception('offline'));
-          await vm.setWindowStart(next);
-          notifyLiveTvRecordingsChanged();
-          await vm.reloadIfRecordingsChanged();
-          expect(vm.canRetryCategoryListings, isTrue);
-
-          when(() => _guide(liveTv, category: GuideFilter.sports))
-              .thenAnswer((inv) async {
-                expect(inv.namedArguments[#startDate], next);
-                expect(_requestedIds(inv), contains('c2'));
-                return {
-                  'Items': [
-                    {
-                      ..._program('new', 'c2', start: next, isSports: true),
-                      'TimerId': 'timer',
-                    },
-                  ],
-                };
-              });
-          // The failed attempt must not have consumed the recording revision.
-          await vm.reloadIfRecordingsChanged();
-          expect(vm.state, GuideState.ready);
-          expect(vm.filteredChannels.map((c) => c.id), ['c2']);
-          expect(vm.programsForChannel('c2').single.hasTimer, isTrue);
-        },
-      );
+      test('recording changes refresh the time still on screen', () async {
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenThrow(Exception('offline'));
+        await expectLater(vm.setWindowStart(next), throwsException);
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer((inv) async {
+              expect(inv.namedArguments[#startDate], start);
+              return {
+                'Items': [
+                  {
+                    ..._program('old', 'c1', start: start, isSports: true),
+                    'TimerId': 'timer',
+                  },
+                ],
+              };
+            });
+        await vm.recordingChanged();
+        expect(vm.windowStart, start);
+        expect(vm.programsForChannel('c1').single.hasTimer, isTrue);
+      });
 
       test(
-        'a late failed request cannot clear a newer recording refresh',
+        'a superseded failure cannot replace a newer successful move',
         () async {
           final pending = Completer<Map<String, dynamic>>();
           when(() => _guide(liveTv, category: GuideFilter.sports))
               .thenAnswer((_) => pending.future);
           final moving = vm.setWindowStart(next);
           await pumpEventQueue();
-          expect(vm.programsForChannel('c1').single.id, 'old');
-
+          expect(vm.windowStart, start);
+          final later = next.add(const Duration(hours: 3));
           when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(
             (_) async => {
-              'Items': [
-                {
-                  ..._program('new', 'c2', start: next, isSports: true),
-                  'TimerId': 'timer',
-                },
-              ],
+              'Items': [_program('new', 'c2', start: later, isSports: true)],
             },
           );
-          await vm.recordingChanged();
-          pending.completeError(Exception('earlier request failed'));
-          await moving;
+          expect(await vm.setWindowStart(later), isTrue);
+          final request = RequestOptions(path: '/LiveTv/Programs');
+          pending.completeError(
+            DioException(
+              requestOptions: request,
+              response: Response(requestOptions: request, statusCode: 403),
+            ),
+          );
+          expect(await moving, isFalse);
+          expect(vm.windowStart, later);
+          expect(vm.filteredChannels.map((c) => c.id), ['c2']);
+          expect(vm.programsForChannel('c2').single.id, 'new');
+        },
+      );
 
-          expect(vm.windowStart, next);
-          expect(vm.state, GuideState.ready);
+      test('a recording revision during paging refreshes the target before display', () async {
+        final pending = Completer<Map<String, dynamic>>();
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer((_) => pending.future);
+        final moving = vm.setWindowStart(next);
+        await pumpEventQueue();
+        notifyLiveTvRecordingsChanged();
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(
+          (_) async => {
+            'Items': [
+              {
+                ..._program('new', 'c2', start: next, isSports: true),
+                'TimerId': 'timer',
+              },
+            ],
+          },
+        );
+        pending.complete({
+          'Items': [_program('new', 'c2', start: next, isSports: true)],
+        });
+
+        expect(await moving, isTrue);
+        expect(vm.windowStart, next);
+        expect(vm.programsForChannel('c2').single.hasTimer, isTrue);
+      });
+
+      test(
+        'access denial still invalidates previously visible listings',
+        () async {
+          final request = RequestOptions(path: '/LiveTv/Programs');
+          when(() => _guide(liveTv, category: GuideFilter.sports)).thenThrow(
+            DioException(
+              requestOptions: request,
+              response: Response(requestOptions: request, statusCode: 403),
+            ),
+          );
+          expect(await vm.setWindowStart(next), isFalse);
+          expect(vm.listingsAccessDenied, isTrue);
+          expect(vm.filteredChannels, isEmpty);
           expect(vm.programsForChannel('c1'), isEmpty);
-          expect(vm.programsForChannel('c2').single.hasTimer, isTrue);
         },
       );
     });
