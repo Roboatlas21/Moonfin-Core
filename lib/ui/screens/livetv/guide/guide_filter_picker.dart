@@ -431,8 +431,9 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                           ]),
                           builder: (context, _) {
                             final choice = _focusedRow.value?.$1;
-                            if (choice == null || !choice.canFavorite)
+                            if (choice == null || !choice.canFavorite) {
                               return const SizedBox.shrink();
+                            }
                             return _remoteHint(
                               l10n.guideHoldOk,
                               _saved.contains(choice)

@@ -2615,7 +2615,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       }
       await write;
     } catch (_) {
-      if (_mayTakeFocus) {
+      if (mounted && _mayTakeFocus) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
