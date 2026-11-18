@@ -1019,6 +1019,23 @@ void main() {
     },
   );
 
+  for (final first in [0, 2]) {
+    testWidgets('opposite chevrons cancel the pending move from button $first', (
+      tester,
+    ) async {
+      channelCount = 2;
+      await pumpGuide(tester);
+      final start = _windowRangeText(tester);
+      deferredChannelId = 'ch0';
+      await _activateGuideControl(tester, 'GuideWindowBar:$first');
+      await _activateGuideControl(tester, 'GuideWindowBar:${2 - first}');
+      expect(releaseDeferredGuide, hasLength(1));
+      releaseDeferredGuide.single();
+      await _pumpFrames(tester);
+      expect(_windowRangeText(tester), start);
+    });
+  }
+
   testWidgets('Next pages Sports while its initial listings are pending', (
     tester,
   ) async {

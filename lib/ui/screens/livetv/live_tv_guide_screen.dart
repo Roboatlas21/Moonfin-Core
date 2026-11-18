@@ -2728,6 +2728,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       final moved = await _vm.setWindowStart(
         clamped,
         livePosition: clamped == liveStart,
+        paging: true,
       );
       if (!moved) return;
     } catch (_) {

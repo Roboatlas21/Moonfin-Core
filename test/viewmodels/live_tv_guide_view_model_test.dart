@@ -649,6 +649,38 @@ void main() {
     verify(() => _channelsRequest(liveTv)).called(1);
   });
 
+  test('a superseded opening clock update cannot restart the original time', () async {
+    final lineup = Completer<Map<String, dynamic>>();
+    when(() => _channelsRequest(liveTv)).thenAnswer((_) => lineup.future);
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    final start = DateTime(2026, 11, 18, 10);
+    final tick = start.add(const Duration(minutes: 30));
+    final next = start.add(vm.guideWindow);
+    final clockReply = Completer<Map<String, dynamic>>();
+    final nextReply = Completer<Map<String, dynamic>>();
+    final requested = <DateTime>[];
+    when(() => _guide(liveTv)).thenAnswer((call) {
+      final time = call.namedArguments[#startDate] as DateTime;
+      requested.add(time);
+      return time == tick ? clockReply.future : nextReply.future;
+    });
+    final opening = vm.load(windowStart: start);
+    final clock = vm.setWindowStart(tick, livePosition: true);
+    lineup.complete({'Items': [_channel('one')]});
+    await pumpEventQueue();
+    final paging = vm.setWindowStart(next, paging: true);
+    clockReply.complete({'Items': []});
+    expect(await clock, isFalse);
+    await pumpEventQueue();
+    nextReply.complete({'Items': [_program('future', 'one', start: next)]});
+    expect(await paging, isTrue);
+    await opening;
+    expect(requested, [tick, next]);
+    expect(vm.windowStart, next);
+    expect(vm.programsForChannel('one').single.id, 'future');
+  });
+
   test('a failed opening page still loads the original listings', () async {
     _stubChannels(liveTv, [_channel('one')]);
     final vm = LiveTvGuideViewModel(client);

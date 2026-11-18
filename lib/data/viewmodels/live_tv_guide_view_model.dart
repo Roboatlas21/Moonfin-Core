@@ -234,12 +234,6 @@ enum GuideState { loading, ready, error }
 /// Per-channel program fetch state, distinct from the guide-wide [GuideState].
 enum GuideChannelLoadState { loaded, loading, failed }
 
-// A full load can use a time chosen while its channel list is in flight.
-class _OpeningLineup {
-  final ready = Completer<bool>();
-  Future<bool>? windowMove;
-}
-
 class LiveTvGuideViewModel extends ChangeNotifier {
   final MediaServerClient _client;
   bool _disposed = false;
@@ -301,9 +295,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Set<String> _categoryQueriedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
   int _windowRequest = 0;
-  ({DateTime start, bool Function() current, Completer<void> settled})?
-      _pendingWindow;
-  _OpeningLineup? _openingLineup;
+  ({
+    DateTime start,
+    bool paging,
+    bool Function() current,
+    Completer<bool> settled,
+  })? _pendingWindow;
+  Completer<bool>? _openingLineup;
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
 
@@ -845,8 +843,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
     final lineupRequest = ++_lineupRequest;
-    final opening = _usesPlaybackLineup ? null : _OpeningLineup();
-    _openingLineup?.ready.complete(false);
+    final opening = _usesPlaybackLineup ? null : Completer<bool>();
+    _openingLineup?.complete(false);
     _openingLineup = opening;
     if (window != null) _guideWindow = window;
     _windowStart =
@@ -884,22 +882,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         return;
       }
 
-      final move = opening?.windowMove;
-      if (opening != null && move != null && pendingWindowStart != null) {
+      var move = _pendingWindow;
+      if (opening != null && move != null && move.current()) {
         _resetPrograms();
         listingsPage = _pageGeneration;
         _listingsStatePage = listingsPage;
         final session = userDataSync.session;
-        opening.ready.complete(true);
-        try {
-          if (await move) {
+        opening.complete(true);
+        // Follow replacements until a move commits or the original time is needed.
+        do {
+          if (await move!.settled.future) {
             if (loadGeneration == _loadGeneration) _reloadOnEntry = false;
             return;
           }
-        } catch (_) {
-          // The paging caller reports the failure. Try the original time below.
-        }
-        if (!current() || session != userDataSync.session) return;
+          if (!current() || session != userDataSync.session) return;
+          move = _pendingWindow;
+        } while (move != null && move.current());
       }
 
       final initial = loadInitialPrograms(channelIds: initialChannelIds);
@@ -923,8 +921,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _state = GuideState.error;
     } finally {
       if (identical(_openingLineup, opening)) _openingLineup = null;
-      if (opening != null && !opening.ready.isCompleted) {
-        opening.ready.complete(false);
+      if (opening != null && !opening.isCompleted) {
+        opening.complete(false);
       }
     }
     _notifyListeners();
@@ -1074,12 +1072,23 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<bool> setWindowStart(
     DateTime start, {
     bool livePosition = false,
+    bool paging = false,
   }) async {
     if (_disposed || listingsAccessDenied) return false;
+    final pending = _pendingWindow;
+    if (paging &&
+        pending != null &&
+        pending.paging &&
+        pending.current() &&
+        start != _windowStart &&
+        start.isBefore(_windowStart) != pending.start.isBefore(_windowStart)) {
+      _windowRequest++;
+      _finishPendingWindow();
+      return false;
+    }
     if (start == _windowStart) {
       _windowRequest++;
       _finishPendingWindow();
-      _openingLineup?.windowMove = null;
       _atLivePosition = livePosition;
       return true;
     }
@@ -1095,17 +1104,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_state == GuideState.error && _listingsStatePage == null) return false;
     _finishPendingWindow();
     final request = ++_windowRequest;
-    final move = _moveWindow(start, livePosition, request, opening);
-    opening?.windowMove = move;
-    return move;
-  }
-
-  Future<bool> _moveWindow(
-    DateTime start,
-    bool livePosition,
-    int request,
-    _OpeningLineup? opening,
-  ) async {
     final load = _loadGeneration;
     final session = userDataSync.session;
     var page = _pageGeneration;
@@ -1115,25 +1113,32 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         load == _loadGeneration &&
         page == _pageGeneration &&
         session == userDataSync.session;
-    final move = (start: start, current: current, settled: Completer<void>());
+    final move = (
+      start: start,
+      paging: paging,
+      current: current,
+      settled: Completer<bool>(),
+    );
+    var moved = false;
     _pendingWindow = move;
     try {
       if (opening != null) {
-        if (!await opening.ready.future) return false;
+        if (!await opening.future) return false;
         page = _pageGeneration;
       }
-      return await _replaceProgramPages(
+      moved = await _replaceProgramPages(
         current,
         windowStart: start,
         livePosition: livePosition,
       );
+      return moved;
     } finally {
-      if (_pendingWindow == move) _finishPendingWindow();
+      if (_pendingWindow == move) _finishPendingWindow(moved: moved);
     }
   }
 
-  void _finishPendingWindow() {
-    _pendingWindow?.settled.complete();
+  void _finishPendingWindow({bool moved = false}) {
+    _pendingWindow?.settled.complete(moved);
     _pendingWindow = null;
   }
 
@@ -1775,7 +1780,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _finishPendingWindow();
-    _openingLineup?.ready.complete(false);
+    _openingLineup?.complete(false);
     _openingLineup = null;
 
     _programGeneration++;
