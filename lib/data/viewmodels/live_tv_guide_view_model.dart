@@ -326,6 +326,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _listingsStatePage == _pageGeneration &&
       _accessDenied(_error);
 
+  bool get canRetryCategoryListings =>
+      _isCategory(_filter) &&
+      _state == GuideState.error &&
+      _listingsStatePage == _pageGeneration &&
+      !_accessDenied(_error);
+
+  Future<void> retryCategoryListings() async {
+    if (canRetryCategoryListings) await _reloadPrograms();
+  }
+
   GuideChannelLoadState loadStateFor(String channelId) {
     if (hasProgramsFor(channelId)) return GuideChannelLoadState.loaded;
     return listingsAccessDenied || _failedCarouselIds.contains(channelId)
@@ -764,11 +774,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// that would rebuild the grid and drop the focused cell. A failed refresh
   /// reloads in full.
   Future<void> _refreshRecordingState() async {
+    // A window replacement must find all matching channels again. Refreshing
+    // only the previous window's rows could miss newly recorded programs.
+    if (_isCategory(_filter) && _listingsStatePage == _pageGeneration) {
+      if (!listingsAccessDenied) await _reloadPrograms(keepCategoryRows: true);
+      return;
+    }
     final recordingRevision = liveTvRecordingRevision.value;
     try {
-      if (_isCategory(_filter) && !_showingPreviousCategory) {
-        await _refreshCategoryRows();
-      }
+      if (_isCategory(_filter)) await _refreshCategoryRows();
       await _refreshLoadedChannels(_now());
       _loadedRecordingRevision = recordingRevision;
     } catch (error) {
@@ -1038,9 +1052,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_disposed) return;
     if (start == _windowStart) {
       _atLivePosition = livePosition;
-      if (_showingPreviousCategory && !_categoryFetchInFlight) {
-        await _reloadPrograms(keepCategoryRows: true);
-      }
+      await retryCategoryListings();
       return;
     }
 
@@ -1105,11 +1117,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _loadedRecordingRevision = recordingRevision;
     } catch (e) {
       if (!current()) return;
-      if (keepRows && !_accessDenied(e)) {
-        // If a refresh fails, keep the old listings and retry on the next request.
-        _categoryFetchInFlight = false;
-        return;
-      }
+      if (keepRows) _resetCategory();
       _error = e;
       _state = GuideState.error;
       _notifyListeners();
@@ -1430,10 +1438,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         (_state == GuideState.loading &&
             _listingsStatePage == pageGeneration) ||
         !hasMorePrograms) {
-      return;
-    }
-    if (_showingPreviousCategory) {
-      await _reloadPrograms(keepCategoryRows: true);
       return;
     }
     bool current() =>

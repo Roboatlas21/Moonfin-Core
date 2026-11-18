@@ -1545,6 +1545,120 @@ void main() {
       expect(vm.filteredChannels.length, 10);
     });
 
+    group('moving the Sports guide to a new window', () {
+      final start = DateTime.utc(2026, 9, 11, 10);
+      final next = start.add(const Duration(hours: 3));
+      late LiveTvGuideViewModel vm;
+
+      setUp(() async {
+        _stubChannels(liveTv, [_channel('c1'), _channel('c2')]);
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(
+          (_) async => {
+            'Items': [_program('old', 'c1', start: start, isSports: true)],
+          },
+        );
+        vm = LiveTvGuideViewModel(client);
+        addTearDown(vm.dispose);
+        await vm.load(windowStart: start);
+        vm.setFilter(GuideFilter.sports);
+        await pumpEventQueue();
+        expect(vm.programsForChannel('c1').single.id, 'old');
+      });
+
+      test(
+        'a failed window can be retried and an empty reply is valid',
+        () async {
+          final failure = Exception('offline');
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenThrow(failure);
+          await vm.setWindowStart(next);
+
+          expect(vm.windowStart, next);
+          expect(vm.state, GuideState.error);
+          expect(vm.error, same(failure));
+          expect(vm.canRetryCategoryListings, isTrue);
+          expect(vm.filteredChannels, isEmpty);
+          expect(vm.programsForChannel('c1'), isEmpty);
+
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenAnswer((inv) async {
+                expect(inv.namedArguments[#startDate], next);
+                return {'Items': []};
+              });
+          await vm.retryCategoryListings();
+
+          expect(vm.state, GuideState.ready);
+          expect(vm.error, isNull);
+          expect(vm.canRetryCategoryListings, isFalse);
+          expect(vm.filter, GuideFilter.sports);
+          expect(vm.windowStart, next);
+          expect(vm.filteredChannels, isEmpty);
+        },
+      );
+
+      test(
+        'a recording change recovers the full window after a failed refresh',
+        () async {
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenThrow(Exception('offline'));
+          await vm.setWindowStart(next);
+          notifyLiveTvRecordingsChanged();
+          await vm.reloadIfRecordingsChanged();
+          expect(vm.canRetryCategoryListings, isTrue);
+
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenAnswer((inv) async {
+                expect(inv.namedArguments[#startDate], next);
+                expect(_requestedIds(inv), contains('c2'));
+                return {
+                  'Items': [
+                    {
+                      ..._program('new', 'c2', start: next, isSports: true),
+                      'TimerId': 'timer',
+                    },
+                  ],
+                };
+              });
+          // The failed attempt must not have consumed the recording revision.
+          await vm.reloadIfRecordingsChanged();
+          expect(vm.state, GuideState.ready);
+          expect(vm.filteredChannels.map((c) => c.id), ['c2']);
+          expect(vm.programsForChannel('c2').single.hasTimer, isTrue);
+        },
+      );
+
+      test(
+        'a late failed request cannot clear a newer recording refresh',
+        () async {
+          final pending = Completer<Map<String, dynamic>>();
+          when(() => _guide(liveTv, category: GuideFilter.sports))
+              .thenAnswer((_) => pending.future);
+          final moving = vm.setWindowStart(next);
+          await pumpEventQueue();
+          expect(vm.programsForChannel('c1').single.id, 'old');
+
+          when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(
+            (_) async => {
+              'Items': [
+                {
+                  ..._program('new', 'c2', start: next, isSports: true),
+                  'TimerId': 'timer',
+                },
+              ],
+            },
+          );
+          await vm.recordingChanged();
+          pending.completeError(Exception('earlier request failed'));
+          await moving;
+
+          expect(vm.windowStart, next);
+          expect(vm.state, GuideState.ready);
+          expect(vm.programsForChannel('c1'), isEmpty);
+          expect(vm.programsForChannel('c2').single.hasTimer, isTrue);
+        },
+      );
+    });
+
     test('shifting the window re-fetches the active category', () async {
       _stubChannels(liveTv, List.generate(10, (i) => _channel('c$i')));
       when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(

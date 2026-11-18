@@ -1847,19 +1847,36 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _prefs.set(UserPreferences.epgMobileView, next);
   }
 
+  Widget _buildGuideError() {
+    final l10n = AppLocalizations.of(context);
+    final message = Text(
+      l10n.failedToLoadGuide(describeError(_vm.error!, l10n)),
+      style: TextStyle(color: Colors.white.withAlpha(179)),
+    );
+    if (!_vm.canRetryCategoryListings) return Center(child: message);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          message,
+          const SizedBox(height: 8),
+          FilledButton(
+            autofocus: PlatformDetection.isTV,
+            onPressed: _vm.retryCategoryListings,
+            child: Text(l10n.retry),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMobileBody() {
     switch (_vm.state) {
       case GuideState.loading:
         return const Center(child: CircularProgressIndicator());
       case GuideState.error
           when !_vm.listingsAccessDenied || _vm.filteredChannels.isEmpty:
-        final l10n = AppLocalizations.of(context);
-        return Center(
-          child: Text(
-            l10n.failedToLoadGuide(describeError(_vm.error!, l10n)),
-            style: TextStyle(color: Colors.white.withAlpha(179)),
-          ),
-        );
+        return _buildGuideError();
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
         if (channels.isEmpty) {
@@ -2266,13 +2283,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         return const Center(child: CircularProgressIndicator());
       case GuideState.error
           when !_vm.listingsAccessDenied || _vm.filteredChannels.isEmpty:
-        final l10n = AppLocalizations.of(context);
-        return Center(
-          child: Text(
-            l10n.failedToLoadGuide(describeError(_vm.error!, l10n)),
-            style: TextStyle(color: Colors.white.withAlpha(179)),
-          ),
-        );
+        return _buildGuideError();
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
         if (channels.isEmpty) {
