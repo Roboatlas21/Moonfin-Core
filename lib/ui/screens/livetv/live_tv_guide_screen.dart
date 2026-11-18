@@ -1675,11 +1675,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildBrowseControls({bool compact = false}) {
     final l10n = AppLocalizations.of(context);
-    final title =
+    final activeFilter =
         _vm.selectedGroup ??
-        (_vm.filter == GuideFilter.all
-            ? l10n.guideBrowse
-            : _filterLabel(_vm.filter));
+        (_vm.filter == GuideFilter.all ? null : _filterLabel(_vm.filter));
     return LayoutBuilder(
       builder: (context, constraints) => Row(
         children: [
@@ -1701,20 +1699,32 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                 }
                 return KeyEventResult.ignored;
               },
-              child: FilledButton.icon(
-                focusNode: _browseFocus,
-                onPressed: _openFilterPicker,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColorScheme.accent,
-                  foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-                iconAlignment: IconAlignment.end,
-                icon: const Icon(Icons.arrow_drop_down),
-                label: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              child: Tooltip(
+                message: l10n.filters,
+                child: FilledButton(
+                  focusNode: _browseFocus,
+                  onPressed: _openFilterPicker,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColorScheme.accent,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.filter_list),
+                      if (activeFilter != null) ...[
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            activeFilter,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ),

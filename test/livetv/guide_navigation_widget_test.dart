@@ -319,7 +319,7 @@ void main() {
       ),
     );
     await _pumpFrames(tester);
-    await tester.tap(find.text('Browse guide'));
+    await tester.tap(find.byTooltip('Filters'));
     await _pumpFrames(tester);
     await tester.tap(
       find.descendant(
@@ -388,7 +388,16 @@ void main() {
       expect(firstMatch.hitTestable(), findsOneWidget);
       await tester.enterText(find.byType(TextField), '');
       await tester.pump(const Duration(milliseconds: 200));
-      await tester.tap(find.text('Browse guide'));
+      final filters = find.byTooltip('Filters');
+      expect(
+        find.descendant(of: filters, matching: find.byIcon(Icons.filter_list)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: filters, matching: find.byType(Text)),
+        findsNothing,
+      );
+      await tester.tap(filters);
       await _pumpFrames(tester);
       expect(tester.getSize(find.byType(GuideFilterPicker)).width, 390);
       final picker = find.byType(GuideFilterPicker);
@@ -403,6 +412,10 @@ void main() {
       expect(inside(find.text('Sports')), findsNothing);
       await tester.tap(inside(find.text('US | PRIME')));
       await _pumpFrames(tester);
+      expect(
+        find.descendant(of: filters, matching: find.text('US | PRIME')),
+        findsOneWidget,
+      );
       expect(find.text('Channel 47'), findsOneWidget);
       await tester.enterText(find.byType(TextField), 'Channel 1');
       await _pumpFrames(tester);

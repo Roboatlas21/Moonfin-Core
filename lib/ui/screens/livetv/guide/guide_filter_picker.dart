@@ -184,7 +184,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                       child: compact
                           ? search
                           : Text(
-                              l10n.guideBrowse,
+                              l10n.filters,
                               style: Theme.of(context).textTheme.titleLarge,
                               overflow: TextOverflow.ellipsis,
                             ),
