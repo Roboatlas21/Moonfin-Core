@@ -301,6 +301,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Set<String> _categoryQueriedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
   int _windowRequest = 0;
+  ({DateTime start, bool Function() current})? _pendingWindow;
   _OpeningLineup? _openingLineup;
   int _categoryRequest = 0;
   bool _categoryFetchInFlight = false;
@@ -585,6 +586,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   DateTime _windowEnd;
   DateTime get windowEnd => _windowEnd;
+
+  /// The pending time, while its request still belongs to the current guide page.
+  DateTime? get pendingWindowStart {
+    final move = _pendingWindow;
+    return move != null && move.current() ? move.start : null;
+  }
 
   List<GuideChannel> get filteredChannels {
     if (!_isCategory(_filter)) return _pageChannels;
@@ -877,7 +884,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
 
       final move = opening?.windowMove;
-      if (opening != null && move != null) {
+      if (opening != null && move != null && pendingWindowStart != null) {
         _resetPrograms();
         listingsPage = _pageGeneration;
         _listingsStatePage = listingsPage;
@@ -1075,7 +1082,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return true;
     }
     final opening = _openingLineup;
-    if (_state == GuideState.loading && opening == null) return false;
+    // Once the lineup is ready, paging can run alongside the opening listings.
+    if (_state == GuideState.loading &&
+        opening == null &&
+        _listingsStatePage != _pageGeneration) {
+      return false;
+    }
     // Paging fetches listings and cannot recover a failed channel list.
     if (_state == GuideState.error && _listingsStatePage == null) return false;
     final request = ++_windowRequest;
@@ -1092,19 +1104,28 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   ) async {
     final load = _loadGeneration;
     final session = userDataSync.session;
-    if (opening != null && !await opening.ready.future) return false;
-    final page = _pageGeneration;
+    var page = _pageGeneration;
     bool current() =>
         !_disposed &&
         request == _windowRequest &&
         load == _loadGeneration &&
         page == _pageGeneration &&
         session == userDataSync.session;
-    return _replaceProgramPages(
-      current,
-      windowStart: start,
-      livePosition: livePosition,
-    );
+    final move = (start: start, current: current);
+    _pendingWindow = move;
+    try {
+      if (opening != null) {
+        if (!await opening.ready.future) return false;
+        page = _pageGeneration;
+      }
+      return await _replaceProgramPages(
+        current,
+        windowStart: start,
+        livePosition: livePosition,
+      );
+    } finally {
+      if (_pendingWindow == move) _pendingWindow = null;
+    }
   }
 
   Future<void> setWindow(Duration window) async {

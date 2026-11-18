@@ -112,6 +112,13 @@ FocusNode _nodeLabelled(WidgetTester tester, String label) => tester
     .whereType<FocusNode>()
     .firstWhere((node) => node.debugLabel == label);
 
+Future<void> _activateGuideControl(WidgetTester tester, String label) async {
+  _nodeLabelled(tester, label).requestFocus();
+  await _pumpFrames(tester);
+  await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+  await _pumpFrames(tester);
+}
+
 String? _focusedLabel() => FocusManager.instance.primaryFocus?.debugLabel;
 
 String _windowRangeText(WidgetTester tester) => tester
@@ -1028,21 +1035,14 @@ void main() {
     await pumpGuide(tester);
     final start = _windowRangeText(tester);
     deferredChannelId = 'ch1';
-    Future<void> activate(String label) async {
-      _nodeLabelled(tester, label).requestFocus();
-      await _pumpFrames(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await _pumpFrames(tester);
-    }
-
     const next = 'GuideWindowBar:2';
-    await activate(next);
-    await activate(next);
+    await _activateGuideControl(tester, next);
+    await _activateGuideControl(tester, next);
     expect(releaseDeferredGuide, hasLength(1));
-    await activate('GuideFilter:${GuideFilter.favorites.index}');
+    await _activateGuideControl(tester, 'GuideFilter:${GuideFilter.favorites.index}');
     final channel = find.byType(EpgChannelCell);
     expect(tester.widget<EpgChannelCell>(channel).name, 'Channel 1');
-    await activate(next);
+    await _activateGuideControl(tester, next);
     expect(releaseDeferredGuide, hasLength(2));
     expect(_windowRangeText(tester), start);
 
@@ -1055,6 +1055,54 @@ void main() {
     expect(_windowRangeText(tester), favoritesRange);
     expect(tester.widget<EpgChannelCell>(channel).name, 'Channel 1');
   });
+
+  for (final action in ['opening listings', 'Now', 'channel search']) {
+    testWidgets('Next works with an older request pending after $action', (
+      tester,
+    ) async {
+      PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+      addTearDown(
+        () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+      );
+      when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {
+            'ch1': {'News'},
+          },
+          channels: [_channelRaw(0), _channelRaw(1)],
+        ),
+      );
+      if (action == 'opening listings') deferredChannelId = 'ch1';
+      await pumpGuide(tester);
+      final initial = _windowRangeText(tester);
+      const next = 'GuideWindowBar:2';
+      if (action != 'opening listings') {
+        deferredChannelId = 'ch1';
+        await _activateGuideControl(tester, next);
+      }
+      expect(releaseDeferredGuide, hasLength(1));
+      deferredChannelId = null;
+      if (action == 'Now') {
+        await _activateGuideControl(tester, 'GuideWindowBar:1');
+      } else if (action == 'channel search') {
+        final search = tester.widget<LocalSearchField>(
+          find.byType(LocalSearchField),
+        );
+        search.controller.text = 'Channel 1';
+        await _pumpFrames(tester);
+        final channel = tester.widget<EpgChannelCell>(
+          find.byType(EpgChannelCell),
+        );
+        expect(channel.name, 'Channel 1');
+      }
+      await _activateGuideControl(tester, next);
+      final nextRange = _windowRangeText(tester);
+      expect(nextRange, isNot(initial));
+      releaseDeferredGuide.single();
+      await _pumpFrames(tester);
+      expect(_windowRangeText(tester), nextRange);
+    });
+  }
 
   testWidgets('Right retries a failed page without moving remote focus', (
     tester,

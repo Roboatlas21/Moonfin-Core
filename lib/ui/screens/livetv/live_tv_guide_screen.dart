@@ -239,8 +239,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// The single deferred vertical move, or null when nothing is pending.
   _PendingVerticalMove? _pendingVerticalMove;
 
-  ({DateTime target, GuideFilterChoice filter, Future<bool> move})?
-      _pendingPageMove;
   DateTime? _failedPageTarget;
   Timer? _windowNoticeTimer;
 
@@ -395,10 +393,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   void _onChanged() {
     if (!mounted) return;
-    final paging = _pendingPageMove;
-    if (paging != null && paging.filter != (_vm.filter, _vm.selectedGroup)) {
-      _pendingPageMove = null;
-    }
     if (_vm.filter != GuideFilter.all &&
         _vm.filter != GuideFilter.favorites &&
         (!_vm.availableProgrammeCategories.contains(_vm.filter) ||
@@ -2643,7 +2637,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// Re-resolves the selection against the window as the clock moves it, and
   /// puts focus back on the cell the new anchor lands on.
   Future<void> _reanchor(DateTime now) async {
-    if (!_vm.atLivePosition || _pendingPageMove != null) return;
+    if (!_vm.atLivePosition || _vm.pendingWindowStart != null) return;
     try {
       final moved = await _vm.setWindowStart(
         guideLeftEdge(now),
@@ -2724,22 +2718,20 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final clamped = amount.isNegative && target.isBefore(floor)
         ? floor
         : target;
-    if (clamped == oldStart || clamped == _pendingPageMove?.target) return;
+    if (clamped == oldStart || clamped == _vm.pendingWindowStart) return;
 
     if (_failedPageTarget != null) {
       _windowNoticeTimer?.cancel();
       setState(() => _failedPageTarget = null);
     }
-    final filter = (_vm.filter, _vm.selectedGroup);
-    final move = _vm.setWindowStart(
-      clamped,
-      livePosition: clamped == liveStart,
-    );
-    _pendingPageMove = (target: clamped, filter: filter, move: move);
     try {
-      if (!await move || _pendingPageMove?.move != move) return;
+      final moved = await _vm.setWindowStart(
+        clamped,
+        livePosition: clamped == liveStart,
+      );
+      if (!moved) return;
     } catch (_) {
-      if (_pendingPageMove?.move == move && _mayTakeFocus) {
+      if (_mayTakeFocus) {
         setState(() => _failedPageTarget = clamped);
         _windowNoticeTimer?.cancel();
         _windowNoticeTimer = Timer(const Duration(seconds: 3), () {
@@ -2747,8 +2739,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         });
       }
       return;
-    } finally {
-      if (_pendingPageMove?.move == move) _pendingPageMove = null;
     }
     if (!mounted || _vm.windowStart != clamped) return;
     final selection = _selection;
