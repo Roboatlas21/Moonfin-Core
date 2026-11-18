@@ -1702,7 +1702,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildBrowseControls({bool compact = false}) {
     final l10n = AppLocalizations.of(context);
-    final filterLabel = _vm.selectedGroup ?? _filterLabel(_vm.filter);
+    final filterLabel =
+        _vm.selectedGroup ??
+        (_vm.filter == GuideFilter.all
+            ? l10n.guideAllChannels
+            : _filterLabel(_vm.filter, l10n));
     final filterButtonStyle = FilledButton.styleFrom(
       shape: const StadiumBorder(),
       minimumSize: Size.zero,

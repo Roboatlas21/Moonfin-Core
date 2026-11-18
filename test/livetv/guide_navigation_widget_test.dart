@@ -406,7 +406,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(of: filters, matching: find.text('All')),
+        find.descendant(of: filters, matching: find.text('All channels')),
         findsOneWidget,
       );
       await tester.tap(filters);
