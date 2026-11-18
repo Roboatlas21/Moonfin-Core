@@ -1776,7 +1776,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       );
 
   KeyEventResult _headerKey(
-    FocusNode node,
     KeyEvent event,
     List<GuideFilterChoice> choices,
     int index,
@@ -1787,14 +1786,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         _channelSearchFocus.requestFocus();
         return KeyEventResult.handled;
       }
+      if (!_mayTakeFocus) return KeyEventResult.ignored;
+      final next = _shortcutNodes[choices.elementAtOrNull(index + 1)];
+      final target = next?.context?.mounted == true ? next! : _channelSearchFocus;
       return _headerHold.start(
         event,
-        stillFocused: () => _mayTakeFocus && node.hasFocus,
-        onTap: () =>
-            (index + 1 < choices.length
-                    ? _shortcutNode(choices[index + 1])
-                    : _channelSearchFocus)
-                .requestFocus(),
+        onPress: target.requestFocus,
+        stillFocused: () => _mayTakeFocus && target.hasFocus,
         onHold: _channelSearchFocus.requestFocus,
       );
     }
@@ -1841,10 +1839,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       return Focus(
         key: ValueKey(choice),
         canRequestFocus: false,
-        onKeyEvent: (_, event) => _headerKey(node, event, choices, index),
+        onKeyEvent: (_, event) => _headerKey(event, choices, index),
         onFocusChange: (focused) {
-          if (focused && node.context != null) {
-            Scrollable.ensureVisible(node.context!);
+          final target = node.context;
+          if (focused && target != null && target.mounted) {
+            Scrollable.ensureVisible(target);
           }
         },
         child: ConstrainedBox(
@@ -1917,8 +1916,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             ),
             child: Focus(
               canRequestFocus: false,
-              onKeyEvent: (_, event) =>
-                  _headerKey(_browseFocus, event, shortcuts, -1),
+              onKeyEvent: (_, event) => _headerKey(event, shortcuts, -1),
               child: Tooltip(
                 message: l10n.filters,
                 child: FilledButton.icon(
@@ -2918,7 +2916,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// Re-resolves the selection against the window as the clock moves it, and
   /// puts focus back on the cell the new anchor lands on.
   Future<void> _reanchor(DateTime now) async {
-    if (!_vm.atLivePosition || _vm.pendingWindowStart != null) return;
+    if (!_vm.atLivePosition) return;
+    if (_vm.pendingWindowResult case final move?) {
+      await move;
+      if (mounted && _vm.atLivePosition) _onReanchorTick();
+      return;
+    }
     try {
       final moved = await _vm.setWindowStart(
         guideLeftEdge(now),
