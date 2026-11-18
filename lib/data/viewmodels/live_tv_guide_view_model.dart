@@ -1040,6 +1040,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return true;
     }
     if (_state == GuideState.loading) return false;
+    // Paging fetches listings and cannot recover a failed channel list.
+    if (_state == GuideState.error && _listingsStatePage == null) return false;
     final load = _loadGeneration;
     final page = _pageGeneration;
     final session = userDataSync.session;

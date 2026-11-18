@@ -570,6 +570,30 @@ void main() {
     expect(vm.programsHighWater, 0);
   });
 
+  test('paging preserves a channel list error until the lineup loads', () async {
+    final offline = Exception('offline');
+    when(() => _channelsRequest(liveTv)).thenThrow(offline);
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    final start = DateTime(2026, 9, 9, 20);
+    final next = start.add(vm.guideWindow);
+
+    await vm.load(windowStart: start);
+    expect(await vm.setWindowStart(next), isFalse);
+    expect(vm.state, GuideState.error);
+    expect(vm.error, same(offline));
+    expect(vm.windowStart, start);
+    verifyNever(() => _guide(liveTv));
+
+    _stubChannels(liveTv, [_channel('one')]);
+    await vm.load(windowStart: start);
+    expect(await vm.setWindowStart(next), isTrue);
+    expect(vm.windowStart, next);
+    expect(vm.filteredChannels.single.id, 'one');
+    expect(vm.hasProgramsFor('one'), isTrue);
+    expect(vm.programsForChannel('one'), isEmpty);
+  });
+
   test(
     'moving the window replaces loaded rows without a loading state',
     () async {
