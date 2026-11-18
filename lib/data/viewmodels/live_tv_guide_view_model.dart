@@ -1141,8 +1141,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         pending.current() &&
         start != _windowStart &&
         start.isBefore(_windowStart) != pending.start.isBefore(_windowStart)) {
-      _windowRequest++;
-      _finishPendingWindow();
+      cancelPendingPage();
       return false;
     }
     if (start == _windowStart) {
@@ -1191,6 +1190,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } finally {
       if (_pendingWindow == move) _finishPendingWindow(moved: moved);
     }
+  }
+
+  void cancelPendingPage() {
+    if (_pendingWindow?.paging != true) return;
+    _windowRequest++;
+    _finishPendingWindow();
   }
 
   void _finishPendingWindow({bool moved = false}) {

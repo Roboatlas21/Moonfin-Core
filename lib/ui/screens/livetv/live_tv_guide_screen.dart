@@ -4,6 +4,7 @@ import 'dart:math' show min, max;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
@@ -616,7 +617,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         _pendingChannelRebindId = null;
         return;
       }
-      _scrollToRow(index, animate: false);
+      if (_nowNextScrollController.hasClients) {
+        if (_scrollTowardNowNextCard(index)) {
+          _scheduleChannelFocusRebind(channelId);
+          return;
+        }
+      } else {
+        _scrollToRow(index, animate: false);
+      }
       // The destination may be offscreen until the list rebuilds.
       binding.addPostFrameCallback((_) {
         if (!_mayTakeFocus ||
@@ -640,6 +648,42 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       binding.scheduleFrame();
     });
     binding.scheduleFrame();
+  }
+
+  /// Now/Next cards have variable heights. Move toward an offscreen card
+  /// using the nearest built row, then resolve the channel again after layout.
+  bool _scrollTowardNowNextCard(int index) {
+    final target = _channelFocusNodes[index]?.context;
+    if (target != null && target.mounted) {
+      unawaited(Scrollable.ensureVisible(target, alignment: 0.5));
+      return false;
+    }
+    final position = _nowNextScrollController.position;
+    double offset;
+    if (index == 0) {
+      offset = position.minScrollExtent;
+    } else if (index == _visibleChannelIds.length - 1) {
+      offset = position.maxScrollExtent;
+    } else {
+      final built = _channelFocusNodes.entries.where(
+        (row) => row.value.context?.mounted == true,
+      );
+      if (built.isEmpty) return false;
+      final nearest = built.reduce(
+        (a, b) => (a.key - index).abs() < (b.key - index).abs() ? a : b,
+      );
+      final card = nearest.value.context!.findRenderObject()!;
+      final top = RenderAbstractViewport.of(card)
+          .getOffsetToReveal(card, 0)
+          .offset;
+      // Every card is at least one tap target tall, so this approaches the
+      // destination even when neighboring cards show different amounts of text.
+      offset = top + (index - nearest.key) * kMinInteractiveDimension;
+    }
+    offset = offset.clamp(position.minScrollExtent, position.maxScrollExtent);
+    if (offset == position.pixels) return false;
+    position.jumpTo(offset);
+    return true;
   }
 
   void _rebindSelectionAfterLineupChange() {
@@ -3176,6 +3220,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     // A reset already running owns this press. Consuming it keeps the guide
     // from closing out from under a reset that is about to land.
     if (_resettingToEntryState) return true;
+    _vm.cancelPendingPage();
     if (PlatformDetection.isTV && !_gridHasFocus) return false;
     if (!_isExploringAwayFromEntry()) {
       if (!PlatformDetection.isTV) return false;

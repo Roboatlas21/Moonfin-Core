@@ -933,6 +933,43 @@ void main() {
     },
   );
 
+  testWidgets('mobile Favorites first follows the channel in both directions', (
+    tester,
+  ) async {
+    userDataSync.reset();
+    addTearDown(userDataSync.reset);
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(
+      UserPreferences.liveTvChannelSortBy,
+      ChannelSortBy.favoritesFirst,
+    );
+    await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
+    final api = _MockUserLibrary();
+    when(() => client.userLibraryApi).thenReturn(api);
+    when(() => api.markFavorite('ch44')).thenAnswer((_) async {});
+    when(() => api.unmarkFavorite('ch44')).thenAnswer((_) async {});
+    await pumpGuide(tester, surface: const Size(390, 844));
+    final list = tester.widget<ListView>(find.byType(ListView).last).controller!;
+    list.jumpTo(list.position.maxScrollExtent);
+    await _pumpFrames(tester);
+    final card = find.byWidgetPredicate(
+      (w) => w is EpgNowNextCard && w.channelName == 'Channel 44',
+    );
+    tester.widget<EpgNowNextCard>(card).focusNode!.requestFocus();
+    await _pumpFrames(tester);
+    for (final favorite in [true, false]) {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
+      await tester.pump(const Duration(milliseconds: 550));
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
+      await _pumpFrames(tester);
+      final focused = tester.widget<EpgNowNextCard>(card.hitTestable());
+      expect(focused.focusNode!.hasFocus, isTrue);
+      expect(focused.isFavorite, favorite);
+    }
+    verify(() => api.markFavorite('ch44')).called(1);
+    verify(() => api.unmarkFavorite('ch44')).called(1);
+  });
+
   // Opening the picker clears the channel search. A program category then
   // refetches guide data, so cancellation must retain the channel ID until
   // those rows exist again instead of restoring whichever row appears first.
@@ -1547,6 +1584,37 @@ void main() {
       expect(_windowRangeText(tester), nextRange);
     });
   }
+
+  testWidgets('Back keeps the live time and header focus after a pending Right', (
+    tester,
+  ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.liveTvLastChannelId,
+      'ch4',
+    );
+    await pumpGuide(tester);
+    _nodeLabelled(tester, 'GuideProgramRow4:0').requestFocus();
+    await _pumpFrames(tester);
+    final live = _windowRangeText(tester);
+    deferredChannelId = 'ch4';
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await _pumpFrames(tester);
+    expect(releaseDeferredGuide, isNotEmpty);
+    await tester.binding.handlePopRoute();
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideFilter:0');
+    deferredChannelId = null;
+    for (final release in releaseDeferredGuide) {
+      release();
+    }
+    await _pumpFrames(tester);
+    expect(_windowRangeText(tester), live);
+    expect(_focusedLabel(), 'GuideFilter:0');
+  });
 
   testWidgets('Right retries a failed page without moving remote focus', (
     tester,
