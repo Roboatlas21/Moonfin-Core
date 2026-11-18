@@ -25,6 +25,7 @@ on:
   push:
     branches:
       - main
+      - ci/wizard-checks-6f79509
     tags:
       - '[0-9]+.[0-9]+.[0-9]+*'
   schedule:
@@ -62,6 +63,8 @@ jobs:
     name: tests (${{ matrix.suite }})
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: 6f795097a2ebe6713e963bfa3a4ca7a6f4211001
 
       # Read from build.yml rather than kept here too, so a Flutter upgrade
       # there can't leave the tests on the old one.
