@@ -394,8 +394,8 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.descendant(of: filters, matching: find.byType(Text)),
-        findsNothing,
+        find.descendant(of: filters, matching: find.text('All')),
+        findsOneWidget,
       );
       await tester.tap(filters);
       await _pumpFrames(tester);

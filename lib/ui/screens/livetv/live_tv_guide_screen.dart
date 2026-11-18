@@ -1675,9 +1675,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildBrowseControls({bool compact = false}) {
     final l10n = AppLocalizations.of(context);
-    final activeFilter =
-        _vm.selectedGroup ??
-        (_vm.filter == GuideFilter.all ? null : _filterLabel(_vm.filter));
+    final filterLabel = _vm.selectedGroup ?? _filterLabel(_vm.filter);
     return LayoutBuilder(
       builder: (context, constraints) => Row(
         children: [
@@ -1701,7 +1699,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
               },
               child: Tooltip(
                 message: l10n.filters,
-                child: FilledButton(
+                child: FilledButton.icon(
                   focusNode: _browseFocus,
                   onPressed: _openFilterPicker,
                   style: FilledButton.styleFrom(
@@ -1709,21 +1707,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                     foregroundColor: Colors.black,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.filter_list),
-                      if (activeFilter != null) ...[
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            activeFilter,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ],
+                  icon: const Icon(Icons.filter_list),
+                  label: Text(
+                    filterLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ),
