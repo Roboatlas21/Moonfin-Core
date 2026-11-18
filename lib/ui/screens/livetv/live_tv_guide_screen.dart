@@ -3335,6 +3335,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       unawaited(_shiftGuideWindow(const Duration(minutes: -30)));
       return;
     }
+    _vm.cancelPendingPage();
     _focusChannelRow(rowIndex);
   }
 

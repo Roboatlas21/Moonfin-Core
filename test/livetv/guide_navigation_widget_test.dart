@@ -1585,9 +1585,11 @@ void main() {
     });
   }
 
-  testWidgets('Back keeps the live time and header focus after a pending Right', (
-    tester,
-  ) async {
+  Future<void> checkPendingRightCancellation(
+    WidgetTester tester, {
+    required Future<void> Function() navigate,
+    required String expectedFocus,
+  }) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
     addTearDown(
       () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
@@ -1604,17 +1606,35 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await _pumpFrames(tester);
     expect(releaseDeferredGuide, isNotEmpty);
-    await tester.binding.handlePopRoute();
+    await navigate();
     await _pumpFrames(tester);
-    expect(_focusedLabel(), 'GuideFilter:0');
+    expect(_focusedLabel(), expectedFocus);
     deferredChannelId = null;
     for (final release in releaseDeferredGuide) {
       release();
     }
     await _pumpFrames(tester);
     expect(_windowRangeText(tester), live);
-    expect(_focusedLabel(), 'GuideFilter:0');
-  });
+    expect(_focusedLabel(), expectedFocus);
+  }
+
+  testWidgets(
+    'Back keeps the live time and header focus after a pending Right',
+    (tester) => checkPendingRightCancellation(
+      tester,
+      navigate: tester.binding.handlePopRoute,
+      expectedFocus: 'GuideFilter:0',
+    ),
+  );
+
+  testWidgets(
+    'Left keeps the live time and channel focus after a pending Right',
+    (tester) => checkPendingRightCancellation(
+      tester,
+      navigate: () => tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft),
+      expectedFocus: 'GuideChannel:4',
+    ),
+  );
 
   testWidgets('Right retries a failed page without moving remote focus', (
     tester,
