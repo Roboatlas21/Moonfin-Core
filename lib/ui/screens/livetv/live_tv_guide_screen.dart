@@ -2856,18 +2856,22 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Future<void> _resetToEntryState() async {
     _resettingToEntryState = true;
     try {
-      // Not _goToNow(): its full reload tears the grid down. This keeps the
-      // rows up and only refetches programs when the window was paged away.
       _cancelPendingVerticalMove();
-      final moved = await _vm.setWindowStart(
-        guideLeftEdge(DateTime.now()),
-        livePosition: true,
-      );
-      if (!moved) {
-        _resettingToEntryState = false;
-        return;
+      final liveStart = guideLeftEdge(DateTime.now());
+      if (_vm.listingsAccessDenied) {
+        // Back can restore focus locally at live time. Returning from another
+        // window needs a fresh request because the denial blocks paging.
+        if (_vm.windowStart != liveStart || !_vm.atLivePosition) {
+          await _goToNow();
+        }
+      } else {
+        final moved = await _vm.setWindowStart(liveStart, livePosition: true);
+        if (!moved) {
+          _resettingToEntryState = false;
+          return;
+        }
+        if (mounted) _anchorToWindowStart();
       }
-      if (mounted) _anchorToWindowStart();
     } catch (_) {
       // Fall back to the full reload, which shows its own error state.
       if (mounted) await _goToNow();

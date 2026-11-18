@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -148,7 +149,7 @@ void main() {
 
   /// Overridable per test so a lineup can outgrow a single program batch.
   late int channelCount;
-  late bool failGuideRequests;
+  Exception? guideFailure;
 
   /// When set, any guide request covering this channel is held open until the
   /// test releases it, so its row can be observed mid-load.
@@ -168,7 +169,7 @@ void main() {
       LiveTvCategoryDisplay.programmes,
     );
     channelCount = _channelCount;
-    failGuideRequests = false;
+    guideFailure = null;
     _fixtureWindowStart = guideLeftEdge(DateTime.now());
     deferredChannelId = null;
     releaseDeferredGuide = <VoidCallback>[];
@@ -217,7 +218,7 @@ void main() {
         userId: any(named: 'userId'),
       ),
     ).thenAnswer((invocation) async {
-      if (failGuideRequests) throw Exception('offline');
+      if (guideFailure case final failure?) throw failure;
       final ids =
           (invocation.namedArguments[#channelIds] as List?)?.cast<String>() ??
           const <String>[];
@@ -1022,19 +1023,70 @@ void main() {
     final range = _windowRangeText(tester);
     final notice = find.textContaining('Couldn’t load');
 
-    failGuideRequests = true;
+    guideFailure = Exception('offline');
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await _pumpFrames(tester);
     expect(_windowRangeText(tester), range);
     expect(FocusManager.instance.primaryFocus, same(cell));
     expect(notice, findsOneWidget);
 
-    failGuideRequests = false;
+    guideFailure = null;
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await _pumpFrames(tester);
     expect(_windowRangeText(tester), isNot(range));
     expect(notice, findsNothing);
   });
+
+  for (final startAtLive in [true, false]) {
+    testWidgets(
+      'Back returns to the tuned channel after denied paging from '
+      '${startAtLive ? 'live' : 'a future window'}',
+      (tester) async {
+        PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+        addTearDown(
+          () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+        );
+        await GetIt.instance<UserPreferences>().set(
+          UserPreferences.liveTvLastChannelId,
+          'ch3',
+        );
+        await pumpGuide(tester);
+        final liveRange = _windowRangeText(tester);
+        _nodeLabelled(tester, 'GuideProgramRow4:0').requestFocus();
+        await _pumpFrames(tester);
+        if (!startAtLive) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+          await _pumpFrames(tester);
+          expect(_windowRangeText(tester), isNot(liveRange));
+        }
+
+        final beforeFailure = _windowRangeText(tester);
+        final request = RequestOptions(path: '/LiveTv/Programs');
+        guideFailure = DioException.badResponse(
+          statusCode: 403,
+          requestOptions: request,
+          response: Response(requestOptions: request, statusCode: 403),
+        );
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+        await _pumpFrames(tester);
+        expect(_windowRangeText(tester), beforeFailure);
+
+        clearInteractions(liveTvApi);
+        await tester.binding.handlePopRoute();
+        await _pumpFrames(tester);
+        expect(_windowRangeText(tester), liveRange);
+        expect(_focusedLabel(), 'GuideChannel:3');
+        if (startAtLive) {
+          verifyNever(() => liveTvApi.getChannelGroups(userId: 'user'));
+        } else {
+          verify(() => liveTvApi.getChannelGroups(userId: 'user')).called(1);
+        }
+        await tester.binding.handlePopRoute();
+        await _pumpFrames(tester);
+        expect(_focusedLabel(), 'GuideFilter:0');
+      },
+    );
+  }
 
   testWidgets('the channel column handles ordinary vertical arrows', (
     tester,
