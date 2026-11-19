@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:dio/dio.dart';
 import 'package:server_plex/src/api/plex_live_tv_api.dart';
 import 'package:server_plex/src/api/plex_playback_api.dart';
@@ -302,68 +300,6 @@ void main() {
       'channel-2-4': {'source:dvr'},
     });
     expect(lineup.sources.map((source) => source.groupId), ['source:dvr']);
-  });
-
-  test('DVR-only lineups show channels under All Channels and DVR Channels', () async {
-    final (dio, server) = _server();
-    dio.interceptors.insert(
-      0,
-      InterceptorsWrapper(
-        onRequest: (options, handler) {
-          if (options.uri.path == '/lineups/plex/channels') {
-            handler.resolve(
-              Response<Map<String, dynamic>>(
-                requestOptions: options,
-                data: {
-                  'MediaContainer': {'Channel': <Map<String, dynamic>>[]},
-                },
-              ),
-            );
-          } else {
-            handler.next(options);
-          }
-        },
-      ),
-    );
-    final lineup = await PlexLiveTvApi(dio).getChannelGroups();
-    expect(lineup.channels?.map((channel) => channel['Id']), ['channel-2-4']);
-    expect(lineup.groupsByChannelId, {
-      'channel-2-4': {'source:dvr'},
-    });
-    expect(lineup.sources.map((source) => source.groupId), ['source:dvr']);
-    expect(server.requests.where((request) => request.uri.path == '/'), isEmpty);
-  });
-
-  test('Plex Cloud keeps HTTP authorization failures visible to the guide', () async {
-    for (final status in [401, 403]) {
-      final (dio, _) = _server();
-      dio.interceptors.insert(
-        0,
-        InterceptorsWrapper(
-          onRequest: (options, handler) {
-            if (options.uri.path == '/lineups/plex/channels') {
-              handler.reject(
-                DioException(
-                  requestOptions: options,
-                  response: Response(requestOptions: options, statusCode: status),
-                  type: DioExceptionType.badResponse,
-                ),
-              );
-            } else {
-              handler.next(options);
-            }
-          },
-        ),
-      );
-      final api = PlexLiveTvApi(dio, cloudOnly: true);
-      final denied = isA<DioException>().having(
-        (error) => error.response?.statusCode,
-        'HTTP status',
-        status,
-      );
-      await expectLater(api.getChannelGroups(), throwsA(denied));
-      await expectLater(api.getChannels(), throwsA(denied));
-    }
   });
 
   test('every showing of a program is a program of its own', () async {

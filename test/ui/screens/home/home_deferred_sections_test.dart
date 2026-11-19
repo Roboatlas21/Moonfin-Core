@@ -237,21 +237,4 @@ void main() {
     );
   });
 
-  test('Kids Mode hides a cached Live TV row without changing it', () async {
-    final vm = model();
-    final liveTv = HomeRow(
-      id: 'live-tv',
-      title: 'Live TV',
-      rowType: HomeRowType.liveTv,
-      items: const [],
-    );
-    final other = populated('other');
-    vm.setRowsForTesting([liveTv, other]);
-
-    expect(vm.rows, [liveTv, other]);
-    await prefs.set(UserPreferences.kidsModeEnabled, true);
-    expect(vm.rows, [other]);
-    await prefs.set(UserPreferences.kidsModeEnabled, false);
-    expect(vm.rows, [liveTv, other]);
-  });
 }

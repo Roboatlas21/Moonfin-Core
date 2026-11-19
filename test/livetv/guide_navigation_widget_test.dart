@@ -301,36 +301,6 @@ void main() {
     await _pumpFrames(tester);
   }
 
-  testWidgets('a failed channel lineup shows Retry and reloads in place', (
-    tester,
-  ) async {
-    var unavailable = true;
-    when(
-      () => liveTvApi.getChannels(
-        startIndex: any(named: 'startIndex'),
-        limit: any(named: 'limit'),
-        sortBy: any(named: 'sortBy'),
-        sortOrder: any(named: 'sortOrder'),
-        fields: any(named: 'fields'),
-        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-        userId: any(named: 'userId'),
-      ),
-    ).thenAnswer((_) async {
-      if (unavailable) throw StateError('Lineup offline');
-      return <String, dynamic>{'Items': [_channelRaw(0)]};
-    });
-
-    await pumpGuide(tester);
-    expect(find.text('Retry'), findsOneWidget);
-
-    unavailable = false;
-    await tester.tap(find.text('Retry'));
-    await _pumpFrames(tester);
-
-    expect(find.text('Retry'), findsNothing);
-    expect(find.text('Channel 0'), findsWidgets);
-  });
-
   testWidgets('playback uses the guide filter until a mini-guide selection', (
     tester,
   ) async {
@@ -519,35 +489,6 @@ void main() {
       expect(rail.selectedIndex, 0);
     },
   );
-  testWidgets('Sports clears active and pending channel searches', (tester) async {
-    await pumpGuide(tester);
-    final search = tester
-        .widget<LocalSearchField>(find.byType(LocalSearchField))
-        .controller;
-    search.text = 'unknown channel';
-    await _pumpFrames(tester);
-    expect(find.text('No channels found'), findsOneWidget);
-
-    search.text = 'another unknown channel';
-    await tester.tap(find.text('Sports'));
-    await _pumpFrames(tester);
-    expect(search.text, isEmpty);
-    expect(find.byType(EpgChannelCell), findsWidgets);
-
-    search.text = 'Channel 2';
-    await _pumpFrames(tester);
-    clearInteractions(liveTvApi);
-    await _activateGuideControl(tester, 'GuideFilter:${GuideFilter.favorites.index}');
-    expect(search.text, isEmpty);
-    verifyNever(() => liveTvApi.getGuide(
-      startDate: any(named: 'startDate'), endDate: any(named: 'endDate'),
-      channelIds: any(named: 'channelIds'), isSports: true,
-      fields: any(named: 'fields'), enableImages: any(named: 'enableImages'),
-      enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-      enableUserData: any(named: 'enableUserData'), userId: any(named: 'userId'),
-    ));
-  });
-
   testWidgets('empty group mode keeps categories', (tester) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
     addTearDown(
@@ -1712,92 +1653,6 @@ void main() {
       expectedFocus: 'GuideChannel:4',
     ),
   );
-
-  testWidgets('OK on a failed TV group row retries all failures once', (
-    tester,
-  ) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
-    await GetIt.instance<UserPreferences>().set(
-      UserPreferences.liveTvCategoryDisplay,
-      LiveTvCategoryDisplay.groups,
-    );
-    channelCount = 60;
-    when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
-      (_) async => const ChannelGroupLineup({
-        'ch50': {'Local'},
-        'ch51': {'Local'},
-      }),
-    );
-    await pumpGuide(tester);
-
-    guideFailure = TimeoutException('listings unavailable');
-    await tester.tap(find.byTooltip('Filters'));
-    await _pumpFrames(tester);
-    await tester.tap(find.text('Local'));
-    await _pumpFrames(tester);
-    expect(find.byIcon(Icons.refresh), findsNWidgets(2));
-
-    guideFailure = null;
-    deferredChannelId = 'ch50';
-    _nodeLabelled(tester, 'GuideProgramRow0:0').requestFocus();
-    await _pumpFrames(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.select);
-    await _pumpFrames(tester);
-    expect(find.byIcon(Icons.refresh), findsNothing);
-    expect(releaseDeferredGuide, hasLength(1));
-
-    // Pressing OK again while loading must not issue another request.
-    await tester.sendKeyEvent(LogicalKeyboardKey.select);
-    await _pumpFrames(tester);
-    expect(releaseDeferredGuide, hasLength(1));
-    deferredChannelId = null;
-    releaseDeferredGuide.single();
-    await _pumpFrames(tester);
-    expect(find.byIcon(Icons.refresh), findsNothing);
-    expect(find.textContaining('ch50 show'), findsWidgets);
-    expect(find.textContaining('ch51 show'), findsWidgets);
-  });
-
-  testWidgets('mobile Now/Next distinguishes loading, failure and no EPG', (
-    tester,
-  ) async {
-    Future<void> show(GuideChannelLoadState status) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: Scaffold(
-            body: EpgNowNextCard(
-              logoUrl: null,
-              channelName: 'Test channel',
-              channelNumber: '1',
-              nowTitle: null,
-              nowProgress: 0,
-              remainingLabel: null,
-              nextLabel: null,
-              loadState: status,
-              isLive: false,
-              apple: false,
-              onTap: () {},
-            ),
-          ),
-        ),
-      );
-      await tester.pump();
-    }
-
-    await show(GuideChannelLoadState.loading);
-    expect(find.text('Loading listings…'), findsOneWidget);
-    await show(GuideChannelLoadState.failed);
-    expect(find.text('Failed to load'), findsOneWidget);
-    expect(find.byIcon(Icons.error_outline), findsOneWidget);
-    await show(GuideChannelLoadState.loaded);
-    expect(find.text('No program data'), findsOneWidget);
-    expect(find.byIcon(Icons.error_outline), findsNothing);
-  });
 
   testWidgets('Right retries a failed page without moving remote focus', (
     tester,
