@@ -242,6 +242,62 @@ void main() {
       expect(vm.guideWindow, span);
     });
 
+    for (final cancelled in [true, false]) {
+      test(
+        'resize applies after a pending page ${cancelled ? 'is cancelled' : 'fails'}',
+        () async {
+          _stubChannels(api, [_channel('one')]);
+          when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+            (_) async => const ChannelGroupLineup({}),
+          );
+          final start = DateTime(2026, 9, 11, 10);
+          await vm.load(windowStart: start);
+          final originalSpan = vm.guideWindow;
+          final requestedSpan = originalSpan + const Duration(minutes: 30);
+          final next = start.add(originalSpan);
+          final pendingPage = Completer<Map<String, dynamic>>();
+          final requests = <(DateTime, DateTime)>[];
+          var pendingPageCalls = 0;
+          // The page may retry with the newly requested span before failing.
+          when(() => _guide(api)).thenAnswer((inv) {
+            final from = inv.namedArguments[#startDate] as DateTime;
+            final to = inv.namedArguments[#endDate] as DateTime;
+            requests.add((from, to));
+            if (from != next) return Future.value({'Items': []});
+            return pendingPageCalls++ == 0
+                ? pendingPage.future
+                : Future.error(TimeoutException('page still unavailable'));
+          });
+
+          final page = vm.setWindowStart(next, paging: true);
+          final resize = vm.setWindow(requestedSpan);
+          expect(vm.windowStart, start);
+          expect(vm.guideWindow, originalSpan);
+
+          if (cancelled) {
+            vm.cancelPendingPage();
+            pendingPage.complete({'Items': []});
+            expect(await page, isFalse);
+          } else {
+            final failed = expectLater(page, throwsA(isA<TimeoutException>()));
+            pendingPage.completeError(TimeoutException('page failed'));
+            await failed;
+          }
+
+          await resize;
+          expect(requests, [
+            (next, next.add(originalSpan)),
+            if (!cancelled) (next, next.add(requestedSpan)),
+            (start, start.add(requestedSpan)),
+          ]);
+          expect(vm.windowStart, start);
+          expect(vm.windowEnd, start.add(requestedSpan));
+          expect(vm.guideWindow, requestedSpan);
+          expect(vm.state, GuideState.ready);
+        },
+      );
+    }
+
     test('a group stays browsable after a listings timeout and retries on selection', () async {
       final channels = [for (var i = 0; i < 101; i++) _channel('c$i', number: '$i')];
       _stubChannels(api, channels);

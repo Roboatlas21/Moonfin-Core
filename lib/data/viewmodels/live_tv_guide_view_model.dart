@@ -1217,12 +1217,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   Future<void> setWindow(Duration window) async {
     _requestedGuideWindow = window;
-    // An in-flight page move picks up the latest layout before it commits.
-    if (pendingWindowResult case final move?) {
-      await move;
+    // The pending move may fail or be cancelled before applying this size.
+    // Follow newer moves too, then resize the window that actually committed.
+    var pending = pendingWindowResult;
+    while (pending != null) {
+      await pending;
+      if (_disposed || _requestedGuideWindow != window) return;
+      pending = pendingWindowResult;
+    }
+    if (_disposed || _requestedGuideWindow != window || window == _guideWindow) {
       return;
     }
-    if (window == _guideWindow) return;
     await setWindowStart(_windowStart, livePosition: _atLivePosition);
   }
 
