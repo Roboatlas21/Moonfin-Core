@@ -19,6 +19,7 @@ import '../../../data/repositories/multi_server_repository.dart';
 import '../../../data/repositories/user_views_repository.dart';
 import '../../../data/utils/latest_media_row_normalizer.dart';
 import '../../../data/services/connectivity_service.dart';
+import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/services/home_row_cache_store.dart';
 import '../../../data/services/row_data_source.dart';
 import '../../../data/services/topshelf_service.dart';
@@ -145,6 +146,8 @@ class HomeViewModel extends ChangeNotifier {
 
   bool get _multiServerEnabled =>
       !_isOffline && _prefs.get(UserPreferences.enableMultiServerLibraries);
+
+  bool get _cloudOnlyPlex => isCloudOnlyPlexClient(_client);
 
   /// Whether a stored address is the server this client is on, ignoring the
   /// harmless ways the two spellings differ, such as a trailing slash or the
@@ -381,7 +384,7 @@ class HomeViewModel extends ChangeNotifier {
     final done = Completer<void>();
     _loadDone = done.future;
     if (!newSectionsOnly) {
-      _mediaBarViewModel.load(force: forceRefresh);
+      if (!_cloudOnlyPlex) _mediaBarViewModel.load(force: forceRefresh);
       _rowOffsets.clear();
       _multiServerRepo.clearOffsets();
       _rowsPagedThisLoad.clear();
@@ -400,7 +403,25 @@ class HomeViewModel extends ChangeNotifier {
 
       final activeConfigs = _prefs.activeHomeSectionConfigs;
       final fallbackUsed = activeConfigs.isEmpty;
-      final configs = fallbackUsed
+      // A Plex account without a Media Server has Live TV but no media
+      // libraries. Keep independently supplied charts, not server-library rows.
+      final configs = _cloudOnlyPlex
+          ? <HomeSectionConfig>[
+              const HomeSectionConfig(
+                type: HomeSectionType.liveTv,
+                enabled: true,
+                order: 0,
+              ),
+              for (final config in activeConfigs)
+                if (config.isBuiltin &&
+                    config.type != HomeSectionType.liveTv &&
+                    (_isSeerrSectionType(config.type) ||
+                        _isTmdbSectionType(config.type) ||
+                        externalCharts.containsKey(config.type) ||
+                        config.type == HomeSectionType.mdblistWatchingNow))
+                  config,
+            ]
+          : fallbackUsed
           ? const [
               HomeSectionConfig(
                 type: HomeSectionType.resume,
@@ -514,7 +535,7 @@ class HomeViewModel extends ChangeNotifier {
         _watchingNowTimer = null;
       }
 
-      if (!sections.contains(HomeSectionType.mediaBar)) {
+      if (!_cloudOnlyPlex && !sections.contains(HomeSectionType.mediaBar)) {
         _mediaBarViewModel.load(force: forceRefresh);
       }
 
@@ -610,7 +631,8 @@ class HomeViewModel extends ChangeNotifier {
           }
         }
         final currentConfigs = _prefs.activeHomeSectionConfigs;
-        final isStillActive = currentConfigs.any((c) => c.stableId == cfg.stableId);
+        final isStillActive = (_cloudOnlyPlex && cfg.type == HomeSectionType.liveTv) ||
+            currentConfigs.any((c) => c.stableId == cfg.stableId);
         if (!isStillActive) return;
         // Cleanup runs even when the load failed, so the section's loading
         // placeholder is cleared instead of spinning forever.
