@@ -1217,18 +1217,24 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   Future<void> setWindow(Duration window) async {
     _requestedGuideWindow = window;
-    // The pending move may fail or be cancelled before applying this size.
-    // Follow newer moves too, then resize the window that actually committed.
-    var pending = pendingWindowResult;
-    while (pending != null) {
-      await pending;
-      if (_disposed || _requestedGuideWindow != window) return;
-      pending = pendingWindowResult;
+    // A filter change can supersede an in-flight resize. Only retry when a
+    // newer request invalidated it; genuine listing failures still propagate.
+    while (!_disposed &&
+        _requestedGuideWindow == window &&
+        _guideWindow != window) {
+      final pending = pendingWindowResult;
+      if (pending != null) {
+        await pending;
+        continue;
+      }
+      if (_state != GuideState.ready && !_categoryFetchInFlight) return;
+      final request = _windowRequest;
+      final moved = await setWindowStart(
+        _windowStart,
+        livePosition: _atLivePosition,
+      );
+      if (moved || _windowRequest == request + 1) return;
     }
-    if (_disposed || _requestedGuideWindow != window || window == _guideWindow) {
-      return;
-    }
-    await setWindowStart(_windowStart, livePosition: _atLivePosition);
   }
 
   Future<void> _reloadPrograms() async {

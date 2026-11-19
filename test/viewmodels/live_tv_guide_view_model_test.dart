@@ -298,6 +298,56 @@ void main() {
       );
     }
 
+    for (final category in [false, true]) {
+      test(
+        'a ${category ? 'program category' : 'channel group'} change during resize keeps the requested span',
+        () async {
+          _stubChannels(api, [_channel('one'), _channel('two')]);
+          when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+            (_) async => const ChannelGroupLineup({'two': {'Local'}}),
+          );
+          final start = DateTime(2026, 9, 11, 10);
+          await vm.load(windowStart: start);
+          final span = vm.guideWindow + const Duration(minutes: 30);
+          final first = Completer<Map<String, dynamic>>();
+          final requests = <(DateTime, List<String>, bool)>[];
+          when(() => _guide(api)).thenAnswer((inv) {
+            final ids = _requestedIds(inv);
+            requests.add((
+              inv.namedArguments[#endDate] as DateTime,
+              ids,
+              inv.namedArguments[#isSports] == true,
+            ));
+            if (requests.length == 1) return first.future;
+            return Future.value({
+              'Items': [
+                for (final id in ids)
+                  _program('show-$id', id, start: start, isSports: true),
+              ],
+            });
+          });
+
+          final resizing = vm.setWindow(span);
+          if (category) {
+            vm.setFilter(GuideFilter.sports);
+          } else {
+            vm.setGroup('Local');
+          }
+          first.complete({'Items': []});
+          await resizing;
+          expect(vm.windowStart, start);
+          expect(vm.windowEnd, start.add(span));
+          expect(vm.guideWindow, span);
+          expect(vm.state, GuideState.ready);
+          expect(vm.filteredChannels.map((c) => c.id),
+              category ? ['one', 'two'] : ['two']);
+          expect(requests.last.$1, start.add(span));
+          expect(requests.last.$2, category ? ['one', 'two'] : ['two']);
+          expect(requests.last.$3, category);
+        },
+      );
+    }
+
     test('a group stays browsable after a listings timeout and retries on selection', () async {
       final channels = [for (var i = 0; i < 101; i++) _channel('c$i', number: '$i')];
       _stubChannels(api, channels);
