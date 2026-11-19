@@ -254,6 +254,19 @@ final appRouter = GoRouter(
       return Destinations.home;
     }
 
+    // Plex Cloud has free Live TV but no DVR. Keep these unsupported routes
+    // inaccessible from bookmarks/deep links, not just hidden in the UI.
+    if (path == Destinations.liveTvRecordings ||
+        path == Destinations.liveTvSchedule ||
+        path == Destinations.liveTvSeriesRecordings) {
+      final server = GetIt.instance<ServerRepository>().getServer(
+        session.activeServerId ?? '',
+      );
+      if (server?.serverType == ServerType.plex && server?.cloudOnly == true) {
+        return Destinations.liveTvGuide;
+      }
+    }
+
     if (_shouldRedirectVideoToExternalPlayer(path)) {
       return Destinations.externalPlayer;
     }
