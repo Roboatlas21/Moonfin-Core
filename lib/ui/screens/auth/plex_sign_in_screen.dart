@@ -260,9 +260,9 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _discoveryError != null
-                            ? () => _loadServers(_token!)
-                            : _retry,
+                        onPressed: _errorMessage != null
+                            ? _retry
+                            : () => _loadServers(_token!),
                         icon: const Icon(Icons.refresh, size: 18),
                         label: FittedBox(
                           fit: BoxFit.scaleDown,
