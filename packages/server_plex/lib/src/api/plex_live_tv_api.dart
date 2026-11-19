@@ -197,13 +197,18 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   /// One source failing, like plex.tv being unreachable, still leaves the
   /// other's channels.
-  Future<(_Channels, _Channels)> _channelSources() => (
-    _dvrChannels().catchError((_) => <Map<String, dynamic>>[]),
-    // With no media server, a cloud outage is an error, not an empty lineup.
-    cloudOnly
-        ? _freeChannels()
-        : _freeChannels().catchError((_) => <Map<String, dynamic>>[]),
-  ).wait;
+  Future<(_Channels, _Channels)> _channelSources() async {
+    // Future.wait preserves the original DioException (including 401/403)
+    // rather than wrapping failures in ParallelWaitError as record .wait does.
+    final results = await Future.wait<_Channels>([
+      _dvrChannels().catchError((_) => <Map<String, dynamic>>[]),
+      // Without a media server, a cloud outage is an error, not an empty lineup.
+      cloudOnly
+          ? _freeChannels()
+          : _freeChannels().catchError((_) => <Map<String, dynamic>>[]),
+    ]);
+    return (results[0], results[1]);
+  }
 
   static const _featuredPath = '/lineups/plex/channels/featured';
 
@@ -263,7 +268,18 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   @override
   Future<ChannelGroupLineup> getChannelGroups({String? userId}) async {
     final (dvr, free) = await _channelSources();
-    if (free.isEmpty) return ChannelGroupLineup({}, channels: dvr);
+    if (free.isEmpty) {
+      // DVR channels belong to both All Channels and DVR Channels even when
+      // Plex's free lineup is empty or unavailable.
+      return ChannelGroupLineup(
+        {
+          for (final channel in dvr)
+            channel['Id'] as String: {ChannelGroupSource.dvr.groupId},
+        },
+        channels: dvr,
+        sources: dvr.isEmpty ? const [] : const [ChannelGroupSource.dvr],
+      );
+    }
     // Optional provider metadata must not delay an otherwise loaded lineup.
     final catalog = await _providerGroups()
         .timeout(const Duration(seconds: 3))

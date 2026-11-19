@@ -126,6 +126,38 @@ void main() {
     );
   });
 
+  testWidgets('skips Plex Cloud accounts when discovering collections', (
+    tester,
+  ) async {
+    final cloud = client('https://plex.tv', 'Cloud Collection');
+    final multiServer =
+        GetIt.instance<MultiServerRepository>() as _MockMultiServer;
+    when(() => multiServer.getLoggedInServers()).thenAnswer(
+      (_) async => [
+        ServerUserSession(
+          server: Server(
+            id: 'cloud',
+            name: 'Plex Free TV',
+            address: 'https://plex.tv',
+            version: '',
+            serverType: ServerType.plex,
+            cloudOnly: true,
+            dateAdded: DateTime(2026),
+          ),
+          userId: 'cloud-user',
+          client: cloud,
+        ),
+      ],
+    );
+
+    await prefs.set(UserPreferences.enableMultiServerLibraries, true);
+    await pump(tester);
+
+    expect(find.text('Local'), findsOneWidget);
+    expect(find.text('Cloud Collection'), findsNothing);
+    verifyNever(() => cloud.itemsApi);
+  });
+
   testWidgets('hides the other server\'s collections once multi-server is off', (
     tester,
   ) async {

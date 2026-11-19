@@ -185,8 +185,8 @@ class MultiServerRepository {
     return sessions;
   }
 
-  /// Keep Plex Cloud in [getLoggedInServers] for future Live TV aggregation,
-  /// but never query its account-only connection for media libraries or search.
+  /// Keep Plex Cloud in [getLoggedInServers] for Live TV, but exclude it
+  /// from media libraries and media-item search by default.
   Future<List<ServerUserSession>> _mediaLibrarySessions() async => [
     for (final session in await getLoggedInServers())
       if (!session.server.cloudOnly) session,
@@ -1394,8 +1394,12 @@ class MultiServerRepository {
   Future<List<List<AggregatedItem>>> searchEachServer(
     Future<List<AggregatedItem>> Function(SearchRepository repository) search, {
     required String label,
+    bool includeCloudOnly = false,
   }) async {
-    final sessions = await _mediaLibrarySessions();
+    // Live TV channel search opts in; Plex Cloud has no media libraries.
+    final sessions = includeCloudOnly
+        ? await getLoggedInServers()
+        : await _mediaLibrarySessions();
     return _gatherPerServer(
       sessions,
       (session) async => [
