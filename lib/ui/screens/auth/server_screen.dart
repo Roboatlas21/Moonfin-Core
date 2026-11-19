@@ -222,7 +222,7 @@ class _ServerScreenState extends State<ServerScreen> {
         () => _trySwitchSession(server.id, user.id),
       );
       if (success && mounted) {
-        context.go(Destinations.home);
+        context.go(server.cloudOnly ? Destinations.liveTvGuide : Destinations.home);
         return;
       }
       if (mounted) {
@@ -296,7 +296,7 @@ class _ServerScreenState extends State<ServerScreen> {
             plexToken: plexToken!,
           );
       if (signedIn && mounted) {
-        context.go(Destinations.home);
+        context.go(server.cloudOnly ? Destinations.liveTvGuide : Destinations.home);
         return;
       }
     } catch (_) {}

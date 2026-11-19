@@ -161,6 +161,7 @@ class MultiServerRepository {
           serverId: server.id,
           serverType: server.serverType,
           baseUrl: server.address,
+          cloudOnly: server.cloudOnly,
         );
         // A Silo profile restores its account's pair and profile. Setting the
         // stored access token would drop the active session's refresh token.

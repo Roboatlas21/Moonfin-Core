@@ -308,6 +308,7 @@ class SessionRepository {
       serverId: serverId,
       serverType: server.serverType,
       baseUrl: address,
+      cloudOnly: server.cloudOnly,
     );
     // A client kept from an earlier session still has the old address.
     if (address != server.address) client.baseUrl = address;

@@ -50,12 +50,14 @@ class MediaServerClientFactory {
     required String serverId,
     required ServerType serverType,
     required String baseUrl,
+    bool cloudOnly = false,
   }) {
     final normalizedBaseUrl = normalizeServerBaseUrl(baseUrl);
     return _clients.putIfAbsent(serverId, () {
       return _createClient(
         serverType: serverType,
         baseUrl: normalizedBaseUrl,
+        cloudOnly: cloudOnly,
       );
     });
   }
@@ -93,8 +95,13 @@ class MediaServerClientFactory {
   MediaServerClient _createClient({
     required ServerType serverType,
     required String baseUrl,
+    required bool cloudOnly,
   }) {
-    final raw = _createRawClient(serverType: serverType, baseUrl: baseUrl);
+    final raw = _createRawClient(
+      serverType: serverType,
+      baseUrl: baseUrl,
+      cloudOnly: cloudOnly,
+    );
     final getIt = GetIt.instance;
     // Background isolates skip the offline stack, so there's nothing to route
     // to and the raw client is all they need.
@@ -116,6 +123,7 @@ class MediaServerClientFactory {
   MediaServerClient _createRawClient({
     required ServerType serverType,
     required String baseUrl,
+    required bool cloudOnly,
   }) {
     switch (serverType) {
       case ServerType.jellyfin:
@@ -141,7 +149,8 @@ class MediaServerClientFactory {
         return PlexMediaServerClient(
           baseUrl: baseUrl,
           deviceInfo: deviceInfo,
-          gamesApi: plexMoonbaseGamesApi,
+          cloudOnly: cloudOnly,
+          gamesApi: cloudOnly ? null : plexMoonbaseGamesApi,
         );
       case ServerType.silo:
         return SiloMediaServerClient(

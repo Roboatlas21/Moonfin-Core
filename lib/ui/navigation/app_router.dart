@@ -102,6 +102,12 @@ const _authRoutes = {
 /// through to Home costs nothing next to stranding them outside it.
 bool _shouldRunSetupWizard() {
   try {
+    final session = GetIt.instance<SessionRepository>();
+    final serverId = session.activeServerId;
+    if (serverId != null &&
+        GetIt.instance<ServerRepository>().getServer(serverId)?.cloudOnly == true) {
+      return false;
+    }
     final client = SetupWizardGate.activeClient();
     if (client == null) return false;
     return GetIt.instance<SetupWizardGate>().shouldRun(client);

@@ -62,8 +62,9 @@ typedef _Grab = ({Map op, Map<String, dynamic> program});
 /// Plex's free channels, which plex.tv serves itself.
 class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   final Dio _dio;
+  final bool cloudOnly;
 
-  PlexLiveTvApi(this._dio);
+  PlexLiveTvApi(this._dio, {this.cloudOnly = false});
 
   static final _cloudOptions = Options(
     headers: {'X-Plex-Provider-Version': '7.2'},
@@ -132,8 +133,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return loading;
   }
 
-  Future<List<_Dvr>> _dvrList() =>
-      _cached(() => _dvrs, (f) => _dvrs = f, () async {
+  Future<List<_Dvr>> _dvrList() => cloudOnly
+      ? Future.value(<_Dvr>[])
+      : _cached(() => _dvrs, (f) => _dvrs = f, () async {
         final container = await plexContainer(_dio, '/livetv/dvrs');
         return [
           for (final dvr in container['Dvr'] as List? ?? const [])
@@ -482,7 +484,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           channel,
     ];
     final results = await Future.wait([
-      if (channelIds == null || channelIds.length > free.length)
+      if (!cloudOnly && (channelIds == null || channelIds.length > free.length))
         _dvrAirings(
           start,
           end,
@@ -551,6 +553,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     int? limit,
     bool? isAiring,
   }) async {
+    if (cloudOnly) return plexItemsResult([]);
     final now = DateTime.now();
     final programs = await _dvrAirings(now, now);
     return plexItemsResult(
@@ -594,7 +597,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   @override
   Future<Map<String, dynamic>> getTimers() async => plexItemsResult([
-    for (final grab in await _grabs())
+    if (!cloudOnly)
+      for (final grab in await _grabs())
       {
         'Id': grab.op['id'],
         'Type': 'Timer',
@@ -616,6 +620,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   @override
   Future<Map<String, dynamic>> getSeriesTimers() async {
+    if (cloudOnly) return plexItemsResult([]);
     final container = await plexContainer(_dio, '/media/subscriptions');
     return plexItemsResult([
       for (final rule in container['MediaSubscription'] as List? ?? const [])

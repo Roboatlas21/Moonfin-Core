@@ -38,6 +38,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
   String? _token;
   List<PlexServer>? _servers;
   PlexServer? _connecting;
+  bool _connectingCloud = false;
   String? _errorMessage;
   Timer? _pollTimer;
   bool _polling = false;
@@ -104,7 +105,11 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
 
   Future<void> _signedIn(String token) async {
     _pollTimer?.cancel();
-    setState(() => _token = token);
+    // Offer Plex Free TV immediately; media server discovery is optional.
+    setState(() {
+      _token = token;
+      _servers = const [];
+    });
     await _loadServers(token);
   }
 
@@ -116,15 +121,15 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
       );
       if (!mounted) return;
       setState(() => _servers = servers);
-      if (servers.length == 1) await _connect(servers.first);
-    } catch (e) {
-      _showError(e);
+    } catch (_) {
+      // Server discovery failure must not hide the cloud-only sign-in option.
+      if (mounted) setState(() => _servers ??= const []);
     }
   }
 
   Future<void> _connect(PlexServer server) async {
     final token = _token;
-    if (token == null || _connecting != null) return;
+    if (token == null || _connecting != null || _connectingCloud) return;
     setState(() {
       _connecting = server;
       _errorMessage = null;
@@ -144,6 +149,28 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     } catch (e) {
       _connecting = null;
       _showError(e);
+    }
+  }
+
+  Future<void> _connectCloud() async {
+    final token = _token;
+    if (token == null || _connecting != null || _connectingCloud) return;
+    setState(() {
+      _connectingCloud = true;
+      _errorMessage = null;
+    });
+    try {
+      final connected = await _plexRepository.connectCloud(token);
+      if (!mounted) return;
+      if (connected) {
+        context.go(Destinations.liveTvGuide);
+      } else {
+        setState(() => _errorMessage = AppLocalizations.of(context).loginFailed);
+      }
+    } catch (e) {
+      if (mounted) _showError(e);
+    } finally {
+      if (mounted) setState(() => _connectingCloud = false);
     }
   }
 
@@ -250,6 +277,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
   PlexPin? get _shownPin =>
       _errorMessage == null &&
           _connecting == null &&
+          !_connectingCloud &&
           _servers == null &&
           !_usePassword &&
           _token == null
@@ -280,15 +308,15 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
       );
     }
 
+    if (_connectingCloud) {
+      return _buildLoading('Connecting to Plex Free TV...');
+    }
     if (_connecting != null) {
       return _buildLoading(l10n.connectingToServerEllipsis);
     }
 
     final servers = _servers;
     if (servers != null) {
-      if (servers.isEmpty) {
-        return Text(l10n.plexNoServers, style: TextStyle(color: secondary));
-      }
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -298,6 +326,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
                 ?.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
+          _buildServerTile(null),
           ...servers.map(_buildServerTile),
         ],
       );
@@ -393,7 +422,8 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     );
   }
 
-  Widget _buildServerTile(PlexServer server) {
+  /// A null server represents Plex's cloud Live TV, not a media server.
+  Widget _buildServerTile(PlexServer? server) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
@@ -401,7 +431,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
         borderRadius: AppRadius.circular(12),
         child: InkWell(
           borderRadius: AppRadius.circular(12),
-          onTap: () => _connect(server),
+          onTap: () => server == null ? _connectCloud() : _connect(server),
           focusColor: AppColorScheme.accent,
           hoverColor: AppColorScheme.onSurface.withValues(alpha: 0.08),
           child: Padding(
@@ -415,7 +445,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        server.name,
+                        server?.name ?? 'Plex Free TV (Cloud)',
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
                           color: AppColorScheme.onSurface.withValues(
@@ -424,8 +454,10 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
                         ),
                       ),
                       Text(
-                        server.address ??
-                            AppLocalizations.of(context).noReachableAddress,
+                        server == null
+                            ? 'No Plex Media Server required'
+                            : server.address ??
+                                  AppLocalizations.of(context).noReachableAddress,
                         style: TextStyle(
                           fontSize: 13,
                           color: AppColorScheme.onSurface.withValues(

@@ -83,6 +83,39 @@ class PlexRepository {
     );
   }
 
+  /// A Plex account is a Live TV source even without a Plex Media Server.
+  /// Keep it as its own named connection for future multi-server aggregation.
+  Future<bool> connectCloud(String authToken) async {
+    final account = await _plexTv.getAccount(authToken);
+    final id = 'plex-cloud-${account.id}';
+    final now = DateTime.now();
+    await _serverRepository.saveServer(
+      Server(
+        id: id,
+        name: 'Plex Free TV',
+        address: 'https://plex.tv',
+        version: '',
+        serverType: ServerType.plex,
+        cloudOnly: true,
+        dateAdded: now,
+      ),
+    );
+    await _authStore.putUser(
+      PrivateUser(
+        id: account.id,
+        name: account.name,
+        serverId: id,
+        accessToken: authToken,
+        plexToken: authToken,
+        lastUsed: now,
+      ),
+    );
+    return _sessionRepository.switchCurrentSession(
+      serverId: id,
+      userId: account.id,
+    );
+  }
+
   /// The Plex Home members someone signed in to [server] can switch to.
   Future<List<PublicUser>> homeUsers(Server server) async {
     final token = _plexToken(server.id);
@@ -117,15 +150,18 @@ class PlexRepository {
     required String name,
     required String plexToken,
   }) async {
-    final servers = await _plexTv.getServers(plexToken);
-    final match = servers.where((s) => s.id == server.id).firstOrNull;
-    if (match == null) return false;
+    final match = server.cloudOnly
+        ? null
+        : (await _plexTv.getServers(plexToken))
+              .where((s) => s.id == server.id)
+              .firstOrNull;
+    if (!server.cloudOnly && match == null) return false;
     await _authStore.putUser(
       PrivateUser(
         id: userId,
         name: name,
         serverId: server.id,
-        accessToken: match.accessToken,
+        accessToken: server.cloudOnly ? plexToken : match!.accessToken,
         plexToken: plexToken,
         lastUsed: DateTime.now(),
       ),
