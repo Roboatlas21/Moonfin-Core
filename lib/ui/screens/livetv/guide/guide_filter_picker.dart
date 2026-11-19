@@ -261,25 +261,18 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
               mounted &&
               ModalRoute.isCurrentOf(context) == true &&
               _nodes[row]?.hasFocus == true;
-          if (event.logicalKey.isUpKey) {
-            if (!stillFocused(id)) return KeyEventResult.ignored;
+          if (event.isActionable && event.logicalKey.isUpKey) {
             final previous = _visibleRows
                 .takeWhile((row) => row.id != id)
                 .map((row) => row.id)
                 .nonNulls
                 .lastOrNull;
-            return _hold.start(
-              event,
-              onPress: () {
-                if (previous == null) {
-                  _searchFocus.requestFocus();
-                } else {
-                  _focusRow(previous);
-                }
-              },
-              stillFocused: () => stillFocused(previous),
-              onHold: _searchFocus.requestFocus,
-            );
+            if (previous == null) {
+              _searchFocus.requestFocus();
+            } else {
+              _focusRow(previous);
+            }
+            return KeyEventResult.handled;
           }
           if (event.logicalKey.isSelectKey && id.$1.canFavorite) {
             return _hold.start(

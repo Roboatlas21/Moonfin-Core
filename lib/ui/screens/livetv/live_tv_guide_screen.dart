@@ -178,7 +178,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   late LiveTvCategoryDisplay _categoryDisplay;
   final _browseFocus = FocusNode(debugLabel: 'GuideBrowse');
   final _shortcutNodes = <GuideFilterChoice, FocusNode>{};
-  final _headerHold = FocusedKeyHold();
   final _channelHold = FocusedKeyHold();
   final _channelSearchFocus = FocusNode(debugLabel: 'GuideSearch');
   final _channelSearch = TextEditingController();
@@ -1063,7 +1062,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _timeHeaderHorizontalScrollController.dispose();
     _guideHorizontalScrollController.dispose();
     _miniPlayerFocusNode.dispose();
-    _headerHold.dispose();
     _channelHold.dispose();
     for (final node in _shortcutNodes.values) {
       node.dispose();
@@ -1813,21 +1811,17 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     List<GuideFilterChoice> choices,
     int index,
   ) {
-    if (event.logicalKey.isRightKey) {
+    if (event.isActionable && event.logicalKey.isRightKey) {
       _pendingPickerRestore = null;
-      if (!PlatformDetection.isTV && event.isActionable) {
+      if (!PlatformDetection.isTV) {
         _channelSearchFocus.requestFocus();
         return KeyEventResult.handled;
       }
       if (!_mayTakeFocus) return KeyEventResult.ignored;
       final next = _shortcutNodes[choices.elementAtOrNull(index + 1)];
       final target = next?.context?.mounted == true ? next! : _channelSearchFocus;
-      return _headerHold.start(
-        event,
-        onPress: target.requestFocus,
-        stillFocused: () => _mayTakeFocus && target.hasFocus,
-        onHold: _channelSearchFocus.requestFocus,
-      );
+      target.requestFocus();
+      return KeyEventResult.handled;
     }
     if (!event.isActionable) return KeyEventResult.ignored;
     if (event.logicalKey.isLeftKey && PlatformDetection.isTV) {

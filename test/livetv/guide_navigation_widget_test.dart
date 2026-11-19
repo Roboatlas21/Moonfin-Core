@@ -780,19 +780,14 @@ void main() {
       await _pumpFrames(tester);
       expect(rows('CA| SPORTS'), findsNWidgets(2));
       expect(node('US| SPORTS').hasFocus, isTrue);
-      await hold(LogicalKeyboardKey.arrowUp, firstStep: node('CA| SPORTS', last: true));
-      expect(
-        tester
-            .widget<LocalSearchField>(
-              find.descendant(
-                of: picker,
-                matching: find.byType(LocalSearchField),
-              ),
-            )
-            .focusNode
-            .hasFocus,
-        isTrue,
-      );
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowUp);
+      await tester.pump();
+      expect(node('CA| SPORTS', last: true).hasFocus, isTrue);
+      await tester.pump(const Duration(milliseconds: 550));
+      await _pumpFrames(tester);
+      expect(node('CA| SPORTS', last: true).hasFocus, isTrue);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
+      await _pumpFrames(tester);
     },
   );
 
@@ -849,9 +844,14 @@ void main() {
     await tester.pump();
     expect(_focusedLabel(), 'GuideShortcut:group:Featured');
     await tester.pump(const Duration(milliseconds: 550));
-    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideShortcut:group:Featured');
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
     await _pumpFrames(tester);
+    for (var i = 0; i < keys.length; i++) {
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await _pumpFrames(tester);
+    }
     expect(_focusedLabel(), 'GuideSearch');
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await _pumpFrames(tester);
