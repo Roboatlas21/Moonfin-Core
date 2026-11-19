@@ -410,6 +410,68 @@ void main() {
       );
     }
 
+    test('retry all failed group listings in batches without touching good or unrelated rows', () async {
+      final channels = [
+        for (var i = 0; i < 120; i++) _channel('c$i', number: '$i'),
+      ];
+      _stubChannels(api, channels);
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup({
+          for (var i = 0; i < 120; i++)
+            'c$i': {i < 110 ? 'Local' : 'Other'},
+        }),
+      );
+      final start = DateTime(2026, 9, 11, 10);
+      Map<String, dynamic> programs(List<String> ids) => {
+        'Items': [
+          for (final id in ids) _program('show-$id', id, start: start),
+        ],
+      };
+      when(() => _guide(api)).thenAnswer((inv) async => programs(_requestedIds(inv)));
+      await vm.load(windowStart: start);
+      expect(vm.programsForChannel('c0').single.id, 'show-c0');
+
+      when(() => _guide(api)).thenAnswer(
+        (_) async => throw TimeoutException('provider offline'),
+      );
+      vm.setGroup('Other');
+      await pumpEventQueue();
+      expect(vm.loadStateFor('c110'), GuideChannelLoadState.failed);
+      vm.setGroup('Local');
+      await pumpEventQueue();
+      expect(vm.loadStateFor('c50'), GuideChannelLoadState.failed);
+      await vm.loadMorePrograms();
+      expect(vm.loadStateFor('c100'), GuideChannelLoadState.failed);
+
+      final firstBatch = Completer<Map<String, dynamic>>();
+      final requests = <List<String>>[];
+      when(() => _guide(api)).thenAnswer((inv) {
+        final ids = _requestedIds(inv);
+        requests.add(ids);
+        if (ids.first == 'c50') return firstBatch.future;
+        return Future.error(TimeoutException('last batch still offline'));
+      });
+      final retry = vm.retryFailedPrograms();
+      expect(identical(vm.retryFailedPrograms(), retry), isTrue);
+      expect(vm.loadStateFor('c50'), GuideChannelLoadState.loading);
+      expect(vm.loadStateFor('c100'), GuideChannelLoadState.loading);
+      expect(vm.loadStateFor('c110'), GuideChannelLoadState.failed);
+      expect(vm.loadStateFor('c0'), GuideChannelLoadState.loaded);
+      expect(requests, [[for (var i = 50; i < 100; i++) 'c$i']]);
+
+      firstBatch.complete(programs([for (var i = 50; i < 100; i++) 'c$i']));
+      await retry;
+      expect(requests, [
+        [for (var i = 50; i < 100; i++) 'c$i'],
+        [for (var i = 100; i < 110; i++) 'c$i'],
+      ]);
+      expect(vm.loadStateFor('c50'), GuideChannelLoadState.loaded);
+      expect(vm.programsForChannel('c50').single.id, 'show-c50');
+      expect(vm.loadStateFor('c100'), GuideChannelLoadState.failed);
+      expect(vm.loadStateFor('c110'), GuideChannelLoadState.failed);
+      expect(vm.programsForChannel('c0').single.id, 'show-c0');
+    });
+
     test('a group stays browsable after a listings timeout and retries on selection', () async {
       final channels = [for (var i = 0; i < 101; i++) _channel('c$i', number: '$i')];
       _stubChannels(api, channels);

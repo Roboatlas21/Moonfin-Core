@@ -2220,6 +2220,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                     _formatTime(next.startDate),
                     next.titleWithEpisode,
                   ),
+            loadState: _vm.loadStateFor(channel.id),
             isLive: isLive,
             apple: _apple,
             isFavorite: channel.isFavorite,
@@ -3355,8 +3356,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       onRightEdge: () =>
           unawaited(_shiftGuideWindow(const Duration(minutes: 30))),
       noProgramDataLabel: AppLocalizations.of(context).noProgramData,
-      // Per A3: a gap or filtered hole tunes live, never opens the recording
-      // dialog. Loading is inert. Failed has no retry producer yet.
+      // Real programs open details, gaps tune live, and failed rows retry all
+      // failed listings in the active group or category.
       onProgramSelected: (cell) {
         switch (cell.kind) {
           case GuideCellKind.program:
@@ -3367,8 +3368,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           case GuideCellKind.filtered:
             _watchChannel(channelId);
           case GuideCellKind.loading:
-          case GuideCellKind.failed:
             break;
+          case GuideCellKind.failed:
+            unawaited(_vm.retryFailedPrograms());
         }
       },
       onTopEdge: rowIndex == 0 ? _focusWindowBarFromGrid : null,

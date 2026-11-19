@@ -273,6 +273,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // until their programs arrive.
   final Set<String> _programsLoadedIds = <String>{};
   final Set<String> _failedProgramIds = <String>{};
+  final Set<String> _retryingFailedProgramIds = <String>{};
+  Future<void>? _failedProgramsRetry;
 
   // Channel ids with a program request out, the generation it belongs to and
   // when it's done.
@@ -344,6 +346,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   GuideChannelLoadState loadStateFor(String channelId) {
     if (hasProgramsFor(channelId)) return GuideChannelLoadState.loaded;
+    if (!listingsAccessDenied && _retryingFailedProgramIds.contains(channelId)) {
+      return GuideChannelLoadState.loading;
+    }
     return listingsAccessDenied || _failedProgramIds.contains(channelId)
         ? GuideChannelLoadState.failed
         : GuideChannelLoadState.loading;
@@ -1702,6 +1707,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programsByChannel.clear();
     _programsLoadedIds.clear();
     _failedProgramIds.clear();
+    _retryingFailedProgramIds.clear();
     _programsHighWater = 0;
     _processedBoundaries.clear();
     _resetCategory();
@@ -1856,6 +1862,59 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
     }
     _notifyListeners();
+  }
+
+  /// Retries failed listings visible in the active filter, without reloading
+  /// successful channels or the lineup. One tap starts at most one batch run.
+  Future<void> retryFailedPrograms() {
+    if (_failedProgramsRetry case final active?) return active;
+    if (_disposed || _state != GuideState.ready) return Future<void>.value();
+    final failed = filteredChannels
+        .where((c) => _failedProgramIds.contains(c.id) && !hasProgramsFor(c.id))
+        .toList();
+    if (failed.isEmpty) return Future<void>.value();
+
+    final page = _pageGeneration;
+    final generation = _programGeneration;
+    final session = userDataSync.session;
+    bool current() =>
+        !_disposed &&
+        page == _pageGeneration &&
+        generation == _programGeneration &&
+        session == userDataSync.session;
+    final ids = failed.map((c) => c.id).toSet();
+    _retryingFailedProgramIds.addAll(ids);
+    _notifyListeners();
+
+    Future<void> retry() async {
+      try {
+        for (var i = 0; i < failed.length; i += _programBatchSize) {
+          if (!current()) return;
+          final batch = failed.sublist(
+            i,
+            min(i + _programBatchSize, failed.length),
+          );
+          try {
+            await _loadProgramsBatch(batch);
+          } catch (_) {
+            // Preserve a retry affordance for ordinary network failures.
+            // Authorization failures already enter the guide-wide error state.
+            if (current() && !listingsAccessDenied) {
+              _failedProgramIds.addAll(batch.map((c) => c.id));
+            }
+          } finally {
+            _retryingFailedProgramIds.removeAll(batch.map((c) => c.id));
+            _notifyListeners();
+          }
+        }
+      } finally {
+        _retryingFailedProgramIds.removeAll(ids);
+        _failedProgramsRetry = null;
+        _notifyListeners();
+      }
+    }
+
+    return _failedProgramsRetry = retry();
   }
 
   /// Replaces the cached programs for [channelIds] over an explicit [from]-[to]
