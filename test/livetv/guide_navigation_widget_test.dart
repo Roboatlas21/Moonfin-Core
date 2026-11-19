@@ -766,7 +766,7 @@ void main() {
     },
   );
 
-  testWidgets('TV shortcuts preserve search width and skip to search on hold', (
+  testWidgets('Featured preserves TV search width and shortcut navigation', (
     tester,
   ) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
@@ -779,9 +779,11 @@ void main() {
       LiveTvCategoryDisplay.both,
     );
     final groups = [for (var i = 0; i < 10; i++) 'Group $i', 'Sports'];
+    final featured = PromotedChannelGroup('Featured', () async => {'ch0'});
     when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
       (_) async => ChannelGroupLineup(
         {'ch0': groups.toSet()},
+        promoted: featured,
         programmeCategories: {'sports'},
       ),
     );
@@ -789,6 +791,7 @@ void main() {
     final search = find.byType(LocalSearchField);
     final width = tester.getSize(search).width;
     final keys = [
+      'group:Featured',
       for (final group in groups) 'group:$group',
       'category:sports',
     ];
@@ -796,6 +799,14 @@ void main() {
     // Reopen the guide to read the persisted list.
     await tester.pumpWidget(const SizedBox());
     await pumpGuide(tester);
+    final browse = find.byTooltip('Filters');
+    await tester.tap(find.text('Featured'));
+    await _pumpFrames(tester);
+    expect(
+      find.descendant(of: browse, matching: find.text('Featured')),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('Refresh'), findsNothing);
     expect(tester.getSize(search).width, width);
     expect(find.text('Sports (group)'), findsOneWidget);
     expect(find.text('Sports (category)'), findsOneWidget);
@@ -806,7 +817,7 @@ void main() {
     expect(_focusedLabel(), 'GuideShortcut:category:favorites');
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
-    expect(_focusedLabel(), 'GuideShortcut:group:Group 0');
+    expect(_focusedLabel(), 'GuideShortcut:group:Featured');
     await tester.pump(const Duration(milliseconds: 550));
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);

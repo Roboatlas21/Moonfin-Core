@@ -176,7 +176,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final _headerHold = FocusedKeyHold();
   final _channelHold = FocusedKeyHold();
   final _channelSearchFocus = FocusNode(debugLabel: 'GuideSearch');
-  final _refreshGroupFocus = FocusNode(debugLabel: 'GuideRefreshGroup');
   final _channelSearch = TextEditingController();
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
@@ -1066,7 +1065,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     }
     _browseFocus.dispose();
     _channelSearchFocus.dispose();
-    _refreshGroupFocus.dispose();
     _channelSearchDebounce?.cancel();
     _channelSearch.dispose();
     for (final node in _channelFocusNodes.values) {
@@ -1996,32 +1994,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                     },
                   ),
           ),
-          if (_vm.isPromotedGroupSelected) _refreshGroupButton(l10n),
         ],
       ),
     );
   }
-
-  Widget _refreshGroupButton(AppLocalizations l10n) => Focus(
-    canRequestFocus: false,
-    onKeyEvent: (_, event) {
-      if (!event.isActionable) return KeyEventResult.ignored;
-      if (event.logicalKey.isLeftKey) {
-        _channelSearchFocus.requestFocus();
-      } else if (event.logicalKey.isDownKey && _sidePanel) {
-        _focusWindowBarFromGenres();
-      } else {
-        return KeyEventResult.ignored;
-      }
-      return KeyEventResult.handled;
-    },
-    child: IconButton(
-      focusNode: _refreshGroupFocus,
-      tooltip: l10n.refresh,
-      icon: const Icon(Icons.refresh),
-      onPressed: () => unawaited(_vm.refreshPromotedGroup(force: true)),
-    ),
-  );
 
   Widget _buildChannelSearchField({bool compact = false}) => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 360),
@@ -2033,10 +2009,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       onChanged: _searchChannels,
       onTvKeyEvent: (_, event) {
         if (!event.isActionable) return KeyEventResult.ignored;
-        if (event.logicalKey.isRightKey && _vm.isPromotedGroupSelected) {
-          _refreshGroupFocus.requestFocus();
-          return KeyEventResult.handled;
-        }
         if (event.logicalKey.isLeftKey) {
           if (_usesPicker) {
             (PlatformDetection.isTV
