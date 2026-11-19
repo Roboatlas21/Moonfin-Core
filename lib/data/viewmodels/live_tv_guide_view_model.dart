@@ -1806,15 +1806,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         .sublist(_programsHighWater, end)
         .where((c) => !_programsLoadedIds.contains(c.id))
         .toList();
-    // A channel whose earlier request failed stays below the mark, so the
-    // next pass asks for it again.
+    // Failed rows remain retryable without blocking later channel batches.
     if (await _loadProgramsBatch(batch) &&
         pageGeneration == _pageGeneration &&
         batch.every((c) =>
             _programsLoadedIds.contains(c.id) ||
-            (_selectedGroup != null && _failedProgramIds.contains(c.id)))) {
-      // A placeholder for this batch shouldn't block later rows in the group.
-      if (_selectedGroup != null) _programsHighWater = end;
+            _failedProgramIds.contains(c.id))) {
+      _programsHighWater = end;
       _advanceProgramsCursor();
     }
   }
@@ -2674,13 +2672,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           }
         }
       } catch (error) {
-        final groupFailure = _selectedGroup != null &&
-            (error is TimeoutException || isTransientTransportFailure(error));
+        final transientFailure = !_accessDenied(error) &&
+            (error is TimeoutException || isTransientTransportFailure(error)) &&
+            (error is! DioException || error.type != DioExceptionType.cancel);
         final carouselFailure = _usesPlaybackLineup &&
             error is DioException &&
             !_accessDenied(error) &&
             error.type != DioExceptionType.cancel;
-        if (!groupFailure && !carouselFailure) rethrow;
+        if (!transientFailure && !carouselFailure) rethrow;
         if (!current()) return false;
         _failedProgramIds.addAll(ids);
       } finally {
