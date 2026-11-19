@@ -5,6 +5,7 @@ import 'package:moonfin_design/moonfin_design.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../../data/models/live_tv_recording_state.dart';
+import '../../../data/services/plex_free_tv_favorites.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../util/clock_format.dart';
@@ -161,6 +162,14 @@ bool canRecordAiring(GuideProgram? program) {
       !now.isBefore(program.startDate) &&
       now.isBefore(program.endDate);
 }
+
+/// The player may record an airing only on a recordable channel. Plex's
+/// free channels cannot be recorded, even through a physical Plex server.
+bool canRecordChannelAiring(
+  MediaServerClient client,
+  String channelId,
+  GuideProgram? program,
+) => !isPlexFreeTvChannel(client, channelId) && canRecordAiring(program);
 
 /// Offers the recording choices for the airing a player is on and carries out
 /// the one picked. Answers with what to tell the viewer, or null when there is

@@ -39,6 +39,8 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
   List<PlexServer>? _servers;
   PlexServer? _connecting;
   bool _connectingCloud = false;
+  PlexServer? _lastAttemptedServer;
+  bool _lastAttemptWasCloud = false;
   String? _errorMessage;
   String? _discoveryError;
   Timer? _pollTimer;
@@ -110,6 +112,8 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     setState(() {
       _token = token;
       _servers = const [];
+      _lastAttemptedServer = null;
+      _lastAttemptWasCloud = false;
     });
     await _loadServers(token);
   }
@@ -138,6 +142,8 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     if (token == null || _connecting != null || _connectingCloud) return;
     setState(() {
       _connecting = server;
+      _lastAttemptedServer = server;
+      _lastAttemptWasCloud = false;
       _errorMessage = null;
     });
     try {
@@ -163,6 +169,8 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     if (token == null || _connecting != null || _connectingCloud) return;
     setState(() {
       _connectingCloud = true;
+      _lastAttemptedServer = null;
+      _lastAttemptWasCloud = true;
       _errorMessage = null;
     });
     try {
@@ -188,19 +196,29 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     );
   }
 
-  /// An approved code stays approved, so only a failure before approval
-  /// needs a new one.
+  /// Retry the operation that failed. An approved Plex token remains valid,
+  /// so reconnecting does not require another PIN or server discovery.
   void _retry() {
     final token = _token;
-    setState(() {
-      _errorMessage = null;
-      if (token == null) _pin = null;
-    });
     if (token == null) {
-      _requestPin();
-    } else if (_servers == null) {
-      _loadServers(token);
+      setState(() {
+        _errorMessage = null;
+        _pin = null;
+      });
+      unawaited(_requestPin());
+      return;
     }
+    if (_lastAttemptWasCloud) {
+      unawaited(_connectCloud());
+      return;
+    }
+    final server = _lastAttemptedServer;
+    if (server != null) {
+      unawaited(_connect(server));
+      return;
+    }
+    setState(() => _errorMessage = null);
+    unawaited(_loadServers(token));
   }
 
   @override
@@ -260,7 +278,9 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _errorMessage != null
+                        onPressed: _connecting != null || _connectingCloud
+                            ? null
+                            : _errorMessage != null
                             ? _retry
                             : () => _loadServers(_token!),
                         icon: const Icon(Icons.refresh, size: 18),

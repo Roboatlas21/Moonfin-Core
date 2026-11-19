@@ -301,6 +301,36 @@ void main() {
     await _pumpFrames(tester);
   }
 
+  testWidgets('a failed channel lineup shows Retry and reloads in place', (
+    tester,
+  ) async {
+    var unavailable = true;
+    when(
+      () => liveTvApi.getChannels(
+        startIndex: any(named: 'startIndex'),
+        limit: any(named: 'limit'),
+        sortBy: any(named: 'sortBy'),
+        sortOrder: any(named: 'sortOrder'),
+        fields: any(named: 'fields'),
+        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+        userId: any(named: 'userId'),
+      ),
+    ).thenAnswer((_) async {
+      if (unavailable) throw StateError('Lineup offline');
+      return <String, dynamic>{'Items': [_channelRaw(0)]};
+    });
+
+    await pumpGuide(tester);
+    expect(find.text('Retry'), findsOneWidget);
+
+    unavailable = false;
+    await tester.tap(find.text('Retry'));
+    await _pumpFrames(tester);
+
+    expect(find.text('Retry'), findsNothing);
+    expect(find.text('Channel 0'), findsWidgets);
+  });
+
   testWidgets('playback uses the guide filter until a mini-guide selection', (
     tester,
   ) async {
