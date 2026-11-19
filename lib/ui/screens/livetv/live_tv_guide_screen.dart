@@ -231,7 +231,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     availableWidth: kTvDesignWidth,
     availableHeight: kTvDesignWidth * 9 / 16,
   );
-  Duration? _pendingGuideWindow;
+  Duration? _lastLayoutWindow;
 
   /// Whether the current layout actually renders the hero band, the only
   /// widget that consumes per-program artwork.
@@ -938,9 +938,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           );
         },
       );
-      if (picked != null) {
-        await _vm.setDate(picked);
-        if (mounted) _anchorToWindowStart();
+      if (picked != null && mounted) {
+        _clearWindowFailure();
+        try {
+          if (await _vm.setDate(picked) && mounted) _anchorToWindowStart();
+        } catch (_) {
+          _showWindowFailure(picked);
+        }
       }
     } finally {
       _isShowingDatePicker = false;
@@ -1244,7 +1248,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                       child: Chip(
                         label: Text(
                           AppLocalizations.of(context).guideWindowLoadFailed(
-                            _formatTime(target),
+                            DateUtils.isSameDay(target, _vm.windowStart)
+                                ? _formatTime(target)
+                                : _formatDate(target),
                           ),
                         ),
                       ),
@@ -1279,19 +1285,17 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       size.width >= size.height;
 
   void _scheduleGuideWindowUpdate(Duration window) {
-    if (_vm.state != GuideState.ready ||
-        window == _vm.guideWindow ||
-        window == _pendingGuideWindow) {
-      return;
-    }
-    _pendingGuideWindow = window;
+    if (_vm.state != GuideState.ready || window == _lastLayoutWindow) return;
+    // A failed resize can be retried by the next move. Rebuilding the same
+    // layout should not send the failed request again.
+    _lastLayoutWindow = window;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted || _pendingGuideWindow != window) return;
+      if (!mounted || _lastLayoutWindow != window) return;
       try {
         await _vm.setWindow(window);
-      } finally {
-        if (mounted && _pendingGuideWindow == window) {
-          _pendingGuideWindow = null;
+      } catch (_) {
+        if (mounted && _lastLayoutWindow == window) {
+          _showWindowFailure(_vm.windowStart.add(window));
         }
       }
     });
@@ -1609,8 +1613,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         ? channels[previousRow].id
         : null;
     // Clear channel search before browsing groups; the picker has its own search.
-    _channelSearchDebounce?.cancel();
-    if (_channelSearch.text.isNotEmpty) _channelSearch.clear();
+    _clearChannelSearch();
     var closedWithRight = false;
     setState(() => _pickerOpen = true);
     final choice = await showGeneralDialog<GuideFilterChoice>(
@@ -1697,16 +1700,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _applyPickerChoice(GuideFilterChoice choice) {
     _pendingPickerFocus = null;
     _pendingPickerRestore = null;
-    _channelSearchDebounce?.cancel();
-    if (_channelSearch.text.isNotEmpty) _channelSearch.clear();
     final previous = (_vm.filter, _vm.selectedGroup);
     final (filter, group) = choice;
-    if (group != null) {
-      _vm.setGroup(group);
-    } else if (filter == GuideFilter.all ||
+    if (group != null || filter == GuideFilter.all ||
         filter == GuideFilter.favorites ||
         _vm.availableProgrammeCategories.contains(filter)) {
-      _vm.setFilter(filter);
+      _selectGuideFilter(filter, group: group);
     }
     if (!_sidePanel && previous != (_vm.filter, _vm.selectedGroup)) {
       _selection = null;
@@ -1730,6 +1729,16 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         }
       });
     }
+  }
+
+  void _selectGuideFilter(GuideFilter filter, {String? group}) {
+    _vm.setFilter(filter, group: group, clearSearch: true);
+    _clearChannelSearch();
+  }
+
+  void _clearChannelSearch() {
+    _channelSearchDebounce?.cancel();
+    if (_channelSearch.text.isNotEmpty) _channelSearch.clear();
   }
 
   void _searchChannels(String value) {
@@ -1776,7 +1785,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       );
 
   KeyEventResult _headerKey(
-    FocusNode node,
     KeyEvent event,
     List<GuideFilterChoice> choices,
     int index,
@@ -1787,14 +1795,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         _channelSearchFocus.requestFocus();
         return KeyEventResult.handled;
       }
+      if (!_mayTakeFocus) return KeyEventResult.ignored;
+      final next = _shortcutNodes[choices.elementAtOrNull(index + 1)];
+      final target = next?.context?.mounted == true ? next! : _channelSearchFocus;
       return _headerHold.start(
         event,
-        stillFocused: () => _mayTakeFocus && node.hasFocus,
-        onTap: () =>
-            (index + 1 < choices.length
-                    ? _shortcutNode(choices[index + 1])
-                    : _channelSearchFocus)
-                .requestFocus(),
+        onPress: target.requestFocus,
+        stillFocused: () => _mayTakeFocus && target.hasFocus,
         onHold: _channelSearchFocus.requestFocus,
       );
     }
@@ -1841,10 +1848,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       return Focus(
         key: ValueKey(choice),
         canRequestFocus: false,
-        onKeyEvent: (_, event) => _headerKey(node, event, choices, index),
+        onKeyEvent: (_, event) => _headerKey(event, choices, index),
         onFocusChange: (focused) {
-          if (focused && node.context != null) {
-            Scrollable.ensureVisible(node.context!);
+          final target = node.context;
+          if (focused && target != null && target.mounted) {
+            Scrollable.ensureVisible(target);
           }
         },
         child: ConstrainedBox(
@@ -1917,8 +1925,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             ),
             child: Focus(
               canRequestFocus: false,
-              onKeyEvent: (_, event) =>
-                  _headerKey(_browseFocus, event, shortcuts, -1),
+              onKeyEvent: (_, event) => _headerKey(event, shortcuts, -1),
               child: Tooltip(
                 message: l10n.filters,
                 child: FilledButton.icon(
@@ -2023,7 +2030,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             _lastFocusedRowIndex = 0;
             _focusedChannel.value = null;
           }
-          _vm.setFilter(filters[i]);
+          _selectGuideFilter(filters[i]);
         },
         apple: _apple,
         focusNodeFor: (i) => _filterFocusNodeFor(filters[i]),
@@ -2918,7 +2925,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// Re-resolves the selection against the window as the clock moves it, and
   /// puts focus back on the cell the new anchor lands on.
   Future<void> _reanchor(DateTime now) async {
-    if (!_vm.atLivePosition || _vm.pendingWindowStart != null) return;
+    if (!_vm.atLivePosition) return;
+    if (_vm.pendingWindowResult case final move?) {
+      await move;
+      if (mounted && _vm.atLivePosition) _onReanchorTick();
+      return;
+    }
     try {
       final moved = await _vm.setWindowStart(
         guideLeftEdge(now),
@@ -3001,10 +3013,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         : target;
     if (clamped == oldStart || clamped == _vm.pendingWindowStart) return;
 
-    if (_failedPageTarget != null) {
-      _windowNoticeTimer?.cancel();
-      setState(() => _failedPageTarget = null);
-    }
+    _clearWindowFailure();
     try {
       final moved = await _vm.setWindowStart(
         clamped,
@@ -3013,13 +3022,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       );
       if (!moved) return;
     } catch (_) {
-      if (_mayTakeFocus) {
-        setState(() => _failedPageTarget = clamped);
-        _windowNoticeTimer?.cancel();
-        _windowNoticeTimer = Timer(const Duration(seconds: 3), () {
-          if (mounted) setState(() => _failedPageTarget = null);
-        });
-      }
+      _showWindowFailure(clamped);
       return;
     }
     if (!mounted || _vm.windowStart != clamped) return;
@@ -3039,6 +3042,21 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
     _selection = updated;
     if (focusGrid) _focusSelectedCell(updated, cells);
+  }
+
+  void _clearWindowFailure() {
+    if (_failedPageTarget == null) return;
+    _windowNoticeTimer?.cancel();
+    setState(() => _failedPageTarget = null);
+  }
+
+  void _showWindowFailure(DateTime target) {
+    if (!_mayTakeFocus) return;
+    setState(() => _failedPageTarget = target);
+    _windowNoticeTimer?.cancel();
+    _windowNoticeTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _failedPageTarget = null);
+    });
   }
 
   /// Whole rows the grid shows at once, so a page key moves exactly one screen.

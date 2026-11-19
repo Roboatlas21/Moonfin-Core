@@ -85,7 +85,7 @@ Map<String, dynamic> _channelRaw(int index) => <String, dynamic>{
   'UserData': <String, dynamic>{'IsFavorite': false},
 };
 
-List<Map<String, dynamic>> _programsFor(String channelId) {
+List<Map<String, dynamic>> _programsFor(String channelId, {bool sports = false}) {
   final row = int.parse(channelId.substring(2));
   final duration = _durationForRow(row);
   final start = _fixtureWindowStart;
@@ -97,6 +97,7 @@ List<Map<String, dynamic>> _programsFor(String channelId) {
       'Id': '$channelId-p$minute',
       'ChannelId': channelId,
       'Name': '$channelId show $minute',
+      'IsSports': sports,
       'StartDate': start.add(Duration(minutes: minute)).toIso8601String(),
       'EndDate': start
           .add(Duration(minutes: minute + duration))
@@ -247,8 +248,9 @@ void main() {
       final ids =
           (invocation.namedArguments[#channelIds] as List?)?.cast<String>() ??
           const <String>[];
+      final sportsChannel = invocation.namedArguments[#startDate] == _fixtureWindowStart ? 'ch0' : 'ch1';
       final payload = <String, dynamic>{
-        'Items': [for (final id in ids) ..._programsFor(id)],
+        'Items': [for (final id in ids) ..._programsFor(id, sports: id == sportsChannel)],
       };
       final gate = deferredChannelId;
       if (gate == null || !ids.contains(gate)) return payload;
@@ -487,6 +489,35 @@ void main() {
       expect(rail.selectedIndex, 0);
     },
   );
+  testWidgets('Sports clears active and pending channel searches', (tester) async {
+    await pumpGuide(tester);
+    final search = tester
+        .widget<LocalSearchField>(find.byType(LocalSearchField))
+        .controller;
+    search.text = 'unknown channel';
+    await _pumpFrames(tester);
+    expect(find.text('No channels found'), findsOneWidget);
+
+    search.text = 'another unknown channel';
+    await tester.tap(find.text('Sports'));
+    await _pumpFrames(tester);
+    expect(search.text, isEmpty);
+    expect(find.byType(EpgChannelCell), findsWidgets);
+
+    search.text = 'Channel 2';
+    await _pumpFrames(tester);
+    clearInteractions(liveTvApi);
+    await _activateGuideControl(tester, 'GuideFilter:${GuideFilter.favorites.index}');
+    expect(search.text, isEmpty);
+    verifyNever(() => liveTvApi.getGuide(
+      startDate: any(named: 'startDate'), endDate: any(named: 'endDate'),
+      channelIds: any(named: 'channelIds'), isSports: true,
+      fields: any(named: 'fields'), enableImages: any(named: 'enableImages'),
+      enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+      enableUserData: any(named: 'enableUserData'), userId: any(named: 'userId'),
+    ));
+  });
+
   testWidgets('empty group mode keeps categories', (tester) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
     addTearDown(
@@ -670,8 +701,10 @@ void main() {
       FocusNode node(String name, {bool last = false}) => tester
           .widget<ListTile>(last ? rows(name).last : rows(name).first)
           .focusNode!;
-      Future<void> hold(LogicalKeyboardKey key) async {
+      Future<void> hold(LogicalKeyboardKey key, {FocusNode? firstStep}) async {
         await tester.sendKeyDownEvent(key);
+        await tester.pump();
+        if (firstStep != null) expect(firstStep.hasFocus, isTrue);
         await tester.pump(const Duration(milliseconds: 550));
         await _pumpFrames(tester);
         await tester.sendKeyRepeatEvent(key);
@@ -717,7 +750,7 @@ void main() {
       await _pumpFrames(tester);
       expect(rows('CA| SPORTS'), findsNWidgets(2));
       expect(node('US| SPORTS').hasFocus, isTrue);
-      await hold(LogicalKeyboardKey.arrowUp);
+      await hold(LogicalKeyboardKey.arrowUp, firstStep: node('CA| SPORTS', last: true));
       expect(
         tester
             .widget<LocalSearchField>(
@@ -772,6 +805,8 @@ void main() {
     await _pumpFrames(tester);
     expect(_focusedLabel(), 'GuideShortcut:category:favorites');
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(_focusedLabel(), 'GuideShortcut:group:Group 0');
     await tester.pump(const Duration(milliseconds: 550));
     await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
@@ -1498,6 +1533,7 @@ void main() {
     releaseDeferredGuide.first();
     await _pumpFrames(tester);
     expect(_windowRangeText(tester), next);
+    expect(tester.widget<EpgChannelCell>(find.byType(EpgChannelCell)).name, 'Channel 1');
   });
 
   testWidgets('Next can page Favorites while the All request is pending', (
@@ -1639,6 +1675,8 @@ void main() {
   testWidgets('Right retries a failed page without moving remote focus', (
     tester,
   ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
     await pumpGuide(tester);
     // Row 4 has one long program spanning the fixture's current window.
     final cell = _nodeLabelled(tester, 'GuideProgramRow4:0');
@@ -1694,6 +1732,8 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
         await _pumpFrames(tester);
         expect(_windowRangeText(tester), beforeFailure);
+        expect(find.byType(EpgChannelCell), findsWidgets);
+        expect(find.byType(Chip), findsNothing);
 
         clearInteractions(liveTvApi);
         await tester.binding.handlePopRoute();

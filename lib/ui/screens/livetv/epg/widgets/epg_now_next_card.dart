@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 
+import '../../../../../l10n/app_localizations.dart';
 import '../../../../widgets/adaptive/adaptive_glass.dart';
 import '../../../../widgets/focus/focusable_wrapper.dart';
 import '../../../../widgets/offline_aware_image.dart';
@@ -70,10 +71,11 @@ class EpgNowNextCard extends StatelessWidget {
                     ),
                   ),
                   if (isFavorite)
-                    const Padding(
-                      padding: EdgeInsetsDirectional.only(start: 4),
+                    Padding(
+                      padding: const EdgeInsetsDirectional.only(start: 4),
                       child: Icon(
                         Icons.favorite,
+                        semanticLabel: AppLocalizations.of(context).favorited,
                         size: 12,
                         color: AppColors.red500,
                       ),
