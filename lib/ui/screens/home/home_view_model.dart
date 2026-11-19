@@ -1733,10 +1733,13 @@ class HomeViewModel extends ChangeNotifier {
                 ),
         ];
       case HomeSectionType.liveTv:
-        try {
-          if (!await _dataSource.hasLiveTvChannels()) return [];
-        } catch (_) {
-          return [];
+        // Cloud Free TV needs a guide entry even when its lineup is offline.
+        if (!_cloudOnlyPlex) {
+          try {
+            if (!await _dataSource.hasLiveTvChannels()) return [];
+          } catch (_) {
+            return [];
+          }
         }
         final rows = <HomeRow>[
           HomeRow(
