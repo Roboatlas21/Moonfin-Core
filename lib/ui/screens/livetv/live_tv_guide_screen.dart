@@ -14,7 +14,6 @@ import 'package:server_core/server_core.dart';
 import '../../../data/models/series_recording_episodes.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../data/services/user_data_sync.dart';
-import '../../../data/services/plex_free_tv_favorites.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../widgets/emby_premiere_dialog.dart';
 import '../../util/error_message.dart';
@@ -3466,10 +3465,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _cancelPendingVerticalMove();
     final pageContext = context;
     final channel = _vm.channelForId(program.channelId);
-    final canRecord = !isPlexFreeTvChannel(
-      GetIt.instance<MediaServerClient>(),
-      program.channelId,
-    );
+    final canRecord = _vm.canRecordChannel(program.channelId);
     final isFavoriteChannel = channel?.isFavorite ?? false;
     final hasTimer = program.hasTimer;
     final hasSeriesTimer = program.hasSeriesTimer;

@@ -768,6 +768,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
+  bool canRecordChannel(String channelId) =>
+      !isPlexFreeTvChannel(_client, channelId);
+
   Future<void> toggleChannelFavorite(String channelId) async {
     final index = _channels.indexWhere((c) => c.id == channelId);
     if (index < 0) return;

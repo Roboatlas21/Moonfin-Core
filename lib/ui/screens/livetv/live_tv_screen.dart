@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
-import 'package:server_core/server_core.dart';
 import 'package:go_router/go_router.dart';
+import 'package:server_core/server_core.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 
 import '../../../l10n/app_localizations.dart';
@@ -49,9 +49,8 @@ class LiveTvScreen extends StatelessWidget {
     final leftInset = _showNavbar && position == NavbarPosition.left
         ? 72.0
         : 0.0;
-    final hasDvr = !isCloudOnlyPlexClient(
-      GetIt.instance<MediaServerClient>(),
-    );
+    final hasDvr = !GetIt.instance.isRegistered<MediaServerClient>() ||
+        !isCloudOnlyPlexClient(GetIt.instance<MediaServerClient>());
     final items = <({IconData icon, String title, VoidCallback onTap})>[
       (
         icon: Icons.tv,
@@ -59,21 +58,21 @@ class LiveTvScreen extends StatelessWidget {
         onTap: () => context.push(Destinations.liveTvGuide),
       ),
       if (hasDvr) ...[
-      (
-        icon: Icons.fiber_dvr,
-        title: l10n.recordings,
-        onTap: () => context.push(Destinations.liveTvRecordings),
-      ),
-      (
-        icon: Icons.schedule,
-        title: l10n.schedule,
-        onTap: () => context.push(Destinations.liveTvSchedule),
-      ),
-      (
-        icon: Icons.repeat,
-        title: l10n.seriesRecordings,
-        onTap: () => context.push(Destinations.liveTvSeriesRecordings),
-      ),
+        (
+          icon: Icons.fiber_dvr,
+          title: l10n.recordings,
+          onTap: () => context.push(Destinations.liveTvRecordings),
+        ),
+        (
+          icon: Icons.schedule,
+          title: l10n.schedule,
+          onTap: () => context.push(Destinations.liveTvSchedule),
+        ),
+        (
+          icon: Icons.repeat,
+          title: l10n.seriesRecordings,
+          onTap: () => context.push(Destinations.liveTvSeriesRecordings),
+        ),
       ],
     ];
 

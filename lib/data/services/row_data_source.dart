@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:get_it/get_it.dart';
-
-import 'plex_free_tv_favorites.dart';
 import 'package:server_core/server_core.dart';
 import 'package:dio/dio.dart';
+
+import 'plex_free_tv_favorites.dart';
 
 import '../../preference/home_section_config.dart';
 import '../../preference/user_preferences.dart';
