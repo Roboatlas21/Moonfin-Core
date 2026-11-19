@@ -12,6 +12,7 @@ import '../../preference/user_preferences.dart';
 import '../../util/settings_save_retry.dart';
 import '../repositories/item_mutation_repository.dart';
 import '../services/user_data_sync.dart';
+import '../services/plex_free_tv_favorites.dart';
 import '../models/live_tv_recording_state.dart';
 import '../models/series_recording_episodes.dart';
 
@@ -1450,8 +1451,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   void _publishChannels(List<Map<String, dynamic>> items, int revision) {
+    final channels = [
+      for (final item in items) PlexFreeTvFavorites.applyToItem(_client, item),
+    ];
     final fresh = <String, Map<String, dynamic>>{};
-    for (final item in items) {
+    for (final item in channels) {
       final id = item['Id']?.toString();
       final data = item['UserData'];
       if (id != null &&
@@ -1470,7 +1474,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _publishingFetchedUserData = false;
     }
     _channels =
-        items
+        channels
             .map(GuideChannel.fromRawItem)
             .map((channel) => channel.withSyncedUserData())
             .toList()

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:get_it/get_it.dart';
+
+import 'plex_free_tv_favorites.dart';
 import 'package:server_core/server_core.dart';
 import 'package:dio/dio.dart';
 
@@ -2786,7 +2788,10 @@ class RowDataSource {
   ) {
     final rawItems = response['Items'] as List? ?? [];
     final items = rawItems.map((item) {
-      final data = item as Map<String, dynamic>;
+      final data = PlexFreeTvFavorites.applyToItem(
+        _client,
+        item as Map<String, dynamic>,
+      );
       return AggregatedItem(
         id: data['Id']?.toString() ?? '',
         serverId: serverId,

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:get_it/get_it.dart';
+import 'package:server_core/server_core.dart';
 import 'package:go_router/go_router.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 
 import '../../../l10n/app_localizations.dart';
+import '../../../data/services/media_server_client_factory.dart';
 import '../../../preference/preference_constants.dart';
 import '../../../util/focus/key_event_utils.dart';
 import '../../../util/platform_detection.dart';
@@ -46,12 +49,16 @@ class LiveTvScreen extends StatelessWidget {
     final leftInset = _showNavbar && position == NavbarPosition.left
         ? 72.0
         : 0.0;
+    final hasDvr = !isCloudOnlyPlexClient(
+      GetIt.instance<MediaServerClient>(),
+    );
     final items = <({IconData icon, String title, VoidCallback onTap})>[
       (
         icon: Icons.tv,
         title: l10n.guide,
         onTap: () => context.push(Destinations.liveTvGuide),
       ),
+      if (hasDvr) ...[
       (
         icon: Icons.fiber_dvr,
         title: l10n.recordings,
@@ -67,6 +74,7 @@ class LiveTvScreen extends StatelessWidget {
         title: l10n.seriesRecordings,
         onTap: () => context.push(Destinations.liveTvSeriesRecordings),
       ),
+      ],
     ];
 
     return Scaffold(

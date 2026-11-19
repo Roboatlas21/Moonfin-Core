@@ -14,6 +14,7 @@ import 'package:server_core/server_core.dart';
 import '../../../data/models/series_recording_episodes.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../data/services/user_data_sync.dart';
+import '../../../data/services/plex_free_tv_favorites.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../widgets/emby_premiere_dialog.dart';
 import '../../util/error_message.dart';
@@ -3465,6 +3466,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _cancelPendingVerticalMove();
     final pageContext = context;
     final channel = _vm.channelForId(program.channelId);
+    final canRecord = !isPlexFreeTvChannel(
+      GetIt.instance<MediaServerClient>(),
+      program.channelId,
+    );
     final isFavoriteChannel = channel?.isFavorite ?? false;
     final hasTimer = program.hasTimer;
     final hasSeriesTimer = program.hasSeriesTimer;
@@ -3564,7 +3569,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           ),
           actions: [
             // That airing is over. Single-episode recording no longer applies.
-            if (!isEnded)
+            if (canRecord && !isEnded)
               adaptiveDialogAction(
                 autofocus: isRecordingNow,
                 focusNode: isRecordingNow ? defaultActionFocusNode : null,
@@ -3625,7 +3630,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                   hasTimer ? l10n.cancelRecordingAction : l10n.record,
                 ),
               ),
-            if (hasSeriesTimer)
+            if (canRecord && hasSeriesTimer)
               adaptiveDialogAction(
                 onPressed: () async {
                   if (dialogActionInProgress) return;
@@ -3663,7 +3668,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                 },
                 child: Text(l10n.seriesRecordingSettings),
               ),
-            if (program.isSeries)
+            if (canRecord && program.isSeries)
               adaptiveDialogAction(
                 onPressed: () async {
                   if (dialogActionInProgress) return;
