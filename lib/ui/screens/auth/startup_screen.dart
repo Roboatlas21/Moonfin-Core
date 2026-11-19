@@ -131,6 +131,10 @@ class _StartupScreenState extends State<StartupScreen>
         : await session.restoreSession();
 
     if (!mounted) return;
+    // An expired token may already have redirected to the proper provider
+    // sign-in screen; don't overwrite that with the saved server picker.
+    if (GoRouter.of(context).routeInformationProvider.value.uri.path !=
+        Destinations.startup) return;
 
     // Read the flag either way so a one-off failure doesn't carry over to the
     // next launch, but only warn when it cost the user something. A session
