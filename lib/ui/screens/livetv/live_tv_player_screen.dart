@@ -14,6 +14,7 @@ import 'package:volume_controller/volume_controller.dart';
 
 import '../../../data/services/log_service.dart';
 import '../../../data/services/user_data_sync.dart';
+import '../../../data/services/plex_free_tv_favorites.dart';
 import '../../../data/repositories/item_mutation_repository.dart';
 import '../../../playback/subtitle_style.dart';
 import '../../../playback/subtitle_view_config.dart';
@@ -1162,7 +1163,9 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     }
   }
 
-  bool get _canRecordCurrentProgram => canRecordAiring(_currentProgram);
+  bool get _canRecordCurrentProgram =>
+      !isPlexFreeTvChannel(_client, _currentChannel.id) &&
+      canRecordAiring(_currentProgram);
 
   Future<void> _showRecordingDialog() async {
     if (_recordingActionInProgress || _isSwitching || _isStopping) return;

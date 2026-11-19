@@ -82,8 +82,13 @@ class HomeViewModel extends ChangeNotifier {
     final base = _emptySectionIds.isEmpty
         ? _rows
         : _rows.where((row) => !_isEmptySectionPlaceholder(row)).toList();
+    // A cached Live TV row is still inaccessible while Kids Mode blocks
+    // Live TV routes. Keep the saved Home configuration untouched.
+    final visible = _prefs.get(UserPreferences.kidsModeEnabled)
+        ? base.where((row) => row.rowType != HomeRowType.liveTv).toList()
+        : base;
     final party = _watchPartyRow;
-    return party == null ? base : [party, ...base];
+    return party == null ? visible : [party, ...visible];
   }
 
   /// The Watch Parties row, first while rooms exist. It isn't one of the
@@ -407,7 +412,8 @@ class HomeViewModel extends ChangeNotifier {
       // libraries. Keep independently supplied charts, not server-library rows.
       final configs = _cloudOnlyPlex
           ? <HomeSectionConfig>[
-              const HomeSectionConfig(
+              if (!_prefs.get(UserPreferences.kidsModeEnabled))
+                const HomeSectionConfig(
                 type: HomeSectionType.liveTv,
                 enabled: true,
                 order: 0,
@@ -631,7 +637,10 @@ class HomeViewModel extends ChangeNotifier {
           }
         }
         final currentConfigs = _prefs.activeHomeSectionConfigs;
-        final isStillActive = (_cloudOnlyPlex && cfg.type == HomeSectionType.liveTv) ||
+        final isStillActive =
+            (_cloudOnlyPlex &&
+                !_prefs.get(UserPreferences.kidsModeEnabled) &&
+                cfg.type == HomeSectionType.liveTv) ||
             currentConfigs.any((c) => c.stableId == cfg.stableId);
         if (!isStillActive) return;
         // Cleanup runs even when the load failed, so the section's loading

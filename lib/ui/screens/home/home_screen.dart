@@ -5209,21 +5209,23 @@ class _ContentRowsState extends State<_ContentRows>
     final rowHeight = squarePosterSide + (56 * metadataScale);
     final actions = <_LiveTvAction>[
       _LiveTvAction(Icons.tv_rounded, l10n.guide, Destinations.liveTvGuide),
-      _LiveTvAction(
-        Icons.fiber_manual_record_rounded,
-        l10n.recordings,
-        Destinations.liveTvRecordings,
-      ),
-      _LiveTvAction(
-        Icons.schedule_rounded,
-        l10n.schedule,
-        Destinations.liveTvSchedule,
-      ),
-      _LiveTvAction(
-        Icons.movie_creation,
-        l10n.series,
-        Destinations.liveTvSeriesRecordings,
-      ),
+      if (!isCloudOnlyPlexClient(GetIt.instance<MediaServerClient>())) ...[
+        _LiveTvAction(
+          Icons.fiber_manual_record_rounded,
+          l10n.recordings,
+          Destinations.liveTvRecordings,
+        ),
+        _LiveTvAction(
+          Icons.schedule_rounded,
+          l10n.schedule,
+          Destinations.liveTvSchedule,
+        ),
+        _LiveTvAction(
+          Icons.movie_creation,
+          l10n.series,
+          Destinations.liveTvSeriesRecordings,
+        ),
+      ],
     ];
     return _buildTitledRow(
       key: _rowContainerKey(rowIndex),
