@@ -199,7 +199,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   /// other's channels.
   Future<(_Channels, _Channels)> _channelSources() => (
     _dvrChannels().catchError((_) => <Map<String, dynamic>>[]),
-    _freeChannels().catchError((_) => <Map<String, dynamic>>[]),
+    // With no media server, a cloud outage is an error, not an empty lineup.
+    cloudOnly
+        ? _freeChannels()
+        : _freeChannels().catchError((_) => <Map<String, dynamic>>[]),
   ).wait;
 
   static const _featuredPath = '/lineups/plex/channels/featured';

@@ -263,6 +263,36 @@ void main() {
     expect(server.requests.last.headers['X-Plex-Provider-Version'], '7.2');
   });
 
+  test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
+    final (dio, server) = _server();
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == '/lineups/plex/channels') {
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                type: DioExceptionType.connectionError,
+              ),
+            );
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+
+    final cloud = PlexLiveTvApi(dio, cloudOnly: true);
+    await expectLater(cloud.getChannelGroups(), throwsA(isA<DioException>()));
+    await expectLater(cloud.getChannels(), throwsA(isA<DioException>()));
+    expect(server.requests, isEmpty); // A cloud-only account never queries a DVR.
+
+    final serverWithDvr = PlexLiveTvApi(dio);
+    final lineup = await serverWithDvr.getChannelGroups();
+    expect(lineup.channels?.map((channel) => channel['Id']), ['channel-2-4']);
+  });
+
   test('every showing of a program is a program of its own', () async {
     final (dio, server) = _server();
     final result = await PlexLiveTvApi(dio).getGuide(
