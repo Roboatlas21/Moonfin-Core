@@ -23,7 +23,35 @@ PlexMediaServerClient _plex(String userId, {bool cloudOnly = false}) =>
       cloudOnly: cloudOnly,
     )..userId = userId;
 
+class _ServerTypeProbe extends Fake implements MediaServerClient {
+  _ServerTypeProbe(this._type);
+
+  final ServerType _type;
+  int reads = 0;
+
+  @override
+  ServerType get serverType {
+    reads++;
+    return _type;
+  }
+}
+
 void main() {
+  test('unrelated item IDs skip the Plex server-type lookup', () {
+    final plex = _ServerTypeProbe(ServerType.plex);
+    for (final id in ['', 'movie-1', 'book-1', 'channel-2-4']) {
+      expect(isPlexFreeTvChannel(plex, id), isFalse);
+    }
+    expect(plex.reads, 0);
+
+    expect(isPlexFreeTvChannel(plex, 'channel-plex-free123'), isTrue);
+    expect(plex.reads, 1);
+
+    final jellyfin = _ServerTypeProbe(ServerType.jellyfin);
+    expect(isPlexFreeTvChannel(jellyfin, 'channel-plex-free123'), isFalse);
+    expect(jellyfin.reads, 1);
+  });
+
   setUp(() async {
     userDataSync.reset();
     SharedPreferences.setMockInitialValues({});

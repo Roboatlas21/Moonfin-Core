@@ -6,8 +6,8 @@ import '../../preference/user_preferences.dart';
 
 /// Cloud channels share the same ids whether opened through plex.tv or PMS.
 bool isPlexFreeTvChannel(MediaServerClient client, String channelId) =>
-    client.serverType == ServerType.plex &&
-    channelId.startsWith('channel-plex-');
+    channelId.startsWith('channel-plex-') &&
+    client.serverType == ServerType.plex;
 
 /// Device-local favorites, keyed by Plex profile rather than media server.
 /// Unlike Plex's PMS ratings, these work for the free cloud channels.
