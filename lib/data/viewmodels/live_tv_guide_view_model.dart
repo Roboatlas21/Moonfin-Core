@@ -274,7 +274,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Set<String> _programsLoadedIds = <String>{};
   final Set<String> _failedProgramIds = <String>{};
   final Set<String> _retryingFailedProgramIds = <String>{};
-  Future<void>? _failedProgramsRetry;
+  ({int page, Future<void> task})? _failedProgramsRetry;
 
   // Channel ids with a program request out, the generation it belongs to and
   // when it's done.
@@ -617,6 +617,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   void _advancePage() {
+    _retryingFailedProgramIds.clear();
     // Don't carry loading or error states over to the next page.
     if (_listingsStatePage == _pageGeneration) {
       _state = GuideState.ready;
@@ -1865,14 +1866,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Retries failed listings visible in the active filter, without reloading
   /// successful channels or the lineup. One tap starts at most one batch run.
   Future<void> retryFailedPrograms() {
-    if (_failedProgramsRetry case final active?) return active;
+    final page = _pageGeneration;
+    final active = _failedProgramsRetry;
+    if (active != null && active.page == page) return active.task;
     if (_disposed || _state != GuideState.ready) return Future<void>.value();
     final failed = filteredChannels
         .where((c) => _failedProgramIds.contains(c.id) && !hasProgramsFor(c.id))
         .toList();
     if (failed.isEmpty) return Future<void>.value();
 
-    final page = _pageGeneration;
     final generation = _programGeneration;
     final session = userDataSync.session;
     bool current() =>
@@ -1901,18 +1903,24 @@ class LiveTvGuideViewModel extends ChangeNotifier {
               _failedProgramIds.addAll(batch.map((c) => c.id));
             }
           } finally {
-            _retryingFailedProgramIds.removeAll(batch.map((c) => c.id));
-            _notifyListeners();
+            if (current()) {
+              _retryingFailedProgramIds.removeAll(batch.map((c) => c.id));
+              _notifyListeners();
+            }
           }
         }
       } finally {
-        _retryingFailedProgramIds.removeAll(ids);
-        _failedProgramsRetry = null;
-        _notifyListeners();
+        if (_failedProgramsRetry?.page == page) {
+          _retryingFailedProgramIds.removeAll(ids);
+          _failedProgramsRetry = null;
+          _notifyListeners();
+        }
       }
     }
 
-    return _failedProgramsRetry = retry();
+    final task = retry();
+    _failedProgramsRetry = (page: page, task: task);
+    return task;
   }
 
   /// Replaces the cached programs for [channelIds] over an explicit [from]-[to]
