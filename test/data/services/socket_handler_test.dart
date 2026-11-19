@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:moonfin/data/services/socket_handler.dart';
 import 'package:server_core/server_core.dart';
+import 'package:server_plex/server_plex.dart';
 
 class _FakeClient implements MediaServerClient {
   _FakeClient({this.baseUrl = 'http://server'});
@@ -110,6 +111,25 @@ void main() {
   test('connecting opens the socket', () {
     handler.connectTo(_FakeClient());
     expect(socket.connectCalls, 1);
+  });
+
+  test('cloud-only Plex closes the previous socket without opening another', () {
+    handler.connectTo(_FakeClient());
+    final cloud = PlexMediaServerClient(
+      baseUrl: 'https://plex.tv',
+      cloudOnly: true,
+      deviceInfo: const DeviceInfo(
+        id: 'test-device',
+        name: 'Test',
+        appName: 'Moonfin',
+        appVersion: '1.0',
+      ),
+    )..accessToken = 'plex-account-token';
+    handler.connectTo(cloud);
+
+    expect(socket.connectCalls, 1);
+    expect(socket.disposed, isTrue);
+    expect(PlexWebSocketClient(cloud).buildUri(), isNull);
   });
 
   test('every open reaches the listeners, not just the first', () async {

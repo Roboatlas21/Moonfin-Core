@@ -15,6 +15,15 @@ import 'pending_rating_store.dart';
 import 'plex_games_api.dart';
 import 'storage_path_service.dart';
 
+/// A Plex Free TV account has no physical Plex Media Server behind it.
+/// Unwrap the offline adapter so companion and socket callers see this mode.
+bool isCloudOnlyPlexClient(MediaServerClient client) {
+  final online = client is ConnectivityAwareMediaServerClient
+      ? client.onlineClient
+      : client;
+  return online is PlexMediaServerClient && online.cloudOnly;
+}
+
 class MediaServerClientFactory {
   final DeviceInfo deviceInfo;
   final Map<String, MediaServerClient> _clients = {};
