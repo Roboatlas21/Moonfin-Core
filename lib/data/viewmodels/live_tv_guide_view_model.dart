@@ -1509,6 +1509,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _availableGroups = [
       for (final source in _sources)
         if (names.remove(source.groupId)) source.groupId,
+      if (promoted != null && names.remove(promoted)) promoted,
       ...(names.toList()..sort()),
     ];
     _updatePageRows();

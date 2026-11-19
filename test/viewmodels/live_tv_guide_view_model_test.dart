@@ -157,6 +157,33 @@ void main() {
       vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);
     });
+    test('Plex lists DVR, Free TV, Featured, then alphabetical genres', () async {
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {
+            'one': {ChannelGroupSource.dvr.groupId},
+            'two': {
+              ChannelGroupSource.plexFreeTv.groupId,
+              'Sports',
+              'Comedy',
+            },
+          },
+          channels: [_channel('one'), _channel('two')],
+          sources: ChannelGroupSource.values,
+          promoted: PromotedChannelGroup('Featured', () async => {'two'}),
+        ),
+      );
+      await vm.load();
+      expect(vm.availableGroups, [
+        ChannelGroupSource.dvr.groupId,
+        ChannelGroupSource.plexFreeTv.groupId,
+        'Featured',
+        'Comedy',
+        'Sports',
+      ]);
+    });
+
     testWidgets('Featured refreshes on expiry, re-entry and demand', (
       tester,
     ) async {
