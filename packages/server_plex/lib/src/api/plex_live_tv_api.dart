@@ -259,10 +259,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<ChannelGroupLineup> getChannelGroups({String? userId}) async {
     final (dvr, free) = await _channelSources();
     if (free.isEmpty) return ChannelGroupLineup({}, channels: dvr);
-    // Discovery is optional. An unavailable provider must leave channels tunable.
-    final catalog = await _providerGroups().onError<Object>(
-      (_, _) => (genres: const <String, String>{}, promoted: null),
-    );
+    // Optional provider metadata must not delay an otherwise loaded lineup.
+    final catalog = await _providerGroups()
+        .timeout(const Duration(seconds: 3))
+        .onError<Object>(
+          (_, _) => (genres: const <String, String>{}, promoted: null),
+        );
     return ChannelGroupLineup(
       {
         for (final channel in dvr)
