@@ -76,15 +76,6 @@ class _StartupScreenState extends State<StartupScreen>
     }
   }
 
-  String _signedInDestination(SessionRepository session) {
-    final id = session.activeServerId;
-    if (id != null &&
-        GetIt.instance<ServerRepository>().getServer(id)?.cloudOnly == true) {
-      return Destinations.liveTvGuide;
-    }
-    return Destinations.home;
-  }
-
   Future<void> _initialize() async {
     final session = GetIt.instance<SessionRepository>();
     final serverRepo = GetIt.instance<ServerRepository>();
@@ -106,7 +97,7 @@ class _StartupScreenState extends State<StartupScreen>
 
     if (widget.bootstrapActiveSession && session.activeUserId != null) {
       await _waitForNetworkSettle();
-      if (mounted) context.go(_signedInDestination(session));
+      if (mounted) context.go(Destinations.home);
       return;
     }
 
@@ -171,7 +162,7 @@ class _StartupScreenState extends State<StartupScreen>
       }
 
       await _waitForNetworkSettle();
-      if (mounted) context.go(_signedInDestination(session));
+      if (mounted) context.go(Destinations.home);
     } else {
       if (mounted) {
         if (targetServerId != null && targetServerId.isNotEmpty) {

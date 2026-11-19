@@ -163,7 +163,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
       final connected = await _plexRepository.connectCloud(token);
       if (!mounted) return;
       if (connected) {
-        context.go(Destinations.liveTvGuide);
+        context.go(Destinations.home);
       } else {
         setState(() => _errorMessage = AppLocalizations.of(context).loginFailed);
       }
