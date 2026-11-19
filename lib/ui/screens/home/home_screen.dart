@@ -150,6 +150,15 @@ double classicHomeRowOverlayClipTop({
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
+  /// An account-only Plex connection has no media-bar source. The shared bar
+  /// view model can remain in its initial Loading state indefinitely because
+  /// Home deliberately skips fetching it for this connection.
+  @visibleForTesting
+  static bool mediaBarEnabledForHome({
+    required bool enabledByMode,
+    required bool cloudOnlyPlex,
+  }) => enabledByMode && !cloudOnlyPlex;
+
   @visibleForTesting
   static bool showsCalendarSeeAll(HomeRow row, UserPreferences prefs) =>
       _ContentRowsState._showsCalendarSeeAll(row, prefs);
@@ -1194,7 +1203,10 @@ class _ContentRowsState extends State<_ContentRows>
 
   bool _isMediaBarEnabledByMode() {
     final mode = widget.prefs.get(UserPreferences.mediaBarMode);
-    return UserPreferences.isMediaBarModeEnabled(mode);
+    return HomeScreen.mediaBarEnabledForHome(
+      enabledByMode: UserPreferences.isMediaBarModeEnabled(mode),
+      cloudOnlyPlex: widget.viewModel.isCloudOnlyPlex,
+    );
   }
 
   bool _useMedia3InlinePreview() {

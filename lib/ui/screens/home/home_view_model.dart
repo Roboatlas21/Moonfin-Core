@@ -154,6 +154,9 @@ class HomeViewModel extends ChangeNotifier {
 
   bool get _cloudOnlyPlex => isCloudOnlyPlexClient(_client);
 
+  /// Plex Cloud has no server media library from which to build a Home hero.
+  bool get isCloudOnlyPlex => _cloudOnlyPlex;
+
   /// Whether a stored address is the server this client is on, ignoring the
   /// harmless ways the two spellings differ, such as a trailing slash or the
   /// `/web/index.html` the dashboard runs under.
