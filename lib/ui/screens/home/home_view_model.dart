@@ -414,10 +414,10 @@ class HomeViewModel extends ChangeNotifier {
           ? <HomeSectionConfig>[
               if (!_prefs.get(UserPreferences.kidsModeEnabled))
                 const HomeSectionConfig(
-                type: HomeSectionType.liveTv,
-                enabled: true,
-                order: 0,
-              ),
+                  type: HomeSectionType.liveTv,
+                  enabled: true,
+                  order: 0,
+                ),
               for (final config in activeConfigs)
                 if (config.isBuiltin &&
                     config.type != HomeSectionType.liveTv &&
