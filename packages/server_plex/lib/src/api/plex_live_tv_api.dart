@@ -282,7 +282,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
     // Optional provider metadata must not delay an otherwise loaded lineup.
     final catalog = await _providerGroups()
-        .timeout(const Duration(seconds: 3))
+        .timeout(const Duration(seconds: 5))
         .onError<Object>(
           (_, _) => (genres: const <String, String>{}, promoted: null),
         );
