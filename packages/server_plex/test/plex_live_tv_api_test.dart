@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:server_plex/src/api/plex_live_tv_api.dart';
 import 'package:server_plex/src/api/plex_playback_api.dart';
@@ -284,8 +286,13 @@ void main() {
     );
 
     final cloud = PlexLiveTvApi(dio, cloudOnly: true);
-    await expectLater(cloud.getChannelGroups(), throwsA(isA<DioException>()));
-    await expectLater(cloud.getChannels(), throwsA(isA<DioException>()));
+    final cloudFailure = isA<ParallelWaitError>().having(
+      (error) => error.errors.$2?.error,
+      'Free TV request error',
+      isA<DioException>(),
+    );
+    await expectLater(cloud.getChannelGroups(), throwsA(cloudFailure));
+    await expectLater(cloud.getChannels(), throwsA(cloudFailure));
     expect(server.requests, isEmpty); // A cloud-only account never queries a DVR.
 
     final serverWithDvr = PlexLiveTvApi(dio);
