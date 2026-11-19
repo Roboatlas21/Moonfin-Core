@@ -176,9 +176,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final _headerHold = FocusedKeyHold();
   final _channelHold = FocusedKeyHold();
   final _channelSearchFocus = FocusNode(debugLabel: 'GuideSearch');
+  final _refreshGroupFocus = FocusNode(debugLabel: 'GuideRefreshGroup');
   final _channelSearch = TextEditingController();
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
+  bool _routeVisible = true;
   GuideFilter? _pendingPickerFocus;
   ({String channelId, int row, GuideFilter filter, String? group})?
   _pendingPickerRestore;
@@ -324,8 +326,24 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     });
   }
 
+  void _syncGuideVisibility(AppLifecycleState? state) {
+    _vm.setGuideVisible(
+      _routeVisible && (state == null || state == AppLifecycleState.resumed),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _routeVisible =
+        (ModalRoute.isCurrentOf(context) ?? true) &&
+        TickerMode.valuesOf(context).enabled;
+    _syncGuideVisibility(WidgetsBinding.instance.lifecycleState);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _syncGuideVisibility(state);
     if (state != AppLifecycleState.resumed) return;
     final now = DateTime.now();
     _scheduleReanchor();
@@ -1048,6 +1066,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     }
     _browseFocus.dispose();
     _channelSearchFocus.dispose();
+    _refreshGroupFocus.dispose();
     _channelSearchDebounce?.cancel();
     _channelSearch.dispose();
     for (final node in _channelFocusNodes.values) {
@@ -1829,7 +1848,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     double width,
   ) {
     final l10n = AppLocalizations.of(context);
-    String name(GuideFilterChoice c) => c.$2 ?? _filterLabel(c.$1);
+    String name(GuideFilterChoice c) =>
+        c.$2 == null ? _filterLabel(c.$1) : guideGroupLabel(_vm, c.$2!, l10n);
     final names = <String>{};
     final duplicates = {
       for (final c in choices)
@@ -1884,11 +1904,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildBrowseControls({bool compact = false}) {
     final l10n = AppLocalizations.of(context);
-    final filterLabel =
-        _vm.selectedGroup ??
-        (_vm.filter == GuideFilter.all
-            ? l10n.guideAllChannels
-            : _filterLabel(_vm.filter, l10n));
+    final group = _vm.selectedGroup;
+    final filterLabel = group != null
+        ? guideGroupLabel(_vm, group, l10n)
+        : (_vm.filter == GuideFilter.all
+              ? l10n.guideAllChannels
+              : _filterLabel(_vm.filter, l10n));
     final shortcuts = PlatformDetection.isTV
         ? _shortcuts
         : const <GuideFilterChoice>[];
@@ -1975,10 +1996,32 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                     },
                   ),
           ),
+          if (_vm.isPromotedGroupSelected) _refreshGroupButton(l10n),
         ],
       ),
     );
   }
+
+  Widget _refreshGroupButton(AppLocalizations l10n) => Focus(
+    canRequestFocus: false,
+    onKeyEvent: (_, event) {
+      if (!event.isActionable) return KeyEventResult.ignored;
+      if (event.logicalKey.isLeftKey) {
+        _channelSearchFocus.requestFocus();
+      } else if (event.logicalKey.isDownKey && _sidePanel) {
+        _focusWindowBarFromGenres();
+      } else {
+        return KeyEventResult.ignored;
+      }
+      return KeyEventResult.handled;
+    },
+    child: IconButton(
+      focusNode: _refreshGroupFocus,
+      tooltip: l10n.refresh,
+      icon: const Icon(Icons.refresh),
+      onPressed: () => unawaited(_vm.refreshPromotedGroup(force: true)),
+    ),
+  );
 
   Widget _buildChannelSearchField({bool compact = false}) => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 360),
@@ -1990,6 +2033,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       onChanged: _searchChannels,
       onTvKeyEvent: (_, event) {
         if (!event.isActionable) return KeyEventResult.ignored;
+        if (event.logicalKey.isRightKey && _vm.isPromotedGroupSelected) {
+          _refreshGroupFocus.requestFocus();
+          return KeyEventResult.handled;
+        }
         if (event.logicalKey.isLeftKey) {
           if (_usesPicker) {
             (PlatformDetection.isTV
@@ -3452,7 +3499,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     var defaultActionFocusRequested = false;
     final episodeLine = program.episodeLine;
     final chipLabels = [
-      ..._vm.groupsForChannel(program.channelId),
+      for (final group in _vm.groupsForChannel(program.channelId))
+        guideGroupLabel(_vm, group, l10n),
       if (program.isMovie) l10n.movie,
       if (program.isSeries) l10n.series,
       if (program.isSports) l10n.sports,

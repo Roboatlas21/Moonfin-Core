@@ -157,6 +157,68 @@ void main() {
       vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);
     });
+    testWidgets('Featured refreshes on expiry, re-entry and demand', (
+      tester,
+    ) async {
+      final now = tester.binding.clock.now;
+      final guide = LiveTvGuideViewModel(client, now: now);
+      var calls = 0;
+      var reply = Completer<Set<String>>();
+      final featured = PromotedChannelGroup('Featured', () {
+        calls++;
+        return reply.future;
+      });
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {
+            'one': {'News'},
+            'two': {'Sports'},
+          },
+          channels: [_channel('one'), _channel('two')],
+          promoted: featured,
+        ),
+      );
+      await guide.load();
+      expect(guide.availableGroups, ['Featured', 'News', 'Sports']);
+      expect(guide.channelCountForGroup('Featured'), isNull);
+      expect(guide.channelCountForGroup('Sports'), 1);
+      expect(calls, 0);
+      guide.setGroup('Featured');
+      guide.setGroup('Featured');
+      expect(guide.state, GuideState.loading);
+      reply.complete({'one', 'unavailable'});
+      await tester.pump();
+      expect(guide.filteredChannels.single.id, 'one');
+      expect(guide.channelCountForGroup('Featured'), 1);
+      expect(guide.groupsForChannel('one'), ['Featured', 'News']);
+      guide.setGroup('Sports');
+      await tester.pump(const Duration(minutes: 9));
+      guide.setGroup('Featured');
+      expect(calls, 1);
+      reply = Completer();
+      await tester.pump(const Duration(minutes: 1));
+      expect(calls, 2);
+      reply.complete({'two'});
+      await tester.pump();
+      expect(guide.filteredChannels.single.id, 'two');
+      expect(guide.groupsForChannel('one'), ['News']);
+      reply = Completer();
+      final manual = guide.refreshPromotedGroup(force: true);
+      reply.completeError(StateError('offline'));
+      await manual;
+      expect(guide.filteredChannels.single.id, 'two');
+      guide.setGuideVisible(false);
+      await tester.pump(const Duration(minutes: 11));
+      expect(calls, 3);
+      reply = Completer()..complete({});
+      guide.setGuideVisible(true);
+      await tester.pump();
+      expect(calls, 4);
+      expect(guide.channelCountForGroup('Featured'), 0);
+      expect(guide.filteredChannels, isEmpty);
+      guide.dispose();
+    });
+
     for (final resize in [false, true]) {
       test('${resize ? 'resizing' : 'picking a date'} keeps the last window on timeout and accepts an empty retry', () async {
         final channels = [for (var i = 0; i < 51; i++) _channel('c$i', number: '$i')];

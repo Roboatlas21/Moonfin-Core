@@ -11196,6 +11196,8 @@
   "@liveTvChannelGroups": {
     "description": "Heading for channel groups supplied by the Live TV tuner or M3U playlist, not program categories."
   },
+  "guideDvrChannels": "DVR Channels",
+  "guidePlexFreeTv": "Plex Free TV",
   "guideFavoriteGroupsAndCategories": "Favorite groups and categories",
   "guideHoldOk": "Hold OK",
   "guideUnfavorite": "Unfavorite",
