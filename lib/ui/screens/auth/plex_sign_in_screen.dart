@@ -40,6 +40,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
   PlexServer? _connecting;
   bool _connectingCloud = false;
   String? _errorMessage;
+  String? _discoveryError;
   Timer? _pollTimer;
   bool _polling = false;
   bool _usePassword = false;
@@ -114,6 +115,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
   }
 
   Future<void> _loadServers(String token) async {
+    if (mounted) setState(() => _discoveryError = null);
     try {
       final servers = await _plexRepository.loadServers(
         token,
@@ -121,9 +123,13 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
       );
       if (!mounted) return;
       setState(() => _servers = servers);
-    } catch (_) {
-      // Server discovery failure must not hide the cloud-only sign-in option.
-      if (mounted) setState(() => _servers ??= const []);
+    } catch (error) {
+      // The cloud choice stays usable, while discovery can be retried.
+      if (!mounted) return;
+      setState(() {
+        _servers ??= const [];
+        _discoveryError = describeError(error, AppLocalizations.of(context));
+      });
     }
   }
 
@@ -250,11 +256,13 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
                       style: _focusableButtonStyle(),
                     ),
                   ),
-                  if (_errorMessage != null) ...[
+                  if (_errorMessage != null || _discoveryError != null) ...[
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: _retry,
+                        onPressed: _discoveryError != null
+                            ? () => _loadServers(_token!)
+                            : _retry,
                         icon: const Icon(Icons.refresh, size: 18),
                         label: FittedBox(
                           fit: BoxFit.scaleDown,
@@ -328,6 +336,14 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
           const SizedBox(height: 8),
           _buildServerTile(null),
           ...servers.map(_buildServerTile),
+          if (_discoveryError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _discoveryError!,
+              style: TextStyle(color: AppColorScheme.statusRequested),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ],
       );
     }
