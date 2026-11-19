@@ -1855,6 +1855,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     };
     Widget chip(int index) {
       final choice = choices[index];
+      final active = choice == (_vm.filter, _vm.selectedGroup);
       final node = _shortcutNode(choice);
       final favoriteChannels = choice.$1 == GuideFilter.favorites;
       final label = name(choice);
@@ -1877,7 +1878,16 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           constraints: BoxConstraints(maxWidth: width),
           child: FilledButton.icon(
             focusNode: node,
-            style: style,
+            style: active
+                ? style.copyWith(
+                    side: WidgetStatePropertyAll(
+                      BorderSide(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        width: 1.25,
+                      ),
+                    ),
+                  )
+                : style,
             onPressed: () => _applyPickerChoice(choice),
             icon: favoriteChannels ? const Icon(Icons.favorite_border) : null,
             label: Text(
