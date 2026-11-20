@@ -1392,6 +1392,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       items = (response['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     }
     _publishChannels(items, revision);
+    if (_client.serverType == ServerType.plex) {
+      // Cloud failures leave the locally cached hearts visible; next open retries.
+      unawaited(PlexFreeTvFavorites.refresh(_client).catchError((Object _) {}));
+    }
     if (lineup != null) {
       // Null means the category check was unavailable, not unchanged.
       _programmeCategories = lineup.programmeCategories;
