@@ -223,6 +223,33 @@ void main() {
     },
   );
 
+  test('Kids Mode hides every Live TV row without removing saved rows', () async {
+    await enableSections({HomeSectionType.liveTv});
+    stubLiveTvRows();
+    when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
+      (_) async => HomeRow(
+        id: 'liveTvFavorites',
+        title: 'Favorite Channels',
+        rowType: HomeRowType.liveTvFavorites,
+        items: [
+          AggregatedItem(
+            id: 'favorite',
+            serverId: 'http://server.test',
+            rawData: {'Type': 'TvChannel'},
+          ),
+        ],
+      ),
+    );
+    await model.load();
+    final ids = model.rows.map((row) => row.id).toList();
+    expect(ids, ['liveTv', 'liveTvOnNow', 'liveTvFavorites']);
+
+    await prefs.set(UserPreferences.kidsModeEnabled, true);
+    expect(model.rows, isEmpty);
+    await prefs.set(UserPreferences.kidsModeEnabled, false);
+    expect(model.rows.map((row) => row.id), ids);
+  });
+
   test(
     'available channels load airing programs as the standalone row',
     () async {

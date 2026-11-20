@@ -327,7 +327,8 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
 
   Widget _buildBody(AppLocalizations l10n) {
     final secondary = AppColorScheme.onSurface.withValues(alpha: 0.7);
-    if (_errorMessage != null) {
+    if (_errorMessage != null &&
+        !(_lastAttemptWasCloud && _servers != null)) {
       return Text(
         _errorMessage!,
         style: TextStyle(color: AppColorScheme.statusRequested),
@@ -347,6 +348,14 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_errorMessage != null) ...[
+            Text(
+              _errorMessage!,
+              style: TextStyle(color: AppColorScheme.statusRequested),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+          ],
           Text(
             l10n.selectAServer,
             style: Theme.of(context).textTheme.titleMedium

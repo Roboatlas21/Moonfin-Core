@@ -83,8 +83,13 @@ class HomeViewModel extends ChangeNotifier {
         ? _rows
         : _rows.where((row) => !_isEmptySectionPlaceholder(row)).toList();
     // Hide cached Live TV rows in Kids Mode without changing the saved layout.
+    const liveTvRows = {
+      HomeRowType.liveTv,
+      HomeRowType.liveTvOnNow,
+      HomeRowType.liveTvFavorites,
+    };
     final visible = _prefs.get(UserPreferences.kidsModeEnabled)
-        ? base.where((row) => row.rowType != HomeRowType.liveTv).toList()
+        ? base.where((row) => !liveTvRows.contains(row.rowType)).toList()
         : base;
     final party = _watchPartyRow;
     return party == null ? visible : [party, ...visible];
