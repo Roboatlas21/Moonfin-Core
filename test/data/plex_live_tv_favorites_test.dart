@@ -24,6 +24,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _device = DeviceInfo(id: 'device', name: 'Test', appName: 'Moonfin', appVersion: '1');
 const _channel = <String, dynamic>{
   'Id': 'channel-plex-free123', 'Name': 'Free Channel',
+  'Type': 'TvChannel',
   'ImageTags': {'Primary': 'https://example.test/logo.png'},
 };
 const _source = 'provider://tv.plex.provider.epg';
@@ -178,6 +179,7 @@ void main() {
     const otherSource = 'server://another-pms/tv.plex.providers.epg.xmltv:2';
     const dvr = <String, dynamic>{
       'Id': 'channel-2-4',
+      'Type': 'TvChannel',
       'Name': 'CBC',
       'ChannelNumber': '4',
       'PlexFavoriteSource': source,
@@ -270,7 +272,9 @@ void main() {
     addTearDown(first.dispose);
     addTearDown(second.dispose);
     const dvr = <String, dynamic>{
-      'Id': 'channel-2-4', 'Name': 'CBC', 'PlexFavoriteId': '4',
+      'Id': 'channel-2-4',
+      'Type': 'TvChannel',
+      'Name': 'CBC', 'PlexFavoriteId': '4',
     };
     final a = PlexLiveTvFavorites.applyToItem(first, {
       ...dvr, 'PlexFavoriteSource': 'server://pms-a/epg',
@@ -335,6 +339,7 @@ void main() {
     const source = 'server://pms-machine/epg';
     const channel = {
       'Id': 'channel-2-4',
+      'Type': 'TvChannel',
       'Name': 'DVR',
       'PlexFavoriteSource': source,
       'PlexFavoriteId': '4',
@@ -425,6 +430,7 @@ void main() {
     addTearDown(second.dispose);
     const dvr = <String, dynamic>{
       'Id': 'channel-2-4',
+      'Type': 'TvChannel',
       'Name': 'DVR on second PMS',
       'PlexFavoriteSource': 'server://second-machine/epg',
       'PlexFavoriteId': '4',
@@ -452,6 +458,7 @@ void main() {
     addTearDown(pms.dispose);
     const dvr = {
       'Id': 'channel-2-4',
+      'Type': 'TvChannel',
       'PlexFavoriteSource': 'server://machine/epg',
       'PlexFavoriteId': '4',
     };
