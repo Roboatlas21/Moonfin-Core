@@ -2,10 +2,14 @@ import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/auth/models/user.dart';
 import 'package:moonfin/auth/repositories/user_repository.dart';
+import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/repositories/item_mutation_repository.dart';
+import 'package:moonfin/data/repositories/search_repository.dart';
 import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
+import 'package:moonfin/data/services/row_data_source.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/preference/user_preferences.dart';
@@ -19,6 +23,9 @@ const _channel = <String, dynamic>{
   'ImageTags': {'Primary': 'https://example.test/logo.png'},
 };
 const _source = 'provider://tv.plex.provider.epg';
+
+class _ChannelClient extends Mock implements MediaServerClient {}
+class _ChannelApi extends Mock implements LiveTvApi {}
 
 PlexMediaServerClient _plex({bool cloudOnly = false, String userId = 'plex-user'}) =>
     PlexMediaServerClient(
@@ -272,6 +279,64 @@ void main() {
     expect(cloud.rows.single['source'], 'server://pms-b/epg');
     expect(GuideChannel.fromRawItem(a).withSyncedUserData().isFavorite, isFalse);
     expect(GuideChannel.fromRawItem(b).withSyncedUserData().isFavorite, isTrue);
+
+    // Home updates through AggregatedItem, not GuideChannel.
+    userDataSync.publish('channel-2-4', {'IsFavorite': false});
+    final homeA = AggregatedItem(id: 'channel-2-4', serverId: 'a', rawData: a);
+    final homeB = AggregatedItem(id: 'channel-2-4', serverId: 'b', rawData: b);
+    expect(userDataSync.apply(homeA).isFavorite, isFalse);
+    expect(userDataSync.apply(homeB).isFavorite, isTrue);
+  });
+
+
+  test('Home and search load Plex favorites without opening the guide', () async {
+    final client = _ChannelClient();
+    final api = _ChannelApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.userId).thenReturn('plex-user');
+    when(() => client.baseUrl).thenReturn('https://pms.example');
+    when(() => client.deviceInfo).thenReturn(_device);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => api.getChannels(fields: 'ImageTags,UserData')).thenAnswer(
+      (_) async => {'Items': [_channel]},
+    );
+    when(() => api.getChannels(
+      fields: 'ImageTags',
+      enableTotalRecordCount: false,
+      userId: 'plex-user',
+    )).thenAnswer((_) async => {'Items': [_channel]});
+    cloud.rows = [{'source': _source, 'id': 'free123'}];
+
+    final home = await RowDataSource(client).loadFavoritesChannels('pms');
+    expect(home.items.map((item) => item.id), ['channel-plex-free123']);
+    expect(home.items.single.isFavorite, isTrue);
+
+    final search = await SearchRepository(client).fetchLiveTvChannels();
+    expect(search.single.isFavorite, isTrue);
+    expect(cloud.requests.where((request) => request.method == 'GET'),
+        hasLength(1));
+  });
+
+  test('DVR favorites remain available after the client address changes', () async {
+    final pms = _plex();
+    addTearDown(pms.dispose);
+    const source = 'server://pms-machine/epg';
+    const channel = {
+      'Id': 'channel-2-4',
+      'Name': 'DVR',
+      'PlexFavoriteSource': source,
+      'PlexFavoriteId': '4',
+    };
+    final initial = PlexLiveTvFavorites.syncKey(pms, 'channel-2-4');
+    pms.baseUrl = 'https://new-pms-address.example';
+    expect(PlexLiveTvFavorites.syncKey(pms, 'channel-2-4'), initial);
+    PlexLiveTvFavorites.applyToItem(pms, channel);
+    final known = PlexLiveTvFavorites.syncKey(pms, 'channel-2-4');
+    pms.baseUrl = 'https://newer-pms-address.example';
+    expect(PlexLiveTvFavorites.syncKey(pms, 'channel-2-4'), known);
+    await ItemMutationRepository(pms).setFavorite('channel-2-4',
+        isFavorite: true);
+    expect(cloud.rows.single['source'], source);
   });
 
   test('serializes separate channel updates and rejects a different Home user', () async {

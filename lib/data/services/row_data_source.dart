@@ -5,7 +5,7 @@ import 'package:get_it/get_it.dart';
 import 'package:server_core/server_core.dart';
 import 'package:dio/dio.dart';
 
-import 'plex_free_tv_favorites.dart';
+import 'plex_live_tv_favorites.dart';
 
 import '../../preference/home_section_config.dart';
 import '../../preference/user_preferences.dart';
@@ -186,9 +186,13 @@ class RowDataSource {
   /// Ordered the same way as the guide, so a channel sits where the user
   /// expects to find it.
   Future<HomeRow> loadFavoritesChannels(String serverId) async {
+    // Read the account favorites before checking the lineup, not only when
+    // opening the guide. Reuse a recent successful read across browse surfaces.
+    final favoriteRefresh = PlexLiveTvFavorites.refreshForBrowse(_client);
     final response = await _client.liveTvApi.getChannels(
       fields: 'ImageTags,UserData',
     );
+    await favoriteRefresh;
     final pairs = <(GuideChannel, AggregatedItem)>[];
     for (final item in _parseItems(response, serverId)) {
       if (!item.isFavorite) continue;
@@ -2788,7 +2792,7 @@ class RowDataSource {
   ) {
     final rawItems = response['Items'] as List? ?? [];
     final items = rawItems.map((item) {
-      final data = PlexFreeTvFavorites.applyToItem(
+      final data = PlexLiveTvFavorites.applyToItem(
         _client,
         item as Map<String, dynamic>,
       );

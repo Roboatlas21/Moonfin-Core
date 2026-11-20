@@ -36,16 +36,26 @@ class PlexLiveTvFavorites {
   static Dio? testHttp;
 
   static final _pending = <String, Future<void>>{};
-  // The same synthetic channel ID can exist on multiple PMS servers.
+  // A short-lived successful read is shared by Home and search.
+  static const _browseRefreshAge = Duration(seconds: 30);
+  static final _lastRefresh = <String, DateTime>{};
+
+  // The same channel ID can exist on different PMS servers. A client object
+  // keeps its identity even if a network probe changes its reachable URL.
   static final _known = <String, Map<String, Map<String, dynamic>>>{};
+  static Expando<int> _clientIds = Expando<int>('Plex favorite clients');
+  static int _nextClientId = 0;
 
   static String _catalogKey(MediaServerClient client) =>
-      (client.userId ?? '') + '\u0000' + client.baseUrl;
+      '${client.userId ?? ''}\u0000${_clientIds[client] ??= ++_nextClientId}';
 
   @visibleForTesting
   static void resetForTesting() {
     _pending.clear();
     _known.clear();
+    _lastRefresh.clear();
+    _clientIds = Expando<int>('Plex favorite clients');
+    _nextClientId = 0;
     testHttp = null;
   }
 
@@ -205,17 +215,39 @@ class PlexLiveTvFavorites {
     _checkAccount(client, token);
     userDataSync.publishAll({
       for (final entry in known.entries)
-        syncKey(client, entry.key): {'IsFavorite': favorites.contains(_key(entry.value))},
+        syncKey(client, entry.key): {
+          'IsFavorite': favorites.contains(_key(entry.value)),
+        },
     });
+    _lastRefresh[userId] = DateTime.now();
   }
 
-  static Future<void> refresh(MediaServerClient client) async {
+  static Future<void> refresh(
+    MediaServerClient client, {
+    bool ifStale = false,
+  }) async {
     final account = _account(client);
     await _serial(account.id, () async {
+      final last = _lastRefresh[account.id];
+      if (ifStale &&
+          last != null &&
+          DateTime.now().difference(last) < _browseRefreshAge) {
+        return;
+      }
       final remote = await _read(client, account.token);
       _checkAccount(client, account.token);
       await _cache(client, account.token, remote);
     });
+  }
+
+  /// Home and search may use the saved cache when Plex Cloud is unavailable.
+  static Future<void> refreshForBrowse(MediaServerClient client) async {
+    if (client.serverType != ServerType.plex) return;
+    try {
+      await refresh(client, ifStale: true);
+    } catch (_) {
+      // Missing token, network failure or malformed response: use cached data.
+    }
   }
 
   static Map<String, dynamic> applyToItem(
