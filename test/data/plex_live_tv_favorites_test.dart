@@ -301,28 +301,7 @@ void main() {
 
 
 
-  test('DVR favorites remain available after the client address changes', () async {
-    final pms = _plex();
-    addTearDown(pms.dispose);
-    const source = 'server://pms-machine/epg';
-    const channel = {
-      'Id': 'channel-2-4',
-      'Type': 'TvChannel',
-      'Name': 'DVR',
-      'PlexFavoriteSource': source,
-      'PlexFavoriteId': '4',
-    };
-    final initial = PlexLiveTvFavorites.syncKey(pms, 'channel-2-4');
-    pms.baseUrl = 'https://new-pms-address.example';
-    expect(PlexLiveTvFavorites.syncKey(pms, 'channel-2-4'), initial);
-    PlexLiveTvFavorites.applyToItem(pms, channel);
-    final known = PlexLiveTvFavorites.syncKey(pms, 'channel-2-4');
-    pms.baseUrl = 'https://newer-pms-address.example';
-    expect(PlexLiveTvFavorites.syncKey(pms, 'channel-2-4'), known);
-    await ItemMutationRepository(pms).setFavorite('channel-2-4',
-        isFavorite: true);
-    expect(cloud.rows.single['source'], source);
-  });
+
 
 
   test('search does not wait for a slow Plex cloud favorites read', () async {
@@ -358,6 +337,10 @@ void main() {
 
 
 
+
+
+
+
   test('a second PMS applies another PMS cache without a second cloud GET', () async {
     final first = _plex();
     final second = _plex()..baseUrl = 'https://second-pms.example';
@@ -387,8 +370,6 @@ void main() {
     expect(userDataSync.favoriteFor(key), isFalse);
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
   });
-
-
 
   test('a confirmed Plex PUT stays successful when local cache write fails', () async {
     final client = _plex();

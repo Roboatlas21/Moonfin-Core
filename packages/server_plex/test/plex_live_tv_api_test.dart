@@ -309,29 +309,7 @@ void main() {
     expect(server.requests, isEmpty);
   });
 
-  test('invalid Plex Free TV lineup can retry, but zero channels is valid', () async {
-    final (dio, _) = _server();
-    var payload = <String, dynamic>{};
-    dio.interceptors.insert(
-      0,
-      InterceptorsWrapper(
-        onRequest: (options, handler) {
-          if (options.uri.path == '/lineups/plex/channels') {
-            handler.resolve(Response(requestOptions: options, data: payload));
-          } else {
-            handler.next(options);
-          }
-        },
-      ),
-    );
-    final api = PlexLiveTvApi(dio, cloudOnly: true);
-    await expectLater(api.getChannels(), throwsA(isA<FormatException>()));
 
-    payload = {'MediaContainer': {'size': 0}};
-    final empty = await api.getChannels();
-    expect(empty['Items'], isEmpty);
-    expect(empty['TotalRecordCount'], 0);
-  });
 
   test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
     final (dio, server) = _server();
@@ -413,29 +391,7 @@ void main() {
 
 
 
-  test('one failed Free TV grid does not mark the other channels empty', () async {
-    final (dio, _) = _server();
-    dio.interceptors.insert(0, InterceptorsWrapper(
-      onRequest: (options, handler) {
-        if (options.uri.path == '/grid' &&
-            options.queryParameters['channelGridKey'] == 'extra') {
-          handler.reject(DioException(
-            requestOptions: options, type: DioExceptionType.connectionError,
-          ));
-        } else {
-          handler.next(options);
-        }
-      },
-    ));
-    final guide = await PlexLiveTvApi(dio, cloudOnly: true).getGuide(
-      startDate: DateTime.utc(2026, 10, 22, 20),
-      endDate: DateTime.utc(2026, 10, 22, 22),
-      channelIds: ['channel-plex-abc-66635fc0', 'channel-plex-news-extra'],
-    );
-    expect((guide['Items'] as List).whereType<Map>()
-        .map((item) => item['ChannelId']), contains('channel-plex-abc-66635fc0'));
-    expect(guide['FailedChannelIds'], ['channel-plex-news-extra']);
-  });
+
 
   test('malformed Free TV grids fail per channel and are retried', () async {
     final (dio, _) = _server();

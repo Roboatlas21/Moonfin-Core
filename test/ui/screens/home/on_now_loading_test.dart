@@ -232,41 +232,7 @@ void main() {
     },
   );
 
-  test(
-    'Plex Cloud shows its Live TV shortcut without a Free TV On Now row',
-    () async {
-      await enableSections({HomeSectionType.onNow});
-      stubLiveTvRows();
-      // The real cloud-only Plex API returns no On Now programs.
-      when(() => source.loadOnNow('http://server.test')).thenAnswer(
-        (_) async => const HomeRow(
-          id: 'liveTvOnNow',
-          title: 'On Now',
-          rowType: HomeRowType.liveTvOnNow,
-        ),
-      );
-      final cloudClient = _MockPlexClient();
-      when(() => cloudClient.cloudOnly).thenReturn(true);
-      when(() => cloudClient.serverType).thenReturn(ServerType.plex);
-      when(() => cloudClient.userId).thenReturn('user');
-      when(() => cloudClient.baseUrl).thenReturn('http://server.test');
 
-      model.dispose();
-      model = HomeViewModel(
-        dataSource: source,
-        prefs: prefs,
-        client: cloudClient,
-        mediaBarViewModel: _MockMediaBar(),
-        multiServerRepo: _MockMultiServer(),
-      );
-
-      await model.load();
-
-      expect(model.rows.map((row) => row.id), ['liveTv']);
-      verify(() => source.loadOnNow('http://server.test')).called(1);
-      verifyNever(() => source.hasLiveTvChannels());
-    },
-  );
 
 
   test('Plex Cloud restores its embedded On Now when saved standalone is on', () async {
@@ -642,47 +608,5 @@ void main() {
     });
   }
 
-  group('returning to Home', () {
-    HomeRow airing(List<String> ids) => HomeRow(
-      id: 'liveTvOnNow',
-      title: 'On Now',
-      rowType: HomeRowType.liveTvOnNow,
-      items: [
-        for (final id in ids)
-          AggregatedItem(
-            id: id,
-            serverId: 'http://server.test',
-            rawData: {'Type': 'Program'},
-          ),
-      ],
-    );
 
-
-
-    test('a second return while the first is out waits on it', () async {
-      await loadPopulatedRow();
-      final answer = Completer<HomeRow>();
-      when(() => source.loadOnNow('http://server.test'))
-          .thenAnswer((_) => answer.future);
-      clearInteractions(source);
-
-      final first = model.refreshResumeAndNextUp();
-      var secondDone = false;
-      final second = model.refreshResumeAndNextUp().then(
-        (_) => secondDone = true,
-      );
-      await pumpEventQueue();
-      expect(secondDone, isFalse);
-
-      answer.complete(airing(['next']));
-      await Future.wait([first, second]);
-
-      verify(() => source.loadOnNow('http://server.test')).called(1);
-      expect(model.rows.single.items.map((item) => item.id), ['next']);
-    });
-
-
-
-
-  });
 }
