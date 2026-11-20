@@ -1768,7 +1768,7 @@ void main() {
         await _pumpFrames(tester);
         expect(_windowRangeText(tester), beforeFailure);
         expect(find.byType(EpgChannelCell), findsWidgets);
-        expect(find.byType(Chip), findsNothing);
+        expect(find.textContaining('Couldn’t load'), findsOneWidget);
 
         clearInteractions(liveTvApi);
         await tester.binding.handlePopRoute();

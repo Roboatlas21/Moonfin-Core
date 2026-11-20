@@ -3093,7 +3093,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         livePosition: clamped == liveStart,
         paging: true,
       );
-      if (!moved) return;
+      if (!moved) {
+        // Denied listings leave the current channels usable, but block paging.
+        if (_vm.listingsAccessDenied) _showWindowFailure(clamped);
+        return;
+      }
     } catch (_) {
       _showWindowFailure(clamped);
       return;
