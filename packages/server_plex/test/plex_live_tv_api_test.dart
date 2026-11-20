@@ -302,6 +302,35 @@ void main() {
     expect(lineup.sources.map((source) => source.groupId), ['source:dvr']);
   });
 
+  test('a failed Free TV grid retries rather than appearing empty', () async {
+    final (dio, _) = _server();
+    var attempts = 0;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == '/grid' && attempts++ == 0) {
+            handler.reject(DioException(
+              requestOptions: options,
+              type: DioExceptionType.connectionError,
+            ));
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    Future<Map<String, dynamic>> guide() => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22, 20),
+      endDate: DateTime.utc(2026, 10, 22, 22),
+      channelIds: ['channel-plex-abc-66635fc0'],
+    );
+    await expectLater(guide(), throwsA(isA<DioException>()));
+    expect((await guide())['Items'], isNotEmpty);
+    expect(attempts, 2);
+  });
+
   test('every showing of a program is a program of its own', () async {
     final (dio, server) = _server();
     final result = await PlexLiveTvApi(dio).getGuide(

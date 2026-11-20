@@ -358,20 +358,27 @@ class SearchViewModel extends ChangeNotifier {
       label: 'people search',
     ).then(_interleave).catchError((_) => <AggregatedItem>[]);
     final channelsFuture = _channelMatches(query);
-    final perServerItems = await _searchEachServer(
-      (repository) => repository.searchGroups(
-        query,
-        [
-          for (final group in activeGroups)
-            if (!group.itemTypes.contains('Person') &&
-                !group.itemTypes.contains('LiveTvChannel'))
-              group.itemTypes,
-        ],
-        perGroup: _resultLimit,
-        limit: _globalFetchLimit,
-      ),
-      label: 'search',
-    );
+    List<List<AggregatedItem>> perServerItems;
+    try {
+      perServerItems = await _searchEachServer(
+        (repository) => repository.searchGroups(
+          query,
+          [
+            for (final group in activeGroups)
+              if (!group.itemTypes.contains('Person') &&
+                  !group.itemTypes.contains('LiveTvChannel'))
+                group.itemTypes,
+          ],
+          perGroup: _resultLimit,
+          limit: _globalFetchLimit,
+        ),
+        label: 'search',
+      );
+    } catch (_) {
+      // A library outage must not hide usable channel matches.
+      if ((await channelsFuture).isEmpty) rethrow;
+      perServerItems = const [];
+    }
     final channels = await channelsFuture;
 
     final grouped = <SearchResultGroup>[];

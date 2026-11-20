@@ -222,6 +222,24 @@ void main() {
     expect(movieResults(vm), [('a1', 'a')]);
   });
 
+  test('channel matches survive an outage of all library searches', () async {
+    for (final api in itemsApis.values) {
+      when(() => itemsSearch(api)).thenThrow(StateError('offline'));
+    }
+    when(() => clients['a']!.liveTvApi.getChannels(
+      fields: 'ImageTags',
+      enableTotalRecordCount: false,
+      userId: 'user-a',
+    )).thenAnswer((_) async => {
+      'Items': [{'Id': 'alien-channel', 'Type': 'TvChannel', 'Name': 'Alien News'}],
+    });
+
+    final vm = await search(across: multiServer);
+    expect(vm.state, SearchState.ready);
+    expect(vm.results.single.items.single.id, 'alien-channel');
+    expect(vm.results.single.items.single.name, 'Alien News');
+  });
+
   test('with multi-server search off only the active server is searched', () async {
     when(() => itemsSearch(itemsApis['a']!))
         .thenAnswer((_) async => movies(['a1']));

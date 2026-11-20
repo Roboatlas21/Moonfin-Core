@@ -1941,13 +1941,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }) async {
     if (channelIds.isEmpty) return true;
     final generation = ++_programGeneration;
+    final session = userDataSync.session;
     final replacements = await _fetchProgramReplacements(
       List.of(channelIds),
       from: from,
       to: to,
       generation: generation,
     );
-    if (replacements == null || generation != _programGeneration) return false;
+    if (replacements == null ||
+        _disposed ||
+        generation != _programGeneration ||
+        session != userDataSync.session) {
+      return false;
+    }
     _programsByChannel.addAll(replacements);
     _programsLoadedIds.addAll(replacements.keys);
     _notifyListeners();
@@ -2147,6 +2153,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
 
     final generation = ++_programGeneration;
+    final session = userDataSync.session;
     final from = now.subtract(rollingRefreshLookback);
     final to = now.add(rollingRefreshHorizon);
 
@@ -2169,7 +2176,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
 
-    if (_disposed || generation != _programGeneration) {
+    if (_disposed ||
+        generation != _programGeneration ||
+        session != userDataSync.session) {
       _rearmBoundaryIfEnabled();
       return;
     }
@@ -2213,17 +2222,30 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     required DateTime to,
     required int generation,
   }) async {
+    final session = userDataSync.session;
     final replacements = <String, List<GuideProgram>>{};
     for (var i = 0; i < ids.length; i += _programBatchSize) {
+      if (_disposed ||
+          generation != _programGeneration ||
+          session != userDataSync.session) {
+        return null;
+      }
       final chunk = ids.sublist(i, min(i + _programBatchSize, ids.length));
       final Map<String, dynamic> response;
       try {
         response = await _fetchGuide(channelIds: chunk, from: from, to: to);
       } catch (error) {
-        if (!_accessDenied(error) && generation != _programGeneration) return null;
+        if (session != userDataSync.session ||
+            (!_accessDenied(error) && generation != _programGeneration)) {
+          return null;
+        }
         rethrow;
       }
-      if (_disposed || generation != _programGeneration) return null;
+      if (_disposed ||
+          generation != _programGeneration ||
+          session != userDataSync.session) {
+        return null;
+      }
       final parsed = _parsePrograms(response);
       for (final id in chunk) {
         replacements[id] = parsed[id] ?? <GuideProgram>[];

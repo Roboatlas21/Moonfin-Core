@@ -490,6 +490,28 @@ void main() {
     expect(vm.programsHighWater, 120);
   });
 
+  test('a session switch drops pending program replacements', () async {
+    _stubChannels(liveTv, [_channel('c0')]);
+    when(() => _guide(liveTv)).thenAnswer(
+      (_) async => {'Items': [_program('old', 'c0')]},
+    );
+    final vm = LiveTvGuideViewModel(client);
+    await vm.load();
+    final pending = Completer<Map<String, dynamic>>();
+    when(() => _guide(liveTv)).thenAnswer((_) => pending.future);
+    final from = DateTime.utc(2026, 9, 11, 10);
+    final replacement = vm.replacePrograms(
+      channelIds: ['c0'],
+      from: from,
+      to: from.add(const Duration(hours: 2)),
+    );
+    await pumpEventQueue();
+    userDataSync.reset();
+    pending.complete({'Items': [_program('new', 'c0')]});
+    expect(await replacement, isFalse);
+    expect(vm.programsForChannel('c0').single.id, 'old');
+  });
+
   test('a stale response for a superseded window is discarded', () async {
     final vm = LiveTvGuideViewModel(client);
     final early = DateTime(2026, 9, 9, 20);

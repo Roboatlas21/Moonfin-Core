@@ -81,25 +81,25 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<List<_Dvr>>? _dvrs;
   Future<List<Map<String, dynamic>>>? _cloudChannels;
   Future<_CloudGroups>? _cloudGroups;
-  final _cloudGrids = <String, ({DateTime at, Future<List?> items})>{};
+  final _cloudGrids = <String, ({DateTime at, Future<List> items})>{};
 
-  Future<List?> _freeGrid(String channel, String day) {
+  Future<List> _freeGrid(String channel, String day) {
     final key = '$channel/$day';
     final now = DateTime.now();
     _cloudGrids.removeWhere(
       (_, grid) => now.difference(grid.at) >= _cloudGridLife,
     );
     if (_cloudGrids[key] case final cached?) return cached.items;
-    final items = _fetchFreeGrid(channel, day).then((items) {
-      if (items == null) _cloudGrids.remove(key);
-      return items;
+    final items = _fetchFreeGrid(channel, day).catchError((Object error) {
+      _cloudGrids.remove(key);
+      throw error;
     });
     _cloudGrids[key] = (at: now, items: items);
     return items;
   }
 
-  /// Null when plex.tv wouldn't answer, after waiting out a few 429s.
-  Future<List?> _fetchFreeGrid(String channel, String day) async {
+  /// Failed requests throw, so the guide can retry instead of caching a blank.
+  Future<List> _fetchFreeGrid(String channel, String day) async {
     for (var attempt = 0; ; attempt++) {
       try {
         final response = await _dio.get<Map<String, dynamic>>(
@@ -110,9 +110,18 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           },
           options: _cloudOptions,
         );
-        return (response.data?['MediaContainer'] as Map?)?['Metadata'] as List?;
+        final container = response.data?['MediaContainer'];
+        if (container is! Map) {
+          throw const FormatException('Invalid Plex Free TV grid response');
+        }
+        final metadata = container['Metadata'];
+        if (metadata == null) return const [];
+        if (metadata is! List) {
+          throw const FormatException('Invalid Plex Free TV grid metadata');
+        }
+        return metadata;
       } on DioException catch (e) {
-        if (e.response?.statusCode != 429 || attempt == 3) return null;
+        if (e.response?.statusCode != 429 || attempt == 3) rethrow;
         await Future<void>.delayed(Duration(seconds: 1 << attempt));
       }
     }
@@ -436,7 +445,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           ).then((items) => (channel: request.channel, items: items)),
       ]);
       for (final grid in grids) {
-        for (final item in grid.items ?? const []) {
+        for (final item in grid.items) {
           if (item is! Map) continue;
           for (final media in item['Media'] as List? ?? const []) {
             if (media is! Map) continue;
