@@ -12,7 +12,7 @@ import '../../preference/user_preferences.dart';
 import '../../util/settings_save_retry.dart';
 import '../repositories/item_mutation_repository.dart';
 import '../services/user_data_sync.dart';
-import '../services/plex_free_tv_favorites.dart';
+import '../services/plex_live_tv_favorites.dart';
 import '../models/live_tv_recording_state.dart';
 import '../models/series_recording_episodes.dart';
 
@@ -1394,7 +1394,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _publishChannels(items, revision);
     if (_client.serverType == ServerType.plex) {
       // Cloud failures leave the locally cached hearts visible; next open retries.
-      unawaited(PlexFreeTvFavorites.refresh(_client).catchError((Object _) {}));
+      unawaited(PlexLiveTvFavorites.refresh(_client).catchError((Object _) {}));
     }
     if (lineup != null) {
       // Null means the category check was unavailable, not unchanged.
@@ -1458,7 +1458,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   void _publishChannels(List<Map<String, dynamic>> items, int revision) {
     final channels = [
-      for (final item in items) PlexFreeTvFavorites.applyToItem(_client, item),
+      for (final item in items) PlexLiveTvFavorites.applyToItem(_client, item),
     ];
     final fresh = <String, Map<String, dynamic>>{};
     for (final item in channels) {

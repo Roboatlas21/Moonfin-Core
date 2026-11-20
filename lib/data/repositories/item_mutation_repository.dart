@@ -3,7 +3,7 @@ import 'package:server_core/server_core.dart';
 
 import '../../preference/user_preferences.dart';
 import '../services/user_data_sync.dart';
-import '../services/plex_free_tv_favorites.dart';
+import '../services/plex_live_tv_favorites.dart';
 
 class ItemMutationRepository {
   final MediaServerClient _client;
@@ -43,8 +43,8 @@ class ItemMutationRepository {
           return;
         }
         try {
-          if (isPlexFreeTvChannel(_client, itemId)) {
-            await PlexFreeTvFavorites.setFavorite(
+          if (isPlexLiveTvChannel(_client, itemId)) {
+            await PlexLiveTvFavorites.setFavorite(
               _client,
               itemId,
               isFavorite: wanted,

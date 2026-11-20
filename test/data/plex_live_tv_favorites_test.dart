@@ -5,7 +5,7 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:moonfin/auth/models/user.dart';
 import 'package:moonfin/auth/repositories/user_repository.dart';
 import 'package:moonfin/data/repositories/item_mutation_repository.dart';
-import 'package:moonfin/data/services/plex_free_tv_favorites.dart';
+import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:server_core/server_core.dart';
@@ -27,7 +27,7 @@ PlexMediaServerClient _plex({bool cloudOnly = false, String userId = 'plex-user'
      ..accessToken = cloudOnly ? 'cloud-token' : 'pms-token';
 
 bool _saved(MediaServerClient client, String id) =>
-    (PlexFreeTvFavorites.applyToItem(client, {
+    (PlexLiveTvFavorites.applyToItem(client, {
       ..._channel, 'Id': id,
     })['UserData'] as Map)['IsFavorite'] == true;
 
@@ -71,7 +71,7 @@ void main() {
 
   setUp(() async {
     userDataSync.reset();
-    PlexFreeTvFavorites.resetForTesting();
+    PlexLiveTvFavorites.resetForTesting();
     SharedPreferences.setMockInitialValues({});
     final store = PreferenceStore();
     await store.init();
@@ -85,12 +85,12 @@ void main() {
     GetIt.instance.registerSingleton<UserRepository>(users);
     cloud = _Cloud();
     http = Dio()..interceptors.add(cloud);
-    PlexFreeTvFavorites.testHttp = http;
+    PlexLiveTvFavorites.testHttp = http;
   });
 
   tearDown(() async {
     userDataSync.reset();
-    PlexFreeTvFavorites.resetForTesting();
+    PlexLiveTvFavorites.resetForTesting();
     users.dispose();
     http.close();
     await GetIt.instance.reset();
@@ -105,8 +105,8 @@ void main() {
       {'source': _source, 'id': 'free123', 'title': 'Free Channel'},
       {'source': 'server://other/dvr', 'id': 'channel7', 'thumb': 'keep'},
     ];
-    PlexFreeTvFavorites.applyToItem(direct, _channel);
-    await PlexFreeTvFavorites.refresh(direct);
+    PlexLiveTvFavorites.applyToItem(direct, _channel);
+    await PlexLiveTvFavorites.refresh(direct);
     expect(_saved(pms, 'channel-plex-free123'), isTrue);
 
     await ItemMutationRepository(pms).setFavorite('channel-plex-free123', isFavorite: false);
@@ -124,19 +124,19 @@ void main() {
     final direct = _plex(cloudOnly: true);
     addTearDown(direct.dispose);
     await prefs.set(Preference<List<String>>(
-      key: 'plex_free_tv_favorites_plex-user', defaultValue: [],
-    ), ['channel-plex-free123']);
-    PlexFreeTvFavorites.applyToItem(direct, _channel);
+      key: 'plex_live_tv_favorite_keys_plex-user', defaultValue: [],
+    ), ['provider://tv.plex.provider.epg\u0000free123']);
+    PlexLiveTvFavorites.applyToItem(direct, _channel);
     expect(_saved(direct, 'channel-plex-free123'), isTrue);
 
     cloud.rows = [{'source': 'server://other/dvr', 'id': 'different'}];
-    await PlexFreeTvFavorites.refresh(direct);
+    await PlexLiveTvFavorites.refresh(direct);
     expect(_saved(direct, 'channel-plex-free123'), isFalse);
     expect(cloud.rows.single['id'], 'different');
     expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
 
     cloud.getError = 503;
-    await expectLater(PlexFreeTvFavorites.refresh(direct), throwsA(isA<DioException>()));
+    await expectLater(PlexLiveTvFavorites.refresh(direct), throwsA(isA<DioException>()));
     expect(_saved(direct, 'channel-plex-free123'), isFalse);
     cloud.getError = null;
     cloud.putError = 403;
@@ -148,12 +148,68 @@ void main() {
     expect(cloud.rows.single['id'], 'different');
   });
 
+
+  test('DVR favorites match machine/provider and preserve other PMS channels', () async {
+    final pms = _plex();
+    final direct = _plex(cloudOnly: true);
+    addTearDown(pms.dispose);
+    addTearDown(direct.dispose);
+    const source = 'server://pms-machine-1/tv.plex.providers.epg.xmltv:2';
+    const otherSource = 'server://another-pms/tv.plex.providers.epg.xmltv:2';
+    const dvr = <String, dynamic>{
+      'Id': 'channel-2-4',
+      'Name': 'CBC',
+      'ChannelNumber': '4',
+      'PlexFavoriteSource': source,
+      'PlexFavoriteId': '4',
+      'ImageTags': {'Primary': 'http://pms.example/cbc.png'},
+    };
+    cloud.rows = [
+      {'source': _source, 'id': 'free123', 'title': 'Free Channel'},
+      {'source': otherSource, 'id': '4', 'title': 'Other PMS'},
+      {'source': source, 'id': '4', 'title': 'CBC', 'thumb': 'keep'},
+    ];
+    PlexLiveTvFavorites.applyToItem(pms, dvr);
+    PlexLiveTvFavorites.applyToItem(direct, _channel);
+    await PlexLiveTvFavorites.refresh(pms);
+    expect((PlexLiveTvFavorites.applyToItem(pms, dvr)['UserData'] as Map)['IsFavorite'],
+        isTrue);
+    expect(_saved(direct, 'channel-plex-free123'), isTrue);
+
+    await ItemMutationRepository(pms).setFavorite('channel-2-4', isFavorite: false);
+    expect(cloud.rows.map((row) => row['source']).toList(), [_source, otherSource]);
+    expect((PlexLiveTvFavorites.applyToItem(pms, dvr)['UserData'] as Map)['IsFavorite'],
+        isFalse);
+
+    await ItemMutationRepository(pms).setFavorite('channel-2-4', isFavorite: true);
+    expect(cloud.rows.last, {
+      'source': source,
+      'id': '4',
+      'title': 'CBC',
+      'thumb': 'http://pms.example/cbc.png',
+      'vcn': '4',
+    });
+    expect(cloud.requests.every((r) => r.headers['X-Plex-Token'] == 'account-token'),
+        isTrue);
+
+    // A matching synthetic ID on another PMS must never reuse this metadata.
+    final secondPms = _plex();
+    secondPms.baseUrl = 'https://second-pms.example';
+    addTearDown(secondPms.dispose);
+    final before = cloud.requests.where((r) => r.method == 'PUT').length;
+    await expectLater(
+      ItemMutationRepository(secondPms).setFavorite('channel-2-4', isFavorite: false),
+      throwsA(isA<StateError>()),
+    );
+    expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(before));
+  });
+
   test('serializes separate channel updates and rejects a different Home user', () async {
     final pms = _plex();
     addTearDown(pms.dispose);
-    PlexFreeTvFavorites.applyToItem(pms, _channel);
-    PlexFreeTvFavorites.applyToItem(pms, {..._channel, 'Id': 'channel-plex-extra'});
-    await PlexFreeTvFavorites.refresh(pms);
+    PlexLiveTvFavorites.applyToItem(pms, _channel);
+    PlexLiveTvFavorites.applyToItem(pms, {..._channel, 'Id': 'channel-plex-extra'});
+    await PlexLiveTvFavorites.refresh(pms);
     await Future.wait([
       ItemMutationRepository(pms).setFavorite('channel-plex-free123', isFavorite: true),
       ItemMutationRepository(pms).setFavorite('channel-plex-extra', isFavorite: true),
@@ -166,7 +222,7 @@ void main() {
       lastUsed: DateTime.utc(2026),
     ));
     final requests = cloud.requests.length;
-    await expectLater(PlexFreeTvFavorites.refresh(pms), throwsA(isA<StateError>()));
+    await expectLater(PlexLiveTvFavorites.refresh(pms), throwsA(isA<StateError>()));
     expect(cloud.requests, hasLength(requests));
   });
 }

@@ -11,18 +11,22 @@ import '../../auth/repositories/user_repository.dart';
 import '../../preference/user_preferences.dart';
 import 'user_data_sync.dart';
 
-/// Plex Cloud and PMS connections use the same channel IDs and Plex account.
 bool isPlexFreeTvChannel(MediaServerClient client, String channelId) =>
-    channelId.startsWith('channel-plex-') &&
-    client.serverType == ServerType.plex;
+    client.serverType == ServerType.plex &&
+    channelId.startsWith('channel-plex-');
 
-/// Plex owns one account-level list, including favorites from other TV sources.
-/// Keep our existing per-account preference as a cache, never as a second source
-/// of truth after the first successful cloud read.
-class PlexFreeTvFavorites {
-  static const _prefix = 'channel-plex-';
+/// Guide IDs are synthetic, but Plex Cloud favorites identify channels by
+/// source URI and provider channel ID. DVR channels cannot be rated.
+bool isPlexLiveTvChannel(MediaServerClient client, String channelId) =>
+    client.serverType == ServerType.plex &&
+    channelId.startsWith('channel-');
+
+/// Plex owns both Free TV and DVR favorites. Cache source+provider IDs rather
+/// than synthetic guide IDs, which can collide between PMS servers.
+class PlexLiveTvFavorites {
+  static const _freePrefix = 'channel-plex-';
   static const _url = 'https://epg.provider.plex.tv/settings/favoriteChannels';
-  static const _source = 'provider://tv.plex.provider.epg';
+  static const _freeSource = 'provider://tv.plex.provider.epg';
   static final _http = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 8),
     receiveTimeout: const Duration(seconds: 15),
@@ -31,9 +35,12 @@ class PlexFreeTvFavorites {
   @visibleForTesting
   static Dio? testHttp;
 
-  // Serialize whole-list reads/writes across channels on this device.
   static final _pending = <String, Future<void>>{};
+  // The same synthetic channel ID can exist on multiple PMS servers.
   static final _known = <String, Map<String, Map<String, dynamic>>>{};
+
+  static String _catalogKey(MediaServerClient client) =>
+      (client.userId ?? '') + '\u0000' + client.baseUrl;
 
   @visibleForTesting
   static void resetForTesting() {
@@ -44,7 +51,7 @@ class PlexFreeTvFavorites {
 
   static Preference<List<String>> _preference(String userId) =>
       Preference<List<String>>(
-        key: 'plex_free_tv_favorites_' + Uri.encodeComponent(userId),
+        key: 'plex_live_tv_favorite_keys_' + Uri.encodeComponent(userId),
         defaultValue: const [],
       );
 
@@ -59,7 +66,7 @@ class PlexFreeTvFavorites {
         user.plexToken!.isEmpty) {
       throw StateError('No Plex account token for this user');
     }
-    // Never send the PMS access token or another Home member's token.
+    // A Plex Home member's cloud token is not the PMS access token.
     return (id: user.id, token: user.plexToken!);
   }
 
@@ -80,10 +87,7 @@ class PlexFreeTvFavorites {
     }
   }
 
-  static Future<T> _serial<T>(
-    String id,
-    Future<T> Function() operation,
-  ) async {
+  static Future<T> _serial<T>(String id, Future<T> Function() operation) async {
     final previous = _pending[id];
     final gate = Completer<void>();
     _pending[id] = gate.future;
@@ -115,9 +119,7 @@ class PlexFreeTvFavorites {
     if (raw is! List || raw.any((item) => item is! Map)) {
       throw const FormatException('Invalid Plex favorite-channel list');
     }
-    return [
-      for (final row in raw) Map<String, dynamic>.from(row as Map),
-    ];
+    return [for (final row in raw) Map<String, dynamic>.from(row as Map)];
   }
 
   static Future<void> _write(
@@ -134,23 +136,43 @@ class PlexFreeTvFavorites {
     );
   }
 
-  static bool _isFree(String userId, Map<String, dynamic> row) {
+  static String _key(Map<String, dynamic> info) =>
+      (info['source'] as String) + '\u0000' + (info['id'] as String);
+
+  // Free TV still accepts the provider:// variants supported by our previous
+  // client. DVR favorites must match the exact PMS+EPG source.
+  static bool _matches(
+    String channelId,
+    Map<String, dynamic> info,
+    Map<String, dynamic> row,
+  ) {
+    if (row['id'] != info['id']) return false;
+    if (row['source'] == info['source']) return true;
     final source = row['source'];
-    final id = row['id'];
-    return id is String &&
-        (source == _source ||
-            (source is String &&
-                source.startsWith('provider://') &&
-                _known[userId]?.containsKey(_prefix + id) == true));
+    return channelId.startsWith(_freePrefix) &&
+        source is String &&
+        source.startsWith('provider://');
   }
 
-  static Map<String, dynamic> _newRow(String userId, String channelId) {
-    final meta = _known[userId]?[channelId];
+  static Map<String, dynamic>? _info(
+    MediaServerClient client,
+    Map<String, dynamic> item,
+    String channelId,
+  ) {
+    final free = isPlexFreeTvChannel(client, channelId);
+    final source = item['PlexFavoriteSource'] ?? (free ? _freeSource : null);
+    final id = item['PlexFavoriteId'] ??
+        (free ? channelId.substring(_freePrefix.length) : null);
+    if (source is! String || source.isEmpty || id is! String || id.isEmpty) {
+      return null;
+    }
     return {
-      'source': _source,
-      'id': channelId.substring(_prefix.length),
-      if (meta?['title'] is String) 'title': meta!['title'],
-      if (meta?['thumb'] is String) 'thumb': meta!['thumb'],
+      'source': source,
+      'id': id,
+      if (item['Name'] is String) 'title': item['Name'],
+      if ((item['ImageTags'] as Map?)?['Primary'] is String)
+        'thumb': (item['ImageTags'] as Map)['Primary'],
+      if (item['ChannelNumber'] is String) 'vcn': item['ChannelNumber'],
     };
   }
 
@@ -161,17 +183,27 @@ class PlexFreeTvFavorites {
   ) async {
     _checkAccount(client, token);
     final userId = client.userId!;
-    final ids = {
+    final known = _known[_catalogKey(client)] ??
+        const <String, Map<String, dynamic>>{};
+    // Keep the whole cloud list in cache even when this device has only
+    // loaded Free TV or a subset of the user's PMS channels.
+    final favorites = <String>{
       for (final row in rows)
-        if (_isFree(userId, row)) _prefix + (row['id'] as String),
+        if (row['source'] is String && row['id'] is String) _key(row),
     };
-    await GetIt.instance<UserPreferences>()
-        .set(_preference(userId), ids.toList()..sort());
-    // Update visible guide hearts and Favorites rows without reloading channels.
+    for (final entry in known.entries) {
+      if (rows.any((row) => _matches(entry.key, entry.value, row))) {
+        favorites.add(_key(entry.value));
+      }
+    }
+    await GetIt.instance<UserPreferences>().set(
+      _preference(userId),
+      favorites.toList()..sort(),
+    );
     _checkAccount(client, token);
     userDataSync.publishAll({
-      for (final id in _known[userId]?.keys ?? const <String>[])
-        id: {'IsFavorite': ids.contains(id)},
+      for (final entry in known.entries)
+        entry.key: {'IsFavorite': favorites.contains(_key(entry.value))},
     });
   }
 
@@ -188,26 +220,25 @@ class PlexFreeTvFavorites {
     MediaServerClient client,
     Map<String, dynamic> item,
   ) {
-    final id = item['Id']?.toString() ?? '';
+    final channelId = item['Id']?.toString() ?? '';
     final userId = client.userId;
-    if (!isPlexFreeTvChannel(client, id) ||
+    if (!isPlexLiveTvChannel(client, channelId) ||
         userId == null ||
         userId.isEmpty ||
         !GetIt.instance.isRegistered<UserPreferences>()) {
       return item;
     }
-    _known.putIfAbsent(userId, () => {})[id] = {
-      if (item['Name'] is String) 'title': item['Name'],
-      if ((item['ImageTags'] as Map?)?['Primary'] is String)
-        'thumb': (item['ImageTags'] as Map)['Primary'],
-    };
+    final info = _info(client, item, channelId);
+    // Without a verified machine id, never guess the PMS DVR source.
+    if (info == null) return item;
+    _known.putIfAbsent(_catalogKey(client), () => {})[channelId] = info;
     final favorites = GetIt.instance<UserPreferences>().get(_preference(userId));
     final userData = item['UserData'];
     return {
       ...item,
       'UserData': {
         if (userData is Map) ...userData,
-        'IsFavorite': favorites.contains(id),
+        'IsFavorite': favorites.contains(_key(info)),
       },
     };
   }
@@ -217,27 +248,31 @@ class PlexFreeTvFavorites {
     String channelId, {
     required bool isFavorite,
   }) async {
-    if (!isPlexFreeTvChannel(client, channelId)) {
+    if (!isPlexLiveTvChannel(client, channelId)) {
       throw ArgumentError.value(channelId, 'channelId');
     }
     final account = _account(client);
     await _serial(account.id, () async {
+      final info = _known[_catalogKey(client)]?[channelId] ??
+          (isPlexFreeTvChannel(client, channelId)
+              ? <String, dynamic>{
+                  'source': _freeSource,
+                  'id': channelId.substring(_freePrefix.length),
+                }
+              : null);
+      if (info == null) {
+        throw StateError('Plex DVR channel has no verified EPG provider identity');
+      }
       final remote = await _read(client, account.token);
       _checkAccount(client, account.token);
       final rows = [...remote];
-      final key = channelId.substring(_prefix.length);
-      final hadFavorite = rows.any(
-        (row) => row['id'] == key && _isFree(account.id, row),
-      );
+      final hadFavorite = rows.any((row) => _matches(channelId, info, row));
       if (isFavorite && !hadFavorite) {
-        rows.add(_newRow(account.id, channelId));
+        rows.add({...info});
       } else if (!isFavorite && hadFavorite) {
-        rows.removeWhere(
-          (row) => row['id'] == key && _isFree(account.id, row),
-        );
+        rows.removeWhere((row) => _matches(channelId, info, row));
       }
-      // A PUT replaces the entire account list, so retain every other entry
-      // exactly as Plex returned it, including other servers' DVR favorites.
+      // Plex PUT replaces the whole account list: retain other PMS sources.
       if (isFavorite != hadFavorite) {
         await _write(client, account.token, rows);
       }
