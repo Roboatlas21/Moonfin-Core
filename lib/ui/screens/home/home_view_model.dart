@@ -1137,6 +1137,10 @@ class HomeViewModel extends ChangeNotifier {
       await _loadDone;
     }
     await Future.wait([_refreshResumeRows(), _refreshOnNowRows()]);
+    // A newly saved guide favorite may not exist in the current Home row.
+    // Rebuild only Plex Cloud's favorites row on return, rather than loading
+    // every Home section as the Home button does.
+    if (_cloudOnlyPlex) await _reloadPlexFavoriteChannels();
   }
 
   /// Refetches the programs airing now for the On Now rows: the standalone

@@ -433,6 +433,60 @@ void main() {
     },
   );
 
+  test('returning from the guide updates Plex Cloud channel favorites in place', () async {
+    await enableSections({HomeSectionType.liveTv});
+    stubLiveTvRows();
+    final cloudClient = _MockPlexClient();
+    when(() => cloudClient.cloudOnly).thenReturn(true);
+    when(() => cloudClient.serverType).thenReturn(ServerType.plex);
+    when(() => cloudClient.userId).thenReturn('user');
+    when(() => cloudClient.baseUrl).thenReturn('http://server.test');
+    when(() => source.loadOnNow('http://server.test')).thenAnswer(
+      (_) async => const HomeRow(
+        id: 'liveTvOnNow',
+        title: 'On Now',
+        rowType: HomeRowType.liveTvOnNow,
+      ),
+    );
+
+    var favorites = <AggregatedItem>[];
+    when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
+      (_) async => HomeRow(
+        id: 'liveTvFavorites',
+        title: 'Favorite Channels',
+        rowType: HomeRowType.liveTvFavorites,
+        items: List.of(favorites),
+      ),
+    );
+    model.dispose();
+    model = HomeViewModel(
+      dataSource: source,
+      prefs: prefs,
+      client: cloudClient,
+      mediaBarViewModel: _MockMediaBar(),
+      multiServerRepo: _MockMultiServer(),
+    );
+    await model.load();
+    expect(model.rows.map((r) => r.id), ['liveTv']);
+
+    favorites = [
+      AggregatedItem(
+        id: 'channel-plex-123',
+        serverId: 'http://server.test',
+        rawData: {'Type': 'TvChannel', 'Name': 'Favorite Channel'},
+      ),
+    ];
+    await model.refreshResumeAndNextUp();
+    expect(model.rows.map((r) => r.id), ['liveTv', 'liveTvFavorites']);
+    expect(model.rows.last.items.single.id, 'channel-plex-123');
+
+    favorites = [];
+    await model.refreshResumeAndNextUp();
+    expect(model.rows.map((r) => r.id), ['liveTv']);
+    verify(() => source.loadFavoritesChannels('http://server.test')).called(3);
+    verifyNever(() => source.hasLiveTvChannels());
+  });
+
   group('returning to Home', () {
     HomeRow airing(List<String> ids) => HomeRow(
       id: 'liveTvOnNow',
