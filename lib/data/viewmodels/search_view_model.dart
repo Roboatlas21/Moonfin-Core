@@ -491,6 +491,7 @@ class SearchViewModel extends ChangeNotifier {
       includeCloudOnly: true,
       onPartialFailure: () => partial = true,
     );
+    debugPrint('SEARCH_DIAG lineup partial=$partial servers=${perServer.map((g) => g.map((i) => i.id).toList()).toList()}');
     if (partial) _channelsFuture = null;
     return perServer.expand((channels) => channels).toList();
   }
@@ -503,11 +504,13 @@ class SearchViewModel extends ChangeNotifier {
     _channelsFuture ??= _loadChannelLineup();
     try {
       final all = userDataSync.applyAll(await _channelsFuture!);
+      debugPrint('SEARCH_DIAG match q=$q items=${all.map((i) => '${i.id}:${i.name}').toList()}');
       return all
           .where((c) => foldForSearch(c.name).contains(q))
           .take(_resultLimit)
           .toList();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('SEARCH_DIAG channel failure $error $stackTrace');
       // A server without Live TV shouldn't break search. Retry next query in
       // case the failure was transient.
       _channelsFuture = null;
