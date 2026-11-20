@@ -303,6 +303,26 @@ void main() {
     await _pumpFrames(tester);
   }
 
+  testWidgets('TV guide error Retry is reachable from the window bar', (
+    tester,
+  ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
+    guideFailure = Exception('Guide unavailable');
+    await pumpGuide(tester);
+    expect(find.text('Retry'), findsOneWidget);
+    _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
+    await _pumpFrames(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideErrorRetry');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideWindowBar:0');
+  });
+
   for (final layout in [InterfaceLayout.tv, InterfaceLayout.phone]) {
     testWidgets('failed empty category shows Retry on ${layout.name}', (
       tester,

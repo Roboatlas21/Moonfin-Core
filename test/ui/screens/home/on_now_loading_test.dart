@@ -364,13 +364,18 @@ void main() {
           id: 'liveTvFavorites',
           title: 'Favorite Channels',
           rowType: HomeRowType.liveTvFavorites,
-          items: loads == 1
-              ? const []
-              : [AggregatedItem(
-                  id: 'channel-plex-free123',
-                  serverId: 'http://server.test',
-                  rawData: {'Type': 'TvChannel', 'Name': 'Free Channel'},
-                )],
+          items: prefs.get(Preference<List<String>>(
+            key: 'plex_live_tv_favorite_keys_plex-user',
+            defaultValue: const [],
+          )).contains('provider://tv.plex.provider.epg\u0000free123')
+              ? [
+                  AggregatedItem(
+                    id: 'channel-plex-free123',
+                    serverId: 'http://server.test',
+                    rawData: {'Type': 'TvChannel', 'Name': 'Free Channel'},
+                  ),
+                ]
+              : const [],
         );
       },
     );
@@ -389,6 +394,10 @@ void main() {
 
     pending.complete();
     await pumpEventQueue();
+    expect(prefs.get(Preference<List<String>>(
+      key: 'plex_live_tv_favorite_keys_plex-user',
+      defaultValue: const [],
+    )), contains('provider://tv.plex.provider.epg\u0000free123'));
     expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvFavorites']);
     expect(loads, 2);
   });
@@ -471,10 +480,13 @@ void main() {
     when(() => source.loadFavoritesChannels('http://server.test'))
         .thenAnswer((_) {
       calls++;
-      return calls == 2 ? old.future : Future.value(favoriteRow('new'));
+      if (calls == 1) return Future.value(favoriteRow('initial'));
+      if (calls == 2) return old.future;
+      return Future.value(favoriteRow('new'));
     });
 
     await model.load();
+    expect(model.rows.last.items.single.id, 'initial');
     final staleRefresh = model.refreshResumeAndNextUp();
     await pumpEventQueue();
     expect(calls, 2);
@@ -484,6 +496,7 @@ void main() {
         row.rowType == HomeRowType.liveTvFavorites &&
         row.items.single.id == 'new'), isTrue);
 
+    expect(model.rows.last.items.single.id, 'new');
     old.complete(favoriteRow('old'));
     await staleRefresh;
     expect(model.rows.last.items.single.id, 'new');
@@ -494,7 +507,7 @@ void main() {
     await enableSections({HomeSectionType.liveTv});
     stubLiveTvRows();
     when(() => source.loadOnNow('http://server.test'))
-        .thenThrow(Exception('EPG unavailable'));
+        .thenAnswer((_) async => throw Exception('EPG unavailable'));
     when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
       (_) async => HomeRow(
         id: 'liveTvFavorites',

@@ -533,6 +533,7 @@ void main() {
     );
     final vm = LiveTvGuideViewModel(client);
     await vm.load();
+    clearInteractions(liveTv);
     final pending = Completer<Map<String, dynamic>>();
     when(() => _guide(liveTv)).thenAnswer((_) => pending.future);
     final from = DateTime.utc(2026, 9, 11, 10);
@@ -542,6 +543,8 @@ void main() {
       to: from.add(const Duration(hours: 2)),
     );
     await pumpEventQueue();
+    expect(verify(() => _guide(liveTv, captureChannelIds: true)).captured,
+        [['c0']]);
     userDataSync.reset();
     pending.complete({'Items': [_program('new', 'c0')]});
     expect(await replacement, isFalse);
@@ -555,11 +558,16 @@ void main() {
     _stubChannels(liveTv, List.generate(51, (i) => _channel('c$i')));
     await vm.load(windowStart: early);
     await vm.loadMorePrograms();
+    clearInteractions(liveTv);
 
     final oldBatch = Completer<Map<String, dynamic>>();
     when(() => _guide(liveTv)).thenAnswer((_) => oldBatch.future);
     final superseded = vm.recordingChanged();
     await pumpEventQueue();
+    final oldRequests =
+        verify(() => _guide(liveTv, captureChannelIds: true)).captured;
+    expect(oldRequests, hasLength(1));
+    expect(oldRequests.single as List<String>, containsAll(['c0', 'c49']));
     when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
     expect(await vm.setWindowStart(later, paging: true), isTrue);
     clearInteractions(liveTv);
@@ -2168,9 +2176,15 @@ void main() {
         final tomorrow = today.add(const Duration(days: 1));
         await vm.load(windowStart: tomorrow);
         final sports = Completer<Map<String, dynamic>>();
+        final sportsRequests = <DateTime>[];
         when(() => _guide(liveTv, category: GuideFilter.sports))
-            .thenAnswer((_) => sports.future);
+            .thenAnswer((inv) {
+          sportsRequests.add(inv.namedArguments[#startDate] as DateTime);
+          return sports.future;
+        });
         vm.setFilter(GuideFilter.sports);
+        await pumpEventQueue();
+        expect(sportsRequests, [tomorrow]);
         final lineup = Completer<Map<String, dynamic>>();
         when(() => _channelsRequest(liveTv)).thenAnswer((_) => lineup.future);
         final loading = vm.goToNow(windowStart: today);
@@ -2518,12 +2532,14 @@ void main() {
       await vm.load();
       vm.setFilter(GuideFilter.kids);
       await pumpEventQueue();
+      clearInteractions(liveTv);
 
       final older = Completer<Map<String, dynamic>>();
       when(() => _guide(liveTv, category: GuideFilter.kids))
           .thenAnswer((_) => older.future);
       final first = vm.recordingChanged();
       await pumpEventQueue();
+      verify(() => _guide(liveTv, category: GuideFilter.kids)).called(1);
 
       when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
         (_) async => {

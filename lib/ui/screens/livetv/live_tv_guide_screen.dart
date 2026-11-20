@@ -173,6 +173,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final _emptyCategoryRetryFocus = FocusNode(
     debugLabel: 'GuideEmptyCategoryRetry',
   );
+  final _guideErrorRetryFocus = FocusNode(debugLabel: 'GuideErrorRetry');
   final _channelScrollController = ScrollController();
   final _programScrollController = ScrollController();
   final _nowNextScrollController = ScrollController();
@@ -933,6 +934,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _focusWindowBarFromGenres() => _focusWindowBar(_lastWindowBarIndex);
 
   void _focusLastChannelRow() {
+    if (_vm.state == GuideState.error &&
+        _guideErrorRetryFocus.context?.mounted == true) {
+      _guideErrorRetryFocus.requestFocus();
+      return;
+    }
     final channels = _vm.filteredChannels;
     if (channels.isEmpty) {
       if (_vm.hasFailedCategoryListings &&
@@ -1077,6 +1083,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _focusedChannel.removeListener(_scheduleArtworkLookup);
     _channelRailFocused.removeListener(_scheduleArtworkLookup);
     _emptyCategoryRetryFocus.dispose();
+    _guideErrorRetryFocus.dispose();
     _channelScrollController.dispose();
     _programScrollController.dispose();
     _nowNextScrollController.dispose();
@@ -2190,17 +2197,28 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             style: TextStyle(color: Colors.white.withAlpha(179)),
           ),
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            autofocus: true,
-            onPressed: () => unawaited(
-              _vm.load(
-                window: _vm.guideWindow,
-                windowStart: _vm.windowStart,
-                livePosition: _vm.atLivePosition,
+          Focus(
+            canRequestFocus: false,
+            onKeyEvent: (_, event) {
+              if (event.isActionable && event.logicalKey.isUpKey) {
+                _focusWindowBarFromGrid();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: OutlinedButton.icon(
+              autofocus: true,
+              focusNode: _guideErrorRetryFocus,
+              onPressed: () => unawaited(
+                _vm.load(
+                  window: _vm.guideWindow,
+                  windowStart: _vm.windowStart,
+                  livePosition: _vm.atLivePosition,
+                ),
               ),
+              icon: const Icon(Icons.refresh),
+              label: Text(l10n.retry),
             ),
-            icon: const Icon(Icons.refresh),
-            label: Text(l10n.retry),
           ),
         ],
       ),
