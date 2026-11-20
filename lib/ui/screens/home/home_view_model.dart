@@ -121,6 +121,7 @@ class HomeViewModel extends ChangeNotifier {
   bool _disposed = false;
   bool _liveTvFavoritesReloading = false;
   bool _liveTvFavoritesReloadPending = false;
+  int _homeLoadGeneration = 0;
   Future<void> _bgMerge = Future<void>.value();
   bool _bgMergeInFlight = false;
   bool _bgResumeRefreshInFlight = false;
@@ -413,6 +414,7 @@ class HomeViewModel extends ChangeNotifier {
     }
     newSectionsOnly = newSectionsOnly && _rows.isNotEmpty;
     if (newSectionsOnly) preserveExisting = true;
+    _homeLoadGeneration++;
     _isLoading = true;
     final done = Completer<void>();
     _loadDone = done.future;
@@ -853,8 +855,16 @@ class HomeViewModel extends ChangeNotifier {
         return;
       }
 
+      final generation = _homeLoadGeneration;
       final refreshed = await _dataSource.loadFavoritesChannels(_serverId);
-      if (_disposed || _isLoading) return;
+      if (_disposed) return;
+      if (generation != _homeLoadGeneration) {
+        // A full/new-sections Home load started while this request was out.
+        // Re-read after it completes instead of overwriting a newer row.
+        _liveTvFavoritesReloadPending = true;
+        return;
+      }
+      if (_isLoading) return;
       final next = List<HomeRow>.of(_rows);
       final oldIndex = next.indexWhere(
         (row) => row.rowType == HomeRowType.liveTvFavorites,
@@ -1210,10 +1220,10 @@ class HomeViewModel extends ChangeNotifier {
   /// small request per return. Once there are some, the row is loaded back
   /// in the user's section order.
   Future<void> _restoreMissingOnNow() async {
-    final standalone = _prefs.activeHomeSections.contains(
-      HomeSectionType.onNow,
-    );
-    // Inside Live TV, On Now only shows once that section found channels.
+    final standalone = !_cloudOnlyPlex &&
+        _prefs.activeHomeSections.contains(HomeSectionType.onNow);
+    // Cloud Plex always embeds On Now inside Live TV, even when the saved
+    // layout also enables the standalone section.
     if (!standalone && !_rows.any((row) => row.id == 'liveTv')) return;
     final HomeRow fresh;
     try {
