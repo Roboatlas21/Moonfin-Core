@@ -11234,7 +11234,7 @@
   },
   "guideSavedFilterSaveFailed": "Couldn't save filter. Try again.",
   "@guideSavedFilterSaveFailed": {
-    "description": "Bottom-of-screen notification when saving a guide group or category shortcut fails."
+    "description": "Error message shown inside the Live TV filter picker when saving a group or category shortcut fails."
   },
   "guideGroupShortcut": "{name} (group)",
   "@guideGroupShortcut": {
