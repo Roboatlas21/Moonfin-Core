@@ -671,7 +671,7 @@ void main() {
           ),
         )
         .color;
-    final idleFill = Colors.white.withValues(alpha: 0.10);
+    final idleFill = AppColorScheme.surface.withValues(alpha: 0.72);
     expect(filterFill(), idleFill);
     for (final control in ['GuideWindowBar:0', 'GuideBrowse']) {
       await key(LogicalKeyboardKey.arrowUp);
@@ -842,8 +842,7 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await pumpGuide(tester);
     final browse = find.byTooltip('Filters');
-    await tester.tap(find.text('Featured'));
-    await _pumpFrames(tester);
+    await _activateGuideControl(tester, 'GuideShortcut:group:Featured');
     expect(
       find.descendant(of: browse, matching: find.text('Featured')),
       findsOneWidget,
