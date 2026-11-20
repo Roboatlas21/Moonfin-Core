@@ -240,6 +240,7 @@ void main() {
     });
 
     final vm = await search(across: multiServer);
+    print('SEARCH_DIAG outage state=${vm.state} error=${vm.error} groups=${vm.results.map((g) => '${g.itemTypes}:${g.items.map((i) => i.id).toList()}').toList()}');
     expect(vm.state, SearchState.ready);
     expect(vm.results.single.items.single.id, 'alien-channel');
     expect(vm.results.single.items.single.name, 'Alien News');
@@ -305,6 +306,7 @@ void main() {
     });
 
     final vm = await search(query: 'Alien');
+    print('SEARCH_DIAG favorites state=${vm.state} error=${vm.error} groups=${vm.results.map((g) => '${g.itemTypes}:${g.items.map((i) => i.id).toList()}').toList()}');
     expect(vm.results.single.items.single.isFavorite, isFalse);
     userDataSync.publish('channel-plex-news', {'IsFavorite': true});
     expect(vm.results.single.items.single.isFavorite, isTrue);
