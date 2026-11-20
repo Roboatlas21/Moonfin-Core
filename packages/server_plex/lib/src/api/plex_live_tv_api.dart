@@ -343,7 +343,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           channel['Id'] as String: {
             if (dvr.isNotEmpty) ChannelGroupSource.plexFreeTv.groupId,
             for (final key in channel['genreRatingKeys'] as List? ?? const [])
-              if (catalog.genres[key] case final name?) name,
+              ?catalog.genres[key],
           },
       },
       channels: [...dvr, ...free],
