@@ -1544,9 +1544,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   void _onCategoryDisplayChanged() {
-    _suppressPickerRestorePrefetch = false;
     final mode = _prefs.get(UserPreferences.liveTvCategoryDisplay);
     if (mode == _categoryDisplay) return;
+    _suppressPickerRestorePrefetch = false;
     setState(() => _categoryDisplay = mode);
     if ((_vm.selectedGroup != null && !_usesPicker) ||
         (_usesPicker &&

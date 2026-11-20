@@ -184,6 +184,41 @@ void main() {
       ]);
     });
 
+    test('a Featured refresh keeps the requested time window', () async {
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      var featuredIds = <String>{'one'};
+      final featured = PromotedChannelGroup('Featured', () async => featuredIds);
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          const {},
+          channels: [_channel('one'), _channel('two')],
+          promoted: featured,
+        ),
+      );
+      final start = DateTime.utc(2026, 11, 19, 19);
+      await vm.load(windowStart: start);
+      vm.setGroup('Featured');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['one']);
+
+      final next = start.add(vm.guideWindow);
+      final pending = Completer<Map<String, dynamic>>();
+      when(() => _guide(api)).thenAnswer((call) {
+        if (call.namedArguments[#startDate] == next) return pending.future;
+        return Future.value({'Items': <dynamic>[]});
+      });
+      final moving = vm.setWindowStart(next, paging: true);
+      await pumpEventQueue();
+      featuredIds = {'two'};
+      await vm.refreshPromotedGroup(force: true);
+      pending.complete({'Items': [_program('next', 'two', start: next)]});
+
+      expect(await moving, isTrue);
+      expect(vm.windowStart, next);
+      expect(vm.filteredChannels.map((c) => c.id), ['two']);
+      expect(vm.programsForChannel('two').single.id, 'next');
+    });
+
     testWidgets('Featured refreshes on expiry, re-entry and demand', (
       tester,
     ) async {

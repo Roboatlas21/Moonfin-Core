@@ -1694,7 +1694,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _promotedIds = group.channelIds;
       _rebuildGroupChoices(complete: true);
       if (selected) {
-        _windowRequest++;
+        // Refresh the page without canceling a pending time-window move.
         _resetPageCursor();
         if (_state == GuideState.ready) unawaited(loadMorePrograms());
       }
