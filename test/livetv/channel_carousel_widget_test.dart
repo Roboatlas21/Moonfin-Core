@@ -25,6 +25,8 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   int refreshCalls = 0;
   int programLookups = 0;
   bool ready = false;
+  bool failTopUp = false;
+  final Set<String> failedChannels = {};
   bool get listening => hasListeners;
   String titleSuffix = '';
 
@@ -74,8 +76,15 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   }
 
   @override
+  GuideChannelLoadState loadStateFor(String channelId) =>
+      failedChannels.contains(channelId)
+          ? GuideChannelLoadState.failed
+          : GuideChannelLoadState.loading;
+
+  @override
   Future<void> ensureProgramsForChannels(List<String> channelIds) async {
     requests.add(channelIds);
+    if (failTopUp) throw StateError('HTTP 403 during optional top-up');
   }
 
   @override
@@ -454,6 +463,70 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     expect(vm.disposed, isTrue);
     expect(vm.listening, isFalse);
+  });
+
+  testWidgets('a failed cold-open top-up does not hide the channel strip', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final client = _CarouselClient();
+    final channels = [
+      for (var i = 0; i < 6; i++)
+        GuideChannel(
+          id: 'ch$i',
+          name: 'Channel $i',
+          rawData: const {},
+        ),
+    ];
+    final vm = _CarouselGuide(client, channels)..failTopUp = true;
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
+    addTearDown(prewarm.dispose);
+    prewarm.tuned(channels, 'ch3');
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.buildTheme(ThemeRegistry.active),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      home: Scaffold(
+        body: ChannelCarouselOverlay(
+          client: client,
+          channels: channels,
+          currentChannelId: 'ch3',
+          prewarm: prewarm,
+          onChannelSelected: (_) {},
+          onDismiss: () {},
+          onShowControls: () {},
+        ),
+      ),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(vm.ready, isTrue);
+    expect(vm.requests.length, greaterThan(1));
+    expect(find.byType(ChannelCarouselCard), findsWidgets);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('failed visible prewarm channels retry once after backoff', (
+    tester,
+  ) async {
+    final client = _CarouselClient();
+    final channels = [
+      for (var i = 0; i < 4; i++)
+        GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
+    ];
+    final vm = _CarouselGuide(client, channels)..failedChannels.add('ch1');
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
+    addTearDown(prewarm.dispose);
+    prewarm.tuned(channels, 'ch1');
+    await tester.pump(ChannelCarouselPrewarm.settleDelay);
+    await tester.pump();
+    expect(vm.requests, hasLength(1));
+    await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+    await tester.pump();
+    expect(vm.requests.last, ['ch1']);
+    final count = vm.requests.length;
+    await tester.pump(const Duration(seconds: 1));
+    expect(vm.requests, hasLength(count));
   });
 
   testWidgets('prewarm loads listings near the tuned channel', (

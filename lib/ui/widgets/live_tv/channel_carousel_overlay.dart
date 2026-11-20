@@ -63,6 +63,11 @@ class ChannelCarouselPrewarm {
 
   Timer? _timer;
   Timer? _hourlyTimer;
+  Timer? _failedListingsTimer;
+  final Map<String, DateTime> _failedListingsLastAttempt = {};
+  @visibleForTesting
+  static const failedListingsRetryDelay = Duration(seconds: 5);
+  static const _failedListingsRetryCooldown = Duration(seconds: 30);
   DateTime? _hourlyDueAt;
   Future<void>? _inFlight;
   String _tunedChannelId = '';
@@ -135,6 +140,7 @@ class ChannelCarouselPrewarm {
     });
     if (_disposed) return;
     viewModel.scheduleBoundaryRefresh();
+    _scheduleFailedVisibleRetry(ids);
     if (_hourlyDueAt == null) _armHourly();
   }
 
@@ -228,25 +234,60 @@ class ChannelCarouselPrewarm {
 
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
     if (_disposed || channelIds.isEmpty) return;
-    final wasWarm = isWarm;
     await ensureReady();
     if (!_disposed && isWarm) {
-      // The first open already tried loading nearby listings, including one retry.
-      final ids = wasWarm
-          ? channelIds
-          : channelIds
-                .where(
-                  (id) =>
-                      viewModel.loadStateFor(id) ==
-                      GuideChannelLoadState.loading,
-                )
-                .toList();
+      // Only missing, not failed, programs get an immediate top-up. Retrying
+      // a failed channel waits for the bounded backoff below.
+      final ids = channelIds
+          .where((id) =>
+              viewModel.loadStateFor(id) == GuideChannelLoadState.loading)
+          .toList();
       if (ids.isNotEmpty) {
         await viewModel.ensureProgramsForChannels(ids);
         // The new listings may end sooner than the current boundary timer.
         if (!_disposed) viewModel.scheduleBoundaryRefresh();
       }
+      _scheduleFailedVisibleRetry(channelIds);
     }
+  }
+
+  void _scheduleFailedVisibleRetry(Iterable<String> visible) {
+    if (_disposed || !isWarm || viewModel.listingsAccessDenied ||
+        _failedListingsTimer != null) return;
+    final now = _now();
+    final failed = [
+      for (final id in visible)
+        if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
+            (_failedListingsLastAttempt[id] == null ||
+                now.difference(_failedListingsLastAttempt[id]!) >=
+                    _failedListingsRetryCooldown))
+          id,
+    ];
+    if (failed.isEmpty) return;
+    _failedListingsTimer = Timer(failedListingsRetryDelay, () {
+      _failedListingsTimer = null;
+      if (_disposed || !isWarm || viewModel.listingsAccessDenied) return;
+      final current = carouselNeighborhood(
+        viewModel.playbackChannels,
+        _tunedChannelId,
+        _defaultVisibleCards,
+      ).toSet();
+      final eligible = [
+        for (final id in failed)
+          if (current.contains(id) &&
+              viewModel.loadStateFor(id) == GuideChannelLoadState.failed)
+            id,
+      ];
+      if (eligible.isEmpty) return;
+      for (final id in eligible) {
+        _failedListingsLastAttempt[id] = _now();
+      }
+      // A successful empty schedule is loaded, not failed, so it stays out.
+      // Never queue a tight repeated retry while a server is offline.
+      unawaited(viewModel.ensureProgramsForChannels(eligible).catchError(
+        (Object _) {},
+      ));
+    });
   }
 
   Future<void> ensureReady() async {
@@ -272,6 +313,7 @@ class ChannelCarouselPrewarm {
     liveTvRecordingRevision.removeListener(_onRecordingsChanged);
     userDataSync.removeListener(viewModel.syncChannelUserData);
     _timer?.cancel();
+    _failedListingsTimer?.cancel();
     _hourlyTimer?.cancel();
     _hourlyTimer = null;
     _hourlyDueAt = null;
@@ -502,7 +544,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     final prewarm = widget.prewarm;
     final initialIds = _neighborhood();
     if (prewarm != null) {
-      await prewarm.ensureVisibleChannels(initialIds);
+      await prewarm.ensureReady();
     } else {
       await _vm.load(
         initialChannelIds: initialIds,
@@ -525,7 +567,8 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     }
     if (_ownsViewModel) _vm.scheduleBoundaryRefresh();
     _scheduleHeader();
-    if (_lineupChangedDuringLoad ||
+    if (prewarm != null ||
+        _lineupChangedDuringLoad ||
         _neighborhood().any((id) => !initialIds.contains(id))) {
       _lineupChangedDuringLoad = false;
       _scheduleVisibleLoad();
