@@ -278,6 +278,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // until their programs arrive.
   final Set<String> _programsLoadedIds = <String>{};
   final Set<String> _failedProgramIds = <String>{};
+  // Already-loaded rows keep their programs if a later refresh fails.
+  final Set<String> _failedReplacementIds = <String>{};
   final Set<String> _retryingFailedProgramIds = <String>{};
   ({int page, Future<void> task})? _failedProgramsRetry;
 
@@ -310,6 +312,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Map<String, List<GuideProgram>> _categoryPrograms = {};
   int _categoryHighWater = 0;
   final Set<String> _categoryQueriedIds = <String>{};
+  // A category may hide channels whose listings failed. Keep these retryable
+  // without re-querying the rest of the category on selection.
+  final Set<String> _categoryFailedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
   int _windowRequest = 0;
   ({
@@ -485,6 +490,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programsByChannel.removeWhere((id, _) => !ids.contains(id));
     _programsLoadedIds.retainAll(ids);
     _failedProgramIds.retainAll(ids);
+    _failedReplacementIds.retainAll(ids);
   }
 
   final Map<String, List<GuideProgram>> _programsByChannel = {};
@@ -906,6 +912,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // Collect everything before publishing, so an older request cannot
     // overwrite badges from a newer recording change halfway through.
     final refreshed = <String, List<GuideProgram>>{};
+    final failed = <String>{};
     final size = _batchSizeFor(filter);
     bool current() =>
         !_disposed &&
@@ -915,7 +922,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     for (var i = 0; i < channels.length; i += size) {
       final batch = channels.sublist(i, min(i + size, channels.length));
       final fetched = await _fetchPrograms(batch, category: filter);
-      if (!current() || fetched.failedChannelIds.isNotEmpty) return false;
+      if (!current()) return false;
+      failed.addAll(fetched.failedChannelIds);
       for (final channel in batch) {
         final programs = fetched.programs[channel.id];
         if (programs != null) refreshed[channel.id] = programs;
@@ -923,8 +931,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     if (!current()) return false;
     _categoryPrograms.addAll(refreshed);
+    _categoryFailedIds.addAll(failed);
     _notifyListeners();
-    return true;
+    return failed.isEmpty;
   }
 
   /// Records the showings of this program's series that [episodes] picks, or
@@ -1054,6 +1063,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final queryChanged = clearSearch && _channelQuery.isNotEmpty;
     if (!queryChanged && _filter == value && _selectedGroup == group) {
       unawaited(refreshPromotedGroup());
+      if (_isCategory(value) && _categoryFailedIds.isNotEmpty) {
+        unawaited(_retryCategoryFailures());
+      }
       if (group != null &&
           _state == GuideState.ready &&
           _failedProgramIds.isNotEmpty &&
@@ -1169,6 +1181,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           .toList();
       final fetched = await _fetchPrograms(batch, category: filter);
       if (request != _categoryRequest) return;
+      var failed = fetched.failedChannelIds;
+      if (failed.isNotEmpty) {
+        // One bounded retry, using the existing API batch, only for failures.
+        final retry = await _fetchPrograms(
+          batch.where((channel) => failed.contains(channel.id)).toList(),
+          category: filter,
+        );
+        if (request != _categoryRequest) return;
+        fetched.programs.addAll(retry.programs);
+        failed = retry.failedChannelIds;
+      }
+      _categoryFailedIds.addAll(failed);
+      _failedProgramIds.removeAll(batch.map((c) => c.id));
+      _failedProgramIds.addAll(failed);
+      // Mark the full batch visited to advance past repeated failures.
+      // Unresolved IDs remain in _categoryFailedIds for a later manual retry.
       _categoryQueriedIds.addAll(batch.map((c) => c.id));
       _advanceCategoryCursor();
       if (fetched.programs.isEmpty) continue;
@@ -1177,10 +1205,59 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
+  /// Selecting the same category again retries only its missing EPG channels.
+  /// Failed rows are absent from the category list, so the usual row Retry
+  /// control cannot target them.
+  Future<void> _retryCategoryFailures() async {
+    if (_disposed || _categoryFetchInFlight || _state != GuideState.ready) {
+      return;
+    }
+    final request = _categoryRequest;
+    final session = userDataSync.session;
+    final filter = _filter;
+    final failed = _categoryFailedIds.toList();
+    _categoryFetchInFlight = true;
+    try {
+      final size = _batchSizeFor(filter);
+      for (var i = 0; i < failed.length; i += size) {
+        final batch = failed
+            .skip(i)
+            .take(size)
+            .map(channelForId)
+            .whereType<GuideChannel>()
+            .toList();
+        if (batch.isEmpty) continue;
+        final reply = await _fetchPrograms(batch, category: filter);
+        if (_disposed ||
+            request != _categoryRequest ||
+            filter != _filter ||
+            session != userDataSync.session) {
+          return;
+        }
+        final requested = batch.map((c) => c.id).toSet();
+        _categoryFailedIds.removeAll(requested);
+        _categoryFailedIds.addAll(reply.failedChannelIds);
+        _failedProgramIds.removeAll(requested);
+        _failedProgramIds.addAll(reply.failedChannelIds);
+        _categoryPrograms.addAll(reply.programs);
+        _notifyListeners();
+      }
+    } catch (_) {
+      // Keep the failed IDs for the next explicit selection. An authorization
+      // error is handled by _fetchGuide's existing guide-wide error path.
+    } finally {
+      if (!_disposed && request == _categoryRequest) {
+        _categoryFetchInFlight = false;
+        _notifyListeners();
+      }
+    }
+  }
+
   void _resetCategory() {
     _categoryFetchInFlight = false;
     _categoryPrograms.clear();
     _categoryQueriedIds.clear();
+    _categoryFailedIds.clear();
     _categoryHighWater = 0;
     _categoryLoadedFor = null;
     _categoryRequest++;
@@ -1659,7 +1736,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           ..clear()
           ..addAll(fetched);
         _categoryFetchInFlight = false;
-        _categoryQueriedIds.addAll(ids.where((id) => !failed.contains(id)));
+        _categoryFailedIds
+          ..clear()
+          ..addAll(failed);
+        _categoryQueriedIds.addAll(ids);
         _advanceCategoryCursor();
         _categoryLoadedFor = category;
       }
@@ -1781,6 +1861,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programsByChannel.clear();
     _programsLoadedIds.clear();
     _failedProgramIds.clear();
+    _failedReplacementIds.clear();
     _retryingFailedProgramIds.clear();
     _programsHighWater = 0;
     _processedBoundaries.clear();
@@ -2020,10 +2101,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         session != userDataSync.session) {
       return false;
     }
-    _programsByChannel.addAll(replacements);
-    _programsLoadedIds.addAll(replacements.keys);
+    _programsByChannel.addAll(replacements.programs);
+    _programsLoadedIds.addAll(replacements.programs.keys);
+    _failedReplacementIds.removeAll(channelIds);
+    _failedReplacementIds.addAll(replacements.failedChannelIds);
     _notifyListeners();
-    return true;
+    if (replacements.failedChannelIds.isNotEmpty &&
+        _boundarySchedulingEnabled) {
+      _armRetry(failureBackoff);
+    }
+    return replacements.failedChannelIds.isEmpty;
   }
 
   // --- Next-future-boundary refresh -----------------------------------------
@@ -2089,6 +2176,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
     _boundaryDueAt = null;
+    if (_failedReplacementIds.isNotEmpty) {
+      // A resumed guide must not replace a pending partial-failure retry
+      // with a later boundary belonging to a healthy channel.
+      final retryAt = due ?? now.add(failureBackoff);
+      _arm(retryAt.difference(now), retryAt);
+      return;
+    }
 
     final next = _nextBoundary(now);
     if (next == null) {
@@ -2179,7 +2273,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!boundary.isAfter(now)) _processedBoundaries.add(boundary);
     }
 
-    if (!forceRefresh && !_coverageLapsed(now)) {
+    if (!forceRefresh &&
+        _failedReplacementIds.isEmpty &&
+        !_coverageLapsed(now)) {
       // The next program is already cached, so the cells promote in place.
       _boundaryRefreshInFlight = false;
       _notifyListeners();
@@ -2191,7 +2287,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     try {
       if (!await _refreshLoadedChannels(now) || _disposed) {
         _boundaryRefreshInFlight = false;
-        _rearmBoundaryIfEnabled();
+        // replacePrograms already armed the partial-failure retry; don't
+        // override it with a later healthy channel's program boundary.
+        if (_boundaryDueAt == null) _rearmBoundaryIfEnabled();
         return;
       }
     } catch (error) {
@@ -2223,7 +2321,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final from = now.subtract(rollingRefreshLookback);
     final to = now.add(rollingRefreshHorizon);
 
-    Map<String, List<GuideProgram>>? replacements;
+    ({
+      Map<String, List<GuideProgram>> programs,
+      Set<String> failedChannelIds,
+    })? replacements;
     try {
       replacements = await _fetchProgramReplacements(
         ids,
@@ -2248,18 +2349,29 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _rearmBoundaryIfEnabled();
       return;
     }
-    for (final entry in replacements.entries) {
-      _programsByChannel[entry.key] = entry.value;
-    }
+    _programsByChannel.addAll(replacements.programs);
+    _failedReplacementIds.removeAll(ids);
+    _failedReplacementIds.addAll(replacements.failedChannelIds);
     _processedBoundaries.removeWhere((boundary) => !boundary.isAfter(now));
     _notifyListeners();
-    _scheduleAfterRollingRefresh();
+    if (_failedReplacementIds.isNotEmpty) {
+      if (_boundarySchedulingEnabled) _armRetry(failureBackoff);
+    } else {
+      _scheduleAfterRollingRefresh();
+    }
   }
 
   /// Replaces every cached channel over a range that spans the guide viewport,
   /// in batches, so no surface's coverage can shrink to a rolling horizon.
   Future<bool> _refreshLoadedChannels(DateTime now) {
-    final ids = _programsLoadedIds.toList();
+    final ids = [
+      for (final id in _programsLoadedIds)
+        if (_failedReplacementIds.isEmpty ||
+            _failedReplacementIds.contains(id) ||
+            (_programsByChannel[id]?.isNotEmpty == true &&
+                !_programsByChannel[id]!.any((p) => p.endDate.isAfter(now))))
+          id,
+    ];
     final from = _windowStart.isBefore(now) ? _windowStart : now;
     final rolling = now.add(_guideWindow);
     final to = rolling.isAfter(_windowEnd) ? rolling : _windowEnd;
@@ -2282,7 +2394,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_boundarySchedulingEnabled && !_disposed) scheduleBoundaryRefresh();
   }
 
-  Future<Map<String, List<GuideProgram>>?> _fetchProgramReplacements(
+  Future<({
+    Map<String, List<GuideProgram>> programs,
+    Set<String> failedChannelIds,
+  })?> _fetchProgramReplacements(
     List<String> ids, {
     required DateTime from,
     required DateTime to,
@@ -2290,6 +2405,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }) async {
     final session = userDataSync.session;
     final replacements = <String, List<GuideProgram>>{};
+    final failed = <String>{};
     for (var i = 0; i < ids.length; i += _programBatchSize) {
       if (_disposed ||
           generation != _programGeneration ||
@@ -2312,14 +2428,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           session != userDataSync.session) {
         return null;
       }
-      // A partial Plex grid must not replace valid cached programs with gaps.
-      if (_failedGuideIds(response).isNotEmpty) return null;
+      // Merge healthy channels; retain cached programs for failed ones.
+      final failedInBatch = _failedGuideIds(response);
+      failed.addAll(failedInBatch);
       final parsed = _parsePrograms(response);
       for (final id in chunk) {
-        replacements[id] = parsed[id] ?? <GuideProgram>[];
+        if (!failedInBatch.contains(id)) {
+          replacements[id] = parsed[id] ?? <GuideProgram>[];
+        }
       }
     }
-    return replacements;
+    return (programs: replacements, failedChannelIds: failed);
   }
 
   Iterable<DateTime> _boundaries() => _programsByChannel.values.expand(

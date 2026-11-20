@@ -418,6 +418,35 @@ void main() {
     expect(cloud.requests.single.headers['X-Plex-Token'], 'saved-cloud-token');
   });
 
+  test('a second PMS applies another PMS cache without a second cloud GET', () async {
+    final first = _plex();
+    final second = _plex()..baseUrl = 'https://second-pms.example';
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    const dvr = <String, dynamic>{
+      'Id': 'channel-2-4',
+      'Name': 'DVR on second PMS',
+      'PlexFavoriteSource': 'server://second-machine/epg',
+      'PlexFavoriteId': '4',
+    };
+    final secondItem = PlexLiveTvFavorites.applyToItem(second, dvr);
+    final key = secondItem['PlexFavoriteSyncKey'] as String;
+    cloud.rows = [{'source': 'server://second-machine/epg', 'id': '4'}];
+
+    await PlexLiveTvFavorites.refresh(first);
+    expect(userDataSync.favoriteFor(key), isNull);
+    expect(await PlexLiveTvFavorites.refreshForBrowse(second), isTrue);
+    expect(userDataSync.favoriteFor(key), isTrue);
+    expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(1));
+
+    // Removing the favorite elsewhere should also reconcile without a GET.
+    cloud.rows = [];
+    await PlexLiveTvFavorites.refresh(first);
+    expect(await PlexLiveTvFavorites.refreshForBrowse(second), isTrue);
+    expect(userDataSync.favoriteFor(key), isFalse);
+    expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
+  });
+
   test('a client reused for another user drops its old DVR catalog', () {
     final pms = _plex();
     addTearDown(pms.dispose);

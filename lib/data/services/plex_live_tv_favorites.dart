@@ -245,13 +245,28 @@ class PlexLiveTvFavorites {
       favorites.toList()..sort(),
     );
     _checkAccount(client, token);
-    userDataSync.publishAll({
-      for (final entry in known.entries)
-        syncKey(client, entry.key): {
+    _publishCached(client, token);
+    _lastRefresh[userId] = DateTime.now();
+  }
+
+  /// A recent refresh may have come from a different PMS on this Plex account.
+  /// Apply its stored results to this client's DVR catalog without another GET.
+  static bool _publishCached(MediaServerClient client, String token) {
+    _checkAccount(client, token);
+    final userId = client.userId!;
+    final favorites = GetIt.instance<UserPreferences>()
+        .get(_preference(userId)).toSet();
+    final changes = {
+      for (final entry in _catalog(client).channels.entries)
+        syncKey(client, entry.key): <String, dynamic>{
           'IsFavorite': favorites.contains(_key(entry.value)),
         },
-    });
-    _lastRefresh[userId] = DateTime.now();
+    };
+    final changed = changes.entries.any(
+      (entry) => userDataSync.favoriteFor(entry.key) != entry.value['IsFavorite'],
+    );
+    userDataSync.publishAll(changes);
+    return changed;
   }
 
   static Future<bool> _refresh(
@@ -264,7 +279,7 @@ class PlexLiveTvFavorites {
       if (ifStale &&
           last != null &&
           DateTime.now().difference(last) < _browseRefreshAge) {
-        return false;
+        return _publishCached(client, account.token);
       }
       final remote = await _read(client, account.token);
       _checkAccount(client, account.token);
@@ -280,8 +295,8 @@ class PlexLiveTvFavorites {
     await _refresh(client, ifStale: ifStale);
   }
 
-  /// Read the latest cloud favorites when needed, without holding up browse
-  /// results. Returns true when a fresh response was applied.
+  /// Read account favorites without holding up browsing. Also returns true
+  /// when a different PMS has refreshed this account and we publish its cache.
   static Future<bool> refreshForBrowse(MediaServerClient client) async {
     try {
       if (client.serverType != ServerType.plex) return false;

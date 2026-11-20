@@ -681,6 +681,49 @@ void main() {
     expect(vm.state, GuideState.ready);
   });
 
+  test('a partial program replacement updates successes and retains failures', () async {
+    _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+    final now = DateTime.utc(2026, 9, 11, 10);
+    var clock = now;
+    when(() => _guide(liveTv)).thenAnswer((_) async => {
+      'Items': [_program('old-c0', 'c0'), _program('old-c1', 'c1')],
+    });
+    final vm = LiveTvGuideViewModel(client, now: () => clock);
+    addTearDown(vm.dispose);
+    await vm.load();
+    vm.scheduleBoundaryRefresh();
+
+    when(() => _guide(liveTv)).thenAnswer((_) async => {
+      'Items': [_program('new-c0', 'c0')],
+      'FailedChannelIds': ['c1'],
+    });
+    final complete = await vm.replacePrograms(
+      channelIds: ['c0', 'c1'],
+      from: now,
+      to: now.add(const Duration(hours: 3)),
+    );
+    expect(complete, isFalse);
+    expect(vm.programsForChannel('c0').single.id, 'new-c0');
+    expect(vm.programsForChannel('c1').single.id, 'old-c1');
+    final retryAt = now.add(LiveTvGuideViewModel.failureBackoff);
+    expect(vm.boundaryDueAt, retryAt);
+    vm.scheduleBoundaryRefresh();
+    expect(vm.boundaryDueAt, retryAt);
+
+    when(() => _guide(liveTv)).thenAnswer((_) async => {
+      'Items': [_program('new-c1', 'c1')],
+    });
+    clock = retryAt;
+    await vm.handleBoundaryElapsed();
+    expect(vm.programsForChannel('c1').single.id, 'new-c1');
+    expect(vm.programsForChannel('c0').single.id, 'new-c0');
+    final requests = verify(
+      () => _guide(liveTv, captureChannelIds: true),
+    ).captured;
+    expect(requests.last, ['c1']);
+    vm.cancelBoundaryRefresh();
+  });
+
   test('a targeted initial load requests only the named channels', () async {
     final channels = List.generate(120, (i) => _channel('c$i'));
     when(
@@ -1201,6 +1244,28 @@ void main() {
       },
     );
 
+    test('a partial rolling refresh keeps old listings for failed channels', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      items = [
+        _span('old-c0', 'c0', at(-60), at(30)),
+        _span('old-c1', 'c1', at(-60), at(30)),
+      ];
+      final vm = LiveTvGuideViewModel(client, now: () => clock);
+      addTearDown(vm.dispose);
+      await vm.load();
+      clock = at(10);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {
+        'Items': [_span('new-c0', 'c0', at(0), at(90))],
+        'FailedChannelIds': ['c1'],
+      });
+
+      await vm.refreshCarouselPrograms();
+      expect(vm.programsForChannel('c0').single.id, 'new-c0');
+      expect(vm.programsForChannel('c1').single.id, 'old-c1');
+      expect(vm.boundaryDueAt, clock.add(LiveTvGuideViewModel.failureBackoff));
+      vm.cancelBoundaryRefresh();
+    });
+
     test('overlapping rolling refresh calls share one request', () async {
       seedLapsingSchedule();
       final vm = LiveTvGuideViewModel(client, now: () => clock);
@@ -1716,6 +1781,43 @@ void main() {
   });
 
   group('category filters', () {
+    test('a partial category batch retries only failed channels', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1'), _channel('c2')]);
+      final requests = <List<String>>[];
+      var stillFailing = true;
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        requests.add(ids);
+        if (ids.length > 1) {
+          return {
+            'Items': [_program('sport-c0', 'c0', isSports: true)],
+            'FailedChannelIds': ['c1'],
+          };
+        }
+        return stillFailing
+            ? {'Items': <dynamic>[], 'FailedChannelIds': ['c1']}
+            : {'Items': [_program('sport-c1', 'c1', isSports: true)]};
+      });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      expect(requests, [['c0', 'c1', 'c2'], ['c1']]);
+      expect(vm.filteredChannels.map((c) => c.id), ['c0']);
+      expect(vm.hasMorePrograms, isFalse);
+
+      stillFailing = false;
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(requests.last, ['c1']);
+      expect(requests, hasLength(3));
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c1']);
+    });
+
     test('a category chip walks the lineup in flagged batches', () async {
       final channels = List.generate(120, (i) => _channel('c$i', number: '$i'));
       _stubChannels(liveTv, channels);
