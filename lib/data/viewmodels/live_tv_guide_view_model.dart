@@ -422,6 +422,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _categoryHighWater = 0;
     _categoryRequest++;
+    // Sorting invalidates any pending category retry. Its old finally block
+    // cannot clear this flag once the request generation has changed.
+    _categoryFetchInFlight = false;
     _notifyListeners();
     unawaited(loadMorePrograms());
   }
@@ -899,7 +902,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         return;
       }
       if (recordingRevision != liveTvRecordingRevision.value) return;
-      if (await _refreshLoadedChannels(_now()) &&
+      if (await _refreshLoadedChannels(_now(), includeAll: true) &&
           recordingRevision == liveTvRecordingRevision.value) {
         _loadedRecordingRevision = recordingRevision;
       }
@@ -1205,8 +1208,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         failed = retry.failedChannelIds;
       }
       _categoryFailedIds.addAll(failed);
-      _failedProgramIds.removeAll(batch.map((c) => c.id));
-      _failedProgramIds.addAll(failed);
+      // Category requests own their own failure markers; they must not clear
+      // failed All-view listings, which have a separate retry path.
       // Mark the full batch visited to advance past repeated failures.
       // Unresolved IDs remain in _categoryFailedIds for a later manual retry.
       _categoryQueriedIds.addAll(batch.map((c) => c.id));
@@ -1250,8 +1253,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         final requested = batch.map((c) => c.id).toSet();
         _categoryFailedIds.removeAll(requested);
         _categoryFailedIds.addAll(reply.failedChannelIds);
-        _failedProgramIds.removeAll(requested);
-        _failedProgramIds.addAll(reply.failedChannelIds);
         _categoryPrograms.addAll(reply.programs);
         _notifyListeners();
       }
@@ -1719,6 +1720,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (samePage() || (current() && identical(error, _error))) rethrow;
       }
       if (!samePage()) continue;
+      final ids = rows.take(end).map((c) => c.id).toSet();
+      final requestedIds = {
+        ...ids,
+        if (windowStart != null && category != null)
+          for (final channel in previouslyShownCategoryRows) channel.id,
+      };
+      // A failed-channel response is not a successful empty guide. Do not
+      // discard the old programs or move the clock when every request failed.
+      if (windowStart != null &&
+          requestedIds.isNotEmpty &&
+          requestedIds.every(failed.contains)) {
+        return false;
+      }
       if (windowStart != null) {
         // Invalidate old-window reads and commit without an intermediate notification.
         _resetPrograms();
@@ -1729,10 +1743,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _atLivePosition = livePosition;
         _loadedRecordingRevision = recordingRevision;
       }
-      final ids = rows.take(end).map((c) => c.id);
-      _failedProgramIds.removeAll(ids);
-      _failedProgramIds.addAll(failed);
       if (category == null) {
+        _failedProgramIds.removeAll(ids);
+        _failedProgramIds.addAll(failed);
         for (final id in ids) {
           if (failed.contains(id)) {
             _programsByChannel.remove(id);
@@ -2265,6 +2278,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   void _arm(Duration delay, DateTime dueAt) {
     if (_disposed) return;
+    _boundaryTimer?.cancel();
     _boundaryDueAt = dueAt;
     _boundaryTimer = Timer(delay, () => unawaited(handleBoundaryElapsed()));
   }
@@ -2376,10 +2390,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   /// Replaces every cached channel over a range that spans the guide viewport,
   /// in batches, so no surface's coverage can shrink to a rolling horizon.
-  Future<bool> _refreshLoadedChannels(DateTime now) {
+  Future<bool> _refreshLoadedChannels(
+    DateTime now, {
+    bool includeAll = false,
+  }) {
     final ids = [
       for (final id in _programsLoadedIds)
-        if (_failedReplacementIds.isEmpty ||
+        if (includeAll ||
+            _failedReplacementIds.isEmpty ||
             _failedReplacementIds.contains(id) ||
             (_programsByChannel[id]?.isNotEmpty == true &&
                 !_programsByChannel[id]!.any((p) => p.endDate.isAfter(now))))

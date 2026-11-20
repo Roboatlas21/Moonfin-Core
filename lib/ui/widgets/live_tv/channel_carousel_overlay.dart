@@ -454,7 +454,11 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     final tuneChanged =
         oldWidget.currentChannelId != widget.currentChannelId ||
         oldWidget.selectionRevision != widget.selectionRevision;
-    if ((!lineupChanged && !tuneChanged) || _channels.isEmpty) return;
+    if (_channels.isEmpty) {
+      _dismiss();
+      return;
+    }
+    if (!lineupChanged && !tuneChanged) return;
     if (tuneChanged || !_channels.any((channel) => channel.id == _centeredId)) {
       _centeredId =
           _channels.any((channel) => channel.id == widget.currentChannelId)

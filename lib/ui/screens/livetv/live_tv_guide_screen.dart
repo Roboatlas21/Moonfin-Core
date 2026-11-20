@@ -1774,6 +1774,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   void _selectGuideFilter(GuideFilter filter, {String? group}) {
+    if (_vm.filter != filter || _vm.selectedGroup != group) {
+      _suppressPickerRestorePrefetch = false;
+    }
     _vm.setFilter(filter, group: group, clearSearch: true);
     _clearChannelSearch();
   }

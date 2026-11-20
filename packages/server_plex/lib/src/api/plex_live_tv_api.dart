@@ -74,6 +74,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     headers: {'X-Plex-Provider-Version': '7.2'},
   );
 
+  static bool _accessDenied(Object error) =>
+      error is DioException &&
+      (error.response?.statusCode == 401 || error.response?.statusCode == 403);
+
   /// The free channels' guide comes one channel at a time, and plex.tv turns
   /// a burst away, so only this many go out at once.
   static const _cloudGuideRequests = 3;
@@ -534,6 +538,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               }
               return decoded;
             } catch (error, stack) {
+              // A denied provider token is not a per-channel outage. Let the
+              // caller invalidate guide access instead of retaining stale EPG.
+              if (_accessDenied(error)) Error.throwWithStackTrace(error, stack);
               failedChannelIds.add(_channelId(plexCloudSource, request.channel));
               firstFailure ??= error;
               firstFailureStack ??= stack;
@@ -635,6 +642,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           stack: null,
         );
       } catch (error, stack) {
+        // No healthy source may mask an authorization failure from another.
+        if (_accessDenied(error)) Error.throwWithStackTrace(error, stack);
         return (
           items: <Map<String, dynamic>>[],
           failedChannelIds: failedOnError,
