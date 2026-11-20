@@ -231,7 +231,8 @@ void main() {
     for (final api in itemsApis.values) {
       when(() => itemsSearch(api)).thenThrow(StateError('offline'));
     }
-    when(() => clients['a']!.liveTvApi.getChannels(
+    final channelsApi = clients['a']!.liveTvApi;
+    when(() => channelsApi.getChannels(
       fields: 'ImageTags',
       enableTotalRecordCount: false,
       userId: 'user-a',
@@ -289,7 +290,8 @@ void main() {
     when(() => itemsSearch(itemsApis['a']!)).thenAnswer(
       (_) async => {'Items': <dynamic>[]},
     );
-    when(() => clients['a']!.liveTvApi.getChannels(
+    final channelsApi = clients['a']!.liveTvApi;
+    when(() => channelsApi.getChannels(
       fields: 'ImageTags',
       enableTotalRecordCount: false,
       userId: 'user-a',
