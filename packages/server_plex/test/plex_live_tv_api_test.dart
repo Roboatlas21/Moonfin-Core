@@ -74,6 +74,9 @@ const _teletubbies = {
               'genreRatingKeys': ['movie-key', 'news-key', 'unknown'],
               'thumb': 'https://provider-static.plex.tv/cw.png',
             },
+            // Present in All Channels, but deliberately absent from Featured.
+            if (options.uri.path == '/lineups/plex/channels')
+              {'id': 'news-extra', 'title': 'News Extra'},
             {'id': 'locked-1', 'title': 'Locked', 'drm': true},
           ],
         },
@@ -235,11 +238,12 @@ void main() {
       expect(channels.map((c) => c['Id']), [
         'channel-2-4',
         'channel-plex-abc-66635fc0',
+        'channel-plex-news-extra',
       ]);
       expect(channels.first, containsPair('ChannelNumber', '4'));
       expect(channels.first['Type'], 'TvChannel');
       expect(channels.last.containsKey('ChannelNumber'), isFalse);
-      expect(result['TotalRecordCount'], 2);
+      expect(result['TotalRecordCount'], 3);
     },
   );
 
@@ -250,6 +254,7 @@ void main() {
     expect(lineup.groupsByChannelId, {
       'channel-2-4': {'source:dvr'},
       'channel-plex-abc-66635fc0': {'source:plexFreeTv', 'Movies', 'News'},
+      'channel-plex-news-extra': <String>{},
     });
     final promoted = lineup.promoted!;
     expect((await api.getChannelGroups()).promoted, same(promoted));
@@ -259,6 +264,7 @@ void main() {
     expect(cloud.map((r) => r.uri.path), ['/lineups/plex/channels', '/']);
     await promoted.refresh(DateTime.now);
     expect(promoted.channelIds, {'channel-plex-abc-66635fc0'});
+    expect(promoted.channelIds, isNot(contains('channel-plex-news-extra')));
     expect(server.requests.last.uri.path, '/lineups/plex/channels/featured');
     expect(server.requests.last.headers['X-Plex-Provider-Version'], '7.2');
   });
