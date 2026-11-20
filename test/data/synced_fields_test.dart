@@ -172,6 +172,7 @@ void main() {
     'loadingAnimationSpeed',
     'liveTvChannelSortBy',
     'liveTvCategoryDisplay',
+    'liveTvSavedFilters',
     'liveTvDirectPlayEnabled',
     'maxBitrate',
     'maxVideoResolution',

@@ -2114,6 +2114,9 @@ class PluginSyncService extends ChangeNotifier {
       case SyncCodec.csvList:
         _applyStringList(
             data, field.serverKey, field.pref as Preference<String>);
+      case SyncCodec.stringList:
+        _applyStringArray(
+            data, field.serverKey, field.pref as Preference<List<String>>);
     }
   }
 
@@ -2137,6 +2140,9 @@ class PluginSyncService extends ChangeNotifier {
         return _formatArgb(_prefs.get(field.pref) as int);
       case SyncCodec.csvList:
         return _csvToList(field.pref as Preference<String>);
+      case SyncCodec.stringList:
+        return List<String>.of(
+            _prefs.get(field.pref as Preference<List<String>>));
     }
   }
 
@@ -2332,6 +2338,19 @@ class PluginSyncService extends ChangeNotifier {
         value.cast<String>().join(','),
       );
     }
+  }
+
+  void _applyStringArray(
+    Map<String, dynamic> data,
+    String serverKey,
+    Preference<List<String>> pref,
+  ) {
+    final value = data[serverKey];
+    if (value is! List || value.any((item) => item is! String)) return;
+    _store.set(
+      _prefs.getEffectivePreference(pref),
+      List<String>.from(value),
+    );
   }
 
   void _applyMediaBarMode(Map<String, dynamic> data) {

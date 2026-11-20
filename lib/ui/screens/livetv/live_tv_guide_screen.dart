@@ -179,6 +179,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final Map<int, FocusNode> _channelFocusNodes = {};
   final Map<GuideFilter, FocusNode> _filterFocusNodes = {};
   late LiveTvCategoryDisplay _categoryDisplay;
+  late List<String> _savedFilters;
   final _browseFocus = FocusNode(debugLabel: 'GuideBrowse');
   final _shortcutNodes = <GuideFilterChoice, FocusNode>{};
   final _channelHold = FocusedKeyHold();
@@ -281,6 +282,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void initState() {
     super.initState();
     _categoryDisplay = _prefs.get(UserPreferences.liveTvCategoryDisplay);
+    _savedFilters = List.of(_prefs.get(UserPreferences.liveTvSavedFilters));
     _vm = LiveTvGuideViewModel(
       _client,
       initialSortBy: _prefs.get(UserPreferences.liveTvChannelSortBy),
@@ -1555,8 +1557,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   void _onCategoryDisplayChanged() {
+    final saved = _prefs.get(UserPreferences.liveTvSavedFilters);
+    final savedChanged = !listEquals(saved, _savedFilters);
+    if (savedChanged) _savedFilters = List.of(saved);
     final mode = _prefs.get(UserPreferences.liveTvCategoryDisplay);
-    if (mode == _categoryDisplay) return;
+    if (mode == _categoryDisplay) {
+      if (savedChanged) setState(() {});
+      return;
+    }
     _suppressPickerRestorePrefetch = false;
     setState(() => _categoryDisplay = mode);
     if ((_vm.selectedGroup != null && !_usesPicker) ||
