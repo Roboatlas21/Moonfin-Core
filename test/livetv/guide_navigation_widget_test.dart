@@ -782,6 +782,26 @@ void main() {
       expect(node('CA| SPORTS', last: true).hasFocus, isTrue);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
       await _pumpFrames(tester);
+
+      // Failed saves show a full-width notice above the open picker, not
+      // behind the guide's modal barrier, and leave focus untouched.
+      node('CA| SPORTS').requestFocus();
+      await _pumpFrames(tester);
+      final savedBeforeFailure = prefs.get(UserPreferences.liveTvSavedFilters);
+      prefs.save = Completer<void>();
+      await hold(LogicalKeyboardKey.select);
+      prefs.save!.completeError(StateError('storage unavailable'));
+      await _pumpFrames(tester);
+      final notice = find.text("Couldn't save filter. Try again.");
+      expect(notice, findsOneWidget);
+      expect(tester.widget<SnackBar>(find.byType(SnackBar)).backgroundColor,
+          Colors.white);
+      expect(picker, findsOneWidget);
+      expect(node('CA| SPORTS').hasFocus, isTrue);
+      expect(prefs.get(UserPreferences.liveTvSavedFilters), savedBeforeFailure);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      expect(notice, findsNothing);
     },
   );
 

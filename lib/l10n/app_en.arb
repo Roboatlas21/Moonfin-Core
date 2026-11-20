@@ -11223,6 +11223,10 @@
   "guideFavoriteGroupsAndCategories": "Favorite groups and categories",
   "guideHoldOk": "Hold OK",
   "guideUnfavorite": "Unfavorite",
+  "guideSavedFilterSaveFailed": "Couldn't save filter. Try again.",
+  "@guideSavedFilterSaveFailed": {
+    "description": "Bottom-of-screen notification when saving a guide group or category shortcut fails."
+  },
   "guideGroupShortcut": "{name} (group)",
   "@guideGroupShortcut": {
     "placeholders": {"name": {"type": "String"}}

@@ -60,6 +60,8 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
   ScrollController? _scroll;
   String _query = '';
   List<_Row> _visibleRows = const [];
+  OverlayEntry? _saveErrorEntry;
+  Timer? _saveErrorTimer;
 
   GuideFilterChoice get _selected =>
       (widget.vm.filter, widget.vm.selectedGroup);
@@ -124,6 +126,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
       await widget.vm.toggleSavedFilter(choice);
     } catch (error) {
       debugPrint('Could not save guide favorites (${error.runtimeType})');
+      _showSaveError();
       return;
     }
     if (!mounted || !restore || _query.isNotEmpty) return;
@@ -134,6 +137,43 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
       _focusRow(target);
     });
     WidgetsBinding.instance.scheduleFrame();
+  }
+
+  void _clearSaveError() {
+    _saveErrorTimer?.cancel();
+    _saveErrorTimer = null;
+    _saveErrorEntry?.remove();
+    _saveErrorEntry?.dispose();
+    _saveErrorEntry = null;
+  }
+
+  void _showSaveError() {
+    if (!mounted || ModalRoute.isCurrentOf(context) != true) return;
+    // The guide's Scaffold is behind this dialog. Put the Snackbar above it.
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    _clearSaveError();
+    final message = AppLocalizations.of(context).guideSavedFilterSaveFailed;
+    _saveErrorEntry = OverlayEntry(
+      builder: (_) => Positioned(
+        left: 0,
+        right: 0,
+        bottom: 0,
+        child: SafeArea(
+          top: false,
+          child: IgnorePointer(
+            child: SnackBar(
+              animation: const AlwaysStoppedAnimation<double>(1),
+              behavior: SnackBarBehavior.fixed,
+              backgroundColor: Colors.white,
+              content: Text(message, style: const TextStyle(color: Colors.black)),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(_saveErrorEntry!);
+    _saveErrorTimer = Timer(const Duration(seconds: 3), _clearSaveError);
   }
 
   List<_Row> _rows(AppLocalizations l10n, Set<GuideFilterChoice> saved) {
@@ -218,6 +258,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
 
   @override
   void dispose() {
+    _clearSaveError();
     _scroll?.dispose();
     _search.dispose();
     _searchFocus.dispose();
