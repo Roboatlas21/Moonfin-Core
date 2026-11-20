@@ -1,0 +1,22 @@
+name: Live TV Regression Tests
+on:
+  push:
+    branches:
+      - 'ci/live-tv-regressions-285a4a-20261120'
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+      - name: Run focused tests
+        run: |
+          flutter pub get
+          flutter test test/viewmodels/search_view_model_multi_server_test.dart test/ui/screens/livetv/live_tv_rewind_test.dart test/livetv/guide_navigation_widget_test.dart --reporter expanded
+          cd packages/server_plex
+          flutter pub get
+          flutter test test/plex_live_tv_api_test.dart --reporter expanded
