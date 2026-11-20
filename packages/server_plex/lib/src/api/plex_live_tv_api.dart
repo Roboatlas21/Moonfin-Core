@@ -79,6 +79,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   static const _cloudGridLife = Duration(minutes: 10);
 
   Future<List<_Dvr>>? _dvrs;
+  Future<String?>? _favoriteMachineId;
   Future<List<Map<String, dynamic>>>? _cloudChannels;
   Future<_CloudGroups>? _cloudGroups;
   final _cloudGrids = <String, ({DateTime at, Future<List> items})>{};
@@ -153,9 +154,30 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         ];
       });
 
+  // Plex Cloud favorites use machine+provider, not Moonfin's DVR key.
+  Future<String?> _machineIdForFavorites() async {
+    Future<String?> load() async {
+      try {
+        final identity = await plexContainer(_dio, '/identity');
+        final machine = identity['machineIdentifier'];
+        return machine is String && machine.isNotEmpty ? machine : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final machine = await (_favoriteMachineId ??= load());
+    if (machine == null) _favoriteMachineId = null;
+    return machine;
+  }
+
   Future<List<Map<String, dynamic>>> _dvrChannels() async {
     final channels = <Map<String, dynamic>>[];
-    for (final dvr in await _dvrList()) {
+    final dvrs = await _dvrList();
+    if (dvrs.isEmpty) return channels;
+    // Still show DVR channels if their machine identity is unavailable.
+    final machineId = await _machineIdForFavorites();
+    for (final dvr in dvrs) {
       final lineup = await plexContainer(
         _dio,
         '/${dvr.epg}/lineups/dvr/channels',
@@ -163,7 +185,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       for (final channel in lineup['Channel'] as List? ?? const []) {
         if (channel is Map) {
           channels.add(
-            _channel(dvr.key, channel, number: '${channel['vcn'] ?? ''}'),
+            _channel(
+              dvr.key,
+              channel,
+              number: '${channel['vcn'] ?? ''}',
+              favoriteSource: machineId == null
+                  ? null
+                  : 'server://$machineId/${dvr.epg}',
+            ),
           );
         }
       }
@@ -199,10 +228,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     String source,
     Map channel, {
     String? number,
+    String? favoriteSource,
   }) => {
     'Id': _channelId(source, channel['id']),
     'Name': channel['title'] ?? channel['callSign'],
     'Type': 'TvChannel',
+    if (favoriteSource != null && channel['id'] != null) ...{
+      'PlexFavoriteSource': favoriteSource,
+      'PlexFavoriteId': '${channel['id']}',
+    },
     if (source == plexCloudSource && channel['genreRatingKeys'] is List)
       'genreRatingKeys': channel['genreRatingKeys'],
     if (number != null && number.isNotEmpty) 'ChannelNumber': number,

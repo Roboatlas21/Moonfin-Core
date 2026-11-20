@@ -45,6 +45,9 @@ const _teletubbies = {
 (Dio, _FakeServer) _server() {
   final server = _FakeServer(
     (options) => switch (options.uri.path) {
+      '/identity' => {
+        'MediaContainer': {'machineIdentifier': 'pms-machine-1'},
+      },
       '/livetv/dvrs' => {
         'MediaContainer': {
           'Dvr': [
@@ -242,6 +245,10 @@ void main() {
       ]);
       expect(channels.first, containsPair('ChannelNumber', '4'));
       expect(channels.first['Type'], 'TvChannel');
+      expect(channels.first['PlexFavoriteSource'],
+          'server://pms-machine-1/tv.plex.providers.epg.xmltv:2');
+      expect(channels.first['PlexFavoriteId'], '4');
+      expect(channels.last.containsKey('PlexFavoriteSource'), isFalse);
       expect(channels.last.containsKey('ChannelNumber'), isFalse);
       expect(result['TotalRecordCount'], 3);
     },
