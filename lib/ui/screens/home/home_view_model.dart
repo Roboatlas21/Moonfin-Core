@@ -119,7 +119,7 @@ class HomeViewModel extends ChangeNotifier {
   bool get isLoading => _isLoading;
   Future<void> _loadDone = Future<void>.value();
   bool _disposed = false;
-  bool _plexFavoritesReloading = false;
+  bool _liveTvFavoritesReloading = false;
   Future<void> _bgMerge = Future<void>.value();
   bool _bgMergeInFlight = false;
   bool _bgResumeRefreshInFlight = false;
@@ -807,11 +807,11 @@ class HomeViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// A cloud read can discover favorite channels absent from the saved cache.
-  /// Update just that row instead of restarting the rest of Home.
-  Future<void> _reloadPlexFavoriteChannels() async {
-    if (_plexFavoritesReloading) return;
-    _plexFavoritesReloading = true;
+  /// Refreshes channel favorites without reloading every Home section.
+  /// Adding or removing a guide favorite can change which cards belong here.
+  Future<void> _reloadLiveTvFavoriteChannels() async {
+    if (_liveTvFavoritesReloading) return;
+    _liveTvFavoritesReloading = true;
     try {
       while (_isLoading && !_disposed) {
         await _loadDone;
@@ -844,7 +844,7 @@ class HomeViewModel extends ChangeNotifier {
     } catch (_) {
       // A failed refresh leaves the current Home rows visible.
     } finally {
-      _plexFavoritesReloading = false;
+      _liveTvFavoritesReloading = false;
     }
   }
 
@@ -1125,10 +1125,10 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   /// Lightweight refresh for returning to home from a pushed route. Viewing or
-  /// playing an item changes the resume and next-up rows, and time spent away
-  /// moves On Now along, so this refetches just those and updates them in
-  /// place, leaving every other row (and its pagination, scroll, and focus
-  /// state) untouched. A full [refresh] still runs on the Home button,
+  /// playing an item changes the resume and next-up rows, time spent away
+  /// moves On Now along, and guide favorites can add/remove channel cards.
+  /// Refetch only those rows in place, keeping all other rows (and their
+  /// pagination, scroll, and focus state) untouched. A full [refresh] still runs on the Home button,
   /// pull-to-refresh, cold start, and periodic refresh.
   Future<void> refreshResumeAndNextUp() async {
     // A full load can start before the server has the playback stop and fetch
@@ -1137,10 +1137,9 @@ class HomeViewModel extends ChangeNotifier {
       await _loadDone;
     }
     await Future.wait([_refreshResumeRows(), _refreshOnNowRows()]);
-    // A newly saved guide favorite may not exist in the current Home row.
-    // Rebuild only Plex Cloud's favorites row on return, rather than loading
-    // every Home section as the Home button does.
-    if (_cloudOnlyPlex) await _reloadPlexFavoriteChannels();
+    // Returning from the guide can add or remove favorite channels on any
+    // supported server. Rebuild only that row, keeping the rest of Home intact.
+    await _reloadLiveTvFavoriteChannels();
   }
 
   /// Refetches the programs airing now for the On Now rows: the standalone
@@ -1895,7 +1894,7 @@ class HomeViewModel extends ChangeNotifier {
         } catch (_) {}
         // Initial Home rendering never waits on the Plex account endpoint.
         unawaited(PlexLiveTvFavorites.refreshForBrowse(_client).then((loaded) {
-          if (loaded) unawaited(_reloadPlexFavoriteChannels());
+          if (loaded) unawaited(_reloadLiveTvFavoriteChannels());
         }));
         return rows;
       case HomeSectionType.onNow:

@@ -487,6 +487,65 @@ void main() {
     verifyNever(() => source.hasLiveTvChannels());
   });
 
+  for (final serverType in [
+    ServerType.jellyfin,
+    ServerType.emby,
+    ServerType.plex,
+  ]) {
+    test('returning from the guide updates $serverType channel favorites', () async {
+      await enableSections({HomeSectionType.liveTv});
+      stubLiveTvRows();
+      final MediaServerClient serverClient;
+      if (serverType == ServerType.plex) {
+        final plex = _MockPlexClient();
+        when(() => plex.cloudOnly).thenReturn(false);
+        serverClient = plex;
+      } else {
+        serverClient = _MockClient();
+      }
+      when(() => serverClient.serverType).thenReturn(serverType);
+      when(() => serverClient.userId).thenReturn('user');
+      when(() => serverClient.baseUrl).thenReturn('http://server.test');
+
+      var favorites = <AggregatedItem>[];
+      when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
+        (_) async => HomeRow(
+          id: 'liveTvFavorites',
+          title: 'Favorite Channels',
+          rowType: HomeRowType.liveTvFavorites,
+          items: List.of(favorites),
+        ),
+      );
+      model.dispose();
+      model = HomeViewModel(
+        dataSource: source,
+        prefs: prefs,
+        client: serverClient,
+        mediaBarViewModel: _MockMediaBar(),
+        multiServerRepo: _MockMultiServer(),
+      );
+      await model.load();
+      expect(model.rows.any((r) => r.rowType == HomeRowType.liveTvFavorites), isFalse);
+
+      favorites = [
+        AggregatedItem(
+          id: 'favorite-channel',
+          serverId: 'http://server.test',
+          rawData: {'Type': 'TvChannel', 'Name': 'Favorite Channel'},
+        ),
+      ];
+      await model.refreshResumeAndNextUp();
+      expect(model.rows.map((r) => r.id), contains('liveTvFavorites'));
+      expect(model.rows.last.items.single.id, 'favorite-channel');
+
+      favorites = [];
+      await model.refreshResumeAndNextUp();
+      expect(model.rows.any((r) => r.rowType == HomeRowType.liveTvFavorites), isFalse);
+      verify(() => source.loadFavoritesChannels('http://server.test')).called(3);
+      verify(() => source.hasLiveTvChannels()).called(1);
+    });
+  }
+
   group('returning to Home', () {
     HomeRow airing(List<String> ids) => HomeRow(
       id: 'liveTvOnNow',
