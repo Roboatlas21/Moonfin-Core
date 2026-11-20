@@ -351,6 +351,9 @@ class PlexLiveTvFavorites {
     // Without a verified machine id, don't guess the DVR favorite source.
     // Still keep its local optimistic state separate from other PMS servers.
     if (info == null) {
+      // An old DVR provider must not be reused when the latest row cannot
+      // verify its machine identity (e.g. following a server-address change).
+      _catalog(client).channels.remove(channelId);
       return {...item, 'PlexFavoriteSyncKey': syncKey(client, channelId)};
     }
     _catalog(client).channels[channelId] = info;
@@ -399,7 +402,19 @@ class PlexLiveTvFavorites {
       if (isFavorite != hadFavorite) {
         await _write(client, account.token, rows);
       }
-      await _cache(client, account.token, rows);
+      try {
+        await _cache(client, account.token, rows);
+      } catch (_) {
+        // Plex confirmed this value, even if persisting the local cache
+        // failed. Keep the accepted heart and re-read cloud on next browse.
+        // A genuine account switch still invalidates the result.
+        _checkAccount(client, account.token);
+        _lastRefresh.remove(account.id);
+        userDataSync.publish(
+          syncKey(client, channelId),
+          {'IsFavorite': isFavorite},
+        );
+      }
     });
   }
 }

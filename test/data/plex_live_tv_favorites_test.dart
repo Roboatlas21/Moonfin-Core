@@ -32,6 +32,18 @@ const _source = 'provider://tv.plex.provider.epg';
 class _ChannelClient extends Mock implements MediaServerClient {}
 class _ChannelApi extends Mock implements LiveTvApi {}
 
+class _FailingPlexPreferences extends UserPreferences {
+  _FailingPlexPreferences(super.store);
+
+  @override
+  Future<void> set<T>(Preference<T> pref, T value) async {
+    if (pref.key.startsWith('plex_live_tv_favorite_keys_')) {
+      throw StateError('Local preference write failed');
+    }
+    await super.set(pref, value);
+  }
+}
+
 PlexMediaServerClient _plex({bool cloudOnly = false, String userId = 'plex-user'}) =>
     PlexMediaServerClient(
       baseUrl: cloudOnly ? 'https://plex.tv' : 'https://pms.example',
@@ -478,6 +490,60 @@ void main() {
     await PlexLiveTvFavorites.refresh(first);
     expect(userDataSync.favoriteFor(key), isFalse);
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
+  });
+
+  test('a confirmed Plex PUT stays successful when local cache write fails', () async {
+    final client = _plex();
+    addTearDown(client.dispose);
+    PlexLiveTvFavorites.applyToItem(client, _channel);
+    await GetIt.instance.unregister<UserPreferences>();
+    final store = PreferenceStore();
+    await store.init();
+    GetIt.instance.registerSingleton<UserPreferences>(
+      _FailingPlexPreferences(store),
+    );
+
+    await ItemMutationRepository(client).setFavorite(
+      'channel-plex-free123',
+      isFavorite: true,
+    );
+    expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(1));
+    expect(cloud.rows.single['id'], 'free123');
+    expect(
+      userDataSync.favoriteFor(PlexLiveTvFavorites.syncKey(
+        client, 'channel-plex-free123')),
+      isTrue,
+    );
+    // The failed local write must not falsely mark the cloud read as fresh.
+    expect(await PlexLiveTvFavorites.refreshForBrowse(client), isFalse);
+    expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
+  });
+
+  test('an unverified DVR row invalidates its previous provider', () async {
+    final client = _plex();
+    addTearDown(client.dispose);
+    const known = <String, dynamic>{
+      'Id': 'channel-2-4',
+      'Type': 'TvChannel',
+      'PlexFavoriteSource': 'server://old-pms/epg',
+      'PlexFavoriteId': '4',
+    };
+    PlexLiveTvFavorites.applyToItem(client, known);
+    expect(PlexLiveTvFavorites.syncKey(client, 'channel-2-4'),
+        contains('old-pms'));
+
+    final unverified = PlexLiveTvFavorites.applyToItem(client, {
+      'Id': 'channel-2-4',
+      'Type': 'TvChannel',
+      'Name': 'DVR channel',
+    });
+    expect(unverified['PlexFavoriteSyncKey'] as String,
+        isNot(contains('old-pms')));
+    await expectLater(
+      PlexLiveTvFavorites.setFavorite(client, 'channel-2-4', isFavorite: true),
+      throwsA(isA<StateError>()),
+    );
+    expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
   });
 
   test('account favorites signal only actual changes', () async {
