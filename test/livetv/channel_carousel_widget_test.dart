@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,6 +67,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   }) async {
     _loadedRevision = liveTvRecordingRevision.value;
     duringLoad?.call();
+    if (initialLoadGate != null) await initialLoadGate!.future;
     ready = true;
     requests.add(initialChannelIds!);
     notifyListeners();
@@ -83,6 +86,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
 
   /// Runs inside [load] before the guide turns ready.
   void Function()? duringLoad;
+  Completer<void>? initialLoadGate;
   int recordingCatchUps = 0;
   int _loadedRevision = 0;
 
@@ -238,6 +242,54 @@ void main() {
     await tester.pump();
     return vm;
   }
+
+  testWidgets('a lineup replacement during first load refreshes visible cards',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final client = _CarouselClient();
+    final original = List.generate(
+      12,
+      (i) => GuideChannel(
+        id: 'ch$i',
+        name: 'Channel $i',
+        number: '${i + 1}',
+        rawData: const {},
+      ),
+    );
+    final vm = _CarouselGuide(client, original);
+    vm.initialLoadGate = Completer<void>();
+    var lineup = original;
+    late StateSetter updateHost;
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      theme: AppTheme.buildTheme(ThemeRegistry.active),
+      home: Scaffold(
+        body: StatefulBuilder(builder: (context, setState) {
+          updateHost = setState;
+          return ChannelCarouselOverlay(
+            client: client,
+            channels: lineup,
+            currentChannelId: 'ch6',
+            onChannelSelected: (_) {},
+            onDismiss: () {},
+            onShowControls: () {},
+            viewModelFactory: (_) => vm,
+          );
+        }),
+      ),
+    ));
+    await tester.pump();
+    // Same IDs, new list identity; the initial listings may be invalidated.
+    updateHost(() => lineup = List.of(original));
+    await tester.pump();
+    vm.initialLoadGate!.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(vm.requests, hasLength(2));
+    expect(vm.requests.last, contains('ch6'));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('open carousel cards follow favorite changes', (tester) async {
     userDataSync.reset();
