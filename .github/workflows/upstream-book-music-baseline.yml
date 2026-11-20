@@ -1,0 +1,19 @@
+name: Upstream Book and Music Baseline
+on:
+  push:
+    branches:
+      - 'ci/book-music-upstream-defe466-20261120'
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+      - name: Run upstream Book and Music tests
+        run: |
+          flutter pub get
+          flutter test test/ui/screens/browse/book_authors_screen_test.dart test/ui/screens/browse/book_category_screen_test.dart test/ui/screens/browse/book_favorites_screen_test.dart test/ui/screens/browse/book_series_screen_test.dart test/ui/screens/browse/book_library_screen_test.dart test/ui/screens/browse/music_library_screen_test.dart test/viewmodels/item_detail_book_series_test.dart --reporter expanded
