@@ -11221,18 +11221,29 @@
     "description": "Live TV guide shortcut for all free streaming channels supplied by Plex."
   },
   "guideFavoriteGroupsAndCategories": "Favorite groups and categories",
+  "@guideFavoriteGroupsAndCategories": {
+    "description": "Heading for the viewer's saved groups and program categories in the Live TV filter picker."
+  },
   "guideHoldOk": "Hold OK",
+  "@guideHoldOk": {
+    "description": "TV remote hint to hold OK to save or remove a guide group or category shortcut."
+  },
   "guideUnfavorite": "Unfavorite",
+  "@guideUnfavorite": {
+    "description": "Action hint for removing a channel group or program category from saved guide filters."
+  },
   "guideSavedFilterSaveFailed": "Couldn't save filter. Try again.",
   "@guideSavedFilterSaveFailed": {
     "description": "Bottom-of-screen notification when saving a guide group or category shortcut fails."
   },
   "guideGroupShortcut": "{name} (group)",
   "@guideGroupShortcut": {
+    "description": "Pinned channel-group shortcut; distinguishes a group from a program category with the same name.",
     "placeholders": {"name": {"type": "String"}}
   },
   "guideCategoryShortcut": "{name} (category)",
   "@guideCategoryShortcut": {
+    "description": "Pinned program-category shortcut; distinguishes a category from a channel group with the same name.",
     "placeholders": {"name": {"type": "String"}}
   },
   "guideAllChannels": "All channels",
