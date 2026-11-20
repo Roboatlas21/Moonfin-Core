@@ -424,7 +424,7 @@ void main() {
       multiServerRepo: _MockMultiServer(),
     );
     await model.load();
-    expect(model.rows.map((row) => row.id), ['liveTv']);
+    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
     final initialCalls = calls;
 
     favorites = [
@@ -436,13 +436,13 @@ void main() {
     ];
     PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'user', revision: 1);
     await pumpEventQueue();
-    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvFavorites']);
+    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow', 'liveTvFavorites']);
     expect(calls, initialCalls + 1);
 
     favorites = [];
     PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'user', revision: 2);
     await pumpEventQueue();
-    expect(model.rows.map((row) => row.id), ['liveTv']);
+    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
     expect(calls, initialCalls + 2);
 
     PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'other', revision: 3);
