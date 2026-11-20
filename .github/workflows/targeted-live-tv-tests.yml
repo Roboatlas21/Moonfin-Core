@@ -1,0 +1,22 @@
+name: Targeted Live TV Tests
+on:
+  push:
+    branches:
+      - 'ci/channel-search-check-0d2529c-20261120'
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+      - name: Verify channel search and Plex groups
+        run: |
+          flutter pub get
+          flutter test test/viewmodels/search_view_model_multi_server_test.dart --reporter expanded
+          cd packages/server_plex
+          flutter pub get
+          flutter test test/plex_live_tv_api_test.dart --reporter expanded
