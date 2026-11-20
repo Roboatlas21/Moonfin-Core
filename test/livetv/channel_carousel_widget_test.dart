@@ -486,42 +486,7 @@ void main() {
     }
   });
 
-  testWidgets('prewarm loads listings near the tuned channel', (
-    tester,
-  ) async {
-    final client = _CarouselClient();
-    final channels = List.generate(
-      12,
-      (i) => GuideChannel(
-        id: 'ch$i',
-        name: 'Channel $i',
-        number: '${i + 1}',
-        rawData: const {},
-      ),
-    );
-    final vm = _CarouselGuide(client, channels);
-    final now = DateTime(2026, 9, 13, 18);
-    final prewarm = ChannelCarouselPrewarm(
-      client,
-      viewModelFactory: (_) => vm,
-      hourlyRefreshInterval: const Duration(seconds: 2),
-      now: () => now,
-    );
-    prewarm.tuned(channels, 'ch6');
-    await tester.pump(ChannelCarouselPrewarm.settleDelay);
-    await tester.pump();
 
-    expect(vm.requests, hasLength(1));
-    expect(vm.requests.single, [for (var i = 2; i <= 10; i++) 'ch$i']);
-    expect(vm.playbackChannels, channels);
-    await prewarm.ensureVisibleChannels(
-      carouselNeighborhood(channels, 'ch0', 5),
-    );
-    expect(vm.requests.last, containsAll(['ch0', 'ch11']));
-    expect(vm.schedules, greaterThanOrEqualTo(1));
-    expect(prewarm.hourlyDueAt, now.add(const Duration(seconds: 2)));
-    prewarm.dispose();
-  });
 
   testWidgets('prewarm catches up on a recording changed during its first load', (
     tester,

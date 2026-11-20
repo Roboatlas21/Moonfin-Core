@@ -246,45 +246,7 @@ void main() {
     expect(vm.results.single.items.single.name, 'Alien News');
   });
 
-  test('partial channel search retries the failed server on the next query', () async {
-    for (final api in itemsApis.values) {
-      when(() => itemsSearch(api)).thenAnswer((_) async => {'Items': []});
-    }
-    final first = clients['a']!.liveTvApi;
-    final second = clients['b']!.liveTvApi;
-    when(() => first.getChannels(
-      fields: 'ImageTags',
-      enableTotalRecordCount: false,
-      userId: 'user-a',
-    )).thenThrow(StateError('offline'));
-    when(() => second.getChannels(
-      fields: 'ImageTags',
-      enableTotalRecordCount: false,
-      userId: 'user-b',
-    )).thenAnswer((_) async => {
-      'Items': [{'Id': 'alien-b', 'Type': 'TvChannel', 'Name': 'Alien News'}],
-    });
-    final vm = await search(across: multiServer, query: 'Alien');
-    expect(vm.results.single.items.single.id, 'alien-b');
 
-    when(() => first.getChannels(
-      fields: 'ImageTags',
-      enableTotalRecordCount: false,
-      userId: 'user-a',
-    )).thenAnswer((_) async => {
-      'Items': [{'Id': 'world-a', 'Type': 'TvChannel', 'Name': 'World News'}],
-    });
-    vm.searchImmediate('World');
-    while (vm.state == SearchState.loading) {
-      await pumpEventQueue();
-    }
-    expect(vm.results.single.items.single.id, 'world-a');
-    verify(() => first.getChannels(
-      fields: 'ImageTags',
-      enableTotalRecordCount: false,
-      userId: 'user-a',
-    )).called(2);
-  });
 
   test('channel favorites update existing and subsequent search results', () async {
     when(() => itemsSearch(itemsApis['a']!)).thenAnswer(

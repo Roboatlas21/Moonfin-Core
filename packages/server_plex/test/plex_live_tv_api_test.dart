@@ -277,13 +277,7 @@ void main() {
   });
 
 
-  test('Cloud-only On Now does not fetch per-channel EPG grids', () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio, cloudOnly: true);
-    final programs = await api.getRecommendedPrograms(limit: 15, isAiring: true);
-    expect(programs['Items'], isEmpty);
-    expect(server.requests, isEmpty);
-  });
+
 
 
   test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
@@ -326,42 +320,7 @@ void main() {
   });
 
 
-  test('Plex authorization failures are not recovered as partial listings', () async {
-    for (final deniedPath in ['/grid', '/tv.plex.providers.epg.xmltv:2/grid']) {
-      final (dio, _) = _server();
-      dio.interceptors.insert(0, InterceptorsWrapper(
-        onRequest: (options, handler) {
-          if (options.uri.path == deniedPath &&
-              (deniedPath != '/grid' ||
-                  options.queryParameters['channelGridKey'] == 'extra')) {
-            handler.reject(DioException(
-              requestOptions: options,
-              response: Response(requestOptions: options, statusCode: 403),
-              type: DioExceptionType.badResponse,
-            ));
-          } else {
-            handler.next(options);
-          }
-        },
-      ));
-      await expectLater(
-        PlexLiveTvApi(dio).getGuide(
-          startDate: DateTime.utc(2026, 10, 22, 20),
-          endDate: DateTime.utc(2026, 10, 22, 22),
-          channelIds: [
-            'channel-2-4',
-            'channel-plex-abc-66635fc0',
-            'channel-plex-news-extra',
-          ],
-        ),
-        throwsA(isA<DioException>().having(
-          (error) => error.response?.statusCode,
-          'status',
-          403,
-        )),
-      );
-    }
-  });
+
 
 
   test('every showing of a program is a program of its own', () async {

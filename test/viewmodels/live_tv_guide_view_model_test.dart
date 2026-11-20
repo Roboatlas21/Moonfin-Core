@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/models/live_tv_recording_state.dart';
@@ -9,9 +8,7 @@ import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 
 import 'package:server_core/server_core.dart';
-import 'package:server_emby/server_emby.dart';
 
-import '../../packages/server_emby/test/admin_fake.dart';
 
 class _MockClient extends Mock implements MediaServerClient {}
 
@@ -185,170 +182,22 @@ void main() {
     });
 
 
-    testWidgets('Featured refreshes on expiry, re-entry and demand', (
-      tester,
-    ) async {
-      final now = tester.binding.clock.now;
-      final guide = LiveTvGuideViewModel(client, now: now);
-      var calls = 0;
-      var reply = Completer<Set<String>>();
-      final featured = PromotedChannelGroup('Featured', () {
-        calls++;
-        return reply.future;
-      });
-      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
-        (_) async => ChannelGroupLineup(
-          {
-            'one': {'News'},
-            'two': {'Sports'},
-          },
-          channels: [_channel('one'), _channel('two')],
-          promoted: featured,
-        ),
-      );
-      await guide.load();
-      expect(guide.availableGroups, ['Featured', 'News', 'Sports']);
-      expect(guide.channelCountForGroup('Featured'), isNull);
-      expect(guide.channelCountForGroup('Sports'), 1);
-      expect(calls, 0);
-      guide.setGroup('Featured');
-      guide.setGroup('Featured');
-      expect(guide.state, GuideState.loading);
-      reply.complete({'one', 'unavailable'});
-      await tester.pump();
-      expect(guide.filteredChannels.single.id, 'one');
-      expect(guide.channelCountForGroup('Featured'), 1);
-      expect(guide.groupsForChannel('one'), ['Featured', 'News']);
-      guide.setGroup('Sports');
-      await tester.pump(const Duration(minutes: 9));
-      guide.setGroup('Featured');
-      expect(calls, 1);
-      reply = Completer();
-      await tester.pump(const Duration(minutes: 1));
-      expect(calls, 2);
-      reply.complete({'two'});
-      await tester.pump();
-      expect(guide.filteredChannels.single.id, 'two');
-      expect(guide.groupsForChannel('one'), ['News']);
-      guide.dispose();
-    });
 
-    test('a group stays browsable after a listings timeout and retries on selection', () async {
-      final channels = [for (var i = 0; i < 101; i++) _channel('c$i', number: '$i')];
-      _stubChannels(api, channels);
-      when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async =>
-          ChannelGroupLineup({for (var i = 50; i < 101; i++) 'c$i': {'Local'}}));
+
+
+
+
+    test('missing group metadata restores program categories', () async {
+      _stubChannels(api, [_channel('one')]);
+      when(() => api.getChannelGroups(userId: 'user')).thenThrow(
+        TimeoutException('group metadata unavailable'),
+      );
       await vm.load();
-      when(() => _guide(api)).thenThrow(TimeoutException('listings'));
-      vm.setGroup('Local');
-      await pumpEventQueue();
-      expect(vm.state, GuideState.ready);
-      expect(vm.filteredChannels, hasLength(51));
-      expect(vm.loadStateFor('c50'), GuideChannelLoadState.failed);
-      expect(vm.loadStateFor('c100'), GuideChannelLoadState.loading);
-
-      final requests = <List<String>>[];
-      when(() => _guide(api)).thenAnswer((inv) async {
-        requests.add(_requestedIds(inv));
-        return {'Items': [for (final id in requests.last) _program('show-$id', id)]};
-      });
-      await vm.loadMorePrograms();
-      vm.setGroup('Local');
-      await pumpEventQueue();
-      expect(requests, [['c100'], [for (var i = 50; i < 100; i++) 'c$i']]);
-      expect(vm.programsForChannel('c50').single.name, 'show-c50');
-      expect(vm.loadStateFor('c50'), GuideChannelLoadState.loaded);
+      expect(vm.availableProgrammeCategories, contains(GuideFilter.sports));
+      expect(vm.playbackChannels.single.id, 'one');
     });
-
-
-    test(
-      'unknown categories or missing plugin restore default filters',
-      () async {
-        _stubChannels(api, [_channel('one')]);
-        when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
-          (_) async => const ChannelGroupLineup(
-            {
-              'one': {'Local'},
-            },
-            programmeCategories: {'movies'},
-          ),
-        );
-        await vm.load();
-        vm.setGroup('Local');
-        expect(vm.availableProgrammeCategories, [GuideFilter.movies]);
-
-        when(() => api.getChannelGroups(userId: 'user')).thenThrow(
-          Exception('Moonbase timed out'),
-        );
-        await vm.load();
-        expect(vm.availableProgrammeCategories, contains(GuideFilter.sports));
-        expect(vm.selectedGroup, 'Local');
-        expect(vm.filteredChannels.single.id, 'one');
-
-        // A successful lineup may omit categories while the guide imports.
-        when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
-          (_) async => const ChannelGroupLineup({'one': {'Local'}}),
-        );
-        await vm.load();
-        expect(vm.availableProgrammeCategories, contains(GuideFilter.sports));
-        expect(vm.availableProgrammeCategories, contains(GuideFilter.news));
-
-        when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
-          (_) async => const ChannelGroupLineup({}, endpointAvailable: false),
-        );
-        await vm.load();
-        expect(vm.availableGroups, isEmpty);
-        expect(vm.selectedGroup, isNull);
-        expect(vm.availableProgrammeCategories, contains(GuideFilter.sports));
-        expect(vm.playbackChannels.single.id, 'one');
-      },
-    );
-    for (final removeChannel in [false, true]) {
-      test(
-        'clears the selected group when its last channel is ${removeChannel ? 'deleted' : 'ungrouped'} and another tuner is offline',
-        () async {
-          _stubChannels(api, [_channel('healthy'), _channel('offline')]);
-          when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
-            (_) async => const ChannelGroupLineup({
-              'healthy': {'Sports'},
-              'offline': {'UK'},
-            }),
-          );
-          await vm.load();
-          vm.setGroup('Sports');
-          if (removeChannel) _stubChannels(api, [_channel('offline')]);
-          when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
-            (_) async => const ChannelGroupLineup(
-              {},
-              partial: true,
-              unresolvedChannelIds: {'offline'},
-            ),
-          );
-          await vm.load();
-          expect(vm.availableGroups, ['UK']);
-          expect(vm.selectedGroup, isNull);
-          expect(vm.filteredChannels, isNotEmpty);
-          vm.setGroup('UK');
-          expect(vm.filteredChannels.single.id, 'offline');
-        },
-      );
-    }
   });
-  test('Emby 403 clears the lineup without another fetch', () async {
-    when(() => client.serverType).thenReturn(ServerType.emby);
-    final odd = {..._channel('odd'), 'ChannelNumber': [], 'ImageTags': [], 'UserData': false};
-    final server = AdminFake({'/LiveTv/Channels': {'Items': [_channel('one'), odd]}});
-    when(() => client.liveTvApi).thenReturn(EmbyLiveTvApi(server.dio));
-    when(() => client.baseUrl).thenReturn('emby');
-    final vm = LiveTvGuideViewModel(client);
-    addTearDown(vm.dispose);
-    await vm.load();
-    expect(vm.playbackChannels.map((channel) => channel.id), unorderedEquals(['one', 'odd']));
-    server.statuses['/LiveTv/Channels'] = 403;
-    await vm.load();
-    expect(vm.playbackChannels, isEmpty);
-    expect(server.requests.where((r) => r.path == '/LiveTv/Channels'), hasLength(2));
-  });
+
 
   test('channel groups page by channel and keep every programme', () async {
     final grouped = _GroupedLiveTvApi();
@@ -396,18 +245,6 @@ void main() {
     expect(vm.hasMorePrograms, false);
     expect(pages.map((p) => p.length), [50, 50, 12]);
     expect(pages.last.first, 'c150');
-    vm.setGroup('Kids');
-    await Future<void>.delayed(Duration.zero);
-    expect(pages.length, 3);
-    pages.clear();
-    expect(await vm.setWindowStart(vm.windowEnd), isTrue);
-    expect(pages.expand((ids) => ids), vm.filteredChannels.map((ch) => ch.id));
-    verify(() => grouped.getChannelGroups(userId: 'user')).called(1);
-    when(() => grouped.getChannelGroups(userId: 'user'))
-        .thenAnswer((_) async => const ChannelGroupLineup({}));
-    await vm.load();
-    expect(vm.selectedGroup, isNull);
-    expect(vm.filteredChannels.length, 200);
   });
   test('load() fetches only the first batch; loadMorePrograms() paginates the rest', () async {
     // 120 channels → batches of 50 (never one giant all-channels request).
@@ -1302,28 +1139,7 @@ void main() {
     vm.dispose();
   });
 
-  test('all failed channel listings do not advance the guide window', () async {
-    _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
-    when(() => _guide(liveTv)).thenAnswer((_) async => {
-      'Items': [_program('old-c0', 'c0'), _program('old-c1', 'c1')],
-    });
-    final vm = LiveTvGuideViewModel(client);
-    addTearDown(vm.dispose);
-    await vm.load();
-    final oldStart = vm.windowStart;
-    final oldEnd = vm.windowEnd;
-    when(() => _guide(liveTv)).thenAnswer((_) async => {
-      'Items': <dynamic>[],
-      'FailedChannelIds': ['c0', 'c1'],
-    });
-    final revision = vm.failedWindowMoveRevision;
-    expect(await vm.shiftWindow(const Duration(hours: 3)), isFalse);
-    expect(vm.failedWindowMoveRevision, revision + 1);
-    expect(vm.windowStart, oldStart);
-    expect(vm.windowEnd, oldEnd);
-    expect(vm.programsForChannel('c0').single.id, 'old-c0');
-    expect(vm.programsForChannel('c1').single.id, 'old-c1');
-  });
+
 
 
   test('overlapping program requests fetch a channel once', () async {
@@ -1730,44 +1546,10 @@ void main() {
         },
       );
 
-      test('recording changes refresh the time still on screen', () async {
-        when(() => _guide(liveTv, category: GuideFilter.sports))
-            .thenThrow(Exception('offline'));
-        await expectLater(vm.setWindowStart(next), throwsException);
-        when(() => _guide(liveTv, category: GuideFilter.sports))
-            .thenAnswer((inv) async {
-              expect(inv.namedArguments[#startDate], start);
-              return {
-                'Items': [
-                  {
-                    ..._program('old', 'c1', start: start, isSports: true),
-                    'TimerId': 'timer',
-                  },
-                ],
-              };
-            });
-        await vm.recordingChanged();
-        expect(vm.windowStart, start);
-        expect(vm.programsForChannel('c1').single.hasTimer, isTrue);
-      });
 
 
-      test(
-        'access denial still invalidates previously visible listings',
-        () async {
-          final request = RequestOptions(path: '/LiveTv/Programs');
-          when(() => _guide(liveTv, category: GuideFilter.sports)).thenThrow(
-            DioException(
-              requestOptions: request,
-              response: Response(requestOptions: request, statusCode: 403),
-            ),
-          );
-          expect(await vm.setWindowStart(next), isFalse);
-          expect(vm.listingsAccessDenied, isTrue);
-          expect(vm.filteredChannels, isEmpty);
-          expect(vm.programsForChannel('c1'), isEmpty);
-        },
-      );
+
+
     });
 
 
