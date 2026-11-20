@@ -337,7 +337,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     }
 
     if (_connectingCloud) {
-      return _buildLoading('Connecting to Plex Free TV...');
+      return _buildLoading(l10n.plexConnectingToFreeTv);
     }
     if (_connecting != null) {
       return _buildLoading(l10n.connectingToServerEllipsis);
@@ -468,6 +468,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
 
   /// A null server means Plex Free TV (Cloud).
   Widget _buildServerTile(PlexServer? server) {
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
@@ -489,7 +490,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        server?.name ?? 'Plex Free TV (Cloud)',
+                        server?.name ?? l10n.plexFreeTvCloudTitle,
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
                           color: AppColorScheme.onSurface.withValues(
@@ -499,9 +500,9 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
                       ),
                       Text(
                         server == null
-                            ? 'No Plex Media Server required'
+                            ? l10n.plexNoMediaServerRequired
                             : server.address ??
-                                  AppLocalizations.of(context).noReachableAddress,
+                                  l10n.noReachableAddress,
                         style: TextStyle(
                           fontSize: 13,
                           color: AppColorScheme.onSurface.withValues(
