@@ -261,7 +261,7 @@ void main() {
     expect(lineup.groupsByChannelId, {
       'channel-2-4': {'source:dvr'},
       'channel-plex-abc-66635fc0': {'source:plexFreeTv', 'Movies', 'News'},
-      'channel-plex-news-extra': <String>{},
+      'channel-plex-news-extra': {'source:plexFreeTv'},
     });
     final promoted = lineup.promoted!;
     expect((await api.getChannelGroups()).promoted, same(promoted));
