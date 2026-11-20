@@ -1,0 +1,19 @@
+name: Channel Search Diagnostics
+on:
+  push:
+    branches:
+      - 'ci/search-diagnostics-717121f-20261120'
+permissions:
+  contents: read
+jobs:
+  targeted-search:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+      - name: Run targeted channel-search tests
+        run: |
+          flutter pub get
+          flutter test test/viewmodels/search_view_model_multi_server_test.dart --reporter expanded
