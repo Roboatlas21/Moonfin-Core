@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:moonfin_design/moonfin_design.dart';
@@ -65,6 +66,7 @@ class ChannelCarouselPrewarm {
   Timer? _hourlyTimer;
   Timer? _failedListingsTimer;
   final Map<String, DateTime> _failedListingsLastAttempt = {};
+  List<String>? _visibleChannelIds;
   @visibleForTesting
   static const failedListingsRetryDelay = Duration(seconds: 5);
   static const _failedListingsRetryCooldown = Duration(seconds: 30);
@@ -140,7 +142,7 @@ class ChannelCarouselPrewarm {
     });
     if (_disposed) return;
     viewModel.scheduleBoundaryRefresh();
-    _scheduleFailedVisibleRetry(ids);
+    _scheduleFailedVisibleRetry();
     if (_hourlyDueAt == null) _armHourly();
   }
 
@@ -232,10 +234,38 @@ class ChannelCarouselPrewarm {
     if (!_disposed) viewModel.scheduleBoundaryRefresh();
   }
 
+  /// The overlay can browse channels without tuning them. Its visible
+  /// neighborhood takes precedence over the tuned channel while it is open.
+  void _setVisibleChannels(List<String> ids) {
+    if (listEquals(_visibleChannelIds, ids)) return;
+    _visibleChannelIds = List.of(ids);
+    // An older timer must not prevent the newly visible channels from retrying.
+    _failedListingsTimer?.cancel();
+    _failedListingsTimer = null;
+  }
+
+  void clearVisibleChannels() {
+    if (_visibleChannelIds == null) return;
+    _visibleChannelIds = null;
+    _failedListingsTimer?.cancel();
+    _failedListingsTimer = null;
+    _scheduleFailedVisibleRetry();
+  }
+
+  List<String> get _retryNeighborhood =>
+      _visibleChannelIds ??
+      carouselNeighborhood(
+        viewModel.playbackChannels,
+        _tunedChannelId,
+        _defaultVisibleCards,
+      );
+
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
     if (_disposed || channelIds.isEmpty) return;
+    _setVisibleChannels(channelIds);
     await ensureReady();
-    if (!_disposed && isWarm) {
+    if (_disposed || !isWarm) return;
+    try {
       // Only missing, not failed, programs get an immediate top-up. Retrying
       // a failed channel waits for the bounded backoff below.
       final ids = channelIds
@@ -244,19 +274,20 @@ class ChannelCarouselPrewarm {
           .toList();
       if (ids.isNotEmpty) {
         await viewModel.ensureProgramsForChannels(ids);
-        // The new listings may end sooner than the current boundary timer.
         if (!_disposed) viewModel.scheduleBoundaryRefresh();
       }
-      _scheduleFailedVisibleRetry(channelIds);
+    } finally {
+      // Include any channels that failed during the top-up, even if it threw.
+      _scheduleFailedVisibleRetry();
     }
   }
 
-  void _scheduleFailedVisibleRetry(Iterable<String> visible) {
+  void _scheduleFailedVisibleRetry() {
     if (_disposed || !isWarm || viewModel.listingsAccessDenied ||
         _failedListingsTimer != null) return;
     final now = _now();
     final failed = [
-      for (final id in visible)
+      for (final id in _retryNeighborhood)
         if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
             (_failedListingsLastAttempt[id] == null ||
                 now.difference(_failedListingsLastAttempt[id]!) >=
@@ -267,11 +298,7 @@ class ChannelCarouselPrewarm {
     _failedListingsTimer = Timer(failedListingsRetryDelay, () {
       _failedListingsTimer = null;
       if (_disposed || !isWarm || viewModel.listingsAccessDenied) return;
-      final current = carouselNeighborhood(
-        viewModel.playbackChannels,
-        _tunedChannelId,
-        _defaultVisibleCards,
-      ).toSet();
+      final current = _retryNeighborhood.toSet();
       final eligible = [
         for (final id in failed)
           if (current.contains(id) &&
@@ -282,11 +309,10 @@ class ChannelCarouselPrewarm {
       for (final id in eligible) {
         _failedListingsLastAttempt[id] = _now();
       }
-      // A successful empty schedule is loaded, not failed, so it stays out.
-      // Never queue a tight repeated retry while a server is offline.
-      unawaited(viewModel.ensureProgramsForChannels(eligible).catchError(
-        (Object _) {},
-      ));
+      // Loaded empty schedules and denied requests stay out of the retry.
+      unawaited(viewModel.ensureProgramsForChannels(eligible).then((_) {
+        if (!_disposed) viewModel.scheduleBoundaryRefresh();
+      }).catchError((Object _) {}));
     });
   }
 
@@ -310,6 +336,7 @@ class ChannelCarouselPrewarm {
 
   void dispose() {
     _disposed = true;
+    _visibleChannelIds = null;
     liveTvRecordingRevision.removeListener(_onRecordingsChanged);
     userDataSync.removeListener(viewModel.syncChannelUserData);
     _timer?.cancel();
@@ -513,6 +540,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
 
   @override
   void dispose() {
+    widget.prewarm?.clearVisibleChannels();
     if (_ownsViewModel) WidgetsBinding.instance.removeObserver(this);
     _headerTimer?.cancel();
     _loadTimer?.cancel();

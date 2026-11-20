@@ -16,7 +16,10 @@ import 'package:moonfin/util/tv_ui_scale.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 import 'package:server_core/server_core.dart';
 
-class _CarouselClient extends Mock implements MediaServerClient {}
+class _CarouselClient extends Mock implements MediaServerClient {
+  @override
+  ServerType get serverType => ServerType.jellyfin;
+}
 
 class _CarouselGuide extends LiveTvGuideViewModel {
   final List<List<String>> requests = [];
@@ -481,29 +484,32 @@ void main() {
     ];
     final vm = _CarouselGuide(client, channels)..failTopUp = true;
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
-    addTearDown(prewarm.dispose);
-    prewarm.tuned(channels, 'ch3');
-    await tester.pumpWidget(MaterialApp(
-      theme: AppTheme.buildTheme(ThemeRegistry.active),
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      home: Scaffold(
-        body: ChannelCarouselOverlay(
-          client: client,
-          channels: channels,
-          currentChannelId: 'ch3',
-          prewarm: prewarm,
-          onChannelSelected: (_) {},
-          onDismiss: () {},
-          onShowControls: () {},
+    try {
+      prewarm.tuned(channels, 'ch3');
+      await tester.pumpWidget(MaterialApp(
+        theme: AppTheme.buildTheme(ThemeRegistry.active),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: Scaffold(
+          body: ChannelCarouselOverlay(
+            client: client,
+            channels: channels,
+            currentChannelId: 'ch3',
+            prewarm: prewarm,
+            onChannelSelected: (_) {},
+            onDismiss: () {},
+            onShowControls: () {},
+          ),
         ),
-      ),
-    ));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 250));
-    expect(vm.ready, isTrue);
-    expect(vm.requests.length, greaterThan(1));
-    expect(find.byType(ChannelCarouselCard), findsWidgets);
-    await tester.pumpWidget(const SizedBox.shrink());
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(vm.ready, isTrue);
+      expect(vm.requests.length, greaterThan(1));
+      expect(find.byType(ChannelCarouselCard), findsWidgets);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      prewarm.dispose();
+    }
   });
 
   testWidgets('failed visible prewarm channels retry once after backoff', (
@@ -516,17 +522,80 @@ void main() {
     ];
     final vm = _CarouselGuide(client, channels)..failedChannels.add('ch1');
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
-    addTearDown(prewarm.dispose);
-    prewarm.tuned(channels, 'ch1');
-    await tester.pump(ChannelCarouselPrewarm.settleDelay);
-    await tester.pump();
-    expect(vm.requests, hasLength(1));
-    await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
-    await tester.pump();
-    expect(vm.requests.last, ['ch1']);
-    final count = vm.requests.length;
-    await tester.pump(const Duration(seconds: 1));
-    expect(vm.requests, hasLength(count));
+    try {
+      prewarm.tuned(channels, 'ch1');
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
+      await tester.pump();
+      expect(vm.requests, hasLength(1));
+      final schedules = vm.schedules;
+      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+      await tester.pump();
+      expect(vm.requests.last, ['ch1']);
+      expect(vm.schedules, greaterThan(schedules));
+      final count = vm.requests.length;
+      await tester.pump(const Duration(seconds: 1));
+      expect(vm.requests, hasLength(count));
+    } finally {
+      prewarm.dispose();
+    }
+  });
+
+  testWidgets('carousel retries the currently browsed, not tuned, channels', (
+    tester,
+  ) async {
+    final client = _CarouselClient();
+    final channels = [
+      for (var i = 0; i < 20; i++)
+        GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
+    ];
+    final vm = _CarouselGuide(client, channels)
+      ..failedChannels.addAll(['ch10', 'ch14']);
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
+    try {
+      prewarm.tuned(channels, 'ch0');
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
+      await tester.pump();
+      await prewarm.ensureVisibleChannels(['ch10']);
+      await tester.pump(const Duration(seconds: 2));
+      // Browsing again replaces the pending retry for the previous card.
+      await prewarm.ensureVisibleChannels(['ch14']);
+      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+      await tester.pump();
+      expect(vm.requests.last, ['ch14']);
+      expect(vm.requests.where((ids) =>
+          ids.length == 1 && ids.single == 'ch10'), isEmpty);
+    } finally {
+      prewarm.dispose();
+    }
+  });
+
+  testWidgets('failed-channel retry is armed even when top-up throws', (
+    tester,
+  ) async {
+    final client = _CarouselClient();
+    final channels = [
+      for (var i = 0; i < 4; i++)
+        GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
+    ];
+    final vm = _CarouselGuide(client, channels)
+      ..failedChannels.add('ch1');
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
+    try {
+      prewarm.tuned(channels, 'ch1');
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
+      await tester.pump();
+      vm.failTopUp = true;
+      await expectLater(
+        prewarm.ensureVisibleChannels(['ch1', 'ch2']),
+        throwsA(isA<StateError>()),
+      );
+      vm.failTopUp = false;
+      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+      await tester.pump();
+      expect(vm.requests.last, ['ch1']);
+    } finally {
+      prewarm.dispose();
+    }
   });
 
   testWidgets('prewarm loads listings near the tuned channel', (
