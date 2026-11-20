@@ -25,6 +25,7 @@ on:
   push:
     branches:
       - main
+      - ci/wizard-checks-6ed4103
     tags:
       - '[0-9]+.[0-9]+.[0-9]+*'
   schedule:
