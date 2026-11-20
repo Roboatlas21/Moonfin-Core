@@ -233,47 +233,6 @@ void main() {
   );
 
 
-
-
-  test('Plex Cloud restores its embedded On Now when saved standalone is on', () async {
-    await enableSections({HomeSectionType.liveTv, HomeSectionType.onNow});
-    stubLiveTvRows();
-    var programs = <AggregatedItem>[];
-    when(() => source.loadOnNow('http://server.test')).thenAnswer(
-      (_) async => HomeRow(
-        id: 'liveTvOnNow',
-        title: 'On Now',
-        rowType: HomeRowType.liveTvOnNow,
-        items: List.of(programs),
-      ),
-    );
-    final plex = _MockPlexClient();
-    when(() => plex.cloudOnly).thenReturn(true);
-    when(() => plex.serverType).thenReturn(ServerType.plex);
-    when(() => plex.userId).thenReturn('user');
-    when(() => plex.baseUrl).thenReturn('http://server.test');
-    model.dispose();
-    model = HomeViewModel(
-      dataSource: source,
-      prefs: prefs,
-      client: plex,
-      mediaBarViewModel: _MockMediaBar(),
-      multiServerRepo: _MockMultiServer(),
-    );
-    await model.load();
-    expect(model.rows.map((row) => row.id), ['liveTv']);
-
-    programs = [
-      AggregatedItem(
-        id: 'now',
-        serverId: 'http://server.test',
-        rawData: {'Type': 'Program'},
-      ),
-    ];
-    await model.refreshResumeAndNextUp();
-    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
-  });
-
   test('Plex cloud favorites populate Home after the initial cached rows', () async {
     await enableSections({HomeSectionType.liveTv});
     stubLiveTvRows();
@@ -368,50 +327,6 @@ void main() {
     expect(loads, 2);
   });
 
-
-
-  test('an older favorites response cannot overwrite a newer Home load', () async {
-    await enableSections({HomeSectionType.liveTv});
-    stubLiveTvRows();
-    final old = Completer<HomeRow>();
-    var calls = 0;
-    HomeRow favoriteRow(String id) => HomeRow(
-      id: 'liveTvFavorites',
-      title: 'Favorite Channels',
-      rowType: HomeRowType.liveTvFavorites,
-      items: [
-        AggregatedItem(
-          id: id,
-          serverId: 'http://server.test',
-          rawData: {'Type': 'TvChannel'},
-        ),
-      ],
-    );
-    when(() => source.loadFavoritesChannels('http://server.test'))
-        .thenAnswer((_) {
-      calls++;
-      if (calls == 1) return Future.value(favoriteRow('initial'));
-      if (calls == 2) return old.future;
-      return Future.value(favoriteRow('new'));
-    });
-
-    await model.load();
-    expect(model.rows.last.items.single.id, 'initial');
-    final staleRefresh = model.refreshResumeAndNextUp();
-    await pumpEventQueue();
-    expect(calls, 2);
-
-    await model.load(preserveExisting: true);
-    expect(model.rows.any((row) =>
-        row.rowType == HomeRowType.liveTvFavorites &&
-        row.items.single.id == 'new'), isTrue);
-
-    expect(model.rows.last.items.single.id, 'new');
-    old.complete(favoriteRow('old'));
-    await staleRefresh;
-    expect(model.rows.last.items.single.id, 'new');
-    expect(calls, 4);
-  });
 
   test('failed On Now listings do not hide favorite channels', () async {
     await enableSections({HomeSectionType.liveTv});

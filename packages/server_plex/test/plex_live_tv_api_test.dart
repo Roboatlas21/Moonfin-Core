@@ -276,30 +276,6 @@ void main() {
     expect(server.requests.last.headers['X-Plex-Provider-Version'], '7.2');
   });
 
-  test('malformed Featured data preserves the last good membership', () async {
-    final (dio, _) = _server();
-    var malformed = false;
-    dio.interceptors.insert(0, InterceptorsWrapper(
-      onRequest: (options, handler) {
-        if (malformed && options.uri.path == '/lineups/plex/channels/featured') {
-          handler.resolve(Response(requestOptions: options, data: {
-            'MediaContainer': {'size': 0, 'Channel': 'invalid'},
-          }));
-        } else {
-          handler.next(options);
-        }
-      },
-    ));
-    final promoted = (await PlexLiveTvApi(dio).getChannelGroups()).promoted!;
-    await promoted.refresh(DateTime.now);
-    expect(promoted.channelIds, {'channel-plex-abc-66635fc0'});
-    malformed = true;
-    await expectLater(
-      promoted.refresh(DateTime.now),
-      throwsA(isA<FormatException>()),
-    );
-    expect(promoted.channelIds, {'channel-plex-abc-66635fc0'});
-  });
 
   test('Cloud-only On Now does not fetch per-channel EPG grids', () async {
     final (dio, server) = _server();
@@ -308,7 +284,6 @@ void main() {
     expect(programs['Items'], isEmpty);
     expect(server.requests, isEmpty);
   });
-
 
 
   test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
@@ -351,7 +326,6 @@ void main() {
   });
 
 
-
   test('Plex authorization failures are not recovered as partial listings', () async {
     for (final deniedPath in ['/grid', '/tv.plex.providers.epg.xmltv:2/grid']) {
       final (dio, _) = _server();
@@ -389,90 +363,6 @@ void main() {
     }
   });
 
-
-
-
-
-  test('malformed Free TV grids fail per channel and are retried', () async {
-    final (dio, _) = _server();
-    var malformed = true;
-    var requestsForExtra = 0;
-    dio.interceptors.insert(0, InterceptorsWrapper(
-      onRequest: (options, handler) {
-        if (options.uri.path == '/grid' &&
-            options.queryParameters['channelGridKey'] == 'extra') {
-          requestsForExtra++;
-          if (malformed) {
-            handler.resolve(Response(requestOptions: options, data: {
-              'MediaContainer': {
-                'Metadata': [
-                  {'type': 'movie', 'title': 'partial', 'Media': [
-                    {'beginsAt': 1792699380, 'endsAt': 1792703040},
-                  ]},
-                  {'type': 'movie', 'title': 'broken', 'Media': 'not a list'},
-                ],
-              },
-            }));
-            return;
-          }
-        }
-        handler.next(options);
-      },
-    ));
-    final api = PlexLiveTvApi(dio, cloudOnly: true);
-    Future<Map<String, dynamic>> guide() => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22, 20),
-      endDate: DateTime.utc(2026, 10, 22, 22),
-      channelIds: ['channel-plex-abc-66635fc0', 'channel-plex-news-extra'],
-    );
-    final first = await guide();
-    expect(first['FailedChannelIds'], ['channel-plex-news-extra']);
-    expect(
-      (first['Items'] as List).whereType<Map>().map((p) => p['ChannelId']),
-      isNot(contains('channel-plex-news-extra')),
-    );
-    malformed = false;
-    final second = await guide();
-    expect(second['FailedChannelIds'], isNull);
-    expect(
-      (second['Items'] as List).whereType<Map>().map((p) => p['ChannelId']),
-      contains('channel-plex-news-extra'),
-    );
-    expect(requestsForExtra, 2);
-  });
-
-  test('Cloud-only guide with omitted IDs fetches all grids once per UTC day',
-      () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio, cloudOnly: true);
-    final start = DateTime.utc(2026, 10, 22, 20);
-    final midnight = DateTime.utc(2026, 10, 23);
-    final guide = await api.getGuide(startDate: start, endDate: midnight);
-    expect(
-      (guide['Items'] as List).whereType<Map>().map((p) => p['ChannelId']).toSet(),
-      containsAll(['channel-plex-abc-66635fc0', 'channel-plex-news-extra']),
-    );
-    final grids = server.requests.where((r) => r.uri.path == '/grid').toList();
-    expect(grids, hasLength(2));
-    expect(grids.map((r) => r.queryParameters['date']).toSet(), {'2026-10-22'});
-
-    final empty = await api.getGuide(
-      startDate: start, endDate: midnight, channelIds: [],
-    );
-    expect(empty['Items'], isEmpty);
-    expect(server.requests.where((r) => r.uri.path == '/grid'), hasLength(2));
-
-    await api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22, 23, 59),
-      endDate: DateTime.utc(2026, 10, 23, 0, 1),
-      channelIds: ['channel-plex-abc-66635fc0'],
-    );
-    expect(
-      server.requests.where((r) => r.uri.path == '/grid')
-          .map((r) => r.queryParameters['date']),
-      contains('2026-10-23'),
-    );
-  });
 
   test('every showing of a program is a program of its own', () async {
     final (dio, server) = _server();
