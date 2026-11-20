@@ -405,6 +405,7 @@ void main() {
     }
   });
   test('Emby 403 clears the lineup without another fetch', () async {
+    when(() => client.serverType).thenReturn(ServerType.emby);
     final odd = {..._channel('odd'), 'ChannelNumber': [], 'ImageTags': [], 'UserData': false};
     final server = AdminFake({'/LiveTv/Channels': {'Items': [_channel('one'), odd]}});
     when(() => client.liveTvApi).thenReturn(EmbyLiveTvApi(server.dio));
@@ -1706,14 +1707,44 @@ void main() {
       'Items': <dynamic>[],
       'FailedChannelIds': ['c0', 'c1'],
     });
+    final revision = vm.failedWindowMoveRevision;
     expect(await vm.shiftWindow(const Duration(hours: 3)), isFalse);
+    expect(vm.failedWindowMoveRevision, revision + 1);
     expect(vm.windowStart, oldStart);
     expect(vm.windowEnd, oldEnd);
     expect(vm.programsForChannel('c0').single.id, 'old-c0');
     expect(vm.programsForChannel('c1').single.id, 'old-c1');
   });
 
+  test('successful empty category refresh removes stale matching channels', () async {
+    _stubChannels(liveTv, [_channel('c1'), _channel('c2')]);
+    when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(
+      (_) async => {
+        'Items': [
+          _program('sport1', 'c1', isSports: true),
+          _program('sport2', 'c2', isSports: true),
+        ],
+      },
+    );
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    vm.setFilter(GuideFilter.sports);
+    await pumpEventQueue();
+    expect(vm.filteredChannels.map((c) => c.id), ['c1', 'c2']);
+
+    when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(
+      (_) async => {
+        'Items': [_program('sport2', 'c2', isSports: true)],
+      },
+    );
+    await vm.recordingChanged();
+    expect(vm.filteredChannels.map((c) => c.id), ['c2']);
+    expect(vm.hasFailedCategoryListings, isFalse);
+  });
+
   test('partial Plex listings leave only failed channels retryable', () async {
+    when(() => client.serverType).thenReturn(ServerType.plex);
     _stubChannels(liveTv, [_channel('c1'), _channel('c2')]);
     when(() => _guide(liveTv)).thenAnswer((_) async => {
       'Items': [_program('healthy', 'c1')],
@@ -1723,10 +1754,16 @@ void main() {
     await vm.load();
     expect(vm.loadStateFor('c1'), GuideChannelLoadState.loaded);
     expect(vm.loadStateFor('c2'), GuideChannelLoadState.failed);
-    when(() => _guide(liveTv)).thenAnswer((inv) async => {
-      'Items': [for (final id in _requestedIds(inv)) _program('retry-$id', id)],
+    final retries = <List<String>>[];
+    when(() => _guide(liveTv)).thenAnswer((inv) async {
+      final ids = _requestedIds(inv);
+      retries.add(ids);
+      return {
+        'Items': [for (final id in ids) _program('retry-$id', id)],
+      };
     });
     await vm.retryFailedPrograms();
+    expect(retries, [['c2']]);
     expect(vm.loadStateFor('c2'), GuideChannelLoadState.loaded);
     vm.dispose();
   });

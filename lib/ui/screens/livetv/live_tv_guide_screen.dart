@@ -170,6 +170,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   bool get _canOpenRecordings => !isCloudOnlyPlexClient(_client);
   int get _maxWindowBarIndex =>
       _canOpenRecordings ? _kWindowBarRecordings : _kWindowBarDate;
+  final _emptyCategoryRetryFocus = FocusNode(
+    debugLabel: 'GuideEmptyCategoryRetry',
+  );
   final _channelScrollController = ScrollController();
   final _programScrollController = ScrollController();
   final _nowNextScrollController = ScrollController();
@@ -931,7 +934,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   void _focusLastChannelRow() {
     final channels = _vm.filteredChannels;
-    if (channels.isEmpty) return;
+    if (channels.isEmpty) {
+      if (_vm.hasFailedCategoryListings &&
+          _emptyCategoryRetryFocus.context?.mounted == true) {
+        _emptyCategoryRetryFocus.requestFocus();
+      }
+      return;
+    }
 
     var targetIndex = _lastFocusedRowIndex ?? 0;
     final focusedChannelId = _focusedChannel.value?.id;
@@ -966,10 +975,16 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       );
       if (picked != null && mounted) {
         _clearWindowFailure();
+        final failureRevision = _vm.failedWindowMoveRevision;
         try {
-          if (await _vm.setDate(picked) && mounted) _anchorToWindowStart();
+          if (await _vm.setDate(picked)) {
+            if (mounted) _anchorToWindowStart();
+          } else if (mounted &&
+              _vm.failedWindowMoveRevision != failureRevision) {
+            _showWindowFailure(picked);
+          }
         } catch (_) {
-          _showWindowFailure(picked);
+          if (mounted) _showWindowFailure(picked);
         }
       }
     } finally {
@@ -1061,6 +1076,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _focusedProgram.removeListener(_scheduleArtworkLookup);
     _focusedChannel.removeListener(_scheduleArtworkLookup);
     _channelRailFocused.removeListener(_scheduleArtworkLookup);
+    _emptyCategoryRetryFocus.dispose();
     _channelScrollController.dispose();
     _programScrollController.dispose();
     _nowNextScrollController.dispose();
@@ -2214,13 +2230,24 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             style: TextStyle(color: Colors.white.withAlpha(179)),
           ),
           const SizedBox(height: 16),
-          OutlinedButton.icon(
-            autofocus: true,
-            onPressed: _vm.retryingCategoryListings
-                ? null
-                : () => unawaited(_vm.retryFailedCategoryListings()),
-            icon: const Icon(Icons.refresh),
-            label: Text(l10n.retry),
+          Focus(
+            canRequestFocus: false,
+            onKeyEvent: (_, event) {
+              if (event.isActionable && event.logicalKey.isUpKey) {
+                _focusWindowBarFromGrid();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: OutlinedButton.icon(
+              focusNode: _emptyCategoryRetryFocus,
+              autofocus: true,
+              onPressed: _vm.retryingCategoryListings
+                  ? null
+                  : () => unawaited(_vm.retryFailedCategoryListings()),
+              icon: const Icon(Icons.refresh),
+              label: Text(l10n.retry),
+            ),
           ),
         ],
       ),
@@ -3126,6 +3153,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (clamped == oldStart || clamped == _vm.pendingWindowStart) return;
 
     _clearWindowFailure();
+    final failureRevision = _vm.failedWindowMoveRevision;
     try {
       final moved = await _vm.setWindowStart(
         clamped,
@@ -3133,8 +3161,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         paging: true,
       );
       if (!moved) {
-        // Denied listings leave the current channels usable, but block paging.
-        if (_vm.listingsAccessDenied) _showWindowFailure(clamped);
+        // Superseded moves stay silent; real listings failures show the notice.
+        if (_vm.listingsAccessDenied ||
+            _vm.failedWindowMoveRevision != failureRevision) {
+          _showWindowFailure(clamped);
+        }
         return;
       }
     } catch (_) {
@@ -3258,6 +3289,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// True while [_resetToEntryState] is awaiting its reload, so a second back
   /// press in that window doesn't start the reset over.
   bool _resettingToEntryState = false;
+  bool _failedLiveReset = false;
 
   /// Resets to [_homeChannelId], re-resolving it into
   /// [LiveTvGuideViewModel.filteredChannels] AFTER [_goToNow] reloads the
@@ -3278,11 +3310,18 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           await _goToNow();
         }
       } else {
+        final failureRevision = _vm.failedWindowMoveRevision;
         final moved = await _vm.setWindowStart(liveStart, livePosition: true);
         if (!moved) {
+          // Only a genuine failed live-window load lets the next Back exit.
+          // A superseded reset still belongs to the newer navigation.
+          if (_vm.failedWindowMoveRevision != failureRevision) {
+            _failedLiveReset = true;
+          }
           _resettingToEntryState = false;
           return;
         }
+        _failedLiveReset = false;
         if (mounted) _anchorToWindowStart();
       }
     } catch (_) {
@@ -3355,6 +3394,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     // from closing out from under a reset that is about to land.
     if (_resettingToEntryState) return true;
     _vm.cancelPendingPage();
+    if (_failedLiveReset) {
+      _failedLiveReset = false;
+      return false;
+    }
     if (PlatformDetection.isTV && !_gridHasFocus) return false;
     if (!_isExploringAwayFromEntry()) {
       if (!PlatformDetection.isTV) return false;

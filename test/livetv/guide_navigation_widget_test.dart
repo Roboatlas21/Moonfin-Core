@@ -272,6 +272,7 @@ void main() {
     bool miniPlayerMode = false,
     Size surface = const Size(900, 700),
     List<NavigatorObserver> observers = const [],
+    LiveTvGuideBackController? backController,
   }) async {
     // Wide enough for a multi-hour window and tall enough for a dozen rows.
     // The guide sizes its own time density to whatever surface it is given.
@@ -292,6 +293,7 @@ void main() {
             embedded: miniPlayerMode,
             onChannelSelected: miniPlayerMode ? (_, _) {} : null,
             onClose: miniPlayerMode ? () {} : null,
+            backController: backController,
           ),
           embedded: miniPlayerMode,
         ),
@@ -359,6 +361,16 @@ void main() {
       expect(vm.hasFailedCategoryListings, isTrue);
       expect(find.text('Failed to load'), findsOneWidget);
       expect(find.text('No channels found'), findsNothing);
+      if (layout == InterfaceLayout.tv) {
+        _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
+        await _pumpFrames(tester);
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+        await _pumpFrames(tester);
+        expect(_focusedLabel(), 'GuideEmptyCategoryRetry');
+        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+        await _pumpFrames(tester);
+        expect(_focusedLabel(), 'GuideWindowBar:0');
+      }
 
       failed = false;
       await tester.tap(find.text('Retry'));
@@ -425,6 +437,10 @@ void main() {
   testWidgets('playback uses the guide filter until a mini-guide selection', (
     tester,
   ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
     tester.view.physicalSize = const Size(900, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -658,8 +674,14 @@ void main() {
     final picker = find.byType(GuideFilterPicker);
     Finder label(String name) =>
         find.descendant(of: picker, matching: find.text(name));
-    bool focused(String name) =>
-        Focus.of(tester.element(label(name))).hasPrimaryFocus;
+    bool focused(String name) {
+      final tile = find.ancestor(
+        of: label(name),
+        matching: find.byType(ListTile),
+      );
+      return tester.widget<ListTile>(tile.first).focusNode?.hasPrimaryFocus ==
+          true;
+    }
     expect(focused('All channels'), isTrue);
     await key(LogicalKeyboardKey.arrowUp);
     final pickerSearch = find.descendant(
@@ -1830,6 +1852,78 @@ void main() {
     await _pumpFrames(tester);
     expect(_windowRangeText(tester), isNot(range));
     expect(notice, findsNothing);
+  });
+
+  testWidgets('all-failed EPG paging shows a notice without changing time', (
+    tester,
+  ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
+    await pumpGuide(tester);
+    _nodeLabelled(tester, 'GuideProgramRow4:0').requestFocus();
+    await _pumpFrames(tester);
+    final original = _windowRangeText(tester);
+    when(
+      () => liveTvApi.getGuide(
+        startDate: any(named: 'startDate'),
+        endDate: any(named: 'endDate'),
+        channelIds: any(named: 'channelIds'),
+        isSports: any(named: 'isSports'),
+        fields: any(named: 'fields'),
+        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+        enableImages: any(named: 'enableImages'),
+        enableUserData: any(named: 'enableUserData'),
+        userId: any(named: 'userId'),
+      ),
+    ).thenAnswer((inv) async => {
+      'Items': <dynamic>[],
+      'FailedChannelIds':
+          (inv.namedArguments[#channelIds] as List<String>?) ?? [],
+    });
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await _pumpFrames(tester);
+    expect(_windowRangeText(tester), original);
+    expect(find.textContaining('Couldn’t load'), findsOneWidget);
+  });
+
+  testWidgets('Back can exit after all live reset listings fail', (tester) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
+    final back = LiveTvGuideBackController();
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.liveTvLastChannelId, 'ch3',
+    );
+    await pumpGuide(tester, backController: back);
+    final vm = (tester.state(find.byType(LiveTvGuideScreen)) as dynamic)
+        .debugGuideViewModel as LiveTvGuideViewModel;
+    expect(await vm.shiftWindow(const Duration(hours: 3)), isTrue);
+    _nodeLabelled(tester, 'GuideChannel:4').requestFocus();
+    await _pumpFrames(tester);
+    when(
+      () => liveTvApi.getGuide(
+        startDate: any(named: 'startDate'),
+        endDate: any(named: 'endDate'),
+        channelIds: any(named: 'channelIds'),
+        isSports: any(named: 'isSports'),
+        fields: any(named: 'fields'),
+        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+        enableImages: any(named: 'enableImages'),
+        enableUserData: any(named: 'enableUserData'),
+        userId: any(named: 'userId'),
+      ),
+    ).thenAnswer((inv) async => {
+      'Items': <dynamic>[],
+      'FailedChannelIds':
+          (inv.namedArguments[#channelIds] as List<String>?) ?? [],
+    });
+    expect(back.consumeBackPress(), isTrue);
+    await _pumpFrames(tester);
+    expect(vm.atLivePosition, isFalse);
+    expect(back.consumeBackPress(), isFalse);
   });
 
   for (final startAtLive in [true, false]) {

@@ -329,6 +329,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   Future<void> retryFailedCategoryListings() => _retryCategoryFailures();
   int _windowRequest = 0;
+  int _failedWindowMoveRevision = 0;
+
+  /// Increases only when all channel listings for a requested time failed,
+  /// not when the move was cancelled or superseded.
+  int get failedWindowMoveRevision => _failedWindowMoveRevision;
+
   ({
     DateTime start,
     bool paging,
@@ -388,7 +394,31 @@ class LiveTvGuideViewModel extends ChangeNotifier {
        _now = now ?? DateTime.now,
        _guideDate = (now ?? DateTime.now)(),
        _windowStart = (now ?? DateTime.now)(),
-       _windowEnd = (now ?? DateTime.now)();
+       _windowEnd = (now ?? DateTime.now)() {
+    if (_client.serverType == ServerType.plex) {
+      PlexLiveTvFavorites.favoriteListChanged.addListener(
+        _onPlexFavoritesChanged,
+      );
+    }
+  }
+
+  void _onPlexFavoritesChanged() {
+    final change = PlexLiveTvFavorites.favoriteListChanged.value;
+    if (_disposed ||
+        change == null ||
+        change.userId != _client.userId ||
+        _client.serverType != ServerType.plex) {
+      return;
+    }
+    // Publishing the second PMS catalog updates its synthetic DVR keys.
+    try {
+      PlexLiveTvFavorites.applyCachedToClient(_client);
+      syncChannelUserData();
+    } catch (_) {
+      // The account's saved token can disappear during a user switch.
+      // The next guide load will populate its own favorite state.
+    }
+  }
 
   /// Clock the boundary refresh reads, injectable so tests can advance it.
   final DateTime Function() _now;
@@ -928,6 +958,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // overwrite badges from a newer recording change halfway through.
     final refreshed = <String, List<GuideProgram>>{};
     final failed = <String>{};
+    final succeeded = <String>{};
     final size = _batchSizeFor(filter);
     bool current() =>
         !_disposed &&
@@ -940,12 +971,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!current()) return false;
       failed.addAll(fetched.failedChannelIds);
       for (final channel in batch) {
+        if (fetched.failedChannelIds.contains(channel.id)) continue;
+        succeeded.add(channel.id);
         final programs = fetched.programs[channel.id];
         if (programs != null) refreshed[channel.id] = programs;
       }
     }
     if (!current()) return false;
+    // A successful empty result means this channel left the category.
+    // Only failed requests retain the old entry and can be retried.
+    _categoryPrograms.removeWhere((id, _) => succeeded.contains(id));
     _categoryPrograms.addAll(refreshed);
+    _categoryFailedIds.removeAll(succeeded);
     _categoryFailedIds.addAll(failed);
     _notifyListeners();
     return failed.isEmpty;
@@ -1731,6 +1768,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (windowStart != null &&
           requestedIds.isNotEmpty &&
           requestedIds.every(failed.contains)) {
+        _failedWindowMoveRevision++;
         return false;
       }
       if (windowStart != null) {
@@ -2259,6 +2297,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    PlexLiveTvFavorites.favoriteListChanged.removeListener(
+      _onPlexFavoritesChanged,
+    );
     _promotedTimer?.cancel();
     _finishPendingWindow();
     _openingLineup?.complete(false);

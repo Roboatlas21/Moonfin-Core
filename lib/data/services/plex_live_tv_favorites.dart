@@ -265,6 +265,19 @@ class PlexLiveTvFavorites {
 
   /// A recent refresh may have come from a different PMS on this Plex account.
   /// Apply its stored results to this client's DVR catalog without another GET.
+  /// Update this client's known channels when another Plex connection for
+  /// the same account fetches a changed favorites list. No network request.
+  static void applyCachedToClient(MediaServerClient client) {
+    final change = favoriteListChanged.value;
+    if (change == null ||
+        client.serverType != ServerType.plex ||
+        change.userId != client.userId ||
+        !GetIt.instance.isRegistered<UserPreferences>()) {
+      return;
+    }
+    _publishCached(client, _account(client).token);
+  }
+
   static bool _publishCached(MediaServerClient client, String token) {
     _checkAccount(client, token);
     final userId = client.userId!;

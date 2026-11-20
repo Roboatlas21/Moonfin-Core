@@ -453,6 +453,33 @@ void main() {
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
   });
 
+  test('an open second Plex guide follows another PMS favorite update', () async {
+    final first = _plex();
+    final second = _plex()..baseUrl = 'https://another-pms.example';
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    const dvr = <String, dynamic>{
+      'Id': 'channel-2-4',
+      'Type': 'TvChannel',
+      'PlexFavoriteSource': 'server://another-machine/epg',
+      'PlexFavoriteId': '4',
+    };
+    final item = PlexLiveTvFavorites.applyToItem(second, dvr);
+    final key = item['PlexFavoriteSyncKey'] as String;
+    final guide = LiveTvGuideViewModel(second);
+    addTearDown(guide.dispose);
+
+    cloud.rows = [{'source': 'server://another-machine/epg', 'id': '4'}];
+    await PlexLiveTvFavorites.refresh(first);
+    expect(userDataSync.favoriteFor(key), isTrue);
+    expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(1));
+
+    cloud.rows = [];
+    await PlexLiveTvFavorites.refresh(first);
+    expect(userDataSync.favoriteFor(key), isFalse);
+    expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
+  });
+
   test('account favorites signal only actual changes', () async {
     final pms = _plex();
     addTearDown(pms.dispose);
