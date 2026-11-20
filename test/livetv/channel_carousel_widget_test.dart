@@ -291,6 +291,44 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('an empty replacement lineup dismisses the carousel', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final client = _CarouselClient();
+    final initial = [
+      GuideChannel(id: 'ch0', name: 'Channel 0', rawData: const {}),
+    ];
+    final vm = _CarouselGuide(client, initial);
+    var channels = initial;
+    var dismissCount = 0;
+    late StateSetter updateHost;
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      theme: AppTheme.buildTheme(ThemeRegistry.active),
+      home: StatefulBuilder(builder: (context, setState) {
+        updateHost = setState;
+        return ChannelCarouselOverlay(
+          client: client,
+          channels: channels,
+          currentChannelId: 'ch0',
+          onChannelSelected: (_) {},
+          onDismiss: () => dismissCount++,
+          onShowControls: () {},
+          viewModelFactory: (_) => vm,
+        );
+      }),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    updateHost(() => channels = <GuideChannel>[]);
+    await tester.pump();
+    await tester.pump(kCarouselExitDuration + const Duration(milliseconds: 50));
+    expect(dismissCount, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('open carousel cards follow favorite changes', (tester) async {
     userDataSync.reset();
     addTearDown(userDataSync.reset);
