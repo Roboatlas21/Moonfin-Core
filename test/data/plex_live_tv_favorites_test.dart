@@ -7,6 +7,7 @@ import 'package:moonfin/auth/repositories/user_repository.dart';
 import 'package:moonfin/data/repositories/item_mutation_repository.dart';
 import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
+import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:server_core/server_core.dart';
 import 'package:server_plex/server_plex.dart';
@@ -35,6 +36,7 @@ class _Cloud extends Interceptor {
   final requests = <RequestOptions>[];
   List<Map<String, dynamic>> rows = [];
   int? getError, putError;
+  Map<String, dynamic>? responseOverride;
 
   @override
   void onRequest(RequestOptions request, RequestInterceptorHandler handler) {
@@ -50,7 +52,7 @@ class _Cloud extends Interceptor {
     }
     if (request.method == 'GET') {
       handler.resolve(Response(requestOptions: request, statusCode: 200,
-        data: {'MediaContainer': {'FavoriteChannel': [
+        data: responseOverride ?? {'MediaContainer': {'FavoriteChannel': [
           for (final row in rows) {...row},
         ]}},
       ));
@@ -202,6 +204,74 @@ void main() {
       throwsA(isA<StateError>()),
     );
     expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(before));
+  });
+
+  test('incomplete cloud favorites cannot replace an existing list', () async {
+    final pms = _plex();
+    addTearDown(pms.dispose);
+    cloud.rows = [{'source': _source, 'id': 'free123'}];
+    PlexLiveTvFavorites.applyToItem(pms, _channel);
+    await PlexLiveTvFavorites.refresh(pms);
+    expect(_saved(pms, 'channel-plex-free123'), isTrue);
+
+    cloud.responseOverride = {'MediaContainer': <String, dynamic>{}};
+    await expectLater(
+      ItemMutationRepository(pms).setFavorite('channel-plex-free123', isFavorite: false),
+      throwsA(isA<FormatException>()),
+    );
+    expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
+    expect(_saved(pms, 'channel-plex-free123'), isTrue);
+
+    cloud.responseOverride = {'MediaContainer': {'size': 0}};
+    await PlexLiveTvFavorites.refresh(pms);
+    expect(_saved(pms, 'channel-plex-free123'), isFalse);
+  });
+
+  test('other providers with the same Free TV ID stay untouched', () async {
+    final cloudClient = _plex(cloudOnly: true);
+    addTearDown(cloudClient.dispose);
+    cloud.rows = [{'source': 'provider://unrelated', 'id': 'free123'}];
+    PlexLiveTvFavorites.applyToItem(cloudClient, _channel);
+    await PlexLiveTvFavorites.refresh(cloudClient);
+    expect(_saved(cloudClient, 'channel-plex-free123'), isFalse);
+
+    await ItemMutationRepository(cloudClient).setFavorite(
+      'channel-plex-free123', isFavorite: true,
+    );
+    expect(cloud.rows.map((row) => row['source']).toList(),
+        ['provider://unrelated', _source]);
+    await ItemMutationRepository(cloudClient).setFavorite(
+      'channel-plex-free123', isFavorite: false,
+    );
+    expect(cloud.rows.single['source'], 'provider://unrelated');
+  });
+
+  test('different PMS channels with identical IDs remain independent', () async {
+    final first = _plex();
+    final second = _plex()..baseUrl = 'https://second-pms.example';
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+    const dvr = <String, dynamic>{
+      'Id': 'channel-2-4', 'Name': 'CBC', 'PlexFavoriteId': '4',
+    };
+    final a = PlexLiveTvFavorites.applyToItem(first, {
+      ...dvr, 'PlexFavoriteSource': 'server://pms-a/epg',
+    });
+    final b = PlexLiveTvFavorites.applyToItem(second, {
+      ...dvr, 'PlexFavoriteSource': 'server://pms-b/epg',
+    });
+    expect(a['PlexFavoriteSyncKey'], isNot(b['PlexFavoriteSyncKey']));
+
+    await Future.wait([
+      ItemMutationRepository(first).setFavorite('channel-2-4', isFavorite: true),
+      ItemMutationRepository(second).setFavorite('channel-2-4', isFavorite: true),
+    ]);
+    expect(cloud.rows.map((r) => r['source']).toSet(),
+        {'server://pms-a/epg', 'server://pms-b/epg'});
+    await ItemMutationRepository(first).setFavorite('channel-2-4', isFavorite: false);
+    expect(cloud.rows.single['source'], 'server://pms-b/epg');
+    expect(GuideChannel.fromRawItem(a).withSyncedUserData().isFavorite, isFalse);
+    expect(GuideChannel.fromRawItem(b).withSyncedUserData().isFavorite, isTrue);
   });
 
   test('serializes separate channel updates and rejects a different Home user', () async {

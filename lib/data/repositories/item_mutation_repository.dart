@@ -20,26 +20,27 @@ class ItemMutationRepository {
   /// what the server holds throw, so a caller undoing its own toggle on error
   /// lands on the server's value whichever order the callers run in.
   Future<void> setFavorite(String itemId, {required bool isFavorite}) async {
-    userDataSync.requestFavorite(itemId, isFavorite);
+    final stateId = PlexLiveTvFavorites.syncKey(_client, itemId);
+    userDataSync.requestFavorite(stateId, isFavorite);
     final session = userDataSync.session;
-    final key = '$session:$itemId';
+    final key = '$session:$stateId';
     try {
-      await (_favoriteSyncs[key] ??= _syncFavorite(itemId, session, key));
+      await (_favoriteSyncs[key] ??= _syncFavorite(itemId, stateId, session, key));
     } on _FavoriteSyncFailure catch (failure) {
       if (failure.confirmed == isFavorite) return;
       Error.throwWithStackTrace(failure.error, failure.stackTrace);
     }
   }
 
-  Future<void> _syncFavorite(String itemId, int session, String key) async {
+  Future<void> _syncFavorite(String itemId, String stateId, int session, String key) async {
     try {
       // Lets setFavorite store this run before it can finish and remove it.
       await Future<void>.value();
       while (userDataSync.session == session) {
-        final wanted = userDataSync.pendingFavorite(itemId);
+        final wanted = userDataSync.pendingFavorite(stateId);
         if (wanted == null) return;
-        if (wanted == userDataSync.confirmedFavorite(itemId)) {
-          userDataSync.confirmFavorite(itemId, wanted);
+        if (wanted == userDataSync.confirmedFavorite(stateId)) {
+          userDataSync.confirmFavorite(stateId, wanted);
           return;
         }
         try {
@@ -56,12 +57,12 @@ class ItemMutationRepository {
           }
         } catch (error, stackTrace) {
           if (userDataSync.session != session) return;
-          final confirmed = userDataSync.confirmedFavorite(itemId) ?? !wanted;
-          userDataSync.failFavoriteChange(itemId);
+          final confirmed = userDataSync.confirmedFavorite(stateId) ?? !wanted;
+          userDataSync.failFavoriteChange(stateId);
           throw _FavoriteSyncFailure(error, stackTrace, confirmed: confirmed);
         }
         if (userDataSync.session != session) return;
-        userDataSync.confirmFavorite(itemId, wanted);
+        userDataSync.confirmFavorite(stateId, wanted);
       }
     } finally {
       _favoriteSyncs.remove(key);

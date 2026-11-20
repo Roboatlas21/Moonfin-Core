@@ -34,7 +34,8 @@ class GuideChannel {
   });
 
   GuideChannel withSyncedUserData() {
-    final synced = userDataSync.favoriteFor(id);
+    final stateId = rawData['PlexFavoriteSyncKey'] as String? ?? id;
+    final synced = userDataSync.favoriteFor(stateId);
     if (synced == null || synced == isFavorite) return this;
     final current = rawData['UserData'];
     return GuideChannel(
@@ -1462,7 +1463,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     ];
     final fresh = <String, Map<String, dynamic>>{};
     for (final item in channels) {
-      final id = item['Id']?.toString();
+      final id = item['PlexFavoriteSyncKey'] as String? ?? item['Id']?.toString();
       final data = item['UserData'];
       if (id != null &&
           data is Map &&

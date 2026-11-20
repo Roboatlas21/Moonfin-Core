@@ -113,7 +113,7 @@ class PlexLiveTvFavorites {
       throw const FormatException('Invalid Plex favorite-channel response');
     }
     final raw = container['FavoriteChannel'];
-    if (raw == null && (container['size'] == 0 || container['size'] == null)) {
+    if (raw == null && container['size'] == 0) {
       return [];
     }
     if (raw is! List || raw.any((item) => item is! Map)) {
@@ -139,20 +139,22 @@ class PlexLiveTvFavorites {
   static String _key(Map<String, dynamic> info) =>
       (info['source'] as String) + '\u0000' + (info['id'] as String);
 
-  // Free TV still accepts the provider:// variants supported by our previous
-  // client. DVR favorites must match the exact PMS+EPG source.
+  /// Free TV shares state across Plex connections; DVRs use their PMS/EPG identity.
+  static String syncKey(MediaServerClient client, String channelId) {
+    if (!isPlexLiveTvChannel(client, channelId) ||
+        isPlexFreeTvChannel(client, channelId)) {
+      return channelId;
+    }
+    final info = _known[_catalogKey(client)]?[channelId];
+    return info == null
+        ? 'plex-dvr:${_catalogKey(client)}\u0000$channelId'
+        : 'plex-dvr:${_key(info)}';
+  }
+
   static bool _matches(
-    String channelId,
     Map<String, dynamic> info,
     Map<String, dynamic> row,
-  ) {
-    if (row['id'] != info['id']) return false;
-    if (row['source'] == info['source']) return true;
-    final source = row['source'];
-    return channelId.startsWith(_freePrefix) &&
-        source is String &&
-        source.startsWith('provider://');
-  }
+  ) => row['id'] == info['id'] && row['source'] == info['source'];
 
   static Map<String, dynamic>? _info(
     MediaServerClient client,
@@ -192,7 +194,7 @@ class PlexLiveTvFavorites {
         if (row['source'] is String && row['id'] is String) _key(row),
     };
     for (final entry in known.entries) {
-      if (rows.any((row) => _matches(entry.key, entry.value, row))) {
+      if (rows.any((row) => _matches(entry.value, row))) {
         favorites.add(_key(entry.value));
       }
     }
@@ -203,7 +205,7 @@ class PlexLiveTvFavorites {
     _checkAccount(client, token);
     userDataSync.publishAll({
       for (final entry in known.entries)
-        entry.key: {'IsFavorite': favorites.contains(_key(entry.value))},
+        syncKey(client, entry.key): {'IsFavorite': favorites.contains(_key(entry.value))},
     });
   }
 
@@ -229,13 +231,20 @@ class PlexLiveTvFavorites {
       return item;
     }
     final info = _info(client, item, channelId);
-    // Without a verified machine id, never guess the PMS DVR source.
-    if (info == null) return item;
+    // Without a verified machine id, don't guess the DVR favorite source.
+    // Still keep its local optimistic state separate from other PMS servers.
+    if (info == null) {
+      return isPlexFreeTvChannel(client, channelId)
+          ? item
+          : {...item, 'PlexFavoriteSyncKey': syncKey(client, channelId)};
+    }
     _known.putIfAbsent(_catalogKey(client), () => {})[channelId] = info;
     final favorites = GetIt.instance<UserPreferences>().get(_preference(userId));
     final userData = item['UserData'];
     return {
       ...item,
+      if (!isPlexFreeTvChannel(client, channelId))
+        'PlexFavoriteSyncKey': syncKey(client, channelId),
       'UserData': {
         if (userData is Map) ...userData,
         'IsFavorite': favorites.contains(_key(info)),
@@ -266,11 +275,11 @@ class PlexLiveTvFavorites {
       final remote = await _read(client, account.token);
       _checkAccount(client, account.token);
       final rows = [...remote];
-      final hadFavorite = rows.any((row) => _matches(channelId, info, row));
+      final hadFavorite = rows.any((row) => _matches(info, row));
       if (isFavorite && !hadFavorite) {
         rows.add({...info});
       } else if (!isFavorite && hadFavorite) {
-        rows.removeWhere((row) => _matches(channelId, info, row));
+        rows.removeWhere((row) => _matches(info, row));
       }
       // Plex PUT replaces the whole account list: retain other PMS sources.
       if (isFavorite != hadFavorite) {
