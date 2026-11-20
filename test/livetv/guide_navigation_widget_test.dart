@@ -1624,6 +1624,10 @@ void main() {
     testWidgets('opposite chevrons cancel the pending move from button $first', (
       tester,
     ) async {
+      PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+      addTearDown(
+        () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+      );
       channelCount = 2;
       await pumpGuide(tester);
       final start = _windowRangeText(tester);
@@ -1640,6 +1644,10 @@ void main() {
   testWidgets('Next pages Sports while its initial listings are pending', (
     tester,
   ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
     channelCount = 2;
     await pumpGuide(tester);
     final start = _windowRangeText(tester);

@@ -1692,6 +1692,27 @@ void main() {
     vm.dispose();
   });
 
+  test('all failed channel listings do not advance the guide window', () async {
+    _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+    when(() => _guide(liveTv)).thenAnswer((_) async => {
+      'Items': [_program('old-c0', 'c0'), _program('old-c1', 'c1')],
+    });
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    final oldStart = vm.windowStart;
+    final oldEnd = vm.windowEnd;
+    when(() => _guide(liveTv)).thenAnswer((_) async => {
+      'Items': <dynamic>[],
+      'FailedChannelIds': ['c0', 'c1'],
+    });
+    expect(await vm.shiftWindow(const Duration(hours: 3)), isFalse);
+    expect(vm.windowStart, oldStart);
+    expect(vm.windowEnd, oldEnd);
+    expect(vm.programsForChannel('c0').single.id, 'old-c0');
+    expect(vm.programsForChannel('c1').single.id, 'old-c1');
+  });
+
   test('partial Plex listings leave only failed channels retryable', () async {
     _stubChannels(liveTv, [_channel('c1'), _channel('c2')]);
     when(() => _guide(liveTv)).thenAnswer((_) async => {
@@ -1859,6 +1880,67 @@ void main() {
       expect(requests.last, ['c1']);
       expect(requests, hasLength(3));
       expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c1']);
+    });
+
+    test('sorting releases an invalidated category retry', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      final pending = Completer<Map<String, dynamic>>();
+      var reads = 0;
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((inv) {
+        reads++;
+        if (reads == 3) return pending.future;
+        return Future.value({
+          'Items': [_program('sport-c0', 'c0', isSports: true)],
+          'FailedChannelIds': ['c1'],
+        });
+      });
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.hasFailedCategoryListings, isTrue);
+
+      final retry = vm.retryFailedCategoryListings();
+      await pumpEventQueue();
+      expect(vm.retryingCategoryListings, isTrue);
+      vm.setSortBy(ChannelSortBy.name);
+      expect(vm.retryingCategoryListings, isFalse);
+      pending.complete({'Items': <dynamic>[]});
+      await retry;
+      expect(vm.retryingCategoryListings, isFalse);
+    });
+
+    test('category requests do not clear failed All-view listings', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {
+        'Items': [_program('all-c1', 'c1')],
+        'FailedChannelIds': ['c0'],
+      });
+      var sportsReads = 0;
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((inv) async {
+        sportsReads++;
+        return {
+          'Items': [
+            if (_requestedIds(inv).contains('c1'))
+              _program('sport-c1', 'c1', isSports: true),
+          ],
+          if (sportsReads <= 2) 'FailedChannelIds': ['c0'],
+        };
+      });
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      expect(vm.loadStateFor('c0'), GuideChannelLoadState.failed);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.loadStateFor('c0'), GuideChannelLoadState.failed);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(sportsReads, 3);
+      expect(vm.loadStateFor('c0'), GuideChannelLoadState.failed);
     });
 
     test('a category chip walks the lineup in flagged batches', () async {
@@ -2325,6 +2407,41 @@ void main() {
       expect(vm.state, GuideState.ready);
       expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
       expect(liveTvRecordingRevision.value, revision + 1);
+    });
+
+    test('recording changes refresh healthy rows during a partial retry', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      var phase = 0;
+      when(() => _guide(liveTv)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        if (phase == 1) {
+          return {
+            'Items': [_program('p-c0', 'c0')],
+            'FailedChannelIds': ['c1'],
+          };
+        }
+        return {
+          'Items': [
+            for (final id in ids)
+              {..._program('p-$id', id), if (phase == 2) 'TimerId': 'new-timer'},
+          ],
+        };
+      });
+      final now = DateTime.utc(2026, 9, 11, 10, 15);
+      final vm = LiveTvGuideViewModel(client, now: () => now);
+      addTearDown(vm.dispose);
+      await vm.load();
+      phase = 1;
+      expect(await vm.replacePrograms(
+        channelIds: ['c0', 'c1'],
+        from: now,
+        to: now.add(const Duration(hours: 3)),
+      ), isFalse);
+      phase = 2;
+      await vm.recordingChanged();
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+      expect(vm.programsForChannel('c1').single.hasTimer, isTrue);
+      vm.cancelBoundaryRefresh();
     });
 
     test('a category filter refreshes its own rows too', () async {

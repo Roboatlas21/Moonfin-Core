@@ -402,6 +402,43 @@ void main() {
     expect(result['FailedChannelIds'], ['channel-plex-abc-66635fc0']);
   });
 
+  test('Plex authorization failures are not recovered as partial listings', () async {
+    for (final deniedPath in ['/grid', '/tv.plex.providers.epg.xmltv:2/grid']) {
+      final (dio, _) = _server();
+      dio.interceptors.insert(0, InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == deniedPath &&
+              (deniedPath != '/grid' ||
+                  options.queryParameters['channelGridKey'] == 'extra')) {
+            handler.reject(DioException(
+              requestOptions: options,
+              response: Response(requestOptions: options, statusCode: 403),
+              type: DioExceptionType.badResponse,
+            ));
+          } else {
+            handler.next(options);
+          }
+        },
+      ));
+      await expectLater(
+        PlexLiveTvApi(dio).getGuide(
+          startDate: DateTime.utc(2026, 10, 22, 20),
+          endDate: DateTime.utc(2026, 10, 22, 22),
+          channelIds: [
+            'channel-2-4',
+            'channel-plex-abc-66635fc0',
+            'channel-plex-news-extra',
+          ],
+        ),
+        throwsA(isA<DioException>().having(
+          (error) => error.response?.statusCode,
+          'status',
+          403,
+        )),
+      );
+    }
+  });
+
   test('a failed Free TV grid retries rather than appearing empty', () async {
     final (dio, _) = _server();
     var attempts = 0;

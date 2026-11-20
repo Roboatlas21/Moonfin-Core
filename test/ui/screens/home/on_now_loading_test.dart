@@ -575,11 +575,14 @@ void main() {
         ),
       );
       model.dispose();
+      final mediaBar = _MockMediaBar();
+      when(() => mediaBar.load(force: any(named: 'force')))
+          .thenAnswer((_) async {});
       model = HomeViewModel(
         dataSource: source,
         prefs: prefs,
         client: serverClient,
-        mediaBarViewModel: _MockMediaBar(),
+        mediaBarViewModel: mediaBar,
         multiServerRepo: _MockMultiServer(),
       );
       await model.load();
