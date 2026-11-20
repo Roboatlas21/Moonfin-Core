@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
@@ -44,6 +46,7 @@ class _Cloud extends Interceptor {
   List<Map<String, dynamic>> rows = [];
   int? getError, putError;
   Map<String, dynamic>? responseOverride;
+  Future<void>? holdGet;
 
   @override
   void onRequest(RequestOptions request, RequestInterceptorHandler handler) {
@@ -58,11 +61,17 @@ class _Cloud extends Interceptor {
       return;
     }
     if (request.method == 'GET') {
-      handler.resolve(Response(requestOptions: request, statusCode: 200,
+      final response = Response(requestOptions: request, statusCode: 200,
         data: responseOverride ?? {'MediaContainer': {'FavoriteChannel': [
           for (final row in rows) {...row},
         ]}},
-      ));
+      );
+      final pending = holdGet;
+      if (pending == null) {
+        handler.resolve(response);
+      } else {
+        unawaited(pending.then((_) => handler.resolve(response)));
+      }
     } else {
       rows = [for (final row in request.data as List)
         Map<String, dynamic>.from(row as Map)];
@@ -289,7 +298,7 @@ void main() {
   });
 
 
-  test('Home and search load Plex favorites without opening the guide', () async {
+  test('cached favorites appear in Home and search without another cloud read', () async {
     final client = _ChannelClient();
     final api = _ChannelApi();
     when(() => client.serverType).thenReturn(ServerType.plex);
@@ -306,6 +315,7 @@ void main() {
       userId: 'plex-user',
     )).thenAnswer((_) async => {'Items': [_channel]});
     cloud.rows = [{'source': _source, 'id': 'free123'}];
+    await PlexLiveTvFavorites.refresh(client);
 
     final home = await RowDataSource(client).loadFavoritesChannels('pms');
     expect(home.items.map((item) => item.id), ['channel-plex-free123']);
@@ -337,6 +347,52 @@ void main() {
     await ItemMutationRepository(pms).setFavorite('channel-2-4',
         isFavorite: true);
     expect(cloud.rows.single['source'], source);
+  });
+
+
+  test('search does not wait for a slow Plex cloud favorites read', () async {
+    final client = _ChannelClient();
+    final api = _ChannelApi();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    when(() => client.userId).thenReturn('plex-user');
+    when(() => client.baseUrl).thenReturn('https://pms.example');
+    when(() => client.deviceInfo).thenReturn(_device);
+    when(() => client.liveTvApi).thenReturn(api);
+    when(() => api.getChannels(
+      fields: 'ImageTags',
+      enableTotalRecordCount: false,
+      userId: 'plex-user',
+    )).thenAnswer((_) async => {'Items': [_channel]});
+    cloud.rows = [{'source': _source, 'id': 'free123'}];
+    final hold = Completer<void>();
+    cloud.holdGet = hold.future;
+
+    final result = await SearchRepository(client).fetchLiveTvChannels()
+        .timeout(const Duration(seconds: 1));
+    expect(result.single.isFavorite, isFalse);
+    await pumpEventQueue();
+    expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(1));
+
+    hold.complete();
+    await pumpEventQueue();
+    expect(userDataSync.favoriteFor('channel-plex-free123'), isTrue);
+  });
+
+  test('a client reused for another user drops its old DVR catalog', () {
+    final pms = _plex();
+    addTearDown(pms.dispose);
+    const dvr = {
+      'Id': 'channel-2-4',
+      'PlexFavoriteSource': 'server://machine/epg',
+      'PlexFavoriteId': '4',
+    };
+    PlexLiveTvFavorites.applyToItem(pms, dvr);
+    final known = PlexLiveTvFavorites.syncKey(pms, 'channel-2-4');
+    expect(known, contains('server://machine/epg'));
+    pms.userId = 'other-user';
+    expect(PlexLiveTvFavorites.syncKey(pms, 'channel-2-4'), isNot(known));
+    pms.userId = 'plex-user';
+    expect(PlexLiveTvFavorites.syncKey(pms, 'channel-2-4'), isNot(known));
   });
 
   test('serializes separate channel updates and rejects a different Home user', () async {

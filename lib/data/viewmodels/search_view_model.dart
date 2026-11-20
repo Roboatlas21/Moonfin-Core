@@ -13,6 +13,7 @@ import '../repositories/multi_server_repository.dart';
 import '../repositories/search_repository.dart';
 import '../repositories/seerr_repository.dart';
 import '../services/media_server_client_factory.dart';
+import '../services/user_data_sync.dart';
 import '../services/plugin_sync_service.dart';
 import '../services/seerr/seerr_api_models.dart';
 import '../utils/blocked_ratings.dart';
@@ -117,7 +118,9 @@ class SearchViewModel extends ChangeNotifier {
        _scopedParentId =
            (scopedParentId != null && scopedParentId.isNotEmpty)
                ? scopedParentId
-               : null;
+               : null {
+    userDataSync.addListener(_onUserDataChanged);
+  }
 
   void setSeerrRepository(SeerrRepository repo) {
     _seerrRepository = repo;
@@ -140,6 +143,26 @@ class SearchViewModel extends ChangeNotifier {
 
   List<SearchResultGroup> _results = const [];
   List<SearchResultGroup> get results => _results;
+
+  List<SearchResultGroup> _withChannelUserData(List<SearchResultGroup> groups) {
+    List<SearchResultGroup>? changed;
+    for (var i = 0; i < groups.length; i++) {
+      final group = groups[i];
+      if (!group.itemTypes.contains('LiveTvChannel')) continue;
+      final updated = userDataSync.applyAll(group.items);
+      if (identical(updated, group.items)) continue;
+      changed ??= List<SearchResultGroup>.of(groups);
+      changed[i] = group.copyWith(items: updated);
+    }
+    return changed ?? groups;
+  }
+
+  void _onUserDataChanged() {
+    final updated = _withChannelUserData(_results);
+    if (identical(updated, _results)) return;
+    _results = updated;
+    notifyListeners();
+  }
 
   List<SeerrDiscoverItem> _seerrResults = const [];
   List<SeerrDiscoverItem> get seerrResults => _seerrResults;
@@ -304,7 +327,7 @@ class SearchViewModel extends ChangeNotifier {
 
       if (query != _query) return;
 
-      _results = _withPeople(groups, people ?? const []);
+      _results = _withChannelUserData(_withPeople(groups, people ?? const []));
       _seerrResults = seerr;
       _gameResults = games;
       if (smart != null || _smartQuery != query) {
@@ -325,7 +348,7 @@ class SearchViewModel extends ChangeNotifier {
         unawaited(
           peopleFuture.then((found) {
             if (found.isEmpty || run != _searchRun || query != _query) return;
-            _results = _withPeople(groups, found);
+            _results = _withChannelUserData(_withPeople(groups, found));
             notifyListeners();
           }),
         );
@@ -460,7 +483,7 @@ class SearchViewModel extends ChangeNotifier {
       includeCloudOnly: true,
     ).then((perServer) => perServer.expand((channels) => channels).toList());
     try {
-      final all = await _channelsFuture!;
+      final all = userDataSync.applyAll(await _channelsFuture!);
       return all
           .where((c) => foldForSearch(c.name).contains(q))
           .take(_resultLimit)
@@ -553,6 +576,7 @@ class SearchViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    userDataSync.removeListener(_onUserDataChanged);
     _debounceTimer?.cancel();
     // Keeps people that answer after the screen closed from landing on it.
     _searchRun++;

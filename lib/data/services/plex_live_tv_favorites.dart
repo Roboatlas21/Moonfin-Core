@@ -40,11 +40,20 @@ class PlexLiveTvFavorites {
   static const _browseRefreshAge = Duration(seconds: 30);
   static final _lastRefresh = <String, DateTime>{};
 
-  // The same channel ID can exist on different PMS servers. A client object
-  // keeps its identity even if a network probe changes its reachable URL.
-  static final _known = <String, Map<String, Map<String, dynamic>>>{};
+  // The client identity survives address changes. Its catalogue is weakly
+  // attached, so removing the client also makes its DVR metadata collectible.
+  static Expando<_PlexFavoriteCatalog> _known =
+      Expando<_PlexFavoriteCatalog>('Plex favorite channels');
   static Expando<int> _clientIds = Expando<int>('Plex favorite clients');
   static int _nextClientId = 0;
+
+  static _PlexFavoriteCatalog _catalog(MediaServerClient client) {
+    final cached = _known[client];
+    if (cached != null && cached.userId == client.userId) return cached;
+    final catalog = _PlexFavoriteCatalog(client.userId);
+    _known[client] = catalog;
+    return catalog;
+  }
 
   static String _catalogKey(MediaServerClient client) =>
       '${client.userId ?? ''}\u0000${_clientIds[client] ??= ++_nextClientId}';
@@ -52,7 +61,7 @@ class PlexLiveTvFavorites {
   @visibleForTesting
   static void resetForTesting() {
     _pending.clear();
-    _known.clear();
+    _known = Expando<_PlexFavoriteCatalog>('Plex favorite channels');
     _lastRefresh.clear();
     _clientIds = Expando<int>('Plex favorite clients');
     _nextClientId = 0;
@@ -155,7 +164,7 @@ class PlexLiveTvFavorites {
         isPlexFreeTvChannel(client, channelId)) {
       return channelId;
     }
-    final info = _known[_catalogKey(client)]?[channelId];
+    final info = _catalog(client).channels[channelId];
     return info == null
         ? 'plex-dvr:${_catalogKey(client)}\u0000$channelId'
         : 'plex-dvr:${_key(info)}';
@@ -195,8 +204,7 @@ class PlexLiveTvFavorites {
   ) async {
     _checkAccount(client, token);
     final userId = client.userId!;
-    final known = _known[_catalogKey(client)] ??
-        const <String, Map<String, dynamic>>{};
+    final known = _catalog(client).channels;
     // Keep the whole cloud list in cache even when this device has only
     // loaded Free TV or a subset of the user's PMS channels.
     final favorites = <String>{
@@ -222,31 +230,41 @@ class PlexLiveTvFavorites {
     _lastRefresh[userId] = DateTime.now();
   }
 
-  static Future<void> refresh(
+  static Future<bool> _refresh(
     MediaServerClient client, {
-    bool ifStale = false,
+    required bool ifStale,
   }) async {
     final account = _account(client);
-    await _serial(account.id, () async {
+    return _serial(account.id, () async {
       final last = _lastRefresh[account.id];
       if (ifStale &&
           last != null &&
           DateTime.now().difference(last) < _browseRefreshAge) {
-        return;
+        return false;
       }
       final remote = await _read(client, account.token);
       _checkAccount(client, account.token);
       await _cache(client, account.token, remote);
+      return true;
     });
   }
 
-  /// Home and search may use the saved cache when Plex Cloud is unavailable.
-  static Future<void> refreshForBrowse(MediaServerClient client) async {
-    if (client.serverType != ServerType.plex) return;
+  static Future<void> refresh(
+    MediaServerClient client, {
+    bool ifStale = false,
+  }) async {
+    await _refresh(client, ifStale: ifStale);
+  }
+
+  /// Read the latest cloud favorites when needed, without holding up browse
+  /// results. Returns true when a fresh response was applied.
+  static Future<bool> refreshForBrowse(MediaServerClient client) async {
     try {
-      await refresh(client, ifStale: true);
+      if (client.serverType != ServerType.plex) return false;
+      return await _refresh(client, ifStale: true);
     } catch (_) {
       // Missing token, network failure or malformed response: use cached data.
+      return false;
     }
   }
 
@@ -270,7 +288,7 @@ class PlexLiveTvFavorites {
           ? item
           : {...item, 'PlexFavoriteSyncKey': syncKey(client, channelId)};
     }
-    _known.putIfAbsent(_catalogKey(client), () => {})[channelId] = info;
+    _catalog(client).channels[channelId] = info;
     final favorites = GetIt.instance<UserPreferences>().get(_preference(userId));
     final userData = item['UserData'];
     return {
@@ -294,7 +312,7 @@ class PlexLiveTvFavorites {
     }
     final account = _account(client);
     await _serial(account.id, () async {
-      final info = _known[_catalogKey(client)]?[channelId] ??
+      final info = _catalog(client).channels[channelId] ??
           (isPlexFreeTvChannel(client, channelId)
               ? <String, dynamic>{
                   'source': _freeSource,
@@ -320,4 +338,11 @@ class PlexLiveTvFavorites {
       await _cache(client, account.token, rows);
     });
   }
+}
+
+class _PlexFavoriteCatalog {
+  _PlexFavoriteCatalog(this.userId);
+
+  final String? userId;
+  final Map<String, Map<String, dynamic>> channels = {};
 }

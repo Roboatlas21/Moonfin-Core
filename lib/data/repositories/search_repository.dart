@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:server_core/server_core.dart';
 
 import '../models/aggregated_item.dart';
@@ -89,15 +91,13 @@ class SearchRepository {
   /// Live TV channels never come back from the recursive items search, so
   /// channel search fetches the lineup and filters by name client-side.
   Future<List<AggregatedItem>> fetchLiveTvChannels() async {
-    final favoriteRefresh = PlexLiveTvFavorites.refreshForBrowse(_client);
     final response = await _client.liveTvApi.getChannels(
       fields: 'ImageTags',
       enableTotalRecordCount: false,
       userId: _client.userId,
     );
-    await favoriteRefresh;
     final items = response['Items'] as List? ?? const [];
-    return items.map((item) {
+    final channels = items.map((item) {
       final data = PlexLiveTvFavorites.applyToItem(
         _client,
         Map<String, dynamic>.from(item as Map),
@@ -109,6 +109,10 @@ class SearchRepository {
         rawData: data,
       );
     }).toList();
+    // Return cached hearts with the lineup; new ones are published by
+    // UserDataSync when the cloud request finishes.
+    unawaited(PlexLiveTvFavorites.refreshForBrowse(_client));
+    return channels;
   }
 
   Future<List<AggregatedItem>> search(
