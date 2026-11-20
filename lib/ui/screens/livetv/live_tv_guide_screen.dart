@@ -1921,18 +1921,26 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final shortcuts = PlatformDetection.isTV
         ? _shortcuts
         : const <GuideFilterChoice>[];
+    // Match the adjacent search field without changing other guide controls.
+    final browseHeight = compact ? 36.0 : 48.0;
     final filterButtonStyle = FilledButton.styleFrom(
-      shape: const StadiumBorder(),
-      minimumSize: Size.zero,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-      iconSize: 16,
-      textStyle: const TextStyle(fontSize: 13),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      minimumSize: Size(0, browseHeight),
+      maximumSize: Size(double.infinity, browseHeight),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      iconSize: 18,
+      textStyle: const TextStyle(fontSize: 17),
     ).copyWith(
       backgroundColor: WidgetStateProperty.resolveWith(
-        (states) => _guidePillFill(states.contains(WidgetState.focused)),
+        (states) => states.contains(WidgetState.focused)
+            ? _guidePillFill(true)
+            : AppColorScheme.surface.withValues(alpha: 0.72),
       ),
       foregroundColor: WidgetStateProperty.resolveWith(
-        (states) => _guidePillInk(states.contains(WidgetState.focused)),
+        (states) => states.contains(WidgetState.focused)
+            ? _guidePillInk(true)
+            : AppColorScheme.onSurface,
       ),
       overlayColor: const WidgetStateProperty.fromMap({
         WidgetState.pressed: Colors.white12,
