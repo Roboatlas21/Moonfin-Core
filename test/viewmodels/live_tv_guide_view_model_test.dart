@@ -2080,6 +2080,38 @@ void main() {
       );
     });
 
+    test('paging retains a category channel fetched beyond the prefix', () async {
+      final start = DateTime.utc(2026, 11, 20, 10);
+      final next = start.add(const Duration(hours: 3));
+      _stubChannels(liveTv, [
+        for (var i = 0; i < 400; i++) _channel('c$i', number: '$i'),
+      ]);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(
+        (call) async {
+          final startTime = call.namedArguments[#startDate] as DateTime;
+          return {
+            'Items': [
+              for (final id in _requestedIds(call))
+                if (id == 'c350' || int.parse(id.substring(1)) < 24)
+                  _program('show-$id', id, start: startTime, isSports: true),
+            ],
+          };
+        },
+      );
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.filteredChannels, hasLength(24));
+
+      expect(await vm.ensureCategoryChannel('c350'), isTrue);
+      expect(vm.filteredChannels.map((c) => c.id), contains('c350'));
+      expect(await vm.setWindowStart(next), isTrue);
+      expect(vm.filteredChannels.map((c) => c.id), contains('c350'));
+      expect(vm.programsForChannel('c350').single.startDate.toUtc(), next);
+    });
+
     test('shifting the window re-fetches the active category', () async {
       _stubChannels(liveTv, List.generate(10, (i) => _channel('c$i')));
       when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
@@ -2156,6 +2188,36 @@ void main() {
 
       expect(states, isNot(contains(GuideState.loading)));
       expect(vm.filteredChannels.map((c) => c.id), ['c5']);
+      expect(vm.programsForChannel('c5').single.hasTimer, isTrue);
+    });
+
+    test('stale category recording refresh cannot overwrite a newer badge', () async {
+      _stubChannels(liveTv, [_channel('c5')]);
+      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
+        (_) async => {'Items': [_program('k1', 'c5', isKids: true)]},
+      );
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.kids);
+      await pumpEventQueue();
+
+      final older = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv, category: GuideFilter.kids))
+          .thenAnswer((_) => older.future);
+      final first = vm.recordingChanged();
+      await pumpEventQueue();
+
+      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
+        (_) async => {
+          'Items': [
+            {..._program('k1', 'c5', isKids: true), 'TimerId': 'new-timer'},
+          ],
+        },
+      );
+      await vm.recordingChanged();
+      older.complete({'Items': [_program('k1', 'c5', isKids: true)]});
+      await first;
       expect(vm.programsForChannel('c5').single.hasTimer, isTrue);
     });
 

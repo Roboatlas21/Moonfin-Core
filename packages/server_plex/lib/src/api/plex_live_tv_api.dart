@@ -476,16 +476,27 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final from = _seconds(start);
     final to = _seconds(end);
     final programs = <Map<String, dynamic>>[];
+    var successfulGrids = 0;
+    Object? firstFailure;
+    StackTrace? firstFailureStack;
     for (var i = 0; i < requests.length; i += _cloudGuideRequests) {
       final batch = requests.skip(i).take(_cloudGuideRequests);
       final grids = await Future.wait([
         for (final request in batch)
-          _freeGrid(
-            request.channel,
-            request.day,
-          ).then((items) => (channel: request.channel, items: items)),
+          () async {
+            try {
+              final items = await _freeGrid(request.channel, request.day);
+              return (channel: request.channel, items: items);
+            } catch (error, stack) {
+              firstFailure ??= error;
+              firstFailureStack ??= stack;
+              return null;
+            }
+          }(),
       ]);
       for (final grid in grids) {
+        if (grid == null) continue;
+        successfulGrids++;
         for (final item in grid.items) {
           if (item is! Map) continue;
           for (final media in item['Media'] as List? ?? const []) {
@@ -504,6 +515,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           }
         }
       }
+    }
+    if (successfulGrids == 0 && firstFailure != null) {
+      Error.throwWithStackTrace(firstFailure!, firstFailureStack!);
     }
     return programs;
   }
@@ -551,16 +565,27 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         if (plexChannelOf(id) case (source: plexCloudSource, :final channel))
           channel,
     ];
+    Future<({List<Map<String, dynamic>> items, Object? error, StackTrace? stack})>
+    attempt(Future<List<Map<String, dynamic>>> Function() load) async {
+      try {
+        return (items: await load(), error: null, stack: null);
+      } catch (error, stack) {
+        return (items: <Map<String, dynamic>>[], error: error, stack: stack);
+      }
+    }
+
     final results = await Future.wait([
       if (!cloudOnly && (channelIds == null || channelIds.length > free.length))
-        _dvrAirings(
-          start,
-          end,
-          channelIds: channelIds?.toSet(),
-        ).catchError((_) => <Map<String, dynamic>>[]),
-      if (free.isNotEmpty) _freeAirings(start, end, free),
+        attempt(() => _dvrAirings(start, end, channelIds: channelIds?.toSet())),
+      if (free.isNotEmpty) attempt(() => _freeAirings(start, end, free)),
     ]);
-    return [for (final programs in results) ...programs]..sort(
+    // An unavailable independent source must not erase a healthy guide.
+    // When every requested source failed, report the error so Retry works.
+    if (results.isNotEmpty && results.every((result) => result.error != null)) {
+      final failure = results.first;
+      Error.throwWithStackTrace(failure.error!, failure.stack!);
+    }
+    return [for (final result in results) ...result.items]..sort(
       (a, b) => (a['StartDate'] as String).compareTo(b['StartDate'] as String),
     );
   }

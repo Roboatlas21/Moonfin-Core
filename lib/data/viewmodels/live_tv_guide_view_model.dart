@@ -876,37 +876,55 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     final recordingRevision = liveTvRecordingRevision.value;
     try {
-      if (_isCategory(_filter)) await _refreshCategoryRows();
+      if (_isCategory(_filter) &&
+          !await _refreshCategoryRows(recordingRevision)) {
+        return;
+      }
+      if (recordingRevision != liveTvRecordingRevision.value) return;
       if (await _refreshLoadedChannels(_now()) &&
           recordingRevision == liveTvRecordingRevision.value) {
         _loadedRecordingRevision = recordingRevision;
       }
     } catch (error) {
-      if (!_accessDenied(error)) await _reloadPrograms();
+      if (recordingRevision == liveTvRecordingRevision.value &&
+          !_accessDenied(error)) {
+        await _reloadPrograms();
+      }
     }
   }
 
   /// A category view keeps its own program lists. A recording change doesn't
   /// change which programs belong to the category, so the channels already
   /// shown are fetched again and their lists swapped.
-  Future<void> _refreshCategoryRows() async {
+  Future<bool> _refreshCategoryRows(int recordingRevision) async {
     final request = _categoryRequest;
     final filter = _filter;
     final channels = _categoryPrograms.keys
         .map(channelForId)
         .whereType<GuideChannel>()
         .toList();
+    // Collect everything before publishing, so an older request cannot
+    // overwrite badges from a newer recording change halfway through.
+    final refreshed = <String, List<GuideProgram>>{};
     final size = _batchSizeFor(filter);
+    bool current() =>
+        !_disposed &&
+        request == _categoryRequest &&
+        filter == _filter &&
+        recordingRevision == liveTvRecordingRevision.value;
     for (var i = 0; i < channels.length; i += size) {
       final batch = channels.sublist(i, min(i + size, channels.length));
       final fetched = await _fetchPrograms(batch, category: filter);
-      if (request != _categoryRequest) return;
+      if (!current()) return false;
       for (final channel in batch) {
         final programs = fetched[channel.id];
-        if (programs != null) _categoryPrograms[channel.id] = programs;
+        if (programs != null) refreshed[channel.id] = programs;
       }
     }
+    if (!current()) return false;
+    _categoryPrograms.addAll(refreshed);
     _notifyListeners();
+    return true;
   }
 
   /// Records the showings of this program's series that [episodes] picks, or
@@ -1551,6 +1569,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             }).toList()
           : const <GuideChannel>[];
       final rows = requestedRows.isEmpty ? _pageChannels : requestedRows;
+      // A focus restore may have fetched a matching category channel far
+      // beyond the scroll prefix. Retain those targets across window changes.
+      final previouslyShownCategoryRows =
+          windowStart != null && category != null && _categoryLoadedFor == category
+          ? [
+              for (final channel in _pageChannels)
+                if (_categoryPrograms.containsKey(channel.id)) channel,
+            ]
+          : const <GuideChannel>[];
       final size = _batchSizeFor(category);
       final fetched = <String, List<GuideProgram>>{};
       var end = 0;
@@ -1573,6 +1600,27 @@ class LiveTvGuideViewModel extends ChangeNotifier {
               (category == null || fetched.length >= _categoryMinRowsPerPage)) {
             break;
           }
+        }
+        if (windowStart != null && category != null && samePage()) {
+          final prefixIds = rows.take(end).map((channel) => channel.id).toSet();
+          final extraRows = [
+            for (final channel in previouslyShownCategoryRows)
+              if (!prefixIds.contains(channel.id)) channel,
+          ];
+          for (var i = 0; i < extraRows.length; i += size) {
+            fetched.addAll(
+              await _fetchPrograms(
+                extraRows.sublist(i, min(i + size, extraRows.length)),
+                category: category,
+                current: current,
+                from: from,
+                to: to,
+              ),
+            );
+            if (!samePage()) break;
+          }
+          // Only the scroll prefix advances _categoryQueriedIds. These
+          // independently loaded rows must not change category pagination.
         }
       } catch (error) {
         // Access was denied, so the old listings have already been discarded.

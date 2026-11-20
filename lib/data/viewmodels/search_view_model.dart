@@ -450,6 +450,7 @@ class SearchViewModel extends ChangeNotifier {
     Future<List<AggregatedItem>> Function(SearchRepository repository) search, {
     required String label,
     bool includeCloudOnly = false,
+    void Function()? onPartialFailure,
   }) async {
     final multiServer = _multiServerRepository;
     if (multiServer == null) {
@@ -463,6 +464,7 @@ class SearchViewModel extends ChangeNotifier {
       search,
       label: label,
       includeCloudOnly: includeCloudOnly,
+      onPartialFailure: onPartialFailure,
     );
   }
 
@@ -477,20 +479,28 @@ class SearchViewModel extends ChangeNotifier {
     ];
   }
 
-  // The lineup is fetched once per search session and reused across queries,
-  // since /LiveTv/Channels has no search parameter of its own.
+  // A complete lineup is reused across queries, but partial multi-server
+  // results are shown only for the current search and retried next time.
   Future<List<AggregatedItem>>? _channelsFuture;
+
+  Future<List<AggregatedItem>> _loadChannelLineup() async {
+    var partial = false;
+    final perServer = await _searchEachServer(
+      (repository) => repository.fetchLiveTvChannels(),
+      label: 'channel lineup',
+      includeCloudOnly: true,
+      onPartialFailure: () => partial = true,
+    );
+    if (partial) _channelsFuture = null;
+    return perServer.expand((channels) => channels).toList();
+  }
 
   Future<List<AggregatedItem>> _channelMatches(String query) async {
     // Channels come back wholesale rather than through a search the server
     // answers, so the folding it would have done has to happen here.
     final q = foldForSearch(query.trim());
     if (q.isEmpty || q.startsWith('studio:')) return const [];
-    _channelsFuture ??= _searchEachServer(
-      (repository) => repository.fetchLiveTvChannels(),
-      label: 'channel lineup',
-      includeCloudOnly: true,
-    ).then((perServer) => perServer.expand((channels) => channels).toList());
+    _channelsFuture ??= _loadChannelLineup();
     try {
       final all = userDataSync.applyAll(await _channelsFuture!);
       return all
