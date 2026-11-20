@@ -783,8 +783,8 @@ void main() {
       await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowUp);
       await _pumpFrames(tester);
 
-      // Failed saves show a full-width notice above the open picker, not
-      // behind the guide's modal barrier, and leave focus untouched.
+      // A failed save shows a brief message inside the open picker
+      // without affecting the selected filter or remote focus.
       node('CA| SPORTS').requestFocus();
       await _pumpFrames(tester);
       final savedBeforeFailure = prefs.get(UserPreferences.liveTvSavedFilters);
@@ -793,9 +793,12 @@ void main() {
       prefs.save!.completeError(StateError('storage unavailable'));
       await _pumpFrames(tester);
       final notice = find.text("Couldn't save filter. Try again.");
-      expect(notice, findsOneWidget);
-      expect(tester.widget<SnackBar>(find.byType(SnackBar)).backgroundColor,
-          Colors.white);
+      expect(find.descendant(of: picker, matching: notice), findsOneWidget);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(find.descendant(
+        of: picker,
+        matching: find.byIcon(Icons.error_outline),
+      ), findsOneWidget);
       expect(picker, findsOneWidget);
       expect(node('CA| SPORTS').hasFocus, isTrue);
       expect(prefs.get(UserPreferences.liveTvSavedFilters), savedBeforeFailure);
