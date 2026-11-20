@@ -21,6 +21,7 @@ import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_now_next_card.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_hero_preview.dart';
 import 'package:moonfin/ui/screens/livetv/guide/guide_window.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
+import 'package:moonfin/ui/widgets/local_search_field.dart';
 import 'package:moonfin/util/platform_detection.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -455,8 +456,17 @@ void main() {
       ),
     );
     await _pumpFrames(tester);
-    await tester.enterText(find.byType(TextField), 'Channel 4');
+    // The TV field's internal TextField is read-only outside its keyboard.
+    // The TV keyboard commits text through the LocalSearchField controller.
+    tester.widget<LocalSearchField>(
+      find.byType(LocalSearchField),
+    ).controller.text = 'Channel 4';
     await _pumpFrames(tester);
+    expect(
+      tester.widgetList<EpgChannelCell>(find.byType(EpgChannelCell))
+          .map((channel) => channel.name),
+      ['Channel 46', 'Channel 47'],
+    );
     _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
     await _pumpFrames(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
