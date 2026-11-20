@@ -915,9 +915,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     for (var i = 0; i < channels.length; i += size) {
       final batch = channels.sublist(i, min(i + size, channels.length));
       final fetched = await _fetchPrograms(batch, category: filter);
-      if (!current()) return false;
+      if (!current() || fetched.failedChannelIds.isNotEmpty) return false;
       for (final channel in batch) {
-        final programs = fetched[channel.id];
+        final programs = fetched.programs[channel.id];
         if (programs != null) refreshed[channel.id] = programs;
       }
     }
@@ -1133,16 +1133,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (channel == null) return false;
 
     final request = _categoryRequest;
-    final programs = await _fetchPrograms([channel], category: category);
+    final reply = await _fetchPrograms([channel], category: category);
     if (_disposed ||
         request != _categoryRequest ||
         category != _filter ||
         !_pageChannels.any((c) => c.id == channelId)) {
       return false;
     }
+    if (reply.failedChannelIds.contains(channelId)) return false;
     _categoryQueriedIds.add(channelId);
     _advanceCategoryCursor();
-    final matches = programs[channelId];
+    final matches = reply.programs[channelId];
     if (matches == null) return false;
     _categoryPrograms[channelId] = matches;
     _notifyListeners();
@@ -1170,8 +1171,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (request != _categoryRequest) return;
       _categoryQueriedIds.addAll(batch.map((c) => c.id));
       _advanceCategoryCursor();
-      if (fetched.isEmpty) continue;
-      _categoryPrograms.addAll(fetched);
+      if (fetched.programs.isEmpty) continue;
+      _categoryPrograms.addAll(fetched.programs);
       _notifyListeners();
     }
   }
@@ -1580,20 +1581,21 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           : const <GuideChannel>[];
       final size = _batchSizeFor(category);
       final fetched = <String, List<GuideProgram>>{};
+      final failed = <String>{};
       var end = 0;
       try {
         while (end < rows.length) {
           final start = end;
           end = min(start + size, rows.length);
-          fetched.addAll(
-            await _fetchPrograms(
-              rows.sublist(start, end),
-              category: category,
-              current: current,
-              from: from,
-              to: to,
-            ),
+          final reply = await _fetchPrograms(
+            rows.sublist(start, end),
+            category: category,
+            current: current,
+            from: from,
+            to: to,
           );
+          fetched.addAll(reply.programs);
+          failed.addAll(reply.failedChannelIds);
           if (!samePage()) break;
           if (requestedRows.isEmpty &&
               end >= _requestedPageDepth &&
@@ -1608,15 +1610,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
               if (!prefixIds.contains(channel.id)) channel,
           ];
           for (var i = 0; i < extraRows.length; i += size) {
-            fetched.addAll(
-              await _fetchPrograms(
-                extraRows.sublist(i, min(i + size, extraRows.length)),
-                category: category,
-                current: current,
-                from: from,
-                to: to,
-              ),
+            final reply = await _fetchPrograms(
+              extraRows.sublist(i, min(i + size, extraRows.length)),
+              category: category,
+              current: current,
+              from: from,
+              to: to,
             );
+            fetched.addAll(reply.programs);
+            failed.addAll(reply.failedChannelIds);
             if (!samePage()) break;
           }
           // Only the scroll prefix advances _categoryQueriedIds. These
@@ -1638,18 +1640,26 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _loadedRecordingRevision = recordingRevision;
       }
       final ids = rows.take(end).map((c) => c.id);
+      _failedProgramIds.removeAll(ids);
+      _failedProgramIds.addAll(failed);
       if (category == null) {
         for (final id in ids) {
-          _programsByChannel[id] = fetched[id] ?? const [];
+          if (failed.contains(id)) {
+            _programsByChannel.remove(id);
+            _programsLoadedIds.remove(id);
+          } else {
+            _programsByChannel[id] = fetched[id] ?? const [];
+            _programsLoadedIds.add(id);
+          }
         }
-        _programsLoadedIds.addAll(ids);
         _advanceProgramsCursor();
       } else {
+        fetched.removeWhere((id, _) => failed.contains(id));
         _categoryPrograms
           ..clear()
           ..addAll(fetched);
         _categoryFetchInFlight = false;
-        _categoryQueriedIds.addAll(ids);
+        _categoryQueriedIds.addAll(ids.where((id) => !failed.contains(id)));
         _advanceCategoryCursor();
         _categoryLoadedFor = category;
       }
@@ -2302,6 +2312,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           session != userDataSync.session) {
         return null;
       }
+      // A partial Plex grid must not replace valid cached programs with gaps.
+      if (_failedGuideIds(response).isNotEmpty) return null;
       final parsed = _parsePrograms(response);
       for (final id in chunk) {
         replacements[id] = parsed[id] ?? <GuideProgram>[];
@@ -2413,14 +2425,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _notifyListeners();
   }
 
-  Future<Map<String, List<GuideProgram>>> _fetchPrograms(
+  Future<({
+    Map<String, List<GuideProgram>> programs,
+    Set<String> failedChannelIds,
+  })> _fetchPrograms(
     List<GuideChannel> batch, {
     GuideFilter? category,
     DateTime? from,
     DateTime? to,
     bool Function()? current,
   }) async {
-    if (batch.isEmpty) return {};
+    if (batch.isEmpty) {
+      return (
+        programs: <String, List<GuideProgram>>{},
+        failedChannelIds: <String>{},
+      );
+    }
     final response = await _fetchGuide(
       channelIds: batch.map((c) => c.id).toList(),
       from: from ?? _windowStart,
@@ -2429,14 +2449,21 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       current: current,
     );
     final byChannel = _parsePrograms(response);
+    final failed = _failedGuideIds(response);
+    byChannel.removeWhere((id, _) => failed.contains(id));
     if (category != null) {
       byChannel.removeWhere((_, programs) {
         programs.removeWhere((p) => !_matches(category, p));
         return programs.isEmpty;
       });
     }
-    return byChannel;
+    return (programs: byChannel, failedChannelIds: failed);
   }
+
+  Set<String> _failedGuideIds(Map<String, dynamic> response) => {
+    for (final id in response['FailedChannelIds'] as List? ?? const [])
+      if (id is String) id,
+  };
 
   /// Parses a guide response into start-ordered programs keyed by channel id.
   Map<String, List<GuideProgram>> _parsePrograms(
@@ -2757,8 +2784,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (response == null || !current()) return false;
 
         final parsed = _parsePrograms(response);
+        final failed = _failedGuideIds(response);
         _failedProgramIds.removeAll(ids);
         for (final id in ids) {
+          if (failed.contains(id)) {
+            _failedProgramIds.add(id);
+            continue;
+          }
           // Don't overwrite newer listings if a page refresh finished first.
           if (_programsLoadedIds.add(id)) {
             _programsByChannel[id] = parsed[id] ?? <GuideProgram>[];

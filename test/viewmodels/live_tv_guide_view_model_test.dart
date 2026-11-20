@@ -1584,6 +1584,24 @@ void main() {
     vm.dispose();
   });
 
+  test('partial Plex listings leave only failed channels retryable', () async {
+    _stubChannels(liveTv, [_channel('c1'), _channel('c2')]);
+    when(() => _guide(liveTv)).thenAnswer((_) async => {
+      'Items': [_program('healthy', 'c1')],
+      'FailedChannelIds': ['c2'],
+    });
+    final vm = LiveTvGuideViewModel(client);
+    await vm.load();
+    expect(vm.loadStateFor('c1'), GuideChannelLoadState.loaded);
+    expect(vm.loadStateFor('c2'), GuideChannelLoadState.failed);
+    when(() => _guide(liveTv)).thenAnswer((inv) async => {
+      'Items': [for (final id in _requestedIds(inv)) _program('retry-$id', id)],
+    });
+    await vm.retryFailedPrograms();
+    expect(vm.loadStateFor('c2'), GuideChannelLoadState.loaded);
+    vm.dispose();
+  });
+
   test('overlapping program requests fetch a channel once', () async {
     _stubChannels(liveTv, [
       for (var i = 0; i < 120; i++) _channel('c$i', number: '$i'),

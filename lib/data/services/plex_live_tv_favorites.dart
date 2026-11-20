@@ -8,8 +8,10 @@ import 'package:server_core/server_core.dart';
 
 import '../../auth/models/user.dart';
 import '../../auth/repositories/user_repository.dart';
+import '../../auth/store/authentication_store.dart';
 import '../../preference/user_preferences.dart';
 import 'user_data_sync.dart';
+import 'media_server_client_factory.dart';
 
 bool isPlexFreeTvChannel(MediaServerClient client, String channelId) =>
     client.serverType == ServerType.plex &&
@@ -75,18 +77,36 @@ class PlexLiveTvFavorites {
       );
 
   static ({String id, String token}) _account(MediaServerClient client) {
-    final user = GetIt.instance.isRegistered<UserRepository>()
-        ? GetIt.instance<UserRepository>().currentUser
-        : null;
+    final userId = client.userId;
     if (client.serverType != ServerType.plex ||
-        user is! PrivateUser ||
-        user.id != client.userId ||
-        user.plexToken == null ||
-        user.plexToken!.isEmpty) {
+        userId == null ||
+        userId.isEmpty) {
       throw StateError('No Plex account token for this user');
     }
-    // A Plex Home member's cloud token is not the PMS access token.
-    return (id: user.id, token: user.plexToken!);
+    final getIt = GetIt.instance;
+    final serverId = getIt.isRegistered<MediaServerClientFactory>()
+        ? getIt<MediaServerClientFactory>().serverIdOf(client)
+        : null;
+    // Multi-server browsing supplies a saved client's session, not necessarily
+    // the currently signed-in user. Resolve the account attached to that client.
+    final stored = serverId != null && getIt.isRegistered<AuthenticationStore>()
+        ? getIt<AuthenticationStore>().getUser(serverId, userId)
+        : null;
+    final current = getIt.isRegistered<UserRepository>()
+        ? getIt<UserRepository>().currentUser
+        : null;
+    final user = stored ??
+        (current is PrivateUser &&
+                current.id == userId &&
+                (serverId == null || current.serverId == serverId)
+            ? current
+            : null);
+    final token = user?.plexToken;
+    if (token == null || token.isEmpty) {
+      throw StateError('No Plex account token for this user');
+    }
+    // The caller's user ID and token are checked again before applying a read.
+    return (id: userId, token: token);
   }
 
   static Map<String, String> _headers(
@@ -158,16 +178,20 @@ class PlexLiveTvFavorites {
   static String _key(Map<String, dynamic> info) =>
       (info['source'] as String) + '\u0000' + (info['id'] as String);
 
-  /// Free TV shares state across Plex connections; DVRs use their PMS/EPG identity.
+  /// Share hearts across one Plex account's connections, never across users.
   static String syncKey(MediaServerClient client, String channelId) {
-    if (!isPlexLiveTvChannel(client, channelId) ||
-        isPlexFreeTvChannel(client, channelId)) {
-      return channelId;
+    if (!isPlexLiveTvChannel(client, channelId)) return channelId;
+    final account = client.userId;
+    final scope = account == null || account.isEmpty
+        ? _catalogKey(client)
+        : account;
+    if (isPlexFreeTvChannel(client, channelId)) {
+      return 'plex-free:$scope\u0000$channelId';
     }
     final info = _catalog(client).channels[channelId];
     return info == null
-        ? 'plex-dvr:${_catalogKey(client)}\u0000$channelId'
-        : 'plex-dvr:${_key(info)}';
+        ? 'plex-dvr:$scope\u0000${_catalogKey(client)}\u0000$channelId'
+        : 'plex-dvr:$scope\u0000${_key(info)}';
   }
 
   static bool _matches(
@@ -284,17 +308,14 @@ class PlexLiveTvFavorites {
     // Without a verified machine id, don't guess the DVR favorite source.
     // Still keep its local optimistic state separate from other PMS servers.
     if (info == null) {
-      return isPlexFreeTvChannel(client, channelId)
-          ? item
-          : {...item, 'PlexFavoriteSyncKey': syncKey(client, channelId)};
+      return {...item, 'PlexFavoriteSyncKey': syncKey(client, channelId)};
     }
     _catalog(client).channels[channelId] = info;
     final favorites = GetIt.instance<UserPreferences>().get(_preference(userId));
     final userData = item['UserData'];
     return {
       ...item,
-      if (!isPlexFreeTvChannel(client, channelId))
-        'PlexFavoriteSyncKey': syncKey(client, channelId),
+      'PlexFavoriteSyncKey': syncKey(client, channelId),
       'UserData': {
         if (userData is Map) ...userData,
         'IsFavorite': favorites.contains(_key(info)),

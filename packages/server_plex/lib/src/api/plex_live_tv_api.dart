@@ -54,6 +54,10 @@ typedef _CloudGroups = ({
   Map<String, String> genres,
   PromotedChannelGroup? promoted,
 });
+typedef _Airings = ({
+  List<Map<String, dynamic>> items,
+  Set<String> failedChannelIds,
+});
 
 /// A scheduled recording and the showing it records.
 typedef _Grab = ({Map op, Map<String, dynamic> program});
@@ -455,7 +459,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }
 
   /// The free channels' guide answers one channel and one UTC day at a time.
-  Future<List<Map<String, dynamic>>> _freeAirings(
+  Future<_Airings> _freeAirings(
     DateTime start,
     DateTime end,
     List<String> channels,
@@ -476,6 +480,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final from = _seconds(start);
     final to = _seconds(end);
     final programs = <Map<String, dynamic>>[];
+    final failedChannelIds = <String>{};
     var successfulGrids = 0;
     Object? firstFailure;
     StackTrace? firstFailureStack;
@@ -488,6 +493,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               final items = await _freeGrid(request.channel, request.day);
               return (channel: request.channel, items: items);
             } catch (error, stack) {
+              failedChannelIds.add(_channelId(plexCloudSource, request.channel));
               firstFailure ??= error;
               firstFailureStack ??= stack;
               return null;
@@ -519,7 +525,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     if (successfulGrids == 0 && firstFailure != null) {
       Error.throwWithStackTrace(firstFailure!, firstFailureStack!);
     }
-    return programs;
+    return (items: programs, failedChannelIds: failedChannelIds);
   }
 
   static Map<String, dynamic>? _program(
@@ -555,7 +561,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     };
   }
 
-  Future<List<Map<String, dynamic>>> _airings(
+  Future<_Airings> _airings(
     DateTime start,
     DateTime end, {
     List<String>? channelIds,
@@ -565,28 +571,66 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         if (plexChannelOf(id) case (source: plexCloudSource, :final channel))
           channel,
     ];
-    Future<({List<Map<String, dynamic>> items, Object? error, StackTrace? stack})>
-    attempt(Future<List<Map<String, dynamic>>> Function() load) async {
+    final freeIds = {
+      for (final channel in free) _channelId(plexCloudSource, channel),
+    };
+    final dvrIds = {
+      for (final id in channelIds ?? const <String>[])
+        if (!freeIds.contains(id)) id,
+    };
+    Future<({
+      List<Map<String, dynamic>> items,
+      Set<String> failedChannelIds,
+      Object? error,
+      StackTrace? stack,
+    })> attempt(
+      Future<_Airings> Function() load,
+      Set<String> failedOnError,
+    ) async {
       try {
-        return (items: await load(), error: null, stack: null);
+        final result = await load();
+        return (
+          items: result.items,
+          failedChannelIds: result.failedChannelIds,
+          error: null,
+          stack: null,
+        );
       } catch (error, stack) {
-        return (items: <Map<String, dynamic>>[], error: error, stack: stack);
+        return (
+          items: <Map<String, dynamic>>[],
+          failedChannelIds: failedOnError,
+          error: error,
+          stack: stack,
+        );
       }
     }
 
     final results = await Future.wait([
       if (!cloudOnly && (channelIds == null || channelIds.length > free.length))
-        attempt(() => _dvrAirings(start, end, channelIds: channelIds?.toSet())),
-      if (free.isNotEmpty) attempt(() => _freeAirings(start, end, free)),
+        attempt(
+          () async => (
+            items: await _dvrAirings(start, end, channelIds: channelIds?.toSet()),
+            failedChannelIds: <String>{},
+          ),
+          dvrIds,
+        ),
+      if (free.isNotEmpty)
+        attempt(() => _freeAirings(start, end, free), freeIds),
     ]);
-    // An unavailable independent source must not erase a healthy guide.
-    // When every requested source failed, report the error so Retry works.
+    // Preserve the healthy source while retaining failed channel IDs for Retry.
     if (results.isNotEmpty && results.every((result) => result.error != null)) {
       final failure = results.first;
       Error.throwWithStackTrace(failure.error!, failure.stack!);
     }
-    return [for (final result in results) ...result.items]..sort(
-      (a, b) => (a['StartDate'] as String).compareTo(b['StartDate'] as String),
+    final programs = [for (final result in results) ...result.items]
+      ..sort(
+        (a, b) => (a['StartDate'] as String).compareTo(b['StartDate'] as String),
+      );
+    return (
+      items: programs,
+      failedChannelIds: {
+        for (final result in results) ...result.failedChannelIds,
+      },
     );
   }
 
@@ -630,13 +674,16 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     String? userId,
   }) async {
     final start = startDate ?? DateTime.now();
-    return plexItemsResult(
-      await _airings(
-        start,
-        endDate ?? start.add(const Duration(hours: 3)),
-        channelIds: channelIds,
-      ),
+    final airings = await _airings(
+      start,
+      endDate ?? start.add(const Duration(hours: 3)),
+      channelIds: channelIds,
     );
+    return {
+      ...plexItemsResult(airings.items),
+      if (airings.failedChannelIds.isNotEmpty)
+        'FailedChannelIds': airings.failedChannelIds.toList(),
+    };
   }
 
   /// What's on the tuner right now. The free channels would take a guide
@@ -665,12 +712,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       airing.beginsAt * 1000,
       isUtc: true,
     );
-    final programs = await _airings(
+    final airings = await _airings(
       start,
       start.add(const Duration(seconds: 1)),
       channelIds: [_channelId(airing.source, airing.channel)],
     );
-    return programs.firstWhere(
+    return airings.items.firstWhere(
       (p) => p['Id'] == programId,
       orElse: () => throw StateError('No program $programId'),
     );

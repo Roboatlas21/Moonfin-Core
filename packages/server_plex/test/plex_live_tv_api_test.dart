@@ -374,6 +374,7 @@ void main() {
     final ids = (result['Items'] as List).whereType<Map>()
         .map((program) => program['ChannelId']).toSet();
     expect(ids, contains('channel-2-4'));
+    expect(result['FailedChannelIds'], ['channel-plex-abc-66635fc0']);
   });
 
   test('a failed Free TV grid retries rather than appearing empty', () async {
@@ -403,6 +404,30 @@ void main() {
     await expectLater(guide(), throwsA(isA<DioException>()));
     expect((await guide())['Items'], isNotEmpty);
     expect(attempts, 2);
+  });
+
+  test('one failed Free TV grid does not mark the other channels empty', () async {
+    final (dio, _) = _server();
+    dio.interceptors.insert(0, InterceptorsWrapper(
+      onRequest: (options, handler) {
+        if (options.uri.path == '/grid' &&
+            options.queryParameters['channelGridKey'] == 'extra') {
+          handler.reject(DioException(
+            requestOptions: options, type: DioExceptionType.connectionError,
+          ));
+        } else {
+          handler.next(options);
+        }
+      },
+    ));
+    final guide = await PlexLiveTvApi(dio, cloudOnly: true).getGuide(
+      startDate: DateTime.utc(2026, 10, 22, 20),
+      endDate: DateTime.utc(2026, 10, 22, 22),
+      channelIds: ['channel-plex-abc-66635fc0', 'channel-plex-news-extra'],
+    );
+    expect((guide['Items'] as List).whereType<Map>()
+        .map((item) => item['ChannelId']), contains('channel-plex-abc-66635fc0'));
+    expect(guide['FailedChannelIds'], ['channel-plex-news-extra']);
   });
 
   test('every showing of a program is a program of its own', () async {

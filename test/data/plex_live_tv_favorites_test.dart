@@ -7,10 +7,12 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/auth/models/user.dart';
 import 'package:moonfin/auth/repositories/user_repository.dart';
+import 'package:moonfin/auth/store/authentication_store.dart';
 import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/repositories/item_mutation_repository.dart';
 import 'package:moonfin/data/repositories/search_repository.dart';
 import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
+import 'package:moonfin/data/services/media_server_client_factory.dart';
 import 'package:moonfin/data/services/row_data_source.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
@@ -375,7 +377,45 @@ void main() {
 
     hold.complete();
     await pumpEventQueue();
-    expect(userDataSync.favoriteFor('channel-plex-free123'), isTrue);
+    expect(userDataSync.favoriteFor(
+      PlexLiveTvFavorites.syncKey(client, 'channel-plex-free123')), isTrue);
+  });
+
+  test('Free TV hearts are distinct across Plex accounts', () {
+    final a = _plex();
+    final b = _plex(userId: 'other-user');
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    final first = PlexLiveTvFavorites.applyToItem(a, _channel);
+    final second = PlexLiveTvFavorites.applyToItem(b, _channel);
+    final firstKey = first['PlexFavoriteSyncKey'] as String;
+    expect(firstKey, isNot(second['PlexFavoriteSyncKey']));
+    userDataSync.publish(firstKey, {'IsFavorite': true});
+    final homeA = AggregatedItem(id: 'channel-plex-free123', serverId: 'a', rawData: first);
+    final homeB = AggregatedItem(id: 'channel-plex-free123', serverId: 'b', rawData: second);
+    expect(userDataSync.apply(homeA).isFavorite, isTrue);
+    expect(userDataSync.apply(homeB).isFavorite, isFalse);
+  });
+
+  test('a saved Plex server refreshes when another user is active', () async {
+    final store = AuthenticationStore();
+    await store.init();
+    await store.putUser(PrivateUser(
+      id: 'saved-plex', name: 'Saved Plex', serverId: 'saved-pms',
+      accessToken: 'saved-pms-token', plexToken: 'saved-cloud-token',
+      lastUsed: DateTime.utc(2026),
+    ));
+    final factory = MediaServerClientFactory(deviceInfo: _device);
+    GetIt.instance.registerSingleton<AuthenticationStore>(store);
+    GetIt.instance.registerSingleton<MediaServerClientFactory>(factory);
+    final saved = factory.getClient(
+      serverId: 'saved-pms', serverType: ServerType.plex,
+      baseUrl: 'https://saved-pms.example',
+    )..userId = 'saved-plex';
+    addTearDown(saved.dispose);
+    cloud.rows = [{'source': _source, 'id': 'free123'}];
+    expect(await PlexLiveTvFavorites.refreshForBrowse(saved), isTrue);
+    expect(cloud.requests.single.headers['X-Plex-Token'], 'saved-cloud-token');
   });
 
   test('a client reused for another user drops its old DVR catalog', () {
