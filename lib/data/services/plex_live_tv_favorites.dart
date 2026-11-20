@@ -42,6 +42,12 @@ class PlexLiveTvFavorites {
   static const _browseRefreshAge = Duration(seconds: 30);
   static final _lastRefresh = <String, DateTime>{};
 
+  /// A cached account list changed, including when it came from another PMS.
+  /// Home can rebuild favorite-channel row membership without polling.
+  static final ValueNotifier<({String userId, int revision})?>
+      favoriteListChanged = ValueNotifier(null);
+  static int _favoriteListRevision = 0;
+
   // The client identity survives address changes. Its catalogue is weakly
   // attached, so removing the client also makes its DVR metadata collectible.
   static Expando<_PlexFavoriteCatalog> _known =
@@ -65,6 +71,8 @@ class PlexLiveTvFavorites {
     _pending.clear();
     _known = Expando<_PlexFavoriteCatalog>('Plex favorite channels');
     _lastRefresh.clear();
+    favoriteListChanged.value = null;
+    _favoriteListRevision = 0;
     _clientIds = Expando<int>('Plex favorite clients');
     _nextClientId = 0;
     testHttp = null;
@@ -229,6 +237,9 @@ class PlexLiveTvFavorites {
     _checkAccount(client, token);
     final userId = client.userId!;
     final known = _catalog(client).channels;
+    final pref = _preference(userId);
+    final prefs = GetIt.instance<UserPreferences>();
+    final previous = prefs.get(pref).toSet();
     // Keep the whole cloud list in cache even when this device has only
     // loaded Free TV or a subset of the user's PMS channels.
     final favorites = <String>{
@@ -240,13 +251,16 @@ class PlexLiveTvFavorites {
         favorites.add(_key(entry.value));
       }
     }
-    await GetIt.instance<UserPreferences>().set(
-      _preference(userId),
-      favorites.toList()..sort(),
-    );
+    await prefs.set(pref, favorites.toList()..sort());
     _checkAccount(client, token);
     _publishCached(client, token);
     _lastRefresh[userId] = DateTime.now();
+    if (!setEquals(previous, favorites)) {
+      favoriteListChanged.value = (
+        userId: userId,
+        revision: ++_favoriteListRevision,
+      );
+    }
   }
 
   /// A recent refresh may have come from a different PMS on this Plex account.

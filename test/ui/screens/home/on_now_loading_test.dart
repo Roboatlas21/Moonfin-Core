@@ -354,6 +354,64 @@ void main() {
     expect(loads, 2);
   });
 
+  test('Plex account changes rebuild Home favorite row membership', () async {
+    await enableSections({HomeSectionType.liveTv});
+    stubLiveTvRows();
+    final plex = _MockPlexClient();
+    when(() => plex.cloudOnly).thenReturn(true);
+    when(() => plex.serverType).thenReturn(ServerType.plex);
+    when(() => plex.userId).thenReturn('user');
+    when(() => plex.baseUrl).thenReturn('http://server.test');
+
+    var favorites = <AggregatedItem>[];
+    var calls = 0;
+    when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
+      (_) async {
+        calls++;
+        return HomeRow(
+          id: 'liveTvFavorites',
+          title: 'Favorite Channels',
+          rowType: HomeRowType.liveTvFavorites,
+          items: List.of(favorites),
+        );
+      },
+    );
+    model.dispose();
+    model = HomeViewModel(
+      dataSource: source,
+      prefs: prefs,
+      client: plex,
+      mediaBarViewModel: _MockMediaBar(),
+      multiServerRepo: _MockMultiServer(),
+    );
+    await model.load();
+    expect(model.rows.map((row) => row.id), ['liveTv']);
+    final initialCalls = calls;
+
+    favorites = [
+      AggregatedItem(
+        id: 'channel-plex-free123',
+        serverId: 'http://server.test',
+        rawData: {'Type': 'TvChannel', 'UserData': {'IsFavorite': true}},
+      ),
+    ];
+    PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'user', revision: 1);
+    await pumpEventQueue();
+    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvFavorites']);
+    expect(calls, initialCalls + 1);
+
+    favorites = [];
+    PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'user', revision: 2);
+    await pumpEventQueue();
+    expect(model.rows.map((row) => row.id), ['liveTv']);
+    expect(calls, initialCalls + 2);
+
+    PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'other', revision: 3);
+    await pumpEventQueue();
+    expect(calls, initialCalls + 2);
+    PlexLiveTvFavorites.favoriteListChanged.value = null;
+  });
+
   test('failed On Now listings do not hide favorite channels', () async {
     await enableSections({HomeSectionType.liveTv});
     stubLiveTvRows();

@@ -724,6 +724,49 @@ void main() {
     vm.cancelBoundaryRefresh();
   });
 
+  test('a failed middle refresh batch preserves earlier and later results', () async {
+    final channels = [for (var i = 0; i < 105; i++) _channel('c$i')];
+    _stubChannels(liveTv, channels);
+    var refresh = false;
+    final requested = <List<String>>[];
+    when(() => _guide(liveTv)).thenAnswer((inv) async {
+      final ids = _requestedIds(inv);
+      if (refresh) {
+        requested.add(ids);
+        if (ids.first == 'c50') {
+          throw DioException(
+            requestOptions: RequestOptions(path: '/LiveTv/Programs'),
+            type: DioExceptionType.connectionError,
+          );
+        }
+      }
+      return {
+        'Items': [
+          for (final id in ids)
+            _program('${refresh ? 'new' : 'old'}-$id', id),
+        ],
+      };
+    });
+
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    await vm.loadMorePrograms();
+    expect(vm.programsForChannel('c50').single.id, 'old-c50');
+
+    refresh = true;
+    final complete = await vm.replacePrograms(
+      channelIds: [for (var i = 0; i < 105; i++) 'c$i'],
+      from: DateTime.utc(2026, 9, 11, 10),
+      to: DateTime.utc(2026, 9, 11, 13),
+    );
+    expect(complete, isFalse);
+    expect(requested.map((ids) => ids.length), [50, 50, 5]);
+    expect(vm.programsForChannel('c0').single.id, 'new-c0');
+    expect(vm.programsForChannel('c50').single.id, 'old-c50');
+    expect(vm.programsForChannel('c100').single.id, 'new-c100');
+  });
+
   test('a targeted initial load requests only the named channels', () async {
     final channels = List.generate(120, (i) => _channel('c$i'));
     when(

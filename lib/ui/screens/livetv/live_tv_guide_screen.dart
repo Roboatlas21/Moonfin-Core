@@ -2188,6 +2188,42 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
   }
 
+  /// A category with failed listings is different from a confirmed empty
+  /// filter. The same Retry surface is used on TV and mobile.
+  Widget _buildEmptyGuide() {
+    final l10n = AppLocalizations.of(context);
+    final failed = _vm.hasFailedCategoryListings;
+    if (!failed) {
+      return Center(
+        child: Text(
+          l10n.noChannelsFound,
+          style: TextStyle(color: Colors.white.withAlpha(179)),
+        ),
+      );
+    }
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            l10n.failedToLoad,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white.withAlpha(179)),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            autofocus: true,
+            onPressed: _vm.retryingCategoryListings
+                ? null
+                : () => unawaited(_vm.retryFailedCategoryListings()),
+            icon: const Icon(Icons.refresh),
+            label: Text(l10n.retry),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMobileBody() {
     switch (_vm.state) {
       case GuideState.loading:
@@ -2198,12 +2234,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
         if (channels.isEmpty) {
-          return Center(
-            child: Text(
-              AppLocalizations.of(context).noChannelsFound,
-              style: TextStyle(color: Colors.white.withAlpha(179)),
-            ),
-          );
+          return _buildEmptyGuide();
         }
         return _mobileView == EpgMobileView.grid
             ? _buildGuideGrid(channels)
@@ -2621,12 +2652,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       case GuideState.ready || GuideState.error:
         final channels = _vm.filteredChannels;
         if (channels.isEmpty) {
-          return Center(
-            child: Text(
-              AppLocalizations.of(context).noChannelsFound,
-              style: TextStyle(color: Colors.white.withAlpha(179)),
-            ),
-          );
+          return _buildEmptyGuide();
         }
         return _buildGuideGrid(channels);
     }

@@ -120,6 +120,7 @@ class HomeViewModel extends ChangeNotifier {
   Future<void> _loadDone = Future<void>.value();
   bool _disposed = false;
   bool _liveTvFavoritesReloading = false;
+  bool _liveTvFavoritesReloadPending = false;
   Future<void> _bgMerge = Future<void>.value();
   bool _bgMergeInFlight = false;
   bool _bgResumeRefreshInFlight = false;
@@ -332,7 +333,23 @@ class HomeViewModel extends ChangeNotifier {
        _mediaBarViewModel = mediaBarViewModel,
        _multiServerRepo = multiServerRepo,
        _cacheStore = cacheStore ?? HomeRowCacheStore(),
-       _ownerUserId = client.userId ?? '';
+       _ownerUserId = client.userId ?? '' {
+    PlexLiveTvFavorites.favoriteListChanged.addListener(
+      _onPlexFavoriteListChanged,
+    );
+  }
+
+  void _onPlexFavoriteListChanged() {
+    final change = PlexLiveTvFavorites.favoriteListChanged.value;
+    if (_disposed ||
+        change == null ||
+        change.userId != _ownerUserId ||
+        _client.userId != _ownerUserId ||
+        _client.serverType != ServerType.plex) {
+      return;
+    }
+    unawaited(_reloadLiveTvFavoriteChannels());
+  }
 
   /// Whether a section whose load threw keeps what is already on screen.
   ///
@@ -810,8 +827,22 @@ class HomeViewModel extends ChangeNotifier {
   /// Refreshes channel favorites without reloading every Home section.
   /// Adding or removing a guide favorite can change which cards belong here.
   Future<void> _reloadLiveTvFavoriteChannels() async {
-    if (_liveTvFavoritesReloading) return;
+    if (_liveTvFavoritesReloading) {
+      _liveTvFavoritesReloadPending = true;
+      return;
+    }
     _liveTvFavoritesReloading = true;
+    try {
+      do {
+        _liveTvFavoritesReloadPending = false;
+        await _reloadLiveTvFavoriteChannelsOnce();
+      } while (!_disposed && _liveTvFavoritesReloadPending);
+    } finally {
+      _liveTvFavoritesReloading = false;
+    }
+  }
+
+  Future<void> _reloadLiveTvFavoriteChannelsOnce() async {
     try {
       while (_isLoading && !_disposed) {
         await _loadDone;
@@ -843,8 +874,6 @@ class HomeViewModel extends ChangeNotifier {
       _saveRowCache();
     } catch (_) {
       // A failed refresh leaves the current Home rows visible.
-    } finally {
-      _liveTvFavoritesReloading = false;
     }
   }
 
@@ -1892,10 +1921,9 @@ class HomeViewModel extends ChangeNotifier {
           final favorites = await _dataSource.loadFavoritesChannels(_serverId);
           if (favorites.items.isNotEmpty) rows.add(favorites);
         } catch (_) {}
-        // Initial Home rendering never waits on the Plex account endpoint.
-        unawaited(PlexLiveTvFavorites.refreshForBrowse(_client).then((loaded) {
-          if (loaded) unawaited(_reloadLiveTvFavoriteChannels());
-        }));
+        // The account-level change signal refreshes row membership when
+        // cloud favorites differ; initial Home never waits for this read.
+        unawaited(PlexLiveTvFavorites.refreshForBrowse(_client));
         return rows;
       case HomeSectionType.onNow:
         if (!await _dataSource.hasLiveTvChannels()) return [];
@@ -3829,6 +3857,9 @@ class HomeViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    PlexLiveTvFavorites.favoriteListChanged.removeListener(
+      _onPlexFavoriteListChanged,
+    );
     _watchingNowTimer?.cancel();
     super.dispose();
   }

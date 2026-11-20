@@ -316,6 +316,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   // without re-querying the rest of the category on selection.
   final Set<String> _categoryFailedIds = <String>{};
   GuideFilter? _categoryLoadedFor;
+
+  /// An empty category can mean its EPG requests failed, not that it has no
+  /// matching channels. Exposed for the TV and mobile empty-state Retry.
+  bool get hasFailedCategoryListings =>
+      _isCategory(_filter) &&
+      _categoryLoadedFor == _filter &&
+      _categoryFailedIds.isNotEmpty;
+
+  bool get retryingCategoryListings =>
+      hasFailedCategoryListings && _categoryFetchInFlight;
+
+  Future<void> retryFailedCategoryListings() => _retryCategoryFailures();
   int _windowRequest = 0;
   ({
     DateTime start,
@@ -1217,6 +1229,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final filter = _filter;
     final failed = _categoryFailedIds.toList();
     _categoryFetchInFlight = true;
+    _notifyListeners();
     try {
       final size = _batchSizeFor(filter);
       for (var i = 0; i < failed.length; i += size) {
@@ -2420,6 +2433,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (session != userDataSync.session ||
             (!_accessDenied(error) && generation != _programGeneration)) {
           return null;
+        }
+        if (!_accessDenied(error) &&
+            (error is TimeoutException || isTransientTransportFailure(error))) {
+          // The earlier chunks are still good. Keep this whole batch's old
+          // programs and continue with later 50-channel batches.
+          failed.addAll(chunk);
+          continue;
         }
         rethrow;
       }

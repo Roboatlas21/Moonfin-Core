@@ -301,6 +301,74 @@ void main() {
     await _pumpFrames(tester);
   }
 
+  for (final layout in [InterfaceLayout.tv, InterfaceLayout.phone]) {
+    testWidgets('failed empty category shows Retry on ${layout.name}', (
+      tester,
+    ) async {
+      PlatformDetection.setInterfaceLayout(layout);
+      addTearDown(
+        () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+      );
+      channelCount = 1;
+      var failed = true;
+      when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => const ChannelGroupLineup(
+          {},
+          programmeCategories: {'sports'},
+        ),
+      );
+      when(
+        () => liveTvApi.getGuide(
+          startDate: any(named: 'startDate'),
+          endDate: any(named: 'endDate'),
+          channelIds: any(named: 'channelIds'),
+          isSports: any(named: 'isSports'),
+          fields: any(named: 'fields'),
+          enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+          enableImages: any(named: 'enableImages'),
+          enableUserData: any(named: 'enableUserData'),
+          userId: any(named: 'userId'),
+        ),
+      ).thenAnswer((inv) async {
+        final ids =
+            (inv.namedArguments[#channelIds] as List?)?.cast<String>() ??
+            const <String>[];
+        if (inv.namedArguments[#isSports] != true) {
+          return {'Items': [for (final id in ids) ..._programsFor(id)]};
+        }
+        return failed
+            ? {
+                'Items': <dynamic>[],
+                'FailedChannelIds': ['ch0'],
+              }
+            : {
+                'Items': [for (final id in ids) ..._programsFor(id, sports: true)],
+              };
+      });
+
+      await pumpGuide(
+        tester,
+        surface: layout == InterfaceLayout.phone
+            ? const Size(390, 844)
+            : const Size(900, 700),
+      );
+      final vm = (tester.state(find.byType(LiveTvGuideScreen)) as dynamic)
+          .debugGuideViewModel as LiveTvGuideViewModel;
+      vm.setFilter(GuideFilter.sports);
+      await _pumpFrames(tester);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      expect(find.text('Failed to load'), findsOneWidget);
+      expect(find.text('No channels found'), findsNothing);
+
+      failed = false;
+      await tester.tap(find.text('Retry'));
+      await _pumpFrames(tester);
+      expect(vm.hasFailedCategoryListings, isFalse);
+      expect(vm.filteredChannels.map((c) => c.id), ['ch0']);
+      expect(find.text('Failed to load'), findsNothing);
+    });
+  }
+
   testWidgets('mobile retry reloads listings without selecting the channel', (
     tester,
   ) async {

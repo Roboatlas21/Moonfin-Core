@@ -453,6 +453,30 @@ void main() {
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
   });
 
+  test('account favorites signal only actual changes', () async {
+    final pms = _plex();
+    addTearDown(pms.dispose);
+    final changes = <String>[];
+    void onChange() {
+      final event = PlexLiveTvFavorites.favoriteListChanged.value;
+      if (event != null) changes.add(event.userId);
+    }
+    PlexLiveTvFavorites.favoriteListChanged.addListener(onChange);
+    addTearDown(() => PlexLiveTvFavorites.favoriteListChanged.removeListener(onChange));
+
+    await PlexLiveTvFavorites.refresh(pms);
+    expect(changes, isEmpty);
+
+    cloud.rows = [{'source': _source, 'id': 'free123'}];
+    await PlexLiveTvFavorites.refresh(pms);
+    await PlexLiveTvFavorites.refresh(pms);
+    expect(changes, ['plex-user']);
+
+    cloud.rows = [];
+    await PlexLiveTvFavorites.refresh(pms);
+    expect(changes, ['plex-user', 'plex-user']);
+  });
+
   test('a client reused for another user drops its old DVR catalog', () {
     final pms = _plex();
     addTearDown(pms.dispose);
