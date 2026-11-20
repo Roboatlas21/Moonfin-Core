@@ -23,6 +23,7 @@ class EpgNowNextCard extends StatelessWidget {
   final bool isLive;
   final bool apple;
   final VoidCallback onTap;
+  final VoidCallback? onRetry;
   final VoidCallback? onLongPress;
   final bool isFavorite;
   final FocusNode? focusNode;
@@ -41,6 +42,7 @@ class EpgNowNextCard extends StatelessWidget {
     required this.isLive,
     required this.apple,
     required this.onTap,
+    this.onRetry,
     this.onLongPress,
     this.isFavorite = false,
     this.focusNode,
@@ -114,12 +116,22 @@ class EpgNowNextCard extends StatelessWidget {
                       color: AppColorScheme.statusError,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      AppLocalizations.of(context).failedToLoad,
-                      style: textTheme.bodyMedium?.copyWith(
-                        color: AppColorScheme.statusError,
+                    Flexible(
+                      child: Text(
+                        AppLocalizations.of(context).failedToLoad,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: AppColorScheme.statusError,
+                        ),
                       ),
                     ),
+                    if (onRetry != null) ...[
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: onRetry,
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: Text(AppLocalizations.of(context).retry),
+                      ),
+                    ],
                   ],
                 )
               else if (nowTitle == null && nextLabel == null)

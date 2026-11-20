@@ -2241,6 +2241,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                     next.titleWithEpisode,
                   ),
             loadState: _vm.loadStateFor(channel.id),
+            onRetry: _vm.listingsAccessDenied
+                ? null
+                : () => unawaited(_vm.retryFailedPrograms()),
             isLive: isLive,
             apple: _apple,
             isFavorite: channel.isFavorite,

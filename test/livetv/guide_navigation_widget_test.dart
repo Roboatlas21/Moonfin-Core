@@ -301,6 +301,40 @@ void main() {
     await _pumpFrames(tester);
   }
 
+  testWidgets('mobile retry reloads listings without selecting the channel', (
+    tester,
+  ) async {
+    var tunes = 0;
+    var retries = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(
+          body: EpgNowNextCard(
+            logoUrl: null,
+            channelName: 'Channel 1',
+            channelNumber: '1',
+            nowTitle: null,
+            nowProgress: 0,
+            remainingLabel: null,
+            nextLabel: null,
+            loadState: GuideChannelLoadState.failed,
+            isLive: false,
+            apple: false,
+            onTap: () => tunes++,
+            onRetry: () => retries++,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Retry'));
+    expect(retries, 1);
+    expect(tunes, 0);
+    await tester.tap(find.text('Channel 1'));
+    expect(tunes, 1);
+  });
+
   testWidgets('a resize skipped by a reload is applied when the guide is ready', (
     tester,
   ) async {
