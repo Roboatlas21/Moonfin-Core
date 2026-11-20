@@ -301,6 +301,25 @@ void main() {
     await _pumpFrames(tester);
   }
 
+  testWidgets('a resize skipped by a reload is applied when the guide is ready', (
+    tester,
+  ) async {
+    await pumpGuide(tester);
+    final vm = (tester.state(find.byType(LiveTvGuideScreen)) as dynamic)
+        .debugGuideViewModel as LiveTvGuideViewModel;
+    final previous = vm.guideWindow;
+    tester.view.physicalSize = const Size(1500, 700);
+    // Start a reload after layout schedules the resize but before its callback.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(vm.load(window: previous, windowStart: vm.windowStart));
+    });
+    await tester.pump();
+    await _pumpFrames(tester);
+    expect(vm.state, GuideState.ready);
+    expect(vm.guideWindow, isNot(previous));
+    expect(vm.windowEnd.difference(vm.windowStart), vm.guideWindow);
+  });
+
   testWidgets('playback uses the guide filter until a mini-guide selection', (
     tester,
   ) async {

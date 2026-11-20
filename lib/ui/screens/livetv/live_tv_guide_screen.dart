@@ -161,6 +161,9 @@ class _PendingVerticalMove {
 class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     with WidgetsBindingObserver {
   late final LiveTvGuideViewModel _vm;
+  @visibleForTesting
+  LiveTvGuideViewModel get debugGuideViewModel => _vm;
+
   final _prefs = GetIt.instance<UserPreferences>();
   final _client = GetIt.instance<MediaServerClient>();
 
@@ -1314,6 +1317,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       if (!mounted || _lastLayoutWindow != window) return;
       try {
         await _vm.setWindow(window);
+        // A reload can start after scheduling this resize but before it runs.
+        // Let the ready-state rebuild resubmit a resize skipped during loading.
+        if (mounted &&
+            _lastLayoutWindow == window &&
+            _vm.state != GuideState.ready &&
+            _vm.guideWindow != window) {
+          _lastLayoutWindow = null;
+        }
       } catch (_) {
         if (mounted && _lastLayoutWindow == window) {
           _showWindowFailure(_vm.windowStart.add(window));
