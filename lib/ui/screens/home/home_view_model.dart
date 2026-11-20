@@ -1766,7 +1766,8 @@ class HomeViewModel extends ChangeNotifier {
         ];
         try {
           // The standalone On Now section shows this row in its own spot.
-          if (!_prefs.activeHomeSections.contains(HomeSectionType.onNow)) {
+          if (_cloudOnlyPlex ||
+              !_prefs.activeHomeSections.contains(HomeSectionType.onNow)) {
             final onNow = await _dataSource.loadOnNow(_serverId);
             if (onNow.items.isNotEmpty) rows.add(onNow);
           }

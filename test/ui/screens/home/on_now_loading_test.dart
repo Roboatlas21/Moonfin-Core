@@ -15,11 +15,14 @@ import 'package:moonfin/preference/seerr_preferences.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/screens/home/home_view_model.dart';
 import 'package:server_core/server_core.dart';
+import 'package:server_plex/server_plex.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _MockDataSource extends Mock implements RowDataSource {}
 
 class _MockClient extends Mock implements MediaServerClient {}
+
+class _MockPlexClient extends Mock implements PlexMediaServerClient {}
 
 class _MockMediaBar extends Mock implements MediaBarViewModel {}
 
@@ -220,6 +223,33 @@ void main() {
       await model.load();
 
       expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
+    },
+  );
+
+  test(
+    'Plex Cloud keeps On Now inside Live TV when the standalone section is enabled',
+    () async {
+      await enableSections({HomeSectionType.onNow});
+      stubLiveTvRows();
+      final cloudClient = _MockPlexClient();
+      when(() => cloudClient.cloudOnly).thenReturn(true);
+      when(() => cloudClient.userId).thenReturn('user');
+      when(() => cloudClient.baseUrl).thenReturn('http://server.test');
+
+      model.dispose();
+      model = HomeViewModel(
+        dataSource: source,
+        prefs: prefs,
+        client: cloudClient,
+        mediaBarViewModel: _MockMediaBar(),
+        multiServerRepo: _MockMultiServer(),
+      );
+
+      await model.load();
+
+      expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
+      verify(() => source.loadOnNow('http://server.test')).called(1);
+      verifyNever(() => source.hasLiveTvChannels());
     },
   );
 
