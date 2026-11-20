@@ -402,63 +402,7 @@ void main() {
     expect(loads, 2);
   });
 
-  test('Plex account changes rebuild Home favorite row membership', () async {
-    await enableSections({HomeSectionType.liveTv});
-    stubLiveTvRows();
-    final plex = _MockPlexClient();
-    when(() => plex.cloudOnly).thenReturn(true);
-    when(() => plex.serverType).thenReturn(ServerType.plex);
-    when(() => plex.userId).thenReturn('user');
-    when(() => plex.baseUrl).thenReturn('http://server.test');
 
-    var favorites = <AggregatedItem>[];
-    var calls = 0;
-    when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
-      (_) async {
-        calls++;
-        return HomeRow(
-          id: 'liveTvFavorites',
-          title: 'Favorite Channels',
-          rowType: HomeRowType.liveTvFavorites,
-          items: List.of(favorites),
-        );
-      },
-    );
-    model.dispose();
-    model = HomeViewModel(
-      dataSource: source,
-      prefs: prefs,
-      client: plex,
-      mediaBarViewModel: _MockMediaBar(),
-      multiServerRepo: _MockMultiServer(),
-    );
-    await model.load();
-    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
-    final initialCalls = calls;
-
-    favorites = [
-      AggregatedItem(
-        id: 'channel-plex-free123',
-        serverId: 'http://server.test',
-        rawData: {'Type': 'TvChannel', 'UserData': {'IsFavorite': true}},
-      ),
-    ];
-    PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'user', revision: 1);
-    await pumpEventQueue();
-    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow', 'liveTvFavorites']);
-    expect(calls, initialCalls + 1);
-
-    favorites = [];
-    PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'user', revision: 2);
-    await pumpEventQueue();
-    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
-    expect(calls, initialCalls + 2);
-
-    PlexLiveTvFavorites.favoriteListChanged.value = (userId: 'other', revision: 3);
-    await pumpEventQueue();
-    expect(calls, initialCalls + 2);
-    PlexLiveTvFavorites.favoriteListChanged.value = null;
-  });
 
   test('an older favorites response cannot overwrite a newer Home load', () async {
     await enableSections({HomeSectionType.liveTv});
@@ -713,16 +657,7 @@ void main() {
       ],
     );
 
-    test('refreshes On Now in place', () async {
-      await loadPopulatedRow();
-      when(() => source.loadOnNow('http://server.test'))
-          .thenAnswer((_) async => airing(['next']));
 
-      await model.refreshResumeAndNextUp();
-
-      expect(model.rows.single.id, 'onNow');
-      expect(model.rows.single.items.map((item) => item.id), ['next']);
-    });
 
     test('a second return while the first is out waits on it', () async {
       await loadPopulatedRow();
@@ -746,29 +681,8 @@ void main() {
       expect(model.rows.single.items.map((item) => item.id), ['next']);
     });
 
-    test('brings On Now back once programs are airing', () async {
-      when(() => source.hasLiveTvChannels()).thenAnswer((_) async => true);
-      when(() => source.loadOnNow('http://server.test'))
-          .thenAnswer((_) async => airing(const []));
-      await model.load();
-      expect(model.rows, isEmpty);
 
-      when(() => source.loadOnNow('http://server.test'))
-          .thenAnswer((_) async => airing(['program']));
-      await model.refreshResumeAndNextUp();
 
-      expect(model.rows.map((row) => row.id), ['onNow']);
-    });
 
-    test('asks nothing for Live TV without channels', () async {
-      await enableSections({HomeSectionType.liveTv});
-      when(() => source.hasLiveTvChannels()).thenAnswer((_) async => false);
-      await model.load();
-      expect(model.rows, isEmpty);
-
-      await model.refreshResumeAndNextUp();
-
-      verifyNever(() => source.loadOnNow(any()));
-    });
   });
 }

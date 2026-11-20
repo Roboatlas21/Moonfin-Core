@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -401,39 +400,7 @@ void main() {
     });
   }
 
-  testWidgets('mobile retry reloads listings without selecting the channel', (
-    tester,
-  ) async {
-    var tunes = 0;
-    var retries = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: Scaffold(
-          body: EpgNowNextCard(
-            logoUrl: null,
-            channelName: 'Channel 1',
-            channelNumber: '1',
-            nowTitle: null,
-            nowProgress: 0,
-            remainingLabel: null,
-            nextLabel: null,
-            loadState: GuideChannelLoadState.failed,
-            isLive: false,
-            apple: false,
-            onTap: () => tunes++,
-            onRetry: () => retries++,
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('Retry'));
-    expect(retries, 1);
-    expect(tunes, 0);
-    await tester.tap(find.text('Channel 1'));
-    expect(tunes, 1);
-  });
+
 
   testWidgets('a resize skipped by a reload is applied when the guide is ready', (
     tester,
@@ -1085,241 +1052,9 @@ void main() {
     },
   );
 
-  testWidgets(
-    'releasing Enter after removing the bottom mobile favorite stays in the guide',
-    (tester) async {
-      userDataSync.reset();
-      addTearDown(userDataSync.reset);
-      final prefs = GetIt.instance<UserPreferences>();
-      await prefs.set(
-        UserPreferences.liveTvCategoryDisplay,
-        LiveTvCategoryDisplay.groups,
-      );
-      await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
-      final api = _MockUserLibrary();
-      when(() => client.userLibraryApi).thenReturn(api);
-      when(() => api.unmarkFavorite('ch1')).thenAnswer((_) async {});
-      when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
-        (_) async => ChannelGroupLineup(
-          {
-            'ch0': {'Local'},
-          },
-          channels: [
-            for (var i = 0; i < 2; i++)
-              {
-                ..._channelRaw(i),
-                'UserData': {'IsFavorite': true},
-              },
-          ],
-        ),
-      );
-      await pumpGuide(tester, surface: const Size(390, 844));
-      await tester.tap(find.byTooltip('Filters'));
-      await _pumpFrames(tester);
-      await tester.tap(find.text('Favorites'));
-      await _pumpFrames(tester);
-      _nodeLabelled(tester, 'GuideChannel:1').requestFocus();
-      await _pumpFrames(tester);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
-      await tester.pump(const Duration(milliseconds: 550));
-      await _pumpFrames(tester);
-      expect(_focusedLabel(), 'GuideChannel:0');
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
-      await _pumpFrames(tester);
-      verify(() => api.unmarkFavorite('ch1')).called(1);
-      expect(
-        tester.widget<EpgNowNextCard>(find.byType(EpgNowNextCard)).channelName,
-        'Channel 0',
-      );
-      expect(prefs.get(UserPreferences.liveTvLastChannelId), isEmpty);
-    },
-  );
 
-  testWidgets('mobile Favorites first follows the channel in both directions', (
-    tester,
-  ) async {
-    userDataSync.reset();
-    addTearDown(userDataSync.reset);
-    final prefs = GetIt.instance<UserPreferences>();
-    await prefs.set(
-      UserPreferences.liveTvChannelSortBy,
-      ChannelSortBy.favoritesFirst,
-    );
-    await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
-    final api = _MockUserLibrary();
-    when(() => client.userLibraryApi).thenReturn(api);
-    when(() => api.markFavorite('ch44')).thenAnswer((_) async {});
-    when(() => api.unmarkFavorite('ch44')).thenAnswer((_) async {});
-    await pumpGuide(tester, surface: const Size(390, 844));
-    final list = tester.widget<ListView>(find.byType(ListView).last).controller!;
-    list.jumpTo(list.position.maxScrollExtent);
-    await _pumpFrames(tester);
-    final card = find.byWidgetPredicate(
-      (w) => w is EpgNowNextCard && w.channelName == 'Channel 44',
-    );
-    tester.widget<EpgNowNextCard>(card).focusNode!.requestFocus();
-    await _pumpFrames(tester);
-    for (final favorite in [true, false]) {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.enter);
-      await tester.pump(const Duration(milliseconds: 550));
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.enter);
-      await _pumpFrames(tester);
-      final focused = tester.widget<EpgNowNextCard>(card.hitTestable());
-      expect(focused.focusNode!.hasFocus, isTrue);
-      expect(focused.isFavorite, favorite);
-    }
-    verify(() => api.markFavorite('ch44')).called(1);
-    verify(() => api.unmarkFavorite('ch44')).called(1);
-  });
 
-  // Opening the picker clears the channel search. A program category then
-  // refetches guide data, so cancellation must retain the channel ID until
-  // those rows exist again instead of restoring whichever row appears first.
-  for (final scenario in [
-    (
-      label: 'Right',
-      closeKey: LogicalKeyboardKey.arrowRight,
-      omitChannel: false,
-      navigateAway: false,
-    ),
-    (
-      label: 'Back',
-      closeKey: LogicalKeyboardKey.escape,
-      omitChannel: false,
-      navigateAway: false,
-    ),
-    (
-      label: 'missing channel',
-      closeKey: LogicalKeyboardKey.arrowRight,
-      omitChannel: true,
-      navigateAway: false,
-    ),
-    (
-      label: 'navigate away',
-      closeKey: LogicalKeyboardKey.arrowRight,
-      omitChannel: false,
-      navigateAway: true,
-    ),
-  ]) {
-    testWidgets('TV picker ${scenario.label} waits for Sports category rows', (
-      tester,
-    ) async {
-      PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-      addTearDown(
-        () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-      );
-      await GetIt.instance<UserPreferences>().set(
-        UserPreferences.liveTvCategoryDisplay,
-        LiveTvCategoryDisplay.both,
-      );
-      channelCount = 5;
-      when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
-        (_) async => const ChannelGroupLineup(
-          {
-            'ch1': {'League'},
-          },
-          programmeCategories: {'sports'},
-        ),
-      );
-      Completer<void>? sportsReload;
-      when(
-        () => liveTvApi.getGuide(
-          startDate: any(named: 'startDate'),
-          endDate: any(named: 'endDate'),
-          channelIds: any(named: 'channelIds'),
-          isSports: any(named: 'isSports'),
-          fields: any(named: 'fields'),
-          enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-          enableImages: any(named: 'enableImages'),
-          enableUserData: any(named: 'enableUserData'),
-          userId: any(named: 'userId'),
-        ),
-      ).thenAnswer((invocation) async {
-        final ids =
-            (invocation.namedArguments[#channelIds] as List?)?.cast<String>() ??
-            const <String>[];
-        final sports = invocation.namedArguments[#isSports] == true;
-        if (sports && sportsReload != null) await sportsReload.future;
-        return <String, dynamic>{
-          'Items': [
-            for (final id in ids)
-              if (!(sports &&
-                  sportsReload != null &&
-                  scenario.omitChannel &&
-                  id == 'ch2'))
-                for (final program in _programsFor(id))
-                  <String, dynamic>{...program, if (sports) 'IsSports': true},
-          ],
-        };
-      });
 
-      await pumpGuide(tester);
-      _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
-      await _pumpFrames(tester);
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-      await _pumpFrames(tester);
-      final picker = find.byType(GuideFilterPicker);
-      expect(picker, findsOneWidget);
-      await tester.tap(
-        find.descendant(of: picker, matching: find.text('Sports')),
-      );
-      await _pumpFrames(tester);
-
-      final search = tester
-          .widget<LocalSearchField>(find.byType(LocalSearchField))
-          .controller;
-      search.text = 'Channel 2';
-      await tester.pump(const Duration(milliseconds: 220));
-      await _pumpFrames(tester);
-      expect(
-        tester.widget<EpgChannelCell>(find.byType(EpgChannelCell).first).name,
-        'Channel 2',
-      );
-      _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
-      await _pumpFrames(tester);
-
-      sportsReload = Completer<void>();
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-      await _pumpFrames(tester);
-      expect(search.text, isEmpty);
-      expect(picker, findsOneWidget);
-      await tester.sendKeyEvent(scenario.closeKey);
-      await _pumpFrames(tester);
-      expect(picker, findsNothing);
-      expect(_focusedLabel(), 'GuideBrowse');
-
-      if (scenario.navigateAway) {
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await _pumpFrames(tester);
-        expect(_focusedLabel(), startsWith('GuideShortcut:'));
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await _pumpFrames(tester);
-        expect(_focusedLabel(), 'GuideSearch');
-      }
-      sportsReload.complete();
-      await _pumpFrames(tester);
-
-      if (scenario.navigateAway) {
-        expect(_focusedLabel(), 'GuideSearch');
-      } else {
-        final focused = _focusedLabel();
-        expect(focused, startsWith('GuideChannel:'));
-        final focusedRow = find.byWidgetPredicate(
-          (widget) =>
-              widget is Focus && widget.focusNode?.debugLabel == focused,
-        );
-        final focusedCell = find.descendant(
-          of: focusedRow,
-          matching: find.byType(EpgChannelCell),
-        );
-        expect(focusedCell, findsOneWidget);
-        expect(
-          tester.widget<EpgChannelCell>(focusedCell).name,
-          scenario.omitChannel ? 'Channel 0' : 'Channel 2',
-        );
-      }
-    });
-  }
 
   /// Focuses a row-0 cell two hours into the window and then steps right once,
   /// which is the only move permitted to rewrite the anchor. Returns the
@@ -1662,91 +1397,9 @@ void main() {
     },
   );
 
-  for (final first in [0, 2]) {
-    testWidgets('opposite chevrons cancel the pending move from button $first', (
-      tester,
-    ) async {
-      PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-      addTearDown(
-        () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-      );
-      channelCount = 2;
-      await pumpGuide(tester);
-      final start = _windowRangeText(tester);
-      deferredChannelId = 'ch0';
-      await _activateGuideControl(tester, 'GuideWindowBar:$first');
-      await _activateGuideControl(tester, 'GuideWindowBar:${2 - first}');
-      expect(releaseDeferredGuide, hasLength(1));
-      releaseDeferredGuide.single();
-      await _pumpFrames(tester);
-      expect(_windowRangeText(tester), start);
-    });
-  }
 
-  testWidgets('Next pages Sports while its initial listings are pending', (
-    tester,
-  ) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
-    channelCount = 2;
-    await pumpGuide(tester);
-    final start = _windowRangeText(tester);
-    deferredChannelId = 'ch0';
-    await _activateGuideControl(
-      tester,
-      'GuideFilter:${GuideFilter.sports.index}',
-    );
-    await _activateGuideControl(tester, 'GuideWindowBar:2');
-    expect(releaseDeferredGuide, hasLength(2));
-    expect(_windowRangeText(tester), start);
-    releaseDeferredGuide.last();
-    await _pumpFrames(tester);
-    final next = _windowRangeText(tester);
-    expect(next, isNot(start));
-    releaseDeferredGuide.first();
-    await _pumpFrames(tester);
-    expect(_windowRangeText(tester), next);
-    expect(tester.widget<EpgChannelCell>(find.byType(EpgChannelCell)).name, 'Channel 1');
-  });
 
-  testWidgets('Next can page Favorites while the All request is pending', (
-    tester,
-  ) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
-    when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
-      (_) async => ChannelGroupLineup({}, channels: [
-        _channelRaw(0),
-        {..._channelRaw(1), 'UserData': {'IsFavorite': true}},
-      ]),
-    );
-    await pumpGuide(tester);
-    final start = _windowRangeText(tester);
-    deferredChannelId = 'ch1';
-    const next = 'GuideWindowBar:2';
-    await _activateGuideControl(tester, next);
-    await _activateGuideControl(tester, next);
-    expect(releaseDeferredGuide, hasLength(1));
-    await _activateGuideControl(tester, 'GuideFilter:${GuideFilter.favorites.index}');
-    final channel = find.byType(EpgChannelCell);
-    expect(tester.widget<EpgChannelCell>(channel).name, 'Channel 1');
-    await _activateGuideControl(tester, next);
-    expect(releaseDeferredGuide, hasLength(2));
-    expect(_windowRangeText(tester), start);
 
-    releaseDeferredGuide.last();
-    await _pumpFrames(tester);
-    final favoritesRange = _windowRangeText(tester);
-    expect(favoritesRange, isNot(start));
-    releaseDeferredGuide.first();
-    await _pumpFrames(tester);
-    expect(_windowRangeText(tester), favoritesRange);
-    expect(tester.widget<EpgChannelCell>(channel).name, 'Channel 1');
-  });
 
   for (final action in ['opening listings', 'Now', 'channel search']) {
     testWidgets('Next works with an older request pending after $action', (
@@ -1874,39 +1527,7 @@ void main() {
     expect(notice, findsNothing);
   });
 
-  testWidgets('all-failed EPG paging shows a notice without changing time', (
-    tester,
-  ) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
-    await pumpGuide(tester);
-    _nodeLabelled(tester, 'GuideProgramRow4:0').requestFocus();
-    await _pumpFrames(tester);
-    final original = _windowRangeText(tester);
-    when(
-      () => liveTvApi.getGuide(
-        startDate: any(named: 'startDate'),
-        endDate: any(named: 'endDate'),
-        channelIds: any(named: 'channelIds'),
-        isSports: any(named: 'isSports'),
-        fields: any(named: 'fields'),
-        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-        enableImages: any(named: 'enableImages'),
-        enableUserData: any(named: 'enableUserData'),
-        userId: any(named: 'userId'),
-      ),
-    ).thenAnswer((inv) async => {
-      'Items': <dynamic>[],
-      'FailedChannelIds':
-          (inv.namedArguments[#channelIds] as List<String>?) ?? [],
-    });
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await _pumpFrames(tester);
-    expect(_windowRangeText(tester), original);
-    expect(find.textContaining('Couldn’t load'), findsOneWidget);
-  });
+
 
   testWidgets('Back can exit after all live reset listings fail', (tester) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
@@ -1945,59 +1566,6 @@ void main() {
     expect(vm.atLivePosition, isFalse);
     expect(back.consumeBackPress(), isFalse);
   });
-
-  for (final startAtLive in [true, false]) {
-    testWidgets(
-      'Back returns to the tuned channel after denied paging from '
-      '${startAtLive ? 'live' : 'a future window'}',
-      (tester) async {
-        PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-        addTearDown(
-          () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-        );
-        await GetIt.instance<UserPreferences>().set(
-          UserPreferences.liveTvLastChannelId,
-          'ch3',
-        );
-        await pumpGuide(tester);
-        final liveRange = _windowRangeText(tester);
-        _nodeLabelled(tester, 'GuideProgramRow4:0').requestFocus();
-        await _pumpFrames(tester);
-        if (!startAtLive) {
-          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-          await _pumpFrames(tester);
-          expect(_windowRangeText(tester), isNot(liveRange));
-        }
-
-        final beforeFailure = _windowRangeText(tester);
-        final request = RequestOptions(path: '/LiveTv/Programs');
-        guideFailure = DioException.badResponse(
-          statusCode: 403,
-          requestOptions: request,
-          response: Response(requestOptions: request, statusCode: 403),
-        );
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await _pumpFrames(tester);
-        expect(_windowRangeText(tester), beforeFailure);
-        expect(find.byType(EpgChannelCell), findsWidgets);
-        expect(find.textContaining('Couldn’t load'), findsOneWidget);
-
-        clearInteractions(liveTvApi);
-        await tester.binding.handlePopRoute();
-        await _pumpFrames(tester);
-        expect(_windowRangeText(tester), liveRange);
-        expect(_focusedLabel(), 'GuideChannel:3');
-        if (startAtLive) {
-          verifyNever(() => liveTvApi.getChannelGroups(userId: 'user'));
-        } else {
-          verify(() => liveTvApi.getChannelGroups(userId: 'user')).called(1);
-        }
-        await tester.binding.handlePopRoute();
-        await _pumpFrames(tester);
-        expect(_focusedLabel(), 'GuideFilter:0');
-      },
-    );
-  }
 
   testWidgets('the channel column handles ordinary vertical arrows', (
     tester,

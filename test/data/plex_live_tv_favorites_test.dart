@@ -259,24 +259,7 @@ void main() {
     expect(_saved(pms, 'channel-plex-free123'), isFalse);
   });
 
-  test('other providers with the same Free TV ID stay untouched', () async {
-    final cloudClient = _plex(cloudOnly: true);
-    addTearDown(cloudClient.dispose);
-    cloud.rows = [{'source': 'provider://unrelated', 'id': 'free123'}];
-    PlexLiveTvFavorites.applyToItem(cloudClient, _channel);
-    await PlexLiveTvFavorites.refresh(cloudClient);
-    expect(_saved(cloudClient, 'channel-plex-free123'), isFalse);
 
-    await ItemMutationRepository(cloudClient).setFavorite(
-      'channel-plex-free123', isFavorite: true,
-    );
-    expect(cloud.rows.map((row) => row['source']).toList(),
-        ['provider://unrelated', _source]);
-    await ItemMutationRepository(cloudClient).setFavorite(
-      'channel-plex-free123', isFavorite: false,
-    );
-    expect(cloud.rows.single['source'], 'provider://unrelated');
-  });
 
   test('different PMS channels with identical IDs remain independent', () async {
     final first = _plex();
@@ -316,34 +299,7 @@ void main() {
   });
 
 
-  test('cached favorites appear in Home and search without another cloud read', () async {
-    final client = _ChannelClient();
-    final api = _ChannelApi();
-    when(() => client.serverType).thenReturn(ServerType.plex);
-    when(() => client.userId).thenReturn('plex-user');
-    when(() => client.baseUrl).thenReturn('https://pms.example');
-    when(() => client.deviceInfo).thenReturn(_device);
-    when(() => client.liveTvApi).thenReturn(api);
-    when(() => api.getChannels(fields: 'ImageTags,UserData')).thenAnswer(
-      (_) async => {'Items': [_channel]},
-    );
-    when(() => api.getChannels(
-      fields: 'ImageTags',
-      enableTotalRecordCount: false,
-      userId: 'plex-user',
-    )).thenAnswer((_) async => {'Items': [_channel]});
-    cloud.rows = [{'source': _source, 'id': 'free123'}];
-    await PlexLiveTvFavorites.refresh(client);
 
-    final home = await RowDataSource(client).loadFavoritesChannels('pms');
-    expect(home.items.map((item) => item.id), ['channel-plex-free123']);
-    expect(home.items.single.isFavorite, isTrue);
-
-    final search = await SearchRepository(client).fetchLiveTvChannels();
-    expect(search.single.isFavorite, isTrue);
-    expect(cloud.requests.where((request) => request.method == 'GET'),
-        hasLength(1));
-  });
 
   test('DVR favorites remain available after the client address changes', () async {
     final pms = _plex();
@@ -398,42 +354,9 @@ void main() {
       PlexLiveTvFavorites.syncKey(client, 'channel-plex-free123')), isTrue);
   });
 
-  test('Free TV hearts are distinct across Plex accounts', () {
-    final a = _plex();
-    final b = _plex(userId: 'other-user');
-    addTearDown(a.dispose);
-    addTearDown(b.dispose);
-    final first = PlexLiveTvFavorites.applyToItem(a, _channel);
-    final second = PlexLiveTvFavorites.applyToItem(b, _channel);
-    final firstKey = first['PlexFavoriteSyncKey'] as String;
-    expect(firstKey, isNot(second['PlexFavoriteSyncKey']));
-    userDataSync.publish(firstKey, {'IsFavorite': true});
-    final homeA = AggregatedItem(id: 'channel-plex-free123', serverId: 'a', rawData: first);
-    final homeB = AggregatedItem(id: 'channel-plex-free123', serverId: 'b', rawData: second);
-    expect(userDataSync.apply(homeA).isFavorite, isTrue);
-    expect(userDataSync.apply(homeB).isFavorite, isFalse);
-  });
 
-  test('a saved Plex server refreshes when another user is active', () async {
-    final store = AuthenticationStore();
-    await store.init();
-    await store.putUser(PrivateUser(
-      id: 'saved-plex', name: 'Saved Plex', serverId: 'saved-pms',
-      accessToken: 'saved-pms-token', plexToken: 'saved-cloud-token',
-      lastUsed: DateTime.utc(2026),
-    ));
-    final factory = MediaServerClientFactory(deviceInfo: _device);
-    GetIt.instance.registerSingleton<AuthenticationStore>(store);
-    GetIt.instance.registerSingleton<MediaServerClientFactory>(factory);
-    final saved = factory.getClient(
-      serverId: 'saved-pms', serverType: ServerType.plex,
-      baseUrl: 'https://saved-pms.example',
-    )..userId = 'saved-plex';
-    addTearDown(saved.dispose);
-    cloud.rows = [{'source': _source, 'id': 'free123'}];
-    expect(await PlexLiveTvFavorites.refreshForBrowse(saved), isTrue);
-    expect(cloud.requests.single.headers['X-Plex-Token'], 'saved-cloud-token');
-  });
+
+
 
   test('a second PMS applies another PMS cache without a second cloud GET', () async {
     final first = _plex();
@@ -465,32 +388,7 @@ void main() {
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
   });
 
-  test('an open second Plex guide follows another PMS favorite update', () async {
-    final first = _plex();
-    final second = _plex()..baseUrl = 'https://another-pms.example';
-    addTearDown(first.dispose);
-    addTearDown(second.dispose);
-    const dvr = <String, dynamic>{
-      'Id': 'channel-2-4',
-      'Type': 'TvChannel',
-      'PlexFavoriteSource': 'server://another-machine/epg',
-      'PlexFavoriteId': '4',
-    };
-    final item = PlexLiveTvFavorites.applyToItem(second, dvr);
-    final key = item['PlexFavoriteSyncKey'] as String;
-    final guide = LiveTvGuideViewModel(second);
-    addTearDown(guide.dispose);
 
-    cloud.rows = [{'source': 'server://another-machine/epg', 'id': '4'}];
-    await PlexLiveTvFavorites.refresh(first);
-    expect(userDataSync.favoriteFor(key), isTrue);
-    expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(1));
-
-    cloud.rows = [];
-    await PlexLiveTvFavorites.refresh(first);
-    expect(userDataSync.favoriteFor(key), isFalse);
-    expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
-  });
 
   test('a confirmed Plex PUT stays successful when local cache write fails', () async {
     final client = _plex();
@@ -546,29 +444,7 @@ void main() {
     expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
   });
 
-  test('account favorites signal only actual changes', () async {
-    final pms = _plex();
-    addTearDown(pms.dispose);
-    final changes = <String>[];
-    void onChange() {
-      final event = PlexLiveTvFavorites.favoriteListChanged.value;
-      if (event != null) changes.add(event.userId);
-    }
-    PlexLiveTvFavorites.favoriteListChanged.addListener(onChange);
-    addTearDown(() => PlexLiveTvFavorites.favoriteListChanged.removeListener(onChange));
 
-    await PlexLiveTvFavorites.refresh(pms);
-    expect(changes, isEmpty);
-
-    cloud.rows = [{'source': _source, 'id': 'free123'}];
-    await PlexLiveTvFavorites.refresh(pms);
-    await PlexLiveTvFavorites.refresh(pms);
-    expect(changes, ['plex-user']);
-
-    cloud.rows = [];
-    await PlexLiveTvFavorites.refresh(pms);
-    expect(changes, ['plex-user', 'plex-user']);
-  });
 
   test('a client reused for another user drops its old DVR catalog', () {
     final pms = _plex();

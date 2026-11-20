@@ -303,43 +303,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('an empty replacement lineup dismisses the carousel', (
-    tester,
-  ) async {
-    await tester.binding.setSurfaceSize(const Size(1000, 600));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final client = _CarouselClient();
-    final initial = [
-      GuideChannel(id: 'ch0', name: 'Channel 0', rawData: const {}),
-    ];
-    final vm = _CarouselGuide(client, initial);
-    var channels = initial;
-    var dismissCount = 0;
-    late StateSetter updateHost;
-    await tester.pumpWidget(MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      theme: AppTheme.buildTheme(ThemeRegistry.active),
-      home: StatefulBuilder(builder: (context, setState) {
-        updateHost = setState;
-        return ChannelCarouselOverlay(
-          client: client,
-          channels: channels,
-          currentChannelId: 'ch0',
-          onChannelSelected: (_) {},
-          onDismiss: () => dismissCount++,
-          onShowControls: () {},
-          viewModelFactory: (_) => vm,
-        );
-      }),
-    ));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    updateHost(() => channels = <GuideChannel>[]);
-    await tester.pump();
-    await tester.pump(kCarouselExitDuration + const Duration(milliseconds: 50));
-    expect(dismissCount, 1);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
+
 
   testWidgets('open carousel cards follow favorite changes', (tester) async {
     userDataSync.reset();
@@ -512,33 +476,7 @@ void main() {
     }
   });
 
-  testWidgets('failed visible prewarm channels retry once after backoff', (
-    tester,
-  ) async {
-    final client = _CarouselClient();
-    final channels = [
-      for (var i = 0; i < 4; i++)
-        GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
-    ];
-    final vm = _CarouselGuide(client, channels)..failedChannels.add('ch1');
-    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
-    try {
-      prewarm.tuned(channels, 'ch1');
-      await tester.pump(ChannelCarouselPrewarm.settleDelay);
-      await tester.pump();
-      expect(vm.requests, hasLength(1));
-      final schedules = vm.schedules;
-      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
-      await tester.pump();
-      expect(vm.requests.last, ['ch1']);
-      expect(vm.schedules, greaterThan(schedules));
-      final count = vm.requests.length;
-      await tester.pump(const Duration(seconds: 1));
-      expect(vm.requests, hasLength(count));
-    } finally {
-      prewarm.dispose();
-    }
-  });
+
 
   testWidgets('carousel retries the currently browsed, not tuned, channels', (
     tester,

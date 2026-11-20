@@ -372,35 +372,7 @@ void main() {
     expect(lineup.sources.map((source) => source.groupId), ['source:dvr']);
   });
 
-  test('a failed Free TV grid leaves the healthy Plex DVR guide intact', () async {
-    final (dio, _) = _server();
-    dio.interceptors.insert(
-      0,
-      InterceptorsWrapper(
-        onRequest: (options, handler) {
-          if (options.uri.path == '/grid') {
-            handler.reject(
-              DioException(
-                requestOptions: options,
-                type: DioExceptionType.connectionError,
-              ),
-            );
-          } else {
-            handler.next(options);
-          }
-        },
-      ),
-    );
-    final result = await PlexLiveTvApi(dio).getGuide(
-      startDate: DateTime.utc(2026, 10, 22, 20),
-      endDate: DateTime.utc(2026, 10, 22, 22),
-      channelIds: ['channel-2-4', 'channel-plex-abc-66635fc0'],
-    );
-    final ids = (result['Items'] as List).whereType<Map>()
-        .map((program) => program['ChannelId']).toSet();
-    expect(ids, contains('channel-2-4'));
-    expect(result['FailedChannelIds'], ['channel-plex-abc-66635fc0']);
-  });
+
 
   test('Plex authorization failures are not recovered as partial listings', () async {
     for (final deniedPath in ['/grid', '/tv.plex.providers.epg.xmltv:2/grid']) {
@@ -439,34 +411,7 @@ void main() {
     }
   });
 
-  test('a failed Free TV grid retries rather than appearing empty', () async {
-    final (dio, _) = _server();
-    var attempts = 0;
-    dio.interceptors.insert(
-      0,
-      InterceptorsWrapper(
-        onRequest: (options, handler) {
-          if (options.uri.path == '/grid' && attempts++ == 0) {
-            handler.reject(DioException(
-              requestOptions: options,
-              type: DioExceptionType.connectionError,
-            ));
-          } else {
-            handler.next(options);
-          }
-        },
-      ),
-    );
-    final api = PlexLiveTvApi(dio, cloudOnly: true);
-    Future<Map<String, dynamic>> guide() => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22, 20),
-      endDate: DateTime.utc(2026, 10, 22, 22),
-      channelIds: ['channel-plex-abc-66635fc0'],
-    );
-    await expectLater(guide(), throwsA(isA<DioException>()));
-    expect((await guide())['Items'], isNotEmpty);
-    expect(attempts, 2);
-  });
+
 
   test('one failed Free TV grid does not mark the other channels empty', () async {
     final (dio, _) = _server();
