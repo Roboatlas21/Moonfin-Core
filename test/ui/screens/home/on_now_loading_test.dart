@@ -253,6 +253,32 @@ void main() {
     },
   );
 
+  test('failed On Now listings do not hide favorite channels', () async {
+    await enableSections({HomeSectionType.liveTv});
+    stubLiveTvRows();
+    when(() => source.loadOnNow('http://server.test'))
+        .thenThrow(Exception('EPG unavailable'));
+    when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
+      (_) async => HomeRow(
+        id: 'liveTvFavorites',
+        title: 'Favorite Channels',
+        rowType: HomeRowType.liveTvFavorites,
+        items: [
+          AggregatedItem(
+            id: 'favorite',
+            serverId: 'http://server.test',
+            rawData: {'Type': 'TvChannel'},
+          ),
+        ],
+      ),
+    );
+
+    await model.load();
+
+    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvFavorites']);
+    verify(() => source.loadFavoritesChannels('http://server.test')).called(1);
+  });
+
   test('Kids Mode hides every Live TV row without removing saved rows', () async {
     await enableSections({HomeSectionType.liveTv});
     stubLiveTvRows();

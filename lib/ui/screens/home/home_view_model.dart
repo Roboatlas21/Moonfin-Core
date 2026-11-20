@@ -1771,6 +1771,10 @@ class HomeViewModel extends ChangeNotifier {
             final onNow = await _dataSource.loadOnNow(_serverId);
             if (onNow.items.isNotEmpty) rows.add(onNow);
           }
+        } catch (_) {
+          // Missing EPG listings must not hide the channel favorites row.
+        }
+        try {
           final favorites = await _dataSource.loadFavoritesChannels(_serverId);
           if (favorites.items.isNotEmpty) rows.add(favorites);
         } catch (_) {}
