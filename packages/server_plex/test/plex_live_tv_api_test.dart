@@ -263,6 +263,30 @@ void main() {
     expect(server.requests.last.headers['X-Plex-Provider-Version'], '7.2');
   });
 
+  test('invalid Plex Free TV lineup can retry, but zero channels is valid', () async {
+    final (dio, _) = _server();
+    var payload = <String, dynamic>{};
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == '/lineups/plex/channels') {
+            handler.resolve(Response(requestOptions: options, data: payload));
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    await expectLater(api.getChannels(), throwsA(isA<FormatException>()));
+
+    payload = {'MediaContainer': {'size': 0}};
+    final empty = await api.getChannels();
+    expect(empty['Items'], isEmpty);
+    expect(empty['TotalRecordCount'], 0);
+  });
+
   test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
     final (dio, server) = _server();
     dio.interceptors.insert(

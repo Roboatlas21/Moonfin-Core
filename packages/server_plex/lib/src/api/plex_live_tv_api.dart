@@ -179,9 +179,17 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           '$plexCloudEpg/lineups/plex/channels',
           options: _cloudOptions,
         );
-        final container = response.data?['MediaContainer'] as Map?;
+        final container = response.data?['MediaContainer'];
+        if (container is! Map) {
+          throw const FormatException('Invalid Plex Free TV lineup');
+        }
+        final channels = container['Channel'];
+        if (channels is! List &&
+            (channels != null || container['size'] != 0)) {
+          throw const FormatException('Invalid Plex Free TV lineup channels');
+        }
         return [
-          for (final channel in container?['Channel'] as List? ?? const [])
+          for (final channel in channels is List ? channels : const [])
             if (channel is Map && channel['drm'] != true)
               _channel(plexCloudSource, channel),
         ];
@@ -243,7 +251,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         final response = await _dio.get<Map<String, dynamic>>(
           '$plexCloudEpg/',
           options: _cloudOptions,
-        );
+        ).timeout(const Duration(seconds: 5));
         final provider = response.data?['MediaProvider'];
         if (provider is! Map || provider['Feature'] is! List) {
           throw const FormatException('Invalid Plex provider');
@@ -290,7 +298,6 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
     // Don't hold up the channel list if Plex's group metadata is slow.
     final catalog = await _providerGroups()
-        .timeout(const Duration(seconds: 5))
         .onError<Object>(
           (_, _) => (genres: const <String, String>{}, promoted: null),
         );
