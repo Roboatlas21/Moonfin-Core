@@ -276,6 +276,14 @@ void main() {
     expect(server.requests.last.headers['X-Plex-Provider-Version'], '7.2');
   });
 
+  test('Cloud-only On Now does not fetch per-channel EPG grids', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    final programs = await api.getRecommendedPrograms(limit: 15, isAiring: true);
+    expect(programs['Items'], isEmpty);
+    expect(server.requests, isEmpty);
+  });
+
   test('invalid Plex Free TV lineup can retry, but zero channels is valid', () async {
     final (dio, _) = _server();
     var payload = <String, dynamic>{};

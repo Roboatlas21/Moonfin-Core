@@ -20,6 +20,7 @@ import '../../../data/repositories/user_views_repository.dart';
 import '../../../data/utils/latest_media_row_normalizer.dart';
 import '../../../data/services/connectivity_service.dart';
 import '../../../data/services/media_server_client_factory.dart';
+import '../../../data/services/plex_live_tv_favorites.dart';
 import '../../../data/services/home_row_cache_store.dart';
 import '../../../data/services/row_data_source.dart';
 import '../../../data/services/topshelf_service.dart';
@@ -117,6 +118,8 @@ class HomeViewModel extends ChangeNotifier {
   bool _isLoading = false;
   bool get isLoading => _isLoading;
   Future<void> _loadDone = Future<void>.value();
+  bool _disposed = false;
+  bool _plexFavoritesReloading = false;
   Future<void> _bgMerge = Future<void>.value();
   bool _bgMergeInFlight = false;
   bool _bgResumeRefreshInFlight = false;
@@ -801,6 +804,47 @@ class HomeViewModel extends ChangeNotifier {
     if (rows == null) return;
     _rows = rows;
     notifyListeners();
+  }
+
+  /// A cloud read can discover favorite channels absent from the saved cache.
+  /// Update just that row instead of restarting the rest of Home.
+  Future<void> _reloadPlexFavoriteChannels() async {
+    if (_plexFavoritesReloading) return;
+    _plexFavoritesReloading = true;
+    try {
+      while (_isLoading && !_disposed) {
+        await _loadDone;
+      }
+      if (_disposed ||
+          _prefs.get(UserPreferences.kidsModeEnabled) ||
+          !_rows.any((row) => row.rowType == HomeRowType.liveTv)) {
+        return;
+      }
+
+      final refreshed = await _dataSource.loadFavoritesChannels(_serverId);
+      if (_disposed || _isLoading) return;
+      final next = List<HomeRow>.of(_rows);
+      final oldIndex = next.indexWhere(
+        (row) => row.rowType == HomeRowType.liveTvFavorites,
+      );
+      if (oldIndex >= 0) next.removeAt(oldIndex);
+      if (refreshed.items.isNotEmpty) {
+        final liveTvIndex = next.indexWhere((row) => row.id == 'liveTv');
+        if (liveTvIndex < 0) return;
+        var insertAt = liveTvIndex + 1;
+        if (insertAt < next.length && next[insertAt].id == 'liveTvOnNow') {
+          insertAt++;
+        }
+        next.insert(insertAt, refreshed);
+      }
+      _rows = next;
+      notifyListeners();
+      _saveRowCache();
+    } catch (_) {
+      // A failed refresh leaves the current Home rows visible.
+    } finally {
+      _plexFavoritesReloading = false;
+    }
   }
 
   List<HomeRow> _reconcilePreservedRows(
@@ -1778,6 +1822,10 @@ class HomeViewModel extends ChangeNotifier {
           final favorites = await _dataSource.loadFavoritesChannels(_serverId);
           if (favorites.items.isNotEmpty) rows.add(favorites);
         } catch (_) {}
+        // Initial Home rendering never waits on the Plex account endpoint.
+        unawaited(PlexLiveTvFavorites.refreshForBrowse(_client).then((loaded) {
+          if (loaded) unawaited(_reloadPlexFavoriteChannels());
+        }));
         return rows;
       case HomeSectionType.onNow:
         if (!await _dataSource.hasLiveTvChannels()) return [];
@@ -3710,6 +3758,7 @@ class HomeViewModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _watchingNowTimer?.cancel();
     super.dispose();
   }

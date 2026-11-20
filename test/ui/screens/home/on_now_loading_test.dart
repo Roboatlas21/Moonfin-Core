@@ -1,11 +1,17 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:moonfin/auth/models/user.dart';
+import 'package:moonfin/auth/repositories/user_repository.dart';
 import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/models/home_row.dart';
 import 'package:moonfin/data/repositories/multi_server_repository.dart';
+import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
 import 'package:moonfin/data/services/plugin_sync_service.dart';
 import 'package:moonfin/data/services/row_data_source.dart';
 import 'package:moonfin/data/viewmodels/media_bar_view_model.dart';
@@ -227,12 +233,21 @@ void main() {
   );
 
   test(
-    'Plex Cloud keeps On Now inside Live TV when the standalone section is enabled',
+    'Plex Cloud shows its Live TV shortcut without a Free TV On Now row',
     () async {
       await enableSections({HomeSectionType.onNow});
       stubLiveTvRows();
+      // The real cloud-only Plex API returns no On Now programs.
+      when(() => source.loadOnNow('http://server.test')).thenAnswer(
+        (_) async => const HomeRow(
+          id: 'liveTvOnNow',
+          title: 'On Now',
+          rowType: HomeRowType.liveTvOnNow,
+        ),
+      );
       final cloudClient = _MockPlexClient();
       when(() => cloudClient.cloudOnly).thenReturn(true);
+      when(() => cloudClient.serverType).thenReturn(ServerType.plex);
       when(() => cloudClient.userId).thenReturn('user');
       when(() => cloudClient.baseUrl).thenReturn('http://server.test');
 
@@ -247,11 +262,97 @@ void main() {
 
       await model.load();
 
-      expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
+      expect(model.rows.map((row) => row.id), ['liveTv']);
       verify(() => source.loadOnNow('http://server.test')).called(1);
       verifyNever(() => source.hasLiveTvChannels());
     },
   );
+
+
+  test('Plex cloud favorites populate Home after the initial cached rows', () async {
+    await enableSections({HomeSectionType.liveTv});
+    stubLiveTvRows();
+    PlexLiveTvFavorites.resetForTesting();
+    GetIt.instance.registerSingleton<UserPreferences>(prefs);
+    final users = UserRepository()..setCurrentUser(PrivateUser(
+      id: 'plex-user', name: 'Viewer', serverId: 'plex-cloud',
+      accessToken: 'pms-token', plexToken: 'cloud-token',
+      lastUsed: DateTime.utc(2026),
+    ));
+    GetIt.instance.registerSingleton<UserRepository>(users);
+    addTearDown(users.dispose);
+
+    final pending = Completer<void>();
+    final http = Dio()..interceptors.add(InterceptorsWrapper(
+      onRequest: (options, handler) {
+        unawaited(pending.future.then((_) {
+          handler.resolve(Response(
+            requestOptions: options,
+            statusCode: 200,
+            data: {'MediaContainer': {'FavoriteChannel': [
+              {'source': 'provider://tv.plex.provider.epg', 'id': 'free123'},
+            ]}},
+          ));
+        }));
+      },
+    ));
+    PlexLiveTvFavorites.testHttp = http;
+    addTearDown(() {
+      PlexLiveTvFavorites.resetForTesting();
+      http.close();
+    });
+
+    final cloudClient = _MockPlexClient();
+    when(() => cloudClient.cloudOnly).thenReturn(true);
+    when(() => cloudClient.serverType).thenReturn(ServerType.plex);
+    when(() => cloudClient.userId).thenReturn('plex-user');
+    when(() => cloudClient.baseUrl).thenReturn('http://server.test');
+    when(() => cloudClient.deviceInfo).thenReturn(const DeviceInfo(
+      id: 'device', name: 'Test', appName: 'Moonfin', appVersion: '1',
+    ));
+    when(() => source.loadOnNow('http://server.test')).thenAnswer(
+      (_) async => const HomeRow(
+        id: 'liveTvOnNow',
+        title: 'On Now',
+        rowType: HomeRowType.liveTvOnNow,
+      ),
+    );
+    var loads = 0;
+    when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
+      (_) async {
+        loads++;
+        return HomeRow(
+          id: 'liveTvFavorites',
+          title: 'Favorite Channels',
+          rowType: HomeRowType.liveTvFavorites,
+          items: loads == 1
+              ? const []
+              : [AggregatedItem(
+                  id: 'channel-plex-free123',
+                  serverId: 'http://server.test',
+                  rawData: {'Type': 'TvChannel', 'Name': 'Free Channel'},
+                )],
+        );
+      },
+    );
+
+    model.dispose();
+    model = HomeViewModel(
+      dataSource: source,
+      prefs: prefs,
+      client: cloudClient,
+      mediaBarViewModel: _MockMediaBar(),
+      multiServerRepo: _MockMultiServer(),
+    );
+    await model.load();
+    expect(model.rows.map((row) => row.id), ['liveTv']);
+    expect(loads, 1);
+
+    pending.complete();
+    await pumpEventQueue();
+    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvFavorites']);
+    expect(loads, 2);
+  });
 
   test('failed On Now listings do not hide favorite channels', () async {
     await enableSections({HomeSectionType.liveTv});

@@ -186,13 +186,11 @@ class RowDataSource {
   /// Ordered the same way as the guide, so a channel sits where the user
   /// expects to find it.
   Future<HomeRow> loadFavoritesChannels(String serverId) async {
-    // Read the account favorites before checking the lineup, not only when
-    // opening the guide. Reuse a recent successful read across browse surfaces.
-    final favoriteRefresh = PlexLiveTvFavorites.refreshForBrowse(_client);
+    // Show cached hearts as soon as the channel lineup arrives. Home starts
+    // the cloud refresh separately and updates this row when it finishes.
     final response = await _client.liveTvApi.getChannels(
       fields: 'ImageTags,UserData',
     );
-    await favoriteRefresh;
     final pairs = <(GuideChannel, AggregatedItem)>[];
     for (final item in _parseItems(response, serverId)) {
       if (!item.isFavorite) continue;
