@@ -313,7 +313,8 @@ class PlexLiveTvFavorites {
   ) {
     final channelId = item['Id']?.toString() ?? '';
     final userId = client.userId;
-    if (!isPlexLiveTvChannel(client, channelId) ||
+    if (item['Type'] != 'TvChannel' ||
+        !isPlexLiveTvChannel(client, channelId) ||
         userId == null ||
         userId.isEmpty ||
         !GetIt.instance.isRegistered<UserPreferences>()) {

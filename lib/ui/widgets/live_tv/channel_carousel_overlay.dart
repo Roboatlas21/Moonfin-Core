@@ -370,6 +370,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
   int _visibleCards = _defaultVisibleCards;
   bool _scrolling = false;
   bool _ready = false;
+  bool _lineupChangedDuringLoad = false;
   bool _dismissed = false;
   bool _loadingVisible = false;
   bool _loadAgain = false;
@@ -448,6 +449,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
       _channels = widget.channels;
       _vm.usePlaybackLineup(_channels);
       _invalidateEntries();
+      if (!_ready) _lineupChangedDuringLoad = true;
     }
     final tuneChanged =
         oldWidget.currentChannelId != widget.currentChannelId ||
@@ -519,7 +521,9 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     }
     if (_ownsViewModel) _vm.scheduleBoundaryRefresh();
     _scheduleHeader();
-    if (_neighborhood().any((id) => !initialIds.contains(id))) {
+    if (_lineupChangedDuringLoad ||
+        _neighborhood().any((id) => !initialIds.contains(id))) {
+      _lineupChangedDuringLoad = false;
       _scheduleVisibleLoad();
     }
   }

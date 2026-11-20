@@ -3044,7 +3044,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
     _cancelPendingVerticalMove();
     _selection = updated;
-    _focusSelectedCell(updated, cells);
+    if (_gridHasFocus) _focusSelectedCell(updated, cells);
   }
 
   void _focusSelectedCell(GuideSelection selection, List<GuideCell> cells) {

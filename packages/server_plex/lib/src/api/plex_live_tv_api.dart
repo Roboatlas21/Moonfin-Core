@@ -95,8 +95,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       (_, grid) => now.difference(grid.at) >= _cloudGridLife,
     );
     if (_cloudGrids[key] case final cached?) return cached.items;
-    final items = _fetchFreeGrid(channel, day).catchError((Object error) {
-      _cloudGrids.remove(key);
+    late final Future<List> items;
+    items = _fetchFreeGrid(channel, day).catchError((Object error) {
+      // A timed-out request may have been replaced before its failure.
+      if (identical(_cloudGrids[key]?.items, items)) {
+        _cloudGrids.remove(key);
+      }
       throw error;
     });
     _cloudGrids[key] = (at: now, items: items);
@@ -162,7 +166,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<String?> _machineIdForFavorites() async {
     Future<String?> load() async {
       try {
-        final identity = await plexContainer(_dio, '/identity');
+        // Optional favorite metadata must not stall the DVR lineup.
+        final identity = await plexContainer(
+          _dio,
+          '/identity',
+        ).timeout(const Duration(seconds: 3));
         final machine = identity['machineIdentifier'];
         return machine is String && machine.isNotEmpty ? machine : null;
       } catch (_) {
@@ -176,32 +184,34 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }
 
   Future<List<Map<String, dynamic>>> _dvrChannels() async {
-    final channels = <Map<String, dynamic>>[];
     final dvrs = await _dvrList();
-    if (dvrs.isEmpty) return channels;
-    // Still show DVR channels if their machine identity is unavailable.
-    final machineId = await _machineIdForFavorites();
+    if (dvrs.isEmpty) return [];
+    // Fetch optional favorite metadata while the DVR lineups are loading.
+    final machineIdFuture = _machineIdForFavorites();
+    final channels = <({String key, String epg, Map channel})>[];
     for (final dvr in dvrs) {
       final lineup = await plexContainer(
         _dio,
-        '/${dvr.epg}/lineups/dvr/channels',
+        '/' + dvr.epg + '/lineups/dvr/channels',
       );
       for (final channel in lineup['Channel'] as List? ?? const []) {
         if (channel is Map) {
-          channels.add(
-            _channel(
-              dvr.key,
-              channel,
-              number: '${channel['vcn'] ?? ''}',
-              favoriteSource: machineId == null
-                  ? null
-                  : 'server://$machineId/${dvr.epg}',
-            ),
-          );
+          channels.add((key: dvr.key, epg: dvr.epg, channel: channel));
         }
       }
     }
-    return channels;
+    final machineId = await machineIdFuture;
+    return [
+      for (final entry in channels)
+        _channel(
+          entry.key,
+          entry.channel,
+          number: (entry.channel['vcn'] ?? '').toString(),
+          favoriteSource: machineId == null
+              ? null
+              : 'server://' + machineId + '/' + entry.epg,
+        ),
+    ];
   }
 
   /// Every free channel carries the same placeholder number, so they go
@@ -280,7 +290,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             _channelId(plexCloudSource, channel['id']),
       };
     }
-    if (container case {'size': 0}) return {};
+    // A missing list with size 0 is empty; a malformed present list is not.
+    if (container is Map &&
+        container['Channel'] == null &&
+        container['size'] == 0) {
+      return {};
+    }
     throw const FormatException('Invalid Plex Featured lineup');
   }
 
@@ -465,10 +480,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     List<String> channels,
   ) async {
     final first = start.toUtc();
+    final exclusiveEnd = end.toUtc();
     final days = {
       for (
         var day = DateTime.utc(first.year, first.month, first.day);
-        !day.isAfter(end.toUtc());
+        day.isBefore(exclusiveEnd);
         day = day.add(const Duration(days: 1))
       )
         day.toIso8601String().substring(0, 10),
@@ -489,13 +505,44 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       final grids = await Future.wait([
         for (final request in batch)
           () async {
+            final itemsFuture = _freeGrid(request.channel, request.day);
             try {
-              final items = await _freeGrid(request.channel, request.day);
-              return (channel: request.channel, items: items);
+              final items = await itemsFuture;
+              // Commit a grid's programs only after it decodes completely.
+              final decoded = <Map<String, dynamic>>[];
+              for (final item in items) {
+                if (item is! Map) continue;
+                final mediaItems = item['Media'];
+                if (mediaItems == null) continue;
+                if (mediaItems is! List) {
+                  throw const FormatException('Invalid Plex Free TV grid Media');
+                }
+                for (final media in mediaItems) {
+                  if (media is! Map) continue;
+                  final program = _program(
+                    plexCloudSource,
+                    request.channel,
+                    item,
+                    media,
+                  );
+                  if (program != null &&
+                      media['endsAt'] as int > from &&
+                      media['beginsAt'] as int < to) {
+                    decoded.add(program);
+                  }
+                }
+              }
+              return decoded;
             } catch (error, stack) {
               failedChannelIds.add(_channelId(plexCloudSource, request.channel));
               firstFailure ??= error;
               firstFailureStack ??= stack;
+              // A malformed grid must be fetched again on Retry, but not
+              // if a newer request has already replaced it in the cache.
+              final key = request.channel + '/' + request.day;
+              if (identical(_cloudGrids[key]?.items, itemsFuture)) {
+                _cloudGrids.remove(key);
+              }
               return null;
             }
           }(),
@@ -503,23 +550,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       for (final grid in grids) {
         if (grid == null) continue;
         successfulGrids++;
-        for (final item in grid.items) {
-          if (item is! Map) continue;
-          for (final media in item['Media'] as List? ?? const []) {
-            if (media is! Map) continue;
-            final program = _program(
-              plexCloudSource,
-              grid.channel,
-              item,
-              media,
-            );
-            if (program != null &&
-                media['endsAt'] as int > from &&
-                media['beginsAt'] as int < to) {
-              programs.add(program);
-            }
-          }
-        }
+        programs.addAll(grid);
       }
     }
     if (successfulGrids == 0 && firstFailure != null) {
@@ -566,8 +597,16 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime end, {
     List<String>? channelIds,
   }) async {
+    // Omitted IDs request all Cloud-only channels; [] remains a no-op.
+    final requestedIds = channelIds ??
+        (cloudOnly
+            ? [
+                for (final channel in await _freeChannels())
+                  channel['Id'] as String,
+              ]
+            : const <String>[]);
     final free = [
-      for (final id in channelIds ?? const <String>[])
+      for (final id in requestedIds)
         if (plexChannelOf(id) case (source: plexCloudSource, :final channel))
           channel,
     ];

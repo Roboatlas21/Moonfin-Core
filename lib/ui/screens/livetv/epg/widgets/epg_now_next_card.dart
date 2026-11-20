@@ -101,9 +101,11 @@ class EpgNowNextCard extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      AppLocalizations.of(context).guideLoadingListings,
-                      style: textTheme.bodyMedium,
+                    Flexible(
+                      child: Text(
+                        AppLocalizations.of(context).guideLoadingListings,
+                        style: textTheme.bodyMedium,
+                      ),
                     ),
                   ],
                 )
