@@ -1,0 +1,24 @@
+name: Plex Group Metadata Regression
+
+on:
+  push:
+    branches:
+      - ci/plex-group-metadata-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  plex-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Install Plex package dependencies
+        working-directory: packages/server_plex
+        run: dart pub get
+      - name: Run Plex Live TV API regression tests
+        working-directory: packages/server_plex
+        run: dart test test/plex_live_tv_api_test.dart
