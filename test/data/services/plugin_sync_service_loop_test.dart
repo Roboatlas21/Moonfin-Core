@@ -434,6 +434,31 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
   });
 
+  test('inherited guide pins continue following defaults after an address change', () async {
+    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:News']};
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(prefs.get(UserPreferences.guidePinsReadForServer('srv1_user1')), isTrue);
+
+    when(() => client.baseUrl).thenReturn('http://proxy.test');
+    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Sports']};
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+    expect(adapter.pinActions, isEmpty, reason: 'an address change must not create a user override');
+  });
+
+  for (final oldKey in ['http_plugin_test/user1', 'srv1/user1']) {
+    test('migrates the old pin marker $oldKey', () async {
+      await prefs.set(UserPreferences.guidePinsReadForServer(oldKey), true);
+      await prefs.set(UserPreferences.liveTvSavedFilters, ['group:OldDefault']);
+      adapter.resolvedProfile = {'liveTvSavedFilters': ['group:NewDefault']};
+
+      expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+      expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:NewDefault']);
+      expect(prefs.get(UserPreferences.guidePinsReadForServer('srv1_user1')), isTrue);
+      expect(adapter.pinActions, isEmpty);
+    });
+  }
+
   test('a shared list blocks first-install import, even when explicitly empty', () async {
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
     adapter.savedPins = <String>[];
