@@ -255,6 +255,54 @@ void main() {
         ['group:Sports', 'group:News']);
   });
 
+  test('pin edits wait for the sign-in profile before changing shared pins', () async {
+    adapter.savedPins = ['group:Sports'];
+    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
+    adapter.resolvedResponseReady = Completer<void>();
+    adapter.resolvedResponseGate = Completer<void>();
+
+    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
+    await adapter.resolvedResponseReady!.future;
+    final saving = service.changePinnedGuideFilter(
+      client, filter: 'group:News', add: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(adapter.pinActions, isEmpty);
+    expect(postCount(), 0, reason: 'the edit must wait for the sign-in read');
+
+    adapter.resolvedResponseGate!.complete();
+    await signingIn;
+    expect(await saving, ['group:Sports', 'group:News']);
+    expect(adapter.pinActions, ['add']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters),
+        ['group:Sports', 'group:News']);
+    service.resetState();
+  });
+
+  test('multiple edits during sign-in preserve their order', () async {
+    adapter.savedPins = ['group:Sports'];
+    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
+    adapter.resolvedResponseReady = Completer<void>();
+    adapter.resolvedResponseGate = Completer<void>();
+
+    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
+    await adapter.resolvedResponseReady!.future;
+    final addNews = service.changePinnedGuideFilter(
+      client, filter: 'group:News', add: true,
+    );
+    final removeSports = service.changePinnedGuideFilter(
+      client, filter: 'group:Sports', add: false,
+    );
+    expect(adapter.pinActions, isEmpty);
+    adapter.resolvedResponseGate!.complete();
+    await signingIn;
+    expect(await addNews, ['group:Sports', 'group:News']);
+    expect(await removeSports, ['group:News']);
+    expect(adapter.pinActions, ['add', 'remove']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
+    service.resetState();
+  });
+
   test('an old server cannot import or apply the active account pins', () async {
     const local = ['group:Sports', 'category:news'];
     await prefs.set(UserPreferences.liveTvSavedFilters, local);
