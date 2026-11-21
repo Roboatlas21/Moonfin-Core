@@ -381,6 +381,35 @@ void main() {
     expect(programs, hasLength(2));
   });
 
+  test('Plex On Now falls back to Free TV on DVR transport failures', () async {
+    final (dio, server) = _server();
+    var accessDenied = false;
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (options, handler) {
+      if (options.uri.path != '/tv.plex.providers.epg.xmltv:2/grid') {
+        handler.next(options);
+        return;
+      }
+      handler.reject(DioException(
+        requestOptions: options,
+        type: accessDenied ? DioExceptionType.badResponse : DioExceptionType.connectionError,
+        response: accessDenied
+            ? Response(requestOptions: options, statusCode: 401)
+            : null,
+      ));
+    }));
+
+    final programs = (await PlexLiveTvApi(dio)
+        .getRecommendedPrograms(limit: 3))['Items'] as List;
+    expect(programs.map((item) => item['ChannelId']), ['channel-plex-abc-66635fc0']);
+    expect(server.requests.any((r) => r.uri.path == '/hubs/sections/home/whatsOnNow'), isTrue);
+
+    accessDenied = true;
+    await expectLater(
+      PlexLiveTvApi(dio).getRecommendedPrograms(limit: 3),
+      throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)),
+    );
+  });
+
   test('every showing of a program is a program of its own', () async {
     final (dio, server) = _server();
     final result = await PlexLiveTvApi(dio).getGuide(
