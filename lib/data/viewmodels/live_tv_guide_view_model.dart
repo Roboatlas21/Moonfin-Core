@@ -1190,9 +1190,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _listingsStatePage = _pageGeneration;
       _error = e;
       _state = GuideState.error;
+    } finally {
+      // A replaced category owns its own loading state. Only clean up the
+      // request that still owns this slot.
+      if (!_disposed && request == _categoryRequest) {
+        if (session != userDataSync.session) {
+          // A session switch can invalidate the walk without starting another
+          // load. Discard the old rows and reload on the next guide entry.
+          _resetCategory();
+          _reloadOnEntry = true;
+          if (_state == GuideState.loading) _state = GuideState.ready;
+        } else {
+          _categoryFetchInFlight = false;
+        }
+        _notifyListeners();
+      }
     }
-    _categoryFetchInFlight = false;
-    _notifyListeners();
   }
 
   /// Look up one channel outside the loaded page of a program category.
@@ -1262,8 +1275,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           fetched.programs.addAll(retry.programs);
           failed = retry.failedChannelIds;
         } catch (error) {
-          if (_accessDenied(error)) rethrow;
           if (!current()) return false;
+          // Keep the first reply only when the retry failed temporarily.
+          // Malformed responses and other unexpected errors still surface.
+          if (_accessDenied(error) ||
+              (error is! TimeoutException &&
+                  !isTransientTransportFailure(error))) {
+            rethrow;
+          }
         }
       }
       if (!current()) return false;

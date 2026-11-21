@@ -1256,6 +1256,53 @@ void main() {
   });
 
   group('category filters', () {
+    test('a stale session clears category loading and old rows', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      final pending = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((_) => pending.future);
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.state, GuideState.loading);
+
+      userDataSync.reset();
+      pending.complete({
+        'Items': [_program('old-session', 'c0', isSports: true)],
+      });
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(vm.filteredChannels, isEmpty);
+      expect(vm.hasMorePrograms, isTrue);
+    });
+
+    test('a malformed targeted retry still reports a guide error', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((inv) async {
+        if (_requestedIds(inv).length == 1) {
+          throw const FormatException('Invalid EPG grid');
+        }
+        return {
+          'Items': [_program('sport-c0', 'c0', isSports: true)],
+          'FailedChannelIds': ['c1'],
+        };
+      });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.error);
+      expect(vm.error, isA<FormatException>());
+    });
+
     test('temporary retry failure keeps healthy category programs', () async {
       _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
       when(() => _guide(liveTv, category: GuideFilter.sports))
