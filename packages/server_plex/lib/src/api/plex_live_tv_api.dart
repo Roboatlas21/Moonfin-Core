@@ -364,11 +364,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         sources: dvr.isEmpty ? const [] : const [ChannelGroupSource.dvr],
       );
     }
-    // Don't hold up the channel list if Plex's group metadata is slow.
-    final catalog = await _providerGroups()
-        .onError<Object>(
-          (_, _) => (genres: const <String, String>{}, promoted: null),
-        );
+    // Keep existing groups if the provider metadata is temporarily unavailable.
+    var metadataUnavailable = false;
+    final catalog = await _providerGroups().onError<Object>((_, _) {
+      metadataUnavailable = true;
+      return (genres: const <String, String>{}, promoted: null);
+    });
     return ChannelGroupLineup(
       {
         for (final channel in dvr)
@@ -383,6 +384,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       channels: [...dvr, ...free],
       sources: dvr.isEmpty ? const [] : ChannelGroupSource.values,
       promoted: catalog.promoted,
+      partial: metadataUnavailable,
+      unresolvedChannelIds: metadataUnavailable
+          ? {for (final channel in free) channel['Id'] as String}
+          : null,
     );
   }
 

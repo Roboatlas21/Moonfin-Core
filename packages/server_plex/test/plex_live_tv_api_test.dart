@@ -300,6 +300,48 @@ void main() {
 
 
 
+  test('Plex retains unresolved genre groups when metadata fails and recovers', () async {
+    final (dio, server) = _server();
+    var metadataUnavailable = true;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (metadataUnavailable &&
+              options.uri.host == 'epg.provider.plex.tv' &&
+              options.uri.path == '/') {
+            handler.reject(DioException(
+              requestOptions: options,
+              type: DioExceptionType.connectionError,
+            ));
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+
+    final api = PlexLiveTvApi(dio);
+    final incomplete = await api.getChannelGroups();
+    expect(incomplete.partial, isTrue);
+    expect(incomplete.unresolvedChannelIds, {
+      'channel-plex-abc-66635fc0',
+      'channel-plex-news-extra',
+    });
+    expect(incomplete.groupsByChannelId['channel-2-4'], {'source:dvr'});
+    expect(incomplete.groupsByChannelId['channel-plex-abc-66635fc0'],
+        {'source:plexFreeTv'});
+    expect(incomplete.channels, hasLength(3));
+
+    metadataUnavailable = false;
+    final recovered = await api.getChannelGroups();
+    expect(recovered.partial, isFalse);
+    expect(recovered.unresolvedChannelIds, isNull);
+    expect(recovered.groupsByChannelId['channel-plex-abc-66635fc0'],
+        {'source:plexFreeTv', 'Movies', 'News'});
+    expect(server.requests.where((r) => r.uri.path == '/'), hasLength(1));
+  });
+
   test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
     final (dio, server) = _server();
     dio.interceptors.insert(
