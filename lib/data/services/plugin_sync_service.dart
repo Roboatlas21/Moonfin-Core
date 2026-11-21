@@ -793,7 +793,7 @@ class PluginSyncService extends ChangeNotifier {
     await _withGuidePinSync(() async {
       if (!current()) return;
       final profile = syncProfile;
-      final resolved = await _fetchResolvedProfile(client, profile);
+      final resolved = await _fetchProfileAndImportGuidePins(client, profile);
       if (resolved == null || !current()) return;
       await _applyServerSettings(client, profile, resolved);
       notifyListeners();
