@@ -203,7 +203,6 @@ class PlexLiveTvFavorites {
   ) async {
     _checkAccount(client, token);
     final userId = client.userId!;
-    final known = _catalog(client).channels;
     final pref = _preference(userId);
     final prefs = GetIt.instance<UserPreferences>();
     final previous = prefs.get(pref).toSet();
@@ -212,11 +211,6 @@ class PlexLiveTvFavorites {
       for (final row in rows)
         if (row['source'] is String && row['id'] is String) _key(row),
     };
-    for (final entry in known.entries) {
-      if (rows.any((row) => _matches(entry.value, row))) {
-        favorites.add(_key(entry.value));
-      }
-    }
     await prefs.set(pref, favorites.toList()..sort());
     _checkAccount(client, token);
     _publishCached(client, token);
