@@ -213,6 +213,45 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
   });
 
+  test('stale pin replies and queued edits cannot update another account', () async {
+    adapter.savedPins = [];
+    adapter.pinResponseReady = Completer<void>();
+    adapter.pinResponseGate = Completer<void>();
+    final first = service.changePinnedGuideFilter(
+      client, filter: 'group:Sports', add: true,
+    );
+    await adapter.pinResponseReady!.future;
+    final queued = service.changePinnedGuideFilter(
+      client, filter: 'group:News', add: true,
+    );
+    final firstRejected = expectLater(first, throwsA(isA<StateError>()));
+    final queuedRejected = expectLater(queued, throwsA(isA<StateError>()));
+    when(() => client.userId).thenReturn('user2');
+    adapter.pinResponseGate!.complete();
+    await Future.wait([firstRejected, queuedRejected]);
+    expect(adapter.pinActions, ['add']);
+    expect(postCount(), 1);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+  });
+
+  test('a final import refresh cannot apply to another account', () async {
+    const local = ['group:Legacy'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, local);
+    adapter.pinResponseReady = Completer<void>();
+    adapter.pinResponseGate = Completer<void>();
+    final pulling = service.pullSettingsForProfile(client, profile: 'desktop');
+    await adapter.pinResponseReady!.future;
+    adapter.resolvedResponseReady = Completer<void>();
+    adapter.resolvedResponseGate = Completer<void>();
+    adapter.pinResponseGate!.complete();
+    await adapter.resolvedResponseReady!.future;
+    when(() => client.userId).thenReturn('user2');
+    adapter.resolvedResponseGate!.complete();
+    expect(await pulling, isFalse);
+    expect(adapter.pinActions, ['initializeIfAbsent']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
+  });
+
   test('a delayed pin reply cannot replace a newer settings update', () async {
     adapter.savedPins = [];
     adapter.pinResponseReady = Completer<void>();
