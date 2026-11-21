@@ -1,0 +1,28 @@
+name: Assemble Wizard V3 history
+
+on:
+  push:
+    branches:
+      - ci/wizard-v3-history-build-20261120
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Rebuild and verify consolidated branch
+        env:
+          PR_TIP: b27e2be2f4e34edba6eec0ab25c218adffc2ba91
+          UPSTREAM_TIP: defe4661b603826bf91c9564a5bd71ccadbb47e6
+          WIZARD_V2_TIP: 2d9163499a7f694c7dfd953c9461936677934d16
+          WIZARD_V3_BRANCH: integration/live-tv-channel-groups-wizard-v3-20261120
+        run: |
+          cp scripts/ci/build_wizard_v3_history.py /tmp/build_wizard_v3_history.py
+          python3 /tmp/build_wizard_v3_history.py
