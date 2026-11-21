@@ -299,6 +299,31 @@ void main() {
     expect(adapter.savedPins, local);
   });
 
+  test('pre-Moonbase local pins override inherited admin defaults once', () async {
+    const local = ['group:US | SPORTS', 'group:Kids'];
+    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Admin']};
+    await prefs.set(UserPreferences.liveTvSavedFilters, local);
+
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.pinActions, ['initializeIfAbsent']);
+    expect(adapter.savedPins, local);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
+    // A subsequent settings pull must not import the same device values again.
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.pinActions, ['initializeIfAbsent']);
+  });
+
+  test('unmodified users follow later administrator pin default changes', () async {
+    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Sports']};
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+
+    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:News']};
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.pinActions, isEmpty, reason: 'inherited pins are not copied into a user override');
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
+  });
+
   test('a shared list blocks first-install import, even when explicitly empty', () async {
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
     adapter.savedPins = <String>[];
