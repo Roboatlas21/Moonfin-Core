@@ -29,6 +29,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   List<String>? savedPins;
   bool supportsPinChanges = true;
   bool failPinChanges = false;
+  bool missingProfileUntilPins = false;
   Completer<void>? pinResponseReady;
   Completer<void>? pinResponseGate;
   Completer<void>? resolvedResponseReady;
@@ -63,6 +64,9 @@ class _RecordingAdapter implements HttpClientAdapter {
     if (path.endsWith('/Moonfin/Ping')) {
       body = {'installed': true, 'settingsSyncEnabled': true};
     } else if (path.contains('/Moonfin/Settings/Resolved/')) {
+      if (missingProfileUntilPins && savedPins == null) {
+        return ResponseBody.fromString('', 404);
+      }
       body = {
         ...resolvedProfile,
         if (savedPins != null) 'liveTvSavedFilters': List<String>.of(savedPins!),
@@ -335,7 +339,8 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
   });
 
-  test('pins stay local until the ordinary Moonbase sync imports them', () async {
+  test('pins sync after Moonbase appears, even with no existing server profile', () async {
+    adapter.missingProfileUntilPins = true;
     const existing = ['group:Sports', 'group:News, Canada'];
     await prefs.set(UserPreferences.liveTvSavedFilters, existing);
     service.resetState(); // Moonbase has not been detected in this session.
@@ -357,6 +362,7 @@ void main() {
     expect(await service.refreshAvailability(client), isTrue);
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(adapter.pinActions, ['initializeIfAbsent']);
+    expect(resolvedCount(), 2, reason: 'new server profile must be fetched after import');
     expect(adapter.savedPins, localWithMovies);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), localWithMovies);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
