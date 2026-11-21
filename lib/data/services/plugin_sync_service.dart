@@ -1028,6 +1028,11 @@ class PluginSyncService extends ChangeNotifier {
     }
     return _withGuidePinSync(() async {
       requireCurrent(); // The operation may have waited behind another save.
+      if (_prefs.get(UserPreferences.liveTvSavedFiltersUnsynced)) {
+        await _fetchProfileAndImportGuidePins(client, syncProfile);
+        requireCurrent();
+        if (_prefs.get(UserPreferences.liveTvSavedFiltersUnsynced)) return null;
+      }
       final pins = await _postGuidePinsChange(client, syncProfile, {
         'action': add ? 'add' : 'remove',
         'filter': filter,
@@ -1053,8 +1058,7 @@ class PluginSyncService extends ChangeNotifier {
         (serverId == null || scope == '${serverId}_${userId ?? ''}');
   }
 
-  /// A user may have saved local pins before installing Moonbase.
-  /// Initialize only when the server has no list (not even an empty one).
+  /// Import locally edited pins when Moonbase becomes available.
   Future<Map<String, dynamic>?> _fetchProfileAndImportGuidePins(
     MediaServerClient client,
     String profile, {
@@ -1064,48 +1068,26 @@ class PluginSyncService extends ChangeNotifier {
     if (!current()) return null;
     var resolved = await _fetchResolvedProfile(client, profile);
     if (!current()) return null;
-    final scope = _prefs.activeProfileScopeSuffix();
-    if (scope == null) return resolved;
-    final readPref = UserPreferences.guidePinsReadForServer(scope);
-    // Earlier builds used either the URL or the sign-in server ID.
-    final oldServerId = serverId ?? _store.getString('pref_last_server_id');
-    final alreadyRead = _prefs.get(readPref) ||
-        _prefs.get(UserPreferences.guidePinsReadForServer(_userSyncKey(client))) ||
-        (oldServerId != null &&
-            _prefs.get(UserPreferences.guidePinsReadForServer(
-              _userSyncKey(client, serverId: oldServerId),
-            )));
-    final local = _prefs.get(UserPreferences.liveTvSavedFilters);
-    // Local pins saved before Moonbase was installed take precedence over
-    // inherited defaults, but never replace a stored list on the server.
-    if (resolved?['liveTvSavedFilters'] != null && alreadyRead) {
-      if (!_prefs.get(readPref)) await _prefs.set(readPref, true);
-      return current() ? resolved : null;
-    }
-    if (local.isEmpty) {
-      if (resolved?['liveTvSavedFilters'] != null) {
-        await _prefs.set(readPref, true);
-      }
-      return current() ? resolved : null;
-    }
+    if (!_prefs.get(UserPreferences.liveTvSavedFiltersUnsynced)) return resolved;
+
     try {
-      final imported = await _postGuidePinsChange(client, profile, {
+      final pins = await _postGuidePinsChange(client, profile, {
         'action': 'initializeIfAbsent',
-        'filters': List<String>.of(local),
+        'filters': _prefs.get(UserPreferences.liveTvSavedFilters),
       });
       if (!current()) return null;
-      if (imported == null) {
-        resolved?.remove('liveTvSavedFilters'); // Keep local pins until import works.
+      if (pins == null) {
+        resolved?.remove('liveTvSavedFilters');
         return resolved;
       }
-      await _prefs.set(readPref, true);
+      await _prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, false);
       if (!current()) return null;
-      final fresh = await _fetchResolvedProfile(client, profile);
+      // A first read may be 404 until the import creates the user profile.
+      resolved ??= await _fetchResolvedProfile(client, profile);
       if (!current()) return null;
-      if (fresh?['liveTvSavedFilters'] != null) return fresh;
-      if (resolved != null) resolved['liveTvSavedFilters'] = imported;
+      if (resolved != null) resolved['liveTvSavedFilters'] = pins;
     } catch (_) {
-      // A failed import must not apply the server's inherited pins over local ones.
+      // Keep pending local pins if the import failed.
       resolved?.remove('liveTvSavedFilters');
     }
     return current() ? resolved : null;
