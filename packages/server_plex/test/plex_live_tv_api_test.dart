@@ -346,21 +346,67 @@ void main() {
   test('Plex On Now uses a cached hub after the DVR lineup', () async {
     const hubPath = '/hubs/sections/home/whatsOnNow';
     final (dio, server) = _server();
-    final cloud = PlexLiveTvApi(dio, cloudOnly: true);
+    final cloud = PlexLiveTvApi(
+      dio,
+      cloudOnly: true,
+      cloudAccountToken: () => 'account-token',
+    );
     final free = (await cloud.getRecommendedPrograms(limit: 15))['Items'] as List;
     expect(free, hasLength(1));
     expect(free.single['ChannelId'], 'channel-plex-abc-66635fc0');
     expect(free.single['Name'], 'Free TV show');
     await cloud.getRecommendedPrograms(limit: 15);
-    expect(server.requests.where((r) => r.uri.path == hubPath), hasLength(1));
+    final hubs = server.requests.where((r) => r.uri.path == hubPath);
+    expect(hubs, hasLength(1));
+    expect(hubs.single.headers['X-Plex-Token'], 'account-token');
     expect(server.requests.any((r) => r.uri.path == '/grid'), isFalse);
 
-    final dvr = PlexLiveTvApi(dio);
+    final dvr = PlexLiveTvApi(dio, cloudAccountToken: () => 'account-token');
     expect((await dvr.getRecommendedPrograms(limit: 2))['Items'], hasLength(2));
     final combined = (await dvr.getRecommendedPrograms(limit: 3))['Items'] as List;
     expect(combined.map((item) => item['ChannelId']), [
       'channel-2-4', 'channel-2-4', 'channel-plex-abc-66635fc0',
     ]);
+  });
+
+  test('Free TV On Now never substitutes a PMS token for an account token', () async {
+    final (dio, server) = _server();
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (options, handler) {
+      options.headers.putIfAbsent('X-Plex-Token', () => 'pms-token');
+      handler.next(options);
+    }));
+
+    final api = PlexLiveTvApi(
+      dio,
+      cloudAccountToken: () => 'account-token',
+    );
+    await api.getRecommendedPrograms(limit: 3);
+    final dvr = server.requests.firstWhere(
+      (request) => request.uri.path.endsWith('/grid'),
+    );
+    final hub = server.requests.singleWhere(
+      (request) =>
+          request.uri.path == '/hubs/sections/home/whatsOnNow',
+    );
+    expect(dvr.headers['X-Plex-Token'], 'pms-token');
+    expect(hub.headers['X-Plex-Token'], 'account-token');
+
+    final (missingDio, missingServer) = _server();
+    final missing = PlexLiveTvApi(
+      missingDio,
+      cloudAccountToken: () => null,
+    );
+    final programs = (await missing.getRecommendedPrograms(
+      limit: 3,
+    ))['Items'] as List;
+    expect(programs, hasLength(2));
+    expect(
+      missingServer.requests.where(
+        (request) =>
+            request.uri.path == '/hubs/sections/home/whatsOnNow',
+      ),
+      isEmpty,
+    );
   });
 
   test('an unavailable Plex hub does not discard DVR On Now', () async {
@@ -376,8 +422,10 @@ void main() {
         handler.next(options);
       }
     }));
-    final programs = (await PlexLiveTvApi(dio)
-        .getRecommendedPrograms(limit: 3))['Items'] as List;
+    final programs = (await PlexLiveTvApi(
+      dio,
+      cloudAccountToken: () => 'account-token',
+    ).getRecommendedPrograms(limit: 3))['Items'] as List;
     expect(programs, hasLength(2));
   });
 

@@ -6,6 +6,7 @@ import 'package:server_jellyfin/server_jellyfin.dart';
 import 'package:server_plex/server_plex.dart';
 import 'package:server_silo/server_silo.dart';
 
+import '../../auth/store/authentication_store.dart';
 import '../../util/platform_detection.dart';
 import '../../util/server_url.dart';
 import '../offline/connectivity_aware_media_server_client.dart';
@@ -68,6 +69,7 @@ class MediaServerClientFactory {
     }
     return _clients.putIfAbsent(serverId, () {
       return _createClient(
+        serverId: serverId,
         serverType: serverType,
         baseUrl: normalizedBaseUrl,
         cloudOnly: cloudOnly,
@@ -106,11 +108,13 @@ class MediaServerClientFactory {
   }
 
   MediaServerClient _createClient({
+    required String serverId,
     required ServerType serverType,
     required String baseUrl,
     required bool cloudOnly,
   }) {
     final raw = _createRawClient(
+      serverId: serverId,
       serverType: serverType,
       baseUrl: baseUrl,
       cloudOnly: cloudOnly,
@@ -134,6 +138,7 @@ class MediaServerClientFactory {
   }
 
   MediaServerClient _createRawClient({
+    required String serverId,
     required ServerType serverType,
     required String baseUrl,
     required bool cloudOnly,
@@ -163,6 +168,15 @@ class MediaServerClientFactory {
           baseUrl: baseUrl,
           deviceInfo: deviceInfo,
           cloudOnly: cloudOnly,
+          // Never read credentials from the active user: this client may
+          // belong to a different Plex server or signed-in profile.
+          plexAccountTokenForUser: (userId) {
+            if (userId == null || userId.isEmpty) return null;
+            final getIt = GetIt.instance;
+            if (!getIt.isRegistered<AuthenticationStore>()) return null;
+            return getIt<AuthenticationStore>()
+                .getUser(serverId, userId)?.plexToken;
+          },
           gamesApi: cloudOnly ? null : plexMoonbaseGamesApi,
         );
       case ServerType.silo:

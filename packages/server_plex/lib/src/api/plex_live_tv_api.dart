@@ -67,8 +67,13 @@ typedef _Grab = ({Map op, Map<String, dynamic> program});
 class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   final Dio _dio;
   final bool cloudOnly;
+  final String? Function()? cloudAccountToken;
 
-  PlexLiveTvApi(this._dio, {this.cloudOnly = false});
+  PlexLiveTvApi(
+    this._dio, {
+    this.cloudOnly = false,
+    this.cloudAccountToken,
+  });
 
   static final _cloudOptions = Options(
     headers: {'X-Plex-Provider-Version': '7.2'},
@@ -757,7 +762,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return seconds > 100000000000 ? seconds ~/ 1000 : seconds;
   }
 
-  Future<List<Map<String, dynamic>>> _fetchCloudOnNow() async {
+  Future<List<Map<String, dynamic>>> _fetchCloudOnNow(
+    String accountToken,
+  ) async {
     // Plex's Home hub is a bounded alternative to one EPG grid call per
     // channel. This experimental endpoint is not guaranteed to be available.
     final response = await _dio.get<Map<String, dynamic>>(
@@ -775,7 +782,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         'X-Plex-Container-Start': 0,
         'X-Plex-Container-Size': _cloudOnNowLimit,
       },
-      options: _cloudOptions,
+      options: Options(headers: {
+        'X-Plex-Provider-Version': '7.2',
+        'X-Plex-Token': accountToken,
+      }),
     );
     final container = response.data?['MediaContainer'];
     if (container is! Map) return [];
@@ -868,6 +878,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }
 
   Future<List<Map<String, dynamic>>> _freeOnNow() {
+    final token = cloudAccountToken?.call();
+    // A missing account token must not fall back to the PMS token.
+    // Don't cache the absence so a restored login can retry immediately.
+    if (token == null || token.isEmpty) {
+      return Future.value(<Map<String, dynamic>>[]);
+    }
     final now = DateTime.now();
     if (_cloudOnNow != null &&
         _cloudOnNowFetchedAt != null &&
@@ -875,7 +891,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       return _cloudOnNow!;
     }
     _cloudOnNowFetchedAt = now;
-    return _cloudOnNow = _fetchCloudOnNow()
+    return _cloudOnNow = _fetchCloudOnNow(token)
         .timeout(_cloudOnNowTimeout)
         .catchError((Object _) => <Map<String, dynamic>>[]);
   }
