@@ -640,9 +640,7 @@ class PluginSyncService extends ChangeNotifier {
       final resolved = await _fetchProfileAndImportGuidePins(
         client, profile, serverId: serverId,
       );
-      if (resolved == null || !current()) {
-        return;
-      }
+      if (resolved == null || !current()) return;
 
       await _prefs.set(UserPreferences.pluginSyncEnabled, true);
       if (!current()) return;
@@ -1040,8 +1038,7 @@ class PluginSyncService extends ChangeNotifier {
     });
   }
 
-  // Capture identity once; a reused client can change user while an async
-  // request waits, even if it is the active client again when it finishes.
+  // Capture the account once so queued operations reject stale responses.
   bool Function() _guidePinAccountCheck(
     MediaServerClient client, {
     String? serverId,
@@ -1051,19 +1048,9 @@ class PluginSyncService extends ChangeNotifier {
     return () =>
         client.userId == userId &&
         _prefs.activeProfileScopeSuffix() == scope &&
-        _isActiveGuidePinAccount(client, serverId: serverId);
-  }
-
-  // Pins are stored per server and user. A delayed read from a previous
-  // session must never import this session's local pins into that server.
-  bool _isActiveGuidePinAccount(MediaServerClient client, {String? serverId}) {
-    if (GetIt.instance.isRegistered<MediaServerClient>() &&
-        !identical(GetIt.instance<MediaServerClient>(), client)) {
-      return false;
-    }
-    return serverId == null ||
-        _prefs.activeProfileScopeSuffix() ==
-            '${serverId}_${client.userId ?? ''}';
+        (!GetIt.instance.isRegistered<MediaServerClient>() ||
+            identical(GetIt.instance<MediaServerClient>(), client)) &&
+        (serverId == null || scope == '${serverId}_${userId ?? ''}');
   }
 
   /// A user may have saved local pins before installing Moonbase.
@@ -1102,9 +1089,7 @@ class PluginSyncService extends ChangeNotifier {
       final fresh = await _fetchResolvedProfile(client, profile);
       if (!current()) return null;
       if (fresh?['liveTvSavedFilters'] != null) return fresh;
-      if (resolved != null) {
-        resolved['liveTvSavedFilters'] = imported;
-      }
+      if (resolved != null) resolved['liveTvSavedFilters'] = imported;
     } catch (_) {
       // Keep local pins when Moonbase cannot accept the import yet.
     }
