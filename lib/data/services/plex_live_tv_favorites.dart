@@ -27,6 +27,7 @@ bool isPlexLiveTvChannel(MediaServerClient client, String channelId) =>
 /// than synthetic guide IDs, which can collide between PMS servers.
 class PlexLiveTvFavorites {
   static const _freePrefix = 'channel-plex-';
+  static const _freeSource = 'provider://tv.plex.provider.epg';
   static final _api = PlexLiveTvFavoritesApi();
 
   // Tests inject only the provider transport; user and cache logic stays here.
