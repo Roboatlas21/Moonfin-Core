@@ -1068,11 +1068,12 @@ class PluginSyncService extends ChangeNotifier {
     if (scope == null) return resolved;
     final readPref = UserPreferences.guidePinsReadForServer(scope);
     // Earlier builds used either the URL or the sign-in server ID.
+    final oldServerId = serverId ?? _store.getString('pref_last_server_id');
     final alreadyRead = _prefs.get(readPref) ||
         _prefs.get(UserPreferences.guidePinsReadForServer(_userSyncKey(client))) ||
-        (serverId != null &&
+        (oldServerId != null &&
             _prefs.get(UserPreferences.guidePinsReadForServer(
-              _userSyncKey(client, serverId: serverId),
+              _userSyncKey(client, serverId: oldServerId),
             )));
     final local = _prefs.get(UserPreferences.liveTvSavedFilters);
     // Local pins saved before Moonbase was installed take precedence over
