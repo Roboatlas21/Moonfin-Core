@@ -314,11 +314,12 @@ void main() {
     final saving = service.changePinnedGuideFilter(
       client, filter: 'group:News', add: true,
     );
+    final rejected = expectLater(saving, throwsA(isA<StateError>()));
     // A cached server client can be reused when the account changes.
     when(() => client.userId).thenReturn('user2');
     adapter.resolvedResponseGate!.complete();
     await signingIn;
-    await expectLater(saving, throwsA(isA<StateError>()));
+    await rejected;
     expect(adapter.pinActions, isEmpty);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
     service.resetState();
