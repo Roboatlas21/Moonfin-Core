@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -27,6 +28,8 @@ class _RecordingAdapter implements HttpClientAdapter {
   Map<String, dynamic>? lastPushedProfile;
   List<String>? savedPins;
   bool supportsPinChanges = true;
+  Completer<void>? pinResponseReady;
+  Completer<void>? pinResponseGate;
   final List<String> pinActions = [];
 
   void applyPinChange(Map<dynamic, dynamic> change) {
@@ -63,8 +66,13 @@ class _RecordingAdapter implements HttpClientAdapter {
       };
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
       body = {
-        if (supportsPinChanges && savedPins != null) 'liveTvSavedFilters': savedPins,
+        if (supportsPinChanges && savedPins != null)
+          'liveTvSavedFilters': List<String>.of(savedPins!),
       };
+      if (options.method == 'POST' && pinResponseGate != null) {
+        pinResponseReady?.complete();
+        await pinResponseGate!.future;
+      }
     }
 
     if (body == null) {
@@ -193,6 +201,28 @@ void main() {
     adapter.savedPins = <String>[];
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+  });
+
+  test('a delayed pin reply cannot replace a newer settings update', () async {
+    adapter.savedPins = [];
+    adapter.pinResponseReady = Completer<void>();
+    adapter.pinResponseGate = Completer<void>();
+
+    final saving = service.changePinnedGuideFilter(
+      client, filter: 'group:Sports', add: true,
+    );
+    await adapter.pinResponseReady!.future;
+    // Another device adds News after the server handled our Sports request,
+    // but before its older response reaches this device.
+    adapter.savedPins = ['group:Sports', 'group:News'];
+    final updated = service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    await Future<void>.delayed(Duration.zero);
+    expect(resolvedCount(), 0, reason: 'settings must wait for the pin save');
+
+    adapter.pinResponseGate!.complete();
+    expect(await saving, ['group:Sports']);
+    await updated;
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports', 'group:News']);
   });
 
   test('pins stay local until the ordinary Moonbase sync imports them', () async {
