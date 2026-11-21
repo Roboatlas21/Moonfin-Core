@@ -604,9 +604,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (sync != null) {
         shared = await sync.changePinnedGuideFilter(_client, filter: key, add: add);
       }
-      if (shared != null) {
-        await prefs.set(UserPreferences.liveTvSavedFilters, shared);
-      } else {
+      if (shared == null) {
+        // Moonbase applies successful saves inside the settings-sync guard.
         if (add) {
           keys.add(key);
         } else {
