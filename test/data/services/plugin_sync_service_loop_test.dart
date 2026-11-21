@@ -387,7 +387,7 @@ void main() {
     expect(adapter.savedPins, local);
   });
 
-  test('failed first import keeps local pins but applies other settings', () async {
+  test('failed import keeps local pins through settings events until retry', () async {
     const local = ['group:Sports'];
     await prefs.set(UserPreferences.liveTvSavedFilters, local);
     adapter.resolvedProfile = {
@@ -399,10 +399,13 @@ void main() {
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
     expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
 
     adapter.failPinChanges = false;
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(adapter.savedPins, local);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
     expect(adapter.pinActions, ['initializeIfAbsent']);
   });
 
