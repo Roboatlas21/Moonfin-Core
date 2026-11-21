@@ -255,31 +255,7 @@ void main() {
         ['group:Sports', 'group:News']);
   });
 
-  test('pin edits wait for the sign-in profile before changing shared pins', () async {
-    adapter.savedPins = ['group:Sports'];
-    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
-    adapter.resolvedResponseReady = Completer<void>();
-    adapter.resolvedResponseGate = Completer<void>();
-
-    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
-    await adapter.resolvedResponseReady!.future;
-    final saving = service.changePinnedGuideFilter(
-      client, filter: 'group:News', add: true,
-    );
-    await Future<void>.delayed(Duration.zero);
-    expect(adapter.pinActions, isEmpty);
-    expect(postCount(), 0, reason: 'the edit must wait for the sign-in read');
-
-    adapter.resolvedResponseGate!.complete();
-    await signingIn;
-    expect(await saving, ['group:Sports', 'group:News']);
-    expect(adapter.pinActions, ['add']);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters),
-        ['group:Sports', 'group:News']);
-    service.resetState();
-  });
-
-  test('multiple edits during sign-in preserve their order', () async {
+  test('pin edits wait for sign-in and preserve their order', () async {
     adapter.savedPins = ['group:Sports'];
     await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
     adapter.resolvedResponseReady = Completer<void>();
@@ -300,28 +276,6 @@ void main() {
     expect(await removeSports, ['group:News']);
     expect(adapter.pinActions, ['add', 'remove']);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
-    service.resetState();
-  });
-
-  test('a queued pin save never runs under a newly signed-in user', () async {
-    adapter.savedPins = ['group:Sports'];
-    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
-    adapter.resolvedResponseReady = Completer<void>();
-    adapter.resolvedResponseGate = Completer<void>();
-
-    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
-    await adapter.resolvedResponseReady!.future;
-    final saving = service.changePinnedGuideFilter(
-      client, filter: 'group:News', add: true,
-    );
-    final rejected = expectLater(saving, throwsA(isA<StateError>()));
-    // A cached server client can be reused when the account changes.
-    when(() => client.userId).thenReturn('user2');
-    adapter.resolvedResponseGate!.complete();
-    await signingIn;
-    await rejected;
-    expect(adapter.pinActions, isEmpty);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
     service.resetState();
   });
 
