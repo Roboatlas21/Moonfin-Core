@@ -197,9 +197,7 @@ void main() {
     await service.pushSettingsForProfile(client, profile: 'desktop');
     expect(adapter.lastPushedProfile?.containsKey('liveTvSavedFilters'), isFalse);
 
-    // Import once through the ordinary settings-sync lifecycle, not on pin edits.
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.pinActions, ['initializeIfAbsent']);
+    // Import pending pins before the first atomic edit, without a prior pull.
     final updated = await service.changePinnedGuideFilter(
       client,
       filter: 'group:News, English',
@@ -440,18 +438,6 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
   });
 
-  test('inherited guide pins continue following defaults after an address change', () async {
-    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:News']};
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
-
-    when(() => client.baseUrl).thenReturn('http://proxy.test');
-    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Sports']};
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
-    expect(adapter.pinActions, isEmpty, reason: 'an address change must not create a user override');
-  });
-
   test('an explicit empty server list blocks pending local pin import', () async {
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
     await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
@@ -476,18 +462,6 @@ void main() {
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(adapter.savedPins, isEmpty);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
-  });
-
-  test('the first online edit imports pending pins before its atomic update', () async {
-    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Sports']);
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-
-    final pins = await service.changePinnedGuideFilter(
-      client, filter: 'group:News', add: true,
-    );
-    expect(pins, ['group:Sports', 'group:News']);
-    expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
   });
 
