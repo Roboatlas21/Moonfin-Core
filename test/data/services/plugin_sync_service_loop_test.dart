@@ -28,6 +28,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   Map<String, dynamic>? lastPushedProfile;
   List<String>? savedPins;
   bool supportsPinChanges = true;
+  bool failPinChanges = false;
   Completer<void>? pinResponseReady;
   Completer<void>? pinResponseGate;
   Completer<void>? resolvedResponseReady;
@@ -71,6 +72,9 @@ class _RecordingAdapter implements HttpClientAdapter {
         await resolvedResponseGate!.future;
       }
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
+      if (options.method == 'POST' && failPinChanges) {
+        return ResponseBody.fromString('Temporarily unavailable', 503);
+      }
       body = {
         if (supportsPinChanges && savedPins != null)
           'liveTvSavedFilters': List<String>.of(savedPins!),
@@ -156,7 +160,7 @@ void main() {
             adapter.lastPushedProfile = Map<String, dynamic>.from(profile);
           }
           final change = (request.data as Map)['liveTvSavedFilterChange'];
-          if (change is Map && adapter.supportsPinChanges) {
+          if (change is Map && adapter.supportsPinChanges && !adapter.failPinChanges) {
             adapter.applyPinChange(change);
           }
         }
@@ -361,6 +365,7 @@ void main() {
 
   test('old Moonbase keeps pins local until its pin support is upgraded', () async {
     adapter.supportsPinChanges = false;
+    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Admin']};
     const local = ['group:Sports', 'group:Movies'];
     expect(
       await service.changePinnedGuideFilter(
@@ -380,6 +385,25 @@ void main() {
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(adapter.pinActions, ['initializeIfAbsent']);
     expect(adapter.savedPins, local);
+  });
+
+  test('failed first import keeps local pins but applies other settings', () async {
+    const local = ['group:Sports'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, local);
+    adapter.resolvedProfile = {
+      'liveTvSavedFilters': ['group:Admin'],
+      'use24HourClock': true,
+    };
+    adapter.failPinChanges = true;
+
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+
+    adapter.failPinChanges = false;
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.savedPins, local);
+    expect(adapter.pinActions, ['initializeIfAbsent']);
   });
 
   test('pre-Moonbase local pins override inherited admin defaults once', () async {
