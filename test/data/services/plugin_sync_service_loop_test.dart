@@ -116,7 +116,10 @@ void main() {
       Future<void>.delayed(const Duration(milliseconds: 1400));
 
   setUp(() async {
-    SharedPreferences.setMockInitialValues({'pref_last_server_id': 'srv1'});
+    SharedPreferences.setMockInitialValues({
+      'pref_last_server_id': 'srv1',
+      'pref_last_user_id': 'user1',
+    });
     final store = PreferenceStore();
     await store.init();
     prefs = UserPreferences(store);
@@ -130,6 +133,7 @@ void main() {
     client = _MockClient();
     when(() => client.baseUrl).thenReturn('http://plugin.test');
     when(() => client.accessToken).thenReturn('token');
+    when(() => client.userId).thenReturn('user1');
     when(() => client.serverType).thenReturn(ServerType.jellyfin);
     when(() => client.deviceInfo).thenReturn(
       const DeviceInfo(
@@ -249,6 +253,22 @@ void main() {
     expect(await saving, ['group:Sports', 'group:News']);
     expect(prefs.get(UserPreferences.liveTvSavedFilters),
         ['group:Sports', 'group:News']);
+  });
+
+  test('an old server cannot import or apply the active account pins', () async {
+    const local = ['group:Sports', 'category:news'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, local);
+    final other = _MockClient();
+    when(() => other.baseUrl).thenReturn('http://plugin.test');
+    when(() => other.accessToken).thenReturn('token');
+    when(() => other.userId).thenReturn('user1');
+    when(() => other.serverType).thenReturn(ServerType.jellyfin);
+
+    await service.handleServerEvent(other, {'type': 'settingsUpdated'});
+    expect(resolvedCount(), 0, reason: 'a stale event must not read active pins');
+    expect(await service.pullSettingsForProfile(other, profile: 'desktop'), isFalse);
+    expect(adapter.pinActions, isEmpty);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
   });
 
   test('pins stay local until the ordinary Moonbase sync imports them', () async {
