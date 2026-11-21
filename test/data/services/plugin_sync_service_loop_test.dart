@@ -205,6 +205,36 @@ void main() {
     expect(adapter.requests.where((r) => r.contains('/Settings/Resolved/')).length, 2);
   });
 
+  test('a newly installed companion activates sync without another login', () async {
+    await prefs.removePreference(UserPreferences.pluginSyncEnabled);
+    expect(prefs.get(UserPreferences.pluginSyncEnabled), isFalse);
+    const original = ['group:Sports', 'group:News'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, original);
+    service.resetState();
+
+    final shared = await service.changePinnedGuideFilter(
+      client,
+      filter: 'group:Movies',
+      add: true,
+    );
+    expect(prefs.get(UserPreferences.pluginSyncEnabled), isTrue);
+    expect(shared, [...original, 'group:Movies']);
+    expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
+  });
+
+  test('explicitly disabled settings sync keeps guide pins local', () async {
+    await prefs.set(UserPreferences.pluginSyncEnabled, false);
+    service.resetState();
+    final result = await service.changePinnedGuideFilter(
+      client,
+      filter: 'group:Sports',
+      add: true,
+    );
+    expect(result, isNull);
+    expect(prefs.get(UserPreferences.pluginSyncEnabled), isFalse);
+    expect(adapter.pinActions, isEmpty);
+  });
+
   test('a shared list blocks first-install import, even when explicitly empty', () async {
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
     adapter.savedPins = <String>[];
