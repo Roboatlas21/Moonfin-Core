@@ -1335,24 +1335,31 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       size.width >= size.height;
 
   void _scheduleGuideWindowUpdate(Duration window) {
-    if (_vm.state != GuideState.ready || window == _lastLayoutWindow) return;
-    // Don't retry a failed resize on every rebuild. The next move can try again.
+    if (_vm.state != GuideState.ready) return;
+    if (_vm.guideWindow == window) {
+      _lastLayoutWindow = window;
+      return;
+    }
+    if (window == _lastLayoutWindow) return;
+    // Keep the request latched while it's in flight, without retrying a
+    // genuine listings failure on every rebuild.
     _lastLayoutWindow = window;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted || _lastLayoutWindow != window) return;
       try {
         final failureRevision = _vm.failedWindowMoveRevision;
         await _vm.setWindow(window);
-        if (mounted &&
-            _lastLayoutWindow == window &&
-            _vm.failedWindowMoveRevision != failureRevision) {
+        if (!mounted || _lastLayoutWindow != window) return;
+        if (_vm.guideWindow == window) return;
+        if (_vm.failedWindowMoveRevision != failureRevision) {
           _showWindowFailure(_vm.windowStart.add(window));
+          return;
         }
-        // If a reload interrupts the resize, try again when the guide is ready.
-        if (mounted &&
-            _lastLayoutWindow == window &&
-            _vm.state != GuideState.ready &&
-            _vm.guideWindow != window) {
+        // A reload can supersede the resize and finish before this await
+        // resumes. Queue another frame even if the guide is already ready.
+        if (_vm.state == GuideState.ready) {
+          setState(() => _lastLayoutWindow = null);
+        } else {
           _lastLayoutWindow = null;
         }
       } catch (_) {
