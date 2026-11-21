@@ -986,12 +986,24 @@ class PluginSyncService extends ChangeNotifier {
     required String filter,
     required bool add,
   }) async {
-    if (!_pluginAvailable ||
-        !_prefs.get(UserPreferences.pluginSyncEnabled) ||
-        _readingProfileOnSignIn) {
+    if (_readingProfileOnSignIn) return null;
+    // Moonbase may have been installed after this client signed in.
+    // Check when the guide is edited; a missing companion is still throttled
+    // by moonbaseEndpoint's existing availability cache.
+    if (!_pluginAvailable && !await refreshAvailability(client)) return null;
+    if (!_prefs.get(UserPreferences.pluginSyncEnabled)) return null;
+
+    final profile = syncProfile;
+    final localPins = _prefs.get(UserPreferences.liveTvSavedFilters);
+    // The first edit must import the existing local list before applying its
+    // add/remove action, otherwise the reply would replace all earlier pins.
+    final resolved = await _fetchProfileAndImportGuidePins(client, profile);
+    if (localPins.isNotEmpty && resolved?['liveTvSavedFilters'] is! List) {
+      // The import could not be verified. Keep the list local rather than
+      // performing a partial server write that discards earlier shortcuts.
       return null;
     }
-    return _postGuidePinsChange(client, syncProfile, {
+    return _postGuidePinsChange(client, profile, {
       'action': add ? 'add' : 'remove',
       'filter': filter,
     });
