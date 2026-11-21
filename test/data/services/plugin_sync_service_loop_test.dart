@@ -25,6 +25,23 @@ class _RecordingAdapter implements HttpClientAdapter {
   /// Body returned for the Resolved endpoint, replaceable per test.
   Map<String, dynamic> resolvedProfile = {};
   Map<String, dynamic>? lastPushedProfile;
+  List<String>? savedPins;
+  final List<String> pinActions = [];
+
+  void applyPinChange(Map<dynamic, dynamic> change) {
+    final action = change['action'] as String;
+    pinActions.add(action);
+    if (action == 'initializeIfAbsent') {
+      savedPins ??= List<String>.from(change['filters'] as List);
+    } else if (action == 'add') {
+      savedPins ??= [];
+      final filter = change['filter'] as String;
+      if (!savedPins!.contains(filter)) savedPins!.add(filter);
+    } else if (action == 'remove') {
+      savedPins ??= [];
+      savedPins!.remove(change['filter']);
+    }
+  }
 
   @override
   Future<ResponseBody> fetch(
@@ -39,9 +56,14 @@ class _RecordingAdapter implements HttpClientAdapter {
     if (path.endsWith('/Moonfin/Ping')) {
       body = {'installed': true, 'settingsSyncEnabled': true};
     } else if (path.contains('/Moonfin/Settings/Resolved/')) {
-      body = resolvedProfile;
+      body = {
+        ...resolvedProfile,
+        if (savedPins != null) 'liveTvSavedFilters': savedPins,
+      };
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
-      body = {};
+      body = {
+        if (savedPins != null) 'liveTvSavedFilters': savedPins,
+      };
     }
 
     if (body == null) {
@@ -114,6 +136,8 @@ void main() {
           if (profile is Map) {
             adapter.lastPushedProfile = Map<String, dynamic>.from(profile);
           }
+          final change = (request.data as Map)['liveTvSavedFilterChange'];
+          if (change is Map) adapter.applyPinChange(change);
         }
         handler.next(request);
       },
@@ -141,20 +165,56 @@ void main() {
     expect(postCount(), 0, reason: 'the apply echoed back to the server');
   });
 
-  test('saved guide shortcuts round-trip as intact string arrays', () async {
-    const saved = ['group:US | SPORTS, Canada', 'category:sports'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, saved);
+  test('ordinary settings pushes cannot overwrite saved guide pins', () async {
+    const local = ['group:US | SPORTS, Canada', 'category:sports'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, local);
     await service.pushSettingsForProfile(client, profile: 'desktop');
-    expect(adapter.lastPushedProfile?['liveTvSavedFilters'], saved);
+    expect(adapter.lastPushedProfile?.containsKey('liveTvSavedFilters'), isFalse);
 
-    const remote = ['group:News, English', 'category:movies'];
-    adapter.resolvedProfile = {'liveTvSavedFilters': remote};
+    final updated = await service.changePinnedGuideFilter(
+      client,
+      filter: 'group:News, English',
+      add: true,
+    );
+    expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
+    expect(updated, [...local, 'group:News, English']);
+
+    // A change on another device arrives through the existing settings stream.
+    adapter.savedPins = ['group:News, English', 'category:movies'];
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), remote);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), adapter.savedPins);
 
-    adapter.resolvedProfile = {'liveTvSavedFilters': <String>[]};
+    adapter.savedPins = <String>[];
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+  });
+
+  test('installing Moonbase mid-session imports local pins before another pin', () async {
+    const local = ['group:Sports', 'group:News, Canada'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, local);
+    service.resetState(); // The client has not observed the new Moonbase yet.
+
+    final pins = await service.changePinnedGuideFilter(
+      client,
+      filter: 'group:Movies',
+      add: true,
+    );
+    expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
+    expect(pins, [...local, 'group:Movies']);
+    expect(adapter.requests.first, contains('/Moonfin/Ping'));
+    expect(adapter.requests.where((r) => r.contains('/Settings/Resolved/')).length, 2);
+  });
+
+  test('a shared list blocks first-install import, even when explicitly empty', () async {
+    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
+    adapter.savedPins = <String>[];
+    final pins = await service.changePinnedGuideFilter(
+      client,
+      filter: 'group:Movies',
+      add: true,
+    );
+    expect(adapter.pinActions, ['add']);
+    expect(pins, ['group:Movies']);
   });
 
   test('an unchanged payload is pushed once, a changed one again', () async {
