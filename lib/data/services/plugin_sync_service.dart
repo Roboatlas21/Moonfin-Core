@@ -603,7 +603,9 @@ class PluginSyncService extends ChangeNotifier {
           await _refreshCustomThemes(client, serverId: serverId);
 
           final profile = syncProfile;
-          final resolved = await _fetchProfileAndImportGuidePins(client, profile);
+          final resolved = await _fetchProfileAndImportGuidePins(
+            client, profile, serverId: serverId,
+          );
           if (resolved != null) {
             await _applyServerSettings(client, profile, resolved);
           }
@@ -631,7 +633,9 @@ class PluginSyncService extends ChangeNotifier {
       await _refreshCustomThemes(client, serverId: serverId);
 
       final profile = syncProfile;
-      final resolved = await _fetchProfileAndImportGuidePins(client, profile);
+      final resolved = await _fetchProfileAndImportGuidePins(
+        client, profile, serverId: serverId,
+      );
       if (resolved == null) {
         return;
       }
@@ -778,6 +782,7 @@ class PluginSyncService extends ChangeNotifier {
       return;
     }
 
+    if (!_isActiveGuidePinAccount(client)) return;
     await _withGuidePinSync(() async {
       final profile = syncProfile;
       final resolved = await _fetchResolvedProfile(client, profile);
@@ -1012,12 +1017,26 @@ class PluginSyncService extends ChangeNotifier {
     });
   }
 
+  // Pins are stored per server and user. A delayed read from a previous
+  // session must never import this session's local pins into that server.
+  bool _isActiveGuidePinAccount(MediaServerClient client, {String? serverId}) {
+    if (GetIt.instance.isRegistered<MediaServerClient>() &&
+        !identical(GetIt.instance<MediaServerClient>(), client)) {
+      return false;
+    }
+    return serverId == null ||
+        _prefs.activeProfileScopeSuffix() ==
+            '${serverId}_${client.userId ?? ''}';
+  }
+
   /// A user may have saved local pins before installing Moonbase.
   /// Initialize only when the server has no list (not even an empty one).
   Future<Map<String, dynamic>?> _fetchProfileAndImportGuidePins(
     MediaServerClient client,
-    String profile,
-  ) async {
+    String profile, {
+    String? serverId,
+  }) async {
+    if (!_isActiveGuidePinAccount(client, serverId: serverId)) return null;
     var resolved = await _fetchResolvedProfile(client, profile);
     final readPref = UserPreferences.guidePinsReadForServer(_userSyncKey(client));
     final local = _prefs.get(UserPreferences.liveTvSavedFilters);
