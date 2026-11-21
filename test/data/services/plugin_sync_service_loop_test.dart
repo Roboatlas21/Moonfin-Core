@@ -26,6 +26,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   Map<String, dynamic> resolvedProfile = {};
   Map<String, dynamic>? lastPushedProfile;
   List<String>? savedPins;
+  bool supportsPinChanges = true;
   final List<String> pinActions = [];
 
   void applyPinChange(Map<dynamic, dynamic> change) {
@@ -62,7 +63,7 @@ class _RecordingAdapter implements HttpClientAdapter {
       };
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
       body = {
-        if (savedPins != null) 'liveTvSavedFilters': savedPins,
+        if (supportsPinChanges && savedPins != null) 'liveTvSavedFilters': savedPins,
       };
     }
 
@@ -137,7 +138,9 @@ void main() {
             adapter.lastPushedProfile = Map<String, dynamic>.from(profile);
           }
           final change = (request.data as Map)['liveTvSavedFilterChange'];
-          if (change is Map) adapter.applyPinChange(change);
+          if (change is Map && adapter.supportsPinChanges) {
+            adapter.applyPinChange(change);
+          }
         }
         handler.next(request);
       },
@@ -215,6 +218,29 @@ void main() {
     expect(adapter.pinActions, ['initializeIfAbsent']);
     expect(adapter.savedPins, localWithMovies);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), localWithMovies);
+  });
+
+  test('old Moonbase keeps pins local until its pin support is upgraded', () async {
+    adapter.supportsPinChanges = false;
+    const local = ['group:Sports', 'group:Movies'];
+    expect(
+      await service.changePinnedGuideFilter(
+        client, filter: 'group:Movies', add: true,
+      ),
+      isNull,
+    );
+    expect(postCount(), 1);
+    expect(adapter.pinActions, isEmpty);
+    // The guide handles a null result by saving the pin locally.
+    await prefs.set(UserPreferences.liveTvSavedFilters, local);
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.savedPins, isNull);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
+
+    adapter.supportsPinChanges = true;
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.pinActions, ['initializeIfAbsent']);
+    expect(adapter.savedPins, local);
   });
 
   test('a shared list blocks first-install import, even when explicitly empty', () async {
