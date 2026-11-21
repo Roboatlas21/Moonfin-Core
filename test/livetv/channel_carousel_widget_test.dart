@@ -12,6 +12,7 @@ import 'package:moonfin/ui/theme/app_theme.dart';
 import 'package:moonfin/ui/widgets/live_tv/channel_carousel.dart';
 import 'package:moonfin/ui/widgets/live_tv/channel_carousel_card.dart';
 import 'package:moonfin/ui/widgets/live_tv/channel_carousel_overlay.dart';
+import 'package:moonfin/util/platform_detection.dart';
 import 'package:moonfin/util/tv_ui_scale.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 import 'package:server_core/server_core.dart';
@@ -219,6 +220,10 @@ void main() {
     VoidCallback? onShowControls,
     Duration inactivity = const Duration(seconds: 5),
   }) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
     await tester.binding.setSurfaceSize(const Size(1000, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
@@ -386,6 +391,10 @@ void main() {
   testWidgets('a failed cold-open top-up does not hide the channel strip', (
     tester,
   ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
     await tester.binding.setSurfaceSize(const Size(1000, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
@@ -452,6 +461,37 @@ void main() {
       expect(vm.requests.last, ['ch14']);
       expect(vm.requests.where((ids) =>
           ids.length == 1 && ids.single == 'ch10'), isEmpty);
+    } finally {
+      prewarm.dispose();
+    }
+  });
+
+  testWidgets('failed visible cards retry again after cooldown', (tester) async {
+    final client = _CarouselClient();
+    final channels = [
+      for (var i = 0; i < 4; i++)
+        GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
+    ];
+    final vm = _CarouselGuide(client, channels)..failedChannels.add('ch1');
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
+    try {
+      prewarm.tuned(channels, 'ch1');
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
+      await tester.pump();
+      await prewarm.ensureVisibleChannels(['ch1']);
+      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+      await tester.pump();
+      final first = vm.requests.where((ids) =>
+          ids.length == 1 && ids.single == 'ch1').length;
+      expect(first, greaterThan(0));
+
+      await tester.pump(const Duration(seconds: 30));
+      await tester.pump();
+      expect(
+        vm.requests.where((ids) =>
+            ids.length == 1 && ids.single == 'ch1').length,
+        greaterThan(first),
+      );
     } finally {
       prewarm.dispose();
     }

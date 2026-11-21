@@ -1256,6 +1256,31 @@ void main() {
   });
 
   group('category filters', () {
+    test('temporary retry failure keeps healthy category programs', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((inv) async {
+        if (_requestedIds(inv).length == 1) {
+          throw TimeoutException('Plex grid temporarily unavailable');
+        }
+        return {
+          'Items': [_program('sport-c0', 'c0', isSports: true)],
+          'FailedChannelIds': ['c1'],
+        };
+      });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      expect(vm.state, GuideState.ready);
+      expect(vm.filteredChannels.map((channel) => channel.id), ['c0']);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      expect(vm.programsForChannel('c0').single.id, 'sport-c0');
+    });
+
     test('a partial category batch retries only failed channels', () async {
       _stubChannels(liveTv, [_channel('c0'), _channel('c1'), _channel('c2')]);
       final requests = <List<String>>[];

@@ -553,7 +553,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               return null;
             }
           }(),
-      ]);
+      ], eagerError: true);
       for (final grid in grids) {
         if (grid == null) continue;
         successfulGrids++;
@@ -664,7 +664,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         ),
       if (free.isNotEmpty)
         attempt(() => _freeAirings(start, end, free), freeIds),
-    ]);
+    ], eagerError: true);
     // Preserve the healthy source while retaining failed channel IDs for Retry.
     if (results.isNotEmpty && results.every((result) => result.error != null)) {
       final failure = results.first;
