@@ -171,6 +171,9 @@ void main() {
     await service.pushSettingsForProfile(client, profile: 'desktop');
     expect(adapter.lastPushedProfile?.containsKey('liveTvSavedFilters'), isFalse);
 
+    // Import once through the ordinary settings-sync lifecycle, not on pin edits.
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.pinActions, ['initializeIfAbsent']);
     final updated = await service.changePinnedGuideFilter(
       client,
       filter: 'group:News, English',
@@ -189,55 +192,37 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
   });
 
-  test('installing Moonbase mid-session imports local pins before another pin', () async {
-    const local = ['group:Sports', 'group:News, Canada'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, local);
-    service.resetState(); // The client has not observed the new Moonbase yet.
+  test('pins stay local until the ordinary Moonbase sync imports them', () async {
+    const existing = ['group:Sports', 'group:News, Canada'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, existing);
+    service.resetState(); // Moonbase has not been detected in this session.
 
-    final pins = await service.changePinnedGuideFilter(
+    final remote = await service.changePinnedGuideFilter(
       client,
       filter: 'group:Movies',
       add: true,
     );
-    expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
-    expect(pins, [...local, 'group:Movies']);
-    expect(adapter.requests.first, contains('/Moonfin/Ping'));
-    expect(adapter.requests.where((r) => r.contains('/Settings/Resolved/')).length, 2);
-  });
+    expect(remote, isNull);
+    expect(adapter.requests, isEmpty, reason: 'pinning must not discover Moonbase');
 
-  test('a newly installed companion activates sync without another login', () async {
-    await prefs.removePreference(UserPreferences.pluginSyncEnabled);
-    expect(prefs.get(UserPreferences.pluginSyncEnabled), isFalse);
-    const original = ['group:Sports', 'group:News'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, original);
-    service.resetState();
+    // The guide's local fallback stores the new pin without a plugin.
+    const localWithMovies = [...existing, 'group:Movies'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, localWithMovies);
 
-    final shared = await service.changePinnedGuideFilter(
-      client,
-      filter: 'group:Movies',
-      add: true,
-    );
-    expect(prefs.get(UserPreferences.pluginSyncEnabled), isTrue);
-    expect(shared, [...original, 'group:Movies']);
-    expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
-  });
-
-  test('explicitly disabled settings sync keeps guide pins local', () async {
-    await prefs.set(UserPreferences.pluginSyncEnabled, false);
-    service.resetState();
-    final result = await service.changePinnedGuideFilter(
-      client,
-      filter: 'group:Sports',
-      add: true,
-    );
-    expect(result, isNull);
-    expect(prefs.get(UserPreferences.pluginSyncEnabled), isFalse);
-    expect(adapter.pinActions, isEmpty);
+    // A later normal availability check and settings sync import all three.
+    expect(await service.refreshAvailability(client), isTrue);
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.pinActions, ['initializeIfAbsent']);
+    expect(adapter.savedPins, localWithMovies);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), localWithMovies);
   });
 
   test('a shared list blocks first-install import, even when explicitly empty', () async {
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
     adapter.savedPins = <String>[];
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.pinActions, isEmpty, reason: 'an explicit empty server list blocks importing');
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
     final pins = await service.changePinnedGuideFilter(
       client,
       filter: 'group:Movies',
