@@ -601,7 +601,7 @@ class PluginSyncService extends ChangeNotifier {
           await _refreshCustomThemes(client, serverId: serverId);
 
           final profile = syncProfile;
-          final resolved = await _fetchResolvedProfile(client, profile);
+          final resolved = await _fetchProfileAndImportGuidePins(client, profile);
           if (resolved != null) {
             await _applyServerSettings(client, profile, resolved);
           }
@@ -629,7 +629,7 @@ class PluginSyncService extends ChangeNotifier {
       await _refreshCustomThemes(client, serverId: serverId);
 
       final profile = syncProfile;
-      final resolved = await _fetchResolvedProfile(client, profile);
+      final resolved = await _fetchProfileAndImportGuidePins(client, profile);
       if (resolved == null) {
         return;
       }
@@ -949,6 +949,78 @@ class PluginSyncService extends ChangeNotifier {
     if (_prefs.get(UserPreferences.seerrEnabled)) return;
     _setLocalSeerrEnabled(true);
     await pushSettings(client);
+  }
+
+  /// Use the existing settings/profile route for intentional pin changes.
+  /// The server returns the authoritative shared list after applying the edit.
+  Future<List<String>> _postGuidePinsChange(
+    MediaServerClient client,
+    String profile,
+    Map<String, dynamic> change,
+  ) async {
+    final ep = await moonbaseEndpoint(client, _dio);
+    if (ep == null) throw StateError('Moonbase is unavailable');
+    final response = await _dio.post<Map<String, dynamic>>(
+      '${ep.base}/Moonfin/Settings/Profile/$profile',
+      data: {
+        'profile': <String, dynamic>{},
+        'clientId': 'moonfin-flutter',
+        'liveTvSavedFilterChange': change,
+      },
+      options: Options(
+        headers: {...ep.headers, 'Content-Type': 'application/json'},
+      ),
+    );
+    final pins = response.data?['liveTvSavedFilters'] ??
+        response.data?['LiveTvSavedFilters'];
+    if (pins is! List || pins.any((value) => value is! String)) {
+      throw const FormatException('Moonbase did not return saved guide filters');
+    }
+    return List<String>.from(pins);
+  }
+
+  /// Null when sync is not in use, so the guide can continue saving locally.
+  /// An actual failed remote write throws and leaves the local choice intact.
+  Future<List<String>?> changePinnedGuideFilter(
+    MediaServerClient client, {
+    required String filter,
+    required bool add,
+  }) async {
+    if (!_pluginAvailable ||
+        !_prefs.get(UserPreferences.pluginSyncEnabled) ||
+        _readingProfileOnSignIn) {
+      return null;
+    }
+    return _postGuidePinsChange(client, syncProfile, {
+      'action': add ? 'add' : 'remove',
+      'filter': filter,
+    });
+  }
+
+  /// A user may have saved local pins before installing Moonbase.
+  /// Initialize only when the server has no list (not even an empty one).
+  Future<Map<String, dynamic>?> _fetchProfileAndImportGuidePins(
+    MediaServerClient client,
+    String profile,
+  ) async {
+    var resolved = await _fetchResolvedProfile(client, profile);
+    if (resolved?['liveTvSavedFilters'] != null) return resolved;
+    final local = _prefs.get(UserPreferences.liveTvSavedFilters);
+    if (local.isEmpty) return resolved;
+    try {
+      final imported = await _postGuidePinsChange(client, profile, {
+        'action': 'initializeIfAbsent',
+        'filters': List<String>.of(local),
+      });
+      final fresh = await _fetchResolvedProfile(client, profile);
+      if (fresh?['liveTvSavedFilters'] != null) return fresh;
+      if (resolved != null) {
+        resolved['liveTvSavedFilters'] = imported;
+      }
+    } catch (_) {
+      // Keep local pins when Moonbase cannot accept the import yet.
+    }
+    return resolved;
   }
 
   Future<void> pushSettings(
@@ -2463,7 +2535,8 @@ class PluginSyncService extends ChangeNotifier {
       // Everything the field table describes. The bespoke entries below cover the
       // settings that need real logic rather than a straight codec.
       for (final field in syncedFields)
-        if (!field.receiveOnly) field.serverKey: _encodeSyncedField(field),
+        if (!field.receiveOnly && field.serverKey != 'liveTvSavedFilters')
+          field.serverKey: _encodeSyncedField(field),
       'sinceYouWatchedNumRows': _prefs.get(UserPreferences.sinceYouWatchedNumRows).value,
       'mediaBarEnabled': mediaBarEnabled,
       'mediaBarMode': mediaBarMode,

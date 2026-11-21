@@ -13,6 +13,7 @@ import '../../util/settings_save_retry.dart';
 import '../repositories/item_mutation_repository.dart';
 import '../services/user_data_sync.dart';
 import '../services/plex_live_tv_favorites.dart';
+import '../services/plugin_sync_service.dart';
 import '../models/live_tv_recording_state.dart';
 import '../models/series_recording_episodes.dart';
 
@@ -586,13 +587,42 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     ];
   }
 
-  Future<void> toggleSavedFilter(GuideFilterChoice choice) async {
-    if (!choice.canFavorite) return;
-    final prefs = GetIt.instance<UserPreferences>();
-    final keys = prefs.get(UserPreferences.liveTvSavedFilters).toSet();
-    if (!keys.remove(choice.preferenceKey)) keys.add(choice.preferenceKey);
-    await prefs.set(UserPreferences.liveTvSavedFilters, keys.toList());
-    _notifyListeners();
+  // Serialize local toggles so rapid taps cannot submit the same operation twice.
+  Future<void> _savedFilterOperations = Future<void>.value();
+
+  Future<void> toggleSavedFilter(GuideFilterChoice choice) {
+    if (!choice.canFavorite) return Future<void>.value();
+    final update = _savedFilterOperations.then((_) async {
+      final prefs = GetIt.instance<UserPreferences>();
+      final keys = prefs.get(UserPreferences.liveTvSavedFilters).toSet();
+      final key = choice.preferenceKey;
+      final add = !keys.contains(key);
+      final sync = GetIt.instance.isRegistered<PluginSyncService>()
+          ? GetIt.instance<PluginSyncService>()
+          : null;
+      List<String>? shared;
+      if (sync != null) {
+        shared = await sync.changePinnedGuideFilter(_client, filter: key, add: add);
+      }
+      if (shared != null) {
+        await prefs.set(UserPreferences.liveTvSavedFilters, shared);
+      } else {
+        if (add) {
+          keys.add(key);
+        } else {
+          keys.remove(key);
+        }
+        await prefs.set(UserPreferences.liveTvSavedFilters, keys.toList());
+      }
+      _notifyListeners();
+    });
+    // Preserve the queue after a failed write while reporting the failure to
+    // the picker, which already displays a save error.
+    _savedFilterOperations = update.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return update;
   }
 
   String? _selectedGroup;
