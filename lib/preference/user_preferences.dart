@@ -4103,6 +4103,13 @@ class UserPreferences extends ChangeNotifier {
   static Preference<String> moonbaseUrlForServer(String serverId) =>
       Preference(key: 'pref_moonbase_url_$serverId', defaultValue: '');
 
+  // First successful pin read, separate from whether Moonbase was detected.
+  static Preference<bool> guidePinsReadForServer(String userServerKey) =>
+      Preference(
+        key: 'pref_guide_pins_read_${Uri.encodeComponent(userServerKey)}',
+        defaultValue: false,
+      );
+
   static Preference<bool> pluginSyncInitializedForServer(String serverKey) =>
       Preference(
         key: 'pref_plugin_sync_initialized_$serverKey',
