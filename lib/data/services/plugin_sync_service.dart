@@ -1011,10 +1011,14 @@ class PluginSyncService extends ChangeNotifier {
   }) async {
     // Let sign-in apply the server's pins before sending an intentional edit.
     // Returning null here used to save locally, then lose it to the late read.
+    final userId = client.userId;
+    final scope = _prefs.activeProfileScopeSuffix();
     while (_signInProfileRead != null) {
       await _signInProfileRead!.future;
     }
-    if (!_isActiveGuidePinAccount(client)) {
+    if (client.userId != userId ||
+        _prefs.activeProfileScopeSuffix() != scope ||
+        !_isActiveGuidePinAccount(client)) {
       throw StateError('Live TV account changed while saving a guide shortcut');
     }
     if (!_pluginAvailable || !_prefs.get(UserPreferences.pluginSyncEnabled)) {
@@ -1051,6 +1055,7 @@ class PluginSyncService extends ChangeNotifier {
   }) async {
     if (!_isActiveGuidePinAccount(client, serverId: serverId)) return null;
     var resolved = await _fetchResolvedProfile(client, profile);
+    if (!_isActiveGuidePinAccount(client, serverId: serverId)) return null;
     final readPref = UserPreferences.guidePinsReadForServer(_userSyncKey(client));
     final local = _prefs.get(UserPreferences.liveTvSavedFilters);
     // Local pins saved before Moonbase was installed take precedence over
