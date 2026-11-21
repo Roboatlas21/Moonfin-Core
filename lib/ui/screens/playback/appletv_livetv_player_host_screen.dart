@@ -971,6 +971,8 @@ class _AppleTvLiveTvPlayerHostScreenState
               );
             }
           });
+        } else {
+          _carouselPrewarm?.clearVisibleChannels();
         }
         // The schedule listener sends the lineup when listings change.
         return;

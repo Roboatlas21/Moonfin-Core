@@ -226,6 +226,7 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     private func dismissCarousel(showingControls: Bool = false) {
         guard !dismissed else { return }
         dismissed = true
+        onVisibleChannelsChanged?([])
         stopTimers()
         UIView.animate(
             withDuration: carouselExitDuration, delay: 0,
@@ -443,6 +444,7 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     private func tuneCenteredChannel() {
         guard let id = centeredChannel?.channelId else { return }
         dismissed = true
+        onVisibleChannelsChanged?([])
         stopTimers()
         dismiss(animated: false) { [weak self] in
             self?.onChannelSelected?(id)

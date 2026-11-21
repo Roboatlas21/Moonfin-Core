@@ -288,31 +288,53 @@ class ChannelCarouselPrewarm {
     final now = _now();
     final failed = [
       for (final id in _retryNeighborhood)
-        if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
-            (_failedListingsLastAttempt[id] == null ||
-                now.difference(_failedListingsLastAttempt[id]!) >=
-                    _failedListingsRetryCooldown))
-          id,
+        if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed) id,
     ];
     if (failed.isEmpty) return;
-    _failedListingsTimer = Timer(failedListingsRetryDelay, () {
+
+    // Keep failed visible channels on a cooldown instead of giving up after
+    // the first retry. Schedule the earliest channel that can retry next.
+    DateTime? nextAttempt;
+    for (final id in failed) {
+      final last = _failedListingsLastAttempt[id];
+      final due = last == null
+          ? now.add(failedListingsRetryDelay)
+          : last.add(_failedListingsRetryCooldown);
+      if (nextAttempt == null || due.isBefore(nextAttempt)) {
+        nextAttempt = due;
+      }
+    }
+    final scheduledAt = nextAttempt!;
+    final wait = scheduledAt.difference(now);
+    _failedListingsTimer = Timer(wait.isNegative ? Duration.zero : wait, () {
       _failedListingsTimer = null;
       if (_disposed || !isWarm || viewModel.listingsAccessDenied) return;
-      final current = _retryNeighborhood.toSet();
       final eligible = [
-        for (final id in failed)
-          if (current.contains(id) &&
-              viewModel.loadStateFor(id) == GuideChannelLoadState.failed)
+        for (final id in _retryNeighborhood)
+          if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
+              (_failedListingsLastAttempt[id] == null ||
+                  !_failedListingsLastAttempt[id]!
+                      .add(_failedListingsRetryCooldown)
+                      .isAfter(scheduledAt)))
             id,
       ];
-      if (eligible.isEmpty) return;
+      if (eligible.isEmpty) {
+        _scheduleFailedVisibleRetry();
+        return;
+      }
       for (final id in eligible) {
         _failedListingsLastAttempt[id] = _now();
       }
-      // Loaded empty schedules and denied requests stay out of the retry.
-      unawaited(viewModel.ensureProgramsForChannels(eligible).then((_) {
-        if (!_disposed) viewModel.scheduleBoundaryRefresh();
-      }).catchError((Object _) {}));
+      // A completed attempt can still leave channels failed; schedule the
+      // next retry after cooldown, but stop on denial or disposal.
+      unawaited(
+        viewModel.ensureProgramsForChannels(eligible).catchError((Object _) {})
+            .whenComplete(() {
+          if (_disposed) return;
+          viewModel.scheduleBoundaryRefresh();
+          _scheduleFailedVisibleRetry();
+        }),
+      );
     });
   }
 
