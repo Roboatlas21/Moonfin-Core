@@ -223,6 +223,7 @@ class PluginSyncService extends ChangeNotifier {
 
   /// Set while sign-in is still working out what the server holds.
   bool _readingProfileOnSignIn = false;
+  Completer<void>? _signInProfileRead;
 
   PluginSyncService(this._prefs, this._store, {@visibleForTesting Dio? dio})
     : _dio = dio ?? Dio(pluginRequestOptions()) {
@@ -577,6 +578,8 @@ class PluginSyncService extends ChangeNotifier {
   }
 
   Future<void> syncOnLogin(MediaServerClient client, {String? serverId}) async {
+    final readDone = Completer<void>();
+    _signInProfileRead = readDone;
     _readingProfileOnSignIn = true;
     final userKey = _userSyncKey(client, serverId: serverId);
     _signInSettingsRead.remove(userKey);
@@ -648,7 +651,11 @@ class PluginSyncService extends ChangeNotifier {
     } catch (_) {
       resetState();
     } finally {
-      _readingProfileOnSignIn = false;
+      if (identical(_signInProfileRead, readDone)) {
+        _signInProfileRead = null;
+        _readingProfileOnSignIn = false;
+      }
+      readDone.complete();
       // A retry reads them later, so the wait isn't over yet.
       if (!retrying) _signInSettingsRead.add(userKey);
     }
@@ -996,15 +1003,21 @@ class PluginSyncService extends ChangeNotifier {
   }
 
   /// Null when sync is not in use, so the guide can continue saving locally.
-  /// An actual failed remote write throws and leaves the local choice intact.
+  /// An actual failed remote write throws, allowing the picker to report it.
   Future<List<String>?> changePinnedGuideFilter(
     MediaServerClient client, {
     required String filter,
     required bool add,
   }) async {
-    if (!_pluginAvailable ||
-        !_prefs.get(UserPreferences.pluginSyncEnabled) ||
-        _readingProfileOnSignIn) {
+    // Let sign-in apply the server's pins before sending an intentional edit.
+    // Returning null here used to save locally, then lose it to the late read.
+    while (_signInProfileRead case final pending?) {
+      await pending.future;
+    }
+    if (!_isActiveGuidePinAccount(client)) {
+      throw StateError('Live TV account changed while saving a guide shortcut');
+    }
+    if (!_pluginAvailable || !_prefs.get(UserPreferences.pluginSyncEnabled)) {
       return null;
     }
     return _withGuidePinSync(() async {
