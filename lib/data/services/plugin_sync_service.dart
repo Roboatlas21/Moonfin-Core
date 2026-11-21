@@ -1425,10 +1425,11 @@ class PluginSyncService extends ChangeNotifier {
       if (!supportedProfiles.contains(profile)) return false;
       if (!_pluginAvailable) return false;
 
+      final current = _guidePinAccountCheck(client);
+      if (!current()) return false;
       await _refreshCustomThemes(client);
 
       // Order the manual pull with pin saves and incoming settings events.
-      final current = _guidePinAccountCheck(client);
       return await _withGuidePinSync(() async {
         if (!current()) return false;
         final resolved = await _fetchProfileAndImportGuidePins(client, profile);
