@@ -30,6 +30,8 @@ class _RecordingAdapter implements HttpClientAdapter {
   bool supportsPinChanges = true;
   Completer<void>? pinResponseReady;
   Completer<void>? pinResponseGate;
+  Completer<void>? resolvedResponseReady;
+  Completer<void>? resolvedResponseGate;
   final List<String> pinActions = [];
 
   void applyPinChange(Map<dynamic, dynamic> change) {
@@ -62,8 +64,12 @@ class _RecordingAdapter implements HttpClientAdapter {
     } else if (path.contains('/Moonfin/Settings/Resolved/')) {
       body = {
         ...resolvedProfile,
-        if (savedPins != null) 'liveTvSavedFilters': savedPins,
+        if (savedPins != null) 'liveTvSavedFilters': List<String>.of(savedPins!),
       };
+      if (resolvedResponseGate != null) {
+        resolvedResponseReady?.complete();
+        await resolvedResponseGate!.future;
+      }
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
       body = {
         if (supportsPinChanges && savedPins != null)
@@ -223,6 +229,26 @@ void main() {
     expect(await saving, ['group:Sports']);
     await updated;
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports', 'group:News']);
+  });
+
+  test('manual sync cannot overwrite a pin saved during an older pull', () async {
+    adapter.savedPins = ['group:Sports'];
+    adapter.resolvedResponseReady = Completer<void>();
+    adapter.resolvedResponseGate = Completer<void>();
+
+    final pulling = service.pullSettingsForProfile(client, profile: 'desktop');
+    await adapter.resolvedResponseReady!.future;
+    final saving = service.changePinnedGuideFilter(
+      client, filter: 'group:News', add: true,
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(adapter.pinActions, isEmpty, reason: 'save must wait for the manual pull');
+
+    adapter.resolvedResponseGate!.complete();
+    expect(await pulling, isTrue);
+    expect(await saving, ['group:Sports', 'group:News']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters),
+        ['group:Sports', 'group:News']);
   });
 
   test('pins stay local until the ordinary Moonbase sync imports them', () async {
