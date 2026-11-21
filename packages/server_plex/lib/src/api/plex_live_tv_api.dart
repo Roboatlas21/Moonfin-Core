@@ -888,9 +888,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     bool? isAiring,
   }) async {
     final now = DateTime.now();
-    final dvr = cloudOnly
-        ? <Map<String, dynamic>>[]
-        : await _dvrAirings(now, now);
+    final dvr = <Map<String, dynamic>>[];
+    if (!cloudOnly) {
+      try {
+        dvr.addAll(await _dvrAirings(now, now));
+      } on DioException catch (error) {
+        if (_accessDenied(error)) rethrow;
+        // An unavailable DVR must not prevent loading the Free TV hub.
+      }
+    }
     final programs = <Map<String, dynamic>>[
       ...(limit == null ? dvr : dvr.take(limit)),
     ];
