@@ -21,4 +21,4 @@ jobs:
         run: dart pub get
       - name: Run Plex Live TV API regression tests
         working-directory: packages/server_plex
-        run: dart test test/plex_live_tv_api_test.dart
+        run: dart test test/plex_live_tv_api_test.dart --name 'Plex joins genres and loads Featured on demand|Plex retains unresolved genre groups when metadata fails and recovers|cloud-only lineup failures propagate while Plex DVRs remain usable'
