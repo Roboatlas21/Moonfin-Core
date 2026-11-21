@@ -1011,8 +1011,8 @@ class PluginSyncService extends ChangeNotifier {
   }) async {
     // Let sign-in apply the server's pins before sending an intentional edit.
     // Returning null here used to save locally, then lose it to the late read.
-    while (_signInProfileRead case final pending?) {
-      await pending.future;
+    while (_signInProfileRead != null) {
+      await _signInProfileRead!.future;
     }
     if (!_isActiveGuidePinAccount(client)) {
       throw StateError('Live TV account changed while saving a guide shortcut');
