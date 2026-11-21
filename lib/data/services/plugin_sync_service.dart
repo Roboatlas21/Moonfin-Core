@@ -1064,12 +1064,22 @@ class PluginSyncService extends ChangeNotifier {
     if (!current()) return null;
     var resolved = await _fetchResolvedProfile(client, profile);
     if (!current()) return null;
-    final readPref = UserPreferences.guidePinsReadForServer(_userSyncKey(client));
+    final scope = _prefs.activeProfileScopeSuffix();
+    if (scope == null) return resolved;
+    final readPref = UserPreferences.guidePinsReadForServer(scope);
+    // Earlier builds used either the URL or the sign-in server ID.
+    final alreadyRead = _prefs.get(readPref) ||
+        _prefs.get(UserPreferences.guidePinsReadForServer(_userSyncKey(client))) ||
+        (serverId != null &&
+            _prefs.get(UserPreferences.guidePinsReadForServer(
+              _userSyncKey(client, serverId: serverId),
+            )));
     final local = _prefs.get(UserPreferences.liveTvSavedFilters);
     // Local pins saved before Moonbase was installed take precedence over
     // inherited defaults, but never replace a stored list on the server.
-    if (resolved?['liveTvSavedFilters'] != null && _prefs.get(readPref)) {
-      return resolved;
+    if (resolved?['liveTvSavedFilters'] != null && alreadyRead) {
+      if (!_prefs.get(readPref)) await _prefs.set(readPref, true);
+      return current() ? resolved : null;
     }
     if (local.isEmpty) {
       if (resolved?['liveTvSavedFilters'] != null) {
