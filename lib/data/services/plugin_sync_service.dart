@@ -979,31 +979,6 @@ class PluginSyncService extends ChangeNotifier {
     return List<String>.from(pins);
   }
 
-  /// When Moonbase is installed after sign-in, the usual first-login path
-  /// never ran. Match that path without overriding an explicit sync opt-out.
-  Future<bool> _activateNewMoonbaseSync(MediaServerClient client) async {
-    if (_prefs.get(UserPreferences.pluginSyncEnabled)) return true;
-    if (_prefs.containsPreference(UserPreferences.pluginSyncEnabled)) {
-      return false; // The user deliberately disabled settings sync.
-    }
-    final profile = syncProfile;
-    final localPins = _prefs.get(UserPreferences.liveTvSavedFilters);
-    final resolved = await _fetchProfileAndImportGuidePins(client, profile);
-    if (localPins.isNotEmpty && resolved?['liveTvSavedFilters'] is! List) {
-      return false; // Do not enable sync until local pins are safely imported.
-    }
-    if (resolved != null) {
-      await _applyServerSettings(client, profile, resolved);
-    }
-    await _prefs.set(UserPreferences.pluginSyncEnabled, true);
-    await _prefs.set(
-      UserPreferences.pluginSyncInitializedForServer(_serverSyncKey(client)),
-      true,
-    );
-    unawaited(_startSettingsStream(client));
-    return true;
-  }
-
   /// Null when sync is not in use, so the guide can continue saving locally.
   /// An actual failed remote write throws and leaves the local choice intact.
   Future<List<String>?> changePinnedGuideFilter(
@@ -1011,24 +986,12 @@ class PluginSyncService extends ChangeNotifier {
     required String filter,
     required bool add,
   }) async {
-    if (_readingProfileOnSignIn) return null;
-    // Moonbase may have been installed after this client signed in.
-    // Check when the guide is edited; a missing companion is still throttled
-    // by moonbaseEndpoint's existing availability cache.
-    if (!_pluginAvailable && !await refreshAvailability(client)) return null;
-    if (!await _activateNewMoonbaseSync(client)) return null;
-
-    final profile = syncProfile;
-    final localPins = _prefs.get(UserPreferences.liveTvSavedFilters);
-    // The first edit must import the existing local list before applying its
-    // add/remove action, otherwise the reply would replace all earlier pins.
-    final resolved = await _fetchProfileAndImportGuidePins(client, profile);
-    if (localPins.isNotEmpty && resolved?['liveTvSavedFilters'] is! List) {
-      // The import could not be verified. Keep the list local rather than
-      // performing a partial server write that discards earlier shortcuts.
+    if (!_pluginAvailable ||
+        !_prefs.get(UserPreferences.pluginSyncEnabled) ||
+        _readingProfileOnSignIn) {
       return null;
     }
-    return _postGuidePinsChange(client, profile, {
+    return _postGuidePinsChange(client, syncProfile, {
       'action': add ? 'add' : 'remove',
       'filter': filter,
     });
