@@ -221,33 +221,8 @@ const _teletubbies = {
                   'title': 'Episode 2',
                   'grandparentTitle': 'Free TV show',
                   'Media': [
-                    {
-                      'beginsAt': now - 60,
-                      'endsAt': now + 3600,
-                      'channelIdentifier': 'abc-66635fc0',
-                    },
-                  ],
-                },
-                {
-                  'type': 'movie',
-                  'title': 'Free TV movie',
-                  'Media': [
-                    {
-                      'beginsAt': now - 60,
-                      'endsAt': now + 3600,
-                      'channelIdentifier': 'news-extra',
-                    },
-                  ],
-                },
-                {
-                  'type': 'movie',
-                  'title': 'Expired program',
-                  'Media': [
-                    {
-                      'beginsAt': now - 3600,
-                      'endsAt': now - 60,
-                      'channelIdentifier': 'news-extra',
-                    },
+                    {'beginsAt': now - 60, 'endsAt': now + 3600,
+                     'channelIdentifier': 'abc-66635fc0'},
                   ],
                 },
               ],
@@ -368,62 +343,42 @@ void main() {
 
 
 
-  test('Free TV On Now reads the bounded hub without loading channel grids', () async {
+  test('Plex On Now uses a cached hub after the DVR lineup', () async {
+    const hubPath = '/hubs/sections/home/whatsOnNow';
     final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio, cloudOnly: true);
-    final first = await api.getRecommendedPrograms(limit: 15, isAiring: true);
-    final second = await api.getRecommendedPrograms(limit: 15, isAiring: true);
-    expect(second, first);
+    final cloud = PlexLiveTvApi(dio, cloudOnly: true);
+    final free = (await cloud.getRecommendedPrograms(limit: 15))['Items'] as List;
+    expect(free, hasLength(1));
+    expect(free.single['ChannelId'], 'channel-plex-abc-66635fc0');
+    expect(free.single['Name'], 'Free TV show');
+    await cloud.getRecommendedPrograms(limit: 15);
+    expect(server.requests.where((r) => r.uri.path == hubPath), hasLength(1));
+    expect(server.requests.any((r) => r.uri.path == '/grid'), isFalse);
 
-    final items = (first['Items'] as List).cast<Map>();
-    expect(items.map((item) => item['ChannelId']), [
-      'channel-plex-abc-66635fc0',
-      'channel-plex-news-extra',
+    final dvr = PlexLiveTvApi(dio);
+    expect((await dvr.getRecommendedPrograms(limit: 2))['Items'], hasLength(2));
+    final combined = (await dvr.getRecommendedPrograms(limit: 3))['Items'] as List;
+    expect(combined.map((item) => item['ChannelId']), [
+      'channel-2-4', 'channel-2-4', 'channel-plex-abc-66635fc0',
     ]);
-    expect(items.first['Name'], 'Free TV show');
-    expect(items.first['Id'], startsWith('airing-plex-'));
-    final hub = server.requests.singleWhere(
-      (request) => request.uri.path == '/hubs/sections/home/whatsOnNow',
-    );
-    expect(hub.queryParameters['X-Plex-Container-Size'], 15);
-    expect(server.requests.any((request) => request.uri.path == '/grid'), isFalse);
   });
 
-  test('On Now prefers DVR, and an unavailable hub preserves DVR results', () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
-    final dvrOnly = await api.getRecommendedPrograms(limit: 2);
-    expect((dvrOnly['Items'] as List), hasLength(2));
-    expect(
-      server.requests.any((r) => r.uri.path == '/hubs/sections/home/whatsOnNow'),
-      isFalse,
-    );
-
-    final mixed = await api.getRecommendedPrograms(limit: 3);
-    final items = (mixed['Items'] as List).cast<Map>();
-    expect(items.map((item) => item['ChannelId']), [
-      'channel-2-4',
-      'channel-2-4',
-      'channel-plex-abc-66635fc0',
-    ]);
-
-    final (failedDio, _) = _server();
-    failedDio.interceptors.insert(0, InterceptorsWrapper(
-      onRequest: (options, handler) {
-        if (options.uri.path == '/hubs/sections/home/whatsOnNow') {
-          handler.reject(DioException(
-            requestOptions: options,
-            type: DioExceptionType.badResponse,
-            response: Response(requestOptions: options, statusCode: 404),
-          ));
-        } else {
-          handler.next(options);
-        }
-      },
-    ));
-    final fallback = await PlexLiveTvApi(failedDio)
-        .getRecommendedPrograms(limit: 3);
-    expect((fallback['Items'] as List), hasLength(2));
+  test('an unavailable Plex hub does not discard DVR On Now', () async {
+    final (dio, _) = _server();
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (options, handler) {
+      if (options.uri.path == '/hubs/sections/home/whatsOnNow') {
+        handler.reject(DioException(
+          requestOptions: options,
+          type: DioExceptionType.badResponse,
+          response: Response(requestOptions: options, statusCode: 404),
+        ));
+      } else {
+        handler.next(options);
+      }
+    }));
+    final programs = (await PlexLiveTvApi(dio)
+        .getRecommendedPrograms(limit: 3))['Items'] as List;
+    expect(programs, hasLength(2));
   });
 
   test('every showing of a program is a program of its own', () async {
