@@ -29,13 +29,11 @@ class PlexMediaServerClient extends MediaServerClient {
   String? _accessToken;
   String? _userId;
   final GamesApi? Function(MediaServerClient client)? _gamesApi;
-  final String? Function(String? userId)? plexAccountTokenForUser;
 
   PlexMediaServerClient({
     required String baseUrl,
     required this.deviceInfo,
     this.cloudOnly = false,
-    this.plexAccountTokenForUser,
     GamesApi? Function(MediaServerClient client)? gamesApi,
   }) : _baseUrl = baseUrl,
        _gamesApi = gamesApi,
@@ -53,9 +51,7 @@ class PlexMediaServerClient extends MediaServerClient {
         onRequest: (options, handler) {
           options.queryParameters.addAll(plexIdentity(deviceInfo));
           if (_accessToken != null) {
-            // A Cloud hub request supplies the Plex account token explicitly.
-            // Do not overwrite it with the PMS server access token.
-            options.headers.putIfAbsent('X-Plex-Token', () => _accessToken);
+            options.headers['X-Plex-Token'] = _accessToken;
           }
           ServerLog.network('→ ${options.method} ${options.uri}');
           handler.next(options);
@@ -162,17 +158,8 @@ class PlexMediaServerClient extends MediaServerClient {
 
   PlexLiveTvApi? _liveTvApi;
   @override
-  LiveTvApi get liveTvApi => _liveTvApi ??= PlexLiveTvApi(
-    _dio,
-    cloudOnly: cloudOnly,
-    cloudAccountToken: () {
-      final saved = plexAccountTokenForUser?.call(_userId);
-      if (saved != null && saved.isNotEmpty) return saved;
-      // A Cloud-only account's access token already is a Plex account token.
-      // Never use a PMS token as a Cloud fallback.
-      return cloudOnly ? _accessToken : null;
-    },
-  );
+  LiveTvApi get liveTvApi =>
+      _liveTvApi ??= PlexLiveTvApi(_dio, cloudOnly: cloudOnly);
 
   @override
   late final InstantMixApi instantMixApi = PlexInstantMixApi(_dio);
