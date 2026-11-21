@@ -1083,7 +1083,10 @@ class PluginSyncService extends ChangeNotifier {
         'filters': List<String>.of(local),
       });
       if (!current()) return null;
-      if (imported == null) return resolved; // Legacy Moonbase cannot import.
+      if (imported == null) {
+        resolved?.remove('liveTvSavedFilters'); // Keep local pins until import works.
+        return resolved;
+      }
       await _prefs.set(readPref, true);
       if (!current()) return null;
       final fresh = await _fetchResolvedProfile(client, profile);
@@ -1091,7 +1094,8 @@ class PluginSyncService extends ChangeNotifier {
       if (fresh?['liveTvSavedFilters'] != null) return fresh;
       if (resolved != null) resolved['liveTvSavedFilters'] = imported;
     } catch (_) {
-      // Keep local pins when Moonbase cannot accept the import yet.
+      // A failed import must not apply the server's inherited pins over local ones.
+      resolved?.remove('liveTvSavedFilters');
     }
     return current() ? resolved : null;
   }
