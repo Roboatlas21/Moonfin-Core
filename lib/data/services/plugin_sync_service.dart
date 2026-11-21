@@ -1339,7 +1339,8 @@ class PluginSyncService extends ChangeNotifier {
 
       await _refreshCustomThemes(client);
 
-      final resolved = await _fetchResolvedProfile(client, profile);
+      // Manual sync must also import pins saved before Moonbase was installed.
+      final resolved = await _fetchProfileAndImportGuidePins(client, profile);
       if (resolved == null) {
         return false;
       }
