@@ -303,6 +303,27 @@ void main() {
     service.resetState();
   });
 
+  test('a queued pin save never runs under a newly signed-in user', () async {
+    adapter.savedPins = ['group:Sports'];
+    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
+    adapter.resolvedResponseReady = Completer<void>();
+    adapter.resolvedResponseGate = Completer<void>();
+
+    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
+    await adapter.resolvedResponseReady!.future;
+    final saving = service.changePinnedGuideFilter(
+      client, filter: 'group:News', add: true,
+    );
+    // A cached server client can be reused when the account changes.
+    when(() => client.userId).thenReturn('user2');
+    adapter.resolvedResponseGate!.complete();
+    await signingIn;
+    await expectLater(saving, throwsA(isA<StateError>()));
+    expect(adapter.pinActions, isEmpty);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+    service.resetState();
+  });
+
   test('an old server cannot import or apply the active account pins', () async {
     const local = ['group:Sports', 'category:news'];
     await prefs.set(UserPreferences.liveTvSavedFilters, local);
