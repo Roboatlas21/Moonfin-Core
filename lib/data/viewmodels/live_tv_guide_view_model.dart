@@ -612,6 +612,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           keys.remove(key);
         }
         await prefs.set(UserPreferences.liveTvSavedFilters, keys.toList());
+        await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
       }
       _notifyListeners();
     });
