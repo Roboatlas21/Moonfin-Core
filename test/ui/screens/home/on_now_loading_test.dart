@@ -260,7 +260,7 @@ void main() {
         }));
       },
     ));
-    PlexLiveTvFavorites.testHttp = http;
+    PlexLiveTvFavorites.testApi = PlexLiveTvFavoritesApi(dio: http);
     addTearDown(() {
       PlexLiveTvFavorites.resetForTesting();
       http.close();

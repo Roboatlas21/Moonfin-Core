@@ -399,9 +399,11 @@ void main() {
 
     final dvr = PlexLiveTvApi(dio);
     expect((await dvr.getRecommendedPrograms(limit: 2))['Items'], hasLength(2));
-    final combined = (await dvr.getRecommendedPrograms(limit: 3))['Items'] as List;
+    // Three DVR airings fill the first three slots; Free TV fills the fourth.
+    final combined = (await dvr.getRecommendedPrograms(limit: 4))['Items'] as List;
     expect(combined.map((item) => item['ChannelId']), [
-      'channel-2-4', 'channel-2-4', 'channel-plex-abc-66635fc0',
+      'channel-2-4', 'channel-2-9', 'channel-2-4',
+      'channel-plex-abc-66635fc0',
     ]);
   });
 
@@ -418,9 +420,12 @@ void main() {
         handler.next(options);
       }
     }));
+    // Request room for the Free TV hub so its failure is actually exercised.
     final programs = (await PlexLiveTvApi(dio)
-        .getRecommendedPrograms(limit: 3))['Items'] as List;
-    expect(programs, hasLength(2));
+        .getRecommendedPrograms(limit: 4))['Items'] as List;
+    expect(programs.map((item) => item['ChannelId']), [
+      'channel-2-4', 'channel-2-9', 'channel-2-4',
+    ]);
   });
 
   test('Plex On Now falls back to Free TV on DVR transport failures', () async {
