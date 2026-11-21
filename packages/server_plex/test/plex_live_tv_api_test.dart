@@ -43,6 +43,7 @@ const _teletubbies = {
 };
 
 (Dio, _FakeServer) _server() {
+  final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final server = _FakeServer(
     (options) => switch (options.uri.path) {
       '/identity' => {
@@ -210,6 +211,50 @@ const _teletubbies = {
           ],
         },
       },
+      '/hubs/sections/home/whatsOnNow' => {
+        'MediaContainer': {
+          'Hub': [
+            {
+              'Metadata': [
+                {
+                  'type': 'episode',
+                  'title': 'Episode 2',
+                  'grandparentTitle': 'Free TV show',
+                  'Media': [
+                    {
+                      'beginsAt': now - 60,
+                      'endsAt': now + 3600,
+                      'channelIdentifier': 'abc-66635fc0',
+                    },
+                  ],
+                },
+                {
+                  'type': 'movie',
+                  'title': 'Free TV movie',
+                  'Media': [
+                    {
+                      'beginsAt': now - 60,
+                      'endsAt': now + 3600,
+                      'channelIdentifier': 'news-extra',
+                    },
+                  ],
+                },
+                {
+                  'type': 'movie',
+                  'title': 'Expired program',
+                  'Media': [
+                    {
+                      'beginsAt': now - 3600,
+                      'endsAt': now - 60,
+                      'channelIdentifier': 'news-extra',
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      },
       _ => {'MediaContainer': <String, dynamic>{}},
     },
   );
@@ -322,6 +367,64 @@ void main() {
 
 
 
+
+  test('Free TV On Now reads the bounded hub without loading channel grids', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    final first = await api.getRecommendedPrograms(limit: 15, isAiring: true);
+    final second = await api.getRecommendedPrograms(limit: 15, isAiring: true);
+    expect(second, first);
+
+    final items = (first['Items'] as List).cast<Map>();
+    expect(items.map((item) => item['ChannelId']), [
+      'channel-plex-abc-66635fc0',
+      'channel-plex-news-extra',
+    ]);
+    expect(items.first['Name'], 'Free TV show');
+    expect(items.first['Id'], startsWith('airing-plex-'));
+    final hub = server.requests.singleWhere(
+      (request) => request.uri.path == '/hubs/sections/home/whatsOnNow',
+    );
+    expect(hub.queryParameters['X-Plex-Container-Size'], 15);
+    expect(server.requests.any((request) => request.uri.path == '/grid'), isFalse);
+  });
+
+  test('On Now prefers DVR, and an unavailable hub preserves DVR results', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final dvrOnly = await api.getRecommendedPrograms(limit: 2);
+    expect((dvrOnly['Items'] as List), hasLength(2));
+    expect(
+      server.requests.any((r) => r.uri.path == '/hubs/sections/home/whatsOnNow'),
+      isFalse,
+    );
+
+    final mixed = await api.getRecommendedPrograms(limit: 3);
+    final items = (mixed['Items'] as List).cast<Map>();
+    expect(items.map((item) => item['ChannelId']), [
+      'channel-2-4',
+      'channel-2-4',
+      'channel-plex-abc-66635fc0',
+    ]);
+
+    final (failedDio, _) = _server();
+    failedDio.interceptors.insert(0, InterceptorsWrapper(
+      onRequest: (options, handler) {
+        if (options.uri.path == '/hubs/sections/home/whatsOnNow') {
+          handler.reject(DioException(
+            requestOptions: options,
+            type: DioExceptionType.badResponse,
+            response: Response(requestOptions: options, statusCode: 404),
+          ));
+        } else {
+          handler.next(options);
+        }
+      },
+    ));
+    final fallback = await PlexLiveTvApi(failedDio)
+        .getRecommendedPrograms(limit: 3);
+    expect((fallback['Items'] as List), hasLength(2));
+  });
 
   test('every showing of a program is a program of its own', () async {
     final (dio, server) = _server();
