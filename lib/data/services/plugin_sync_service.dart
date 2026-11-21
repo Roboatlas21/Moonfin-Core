@@ -211,6 +211,8 @@ class PluginSyncService extends ChangeNotifier {
   int _settingsStreamReconnectAttempt = 0;
 
   bool _isSyncingFromServer = false;
+  // Order pin saves and incoming settings so an old response cannot win.
+  Future<void> _guidePinSync = Future<void>.value();
   Timer? _pushDebounceTimer;
   static const _pushDebounce = Duration(milliseconds: 1000);
 
@@ -776,14 +778,13 @@ class PluginSyncService extends ChangeNotifier {
       return;
     }
 
-    final profile = syncProfile;
-    final resolved = await _fetchResolvedProfile(client, profile);
-    if (resolved == null) {
-      return;
-    }
-
-    await _applyServerSettings(client, profile, resolved);
-    notifyListeners();
+    await _withGuidePinSync(() async {
+      final profile = syncProfile;
+      final resolved = await _fetchResolvedProfile(client, profile);
+      if (resolved == null) return;
+      await _applyServerSettings(client, profile, resolved);
+      notifyListeners();
+    });
   }
 
   /// Sign-in leaves this running rather than waiting on it. The server can
@@ -980,6 +981,15 @@ class PluginSyncService extends ChangeNotifier {
     return List<String>.from(pins);
   }
 
+  Future<T> _withGuidePinSync<T>(Future<T> Function() work) {
+    final running = _guidePinSync.then((_) => work());
+    _guidePinSync = running.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace __) {},
+    );
+    return running;
+  }
+
   /// Null when sync is not in use, so the guide can continue saving locally.
   /// An actual failed remote write throws and leaves the local choice intact.
   Future<List<String>?> changePinnedGuideFilter(
@@ -992,9 +1002,13 @@ class PluginSyncService extends ChangeNotifier {
         _readingProfileOnSignIn) {
       return null;
     }
-    return _postGuidePinsChange(client, syncProfile, {
-      'action': add ? 'add' : 'remove',
-      'filter': filter,
+    return _withGuidePinSync(() async {
+      final pins = await _postGuidePinsChange(client, syncProfile, {
+        'action': add ? 'add' : 'remove',
+        'filter': filter,
+      });
+      if (pins != null) await _prefs.set(UserPreferences.liveTvSavedFilters, pins);
+      return pins;
     });
   }
 
