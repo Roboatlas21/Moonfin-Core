@@ -952,8 +952,8 @@ class PluginSyncService extends ChangeNotifier {
   }
 
   /// Use the existing settings/profile route for intentional pin changes.
-  /// The server returns the authoritative shared list after applying the edit.
-  Future<List<String>> _postGuidePinsChange(
+  /// A legacy Moonbase may accept the request without supporting pin updates.
+  Future<List<String>?> _postGuidePinsChange(
     MediaServerClient client,
     String profile,
     Map<String, dynamic> change,
@@ -973,6 +973,7 @@ class PluginSyncService extends ChangeNotifier {
     );
     final pins = response.data?['liveTvSavedFilters'] ??
         response.data?['LiveTvSavedFilters'];
+    if (pins == null) return null; // Older Moonbase ignored the pin change.
     if (pins is! List || pins.any((value) => value is! String)) {
       throw const FormatException('Moonbase did not return saved guide filters');
     }
@@ -1012,6 +1013,7 @@ class PluginSyncService extends ChangeNotifier {
         'action': 'initializeIfAbsent',
         'filters': List<String>.of(local),
       });
+      if (imported == null) return resolved; // Legacy Moonbase cannot import.
       final fresh = await _fetchResolvedProfile(client, profile);
       if (fresh?['liveTvSavedFilters'] != null) return fresh;
       if (resolved != null) {
