@@ -508,6 +508,7 @@ class UserPreferences extends ChangeNotifier {
     'live_tv_channel_sort_by',
     'live_tv_last_channel_id',
     'live_tv_saved_filters',
+    'live_tv_saved_filters_unsynced',
     'music_playback_time_display',
     'osdButtonOrderDesktop',
     'osdButtonOrderMobile',
@@ -4103,13 +4104,6 @@ class UserPreferences extends ChangeNotifier {
   static Preference<String> moonbaseUrlForServer(String serverId) =>
       Preference(key: 'pref_moonbase_url_$serverId', defaultValue: '');
 
-  // First successful pin read, separate from whether Moonbase was detected.
-  static Preference<bool> guidePinsReadForServer(String userServerKey) =>
-      Preference(
-        key: 'pref_guide_pins_read_${Uri.encodeComponent(userServerKey)}',
-        defaultValue: false,
-      );
-
   static Preference<bool> pluginSyncInitializedForServer(String serverKey) =>
       Preference(
         key: 'pref_plugin_sync_initialized_$serverKey',
@@ -4257,6 +4251,11 @@ class UserPreferences extends ChangeNotifier {
   static const liveTvSavedFilters = Preference<List<String>>(
     key: 'live_tv_saved_filters',
     defaultValue: [],
+  );
+  // Local edits awaiting Moonbase, scoped to the signed-in server and user.
+  static const liveTvSavedFiltersUnsynced = Preference<bool>(
+    key: 'live_tv_saved_filters_unsynced',
+    defaultValue: false,
   );
 
   /// Last Live TV channel watched on this server/account. Channel IDs are
