@@ -582,6 +582,7 @@ class PluginSyncService extends ChangeNotifier {
     _signInProfileRead = readDone;
     _readingProfileOnSignIn = true;
     final userKey = _userSyncKey(client, serverId: serverId);
+    final current = _guidePinAccountCheck(client, serverId: serverId);
     _signInSettingsRead.remove(userKey);
     var retrying = false;
     try {
@@ -609,11 +610,11 @@ class PluginSyncService extends ChangeNotifier {
           final resolved = await _fetchProfileAndImportGuidePins(
             client, profile, serverId: serverId,
           );
-          if (resolved != null) {
+          if (resolved != null && current()) {
             await _applyServerSettings(client, profile, resolved);
           }
 
-          unawaited(_startSettingsStream(client));
+          if (current()) unawaited(_startSettingsStream(client));
         }
 
         if (availability == _PluginAvailabilityStatus.unknown) {
@@ -639,15 +640,15 @@ class PluginSyncService extends ChangeNotifier {
       final resolved = await _fetchProfileAndImportGuidePins(
         client, profile, serverId: serverId,
       );
-      if (resolved == null) {
+      if (resolved == null || !current()) {
         return;
       }
 
       await _prefs.set(UserPreferences.pluginSyncEnabled, true);
-
+      if (!current()) return;
       await _applyServerSettings(client, profile, resolved);
       await _prefs.set(syncInitializedPref, true);
-      unawaited(_startSettingsStream(client));
+      if (current()) unawaited(_startSettingsStream(client));
     } catch (_) {
       resetState();
     } finally {
@@ -789,11 +790,13 @@ class PluginSyncService extends ChangeNotifier {
       return;
     }
 
-    if (!_isActiveGuidePinAccount(client)) return;
+    final current = _guidePinAccountCheck(client);
+    if (!current()) return;
     await _withGuidePinSync(() async {
+      if (!current()) return;
       final profile = syncProfile;
       final resolved = await _fetchResolvedProfile(client, profile);
-      if (resolved == null) return;
+      if (resolved == null || !current()) return;
       await _applyServerSettings(client, profile, resolved);
       notifyListeners();
     });
@@ -1011,27 +1014,44 @@ class PluginSyncService extends ChangeNotifier {
   }) async {
     // Let sign-in apply the server's pins before sending an intentional edit.
     // Returning null here used to save locally, then lose it to the late read.
-    final userId = client.userId;
-    final scope = _prefs.activeProfileScopeSuffix();
+    final current = _guidePinAccountCheck(client);
+    void requireCurrent() {
+      if (!current()) {
+        throw StateError('Live TV account changed while saving a guide shortcut');
+      }
+    }
+
     while (_signInProfileRead != null) {
       await _signInProfileRead!.future;
     }
-    if (client.userId != userId ||
-        _prefs.activeProfileScopeSuffix() != scope ||
-        !_isActiveGuidePinAccount(client)) {
-      throw StateError('Live TV account changed while saving a guide shortcut');
-    }
+    requireCurrent();
     if (!_pluginAvailable || !_prefs.get(UserPreferences.pluginSyncEnabled)) {
       return null;
     }
     return _withGuidePinSync(() async {
+      requireCurrent(); // The operation may have waited behind another save.
       final pins = await _postGuidePinsChange(client, syncProfile, {
         'action': add ? 'add' : 'remove',
         'filter': filter,
       });
+      requireCurrent(); // A reply from the old account must not update local pins.
       if (pins != null) await _prefs.set(UserPreferences.liveTvSavedFilters, pins);
       return pins;
     });
+  }
+
+  // Capture identity once; a reused client can change user while an async
+  // request waits, even if it is the active client again when it finishes.
+  bool Function() _guidePinAccountCheck(
+    MediaServerClient client, {
+    String? serverId,
+  }) {
+    final userId = client.userId;
+    final scope = _prefs.activeProfileScopeSuffix();
+    return () =>
+        client.userId == userId &&
+        _prefs.activeProfileScopeSuffix() == scope &&
+        _isActiveGuidePinAccount(client, serverId: serverId);
   }
 
   // Pins are stored per server and user. A delayed read from a previous
@@ -1053,9 +1073,10 @@ class PluginSyncService extends ChangeNotifier {
     String profile, {
     String? serverId,
   }) async {
-    if (!_isActiveGuidePinAccount(client, serverId: serverId)) return null;
+    final current = _guidePinAccountCheck(client, serverId: serverId);
+    if (!current()) return null;
     var resolved = await _fetchResolvedProfile(client, profile);
-    if (!_isActiveGuidePinAccount(client, serverId: serverId)) return null;
+    if (!current()) return null;
     final readPref = UserPreferences.guidePinsReadForServer(_userSyncKey(client));
     final local = _prefs.get(UserPreferences.liveTvSavedFilters);
     // Local pins saved before Moonbase was installed take precedence over
@@ -1067,16 +1088,19 @@ class PluginSyncService extends ChangeNotifier {
       if (resolved?['liveTvSavedFilters'] != null) {
         await _prefs.set(readPref, true);
       }
-      return resolved;
+      return current() ? resolved : null;
     }
     try {
       final imported = await _postGuidePinsChange(client, profile, {
         'action': 'initializeIfAbsent',
         'filters': List<String>.of(local),
       });
+      if (!current()) return null;
       if (imported == null) return resolved; // Legacy Moonbase cannot import.
       await _prefs.set(readPref, true);
+      if (!current()) return null;
       final fresh = await _fetchResolvedProfile(client, profile);
+      if (!current()) return null;
       if (fresh?['liveTvSavedFilters'] != null) return fresh;
       if (resolved != null) {
         resolved['liveTvSavedFilters'] = imported;
@@ -1084,7 +1108,7 @@ class PluginSyncService extends ChangeNotifier {
     } catch (_) {
       // Keep local pins when Moonbase cannot accept the import yet.
     }
-    return resolved;
+    return current() ? resolved : null;
   }
 
   Future<void> pushSettings(
@@ -1404,9 +1428,11 @@ class PluginSyncService extends ChangeNotifier {
       await _refreshCustomThemes(client);
 
       // Order the manual pull with pin saves and incoming settings events.
+      final current = _guidePinAccountCheck(client);
       return await _withGuidePinSync(() async {
+        if (!current()) return false;
         final resolved = await _fetchProfileAndImportGuidePins(client, profile);
-        if (resolved == null) return false;
+        if (resolved == null || !current()) return false;
         await _applyServerSettings(client, profile, resolved);
         return true;
       });
