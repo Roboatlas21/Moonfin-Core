@@ -892,11 +892,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         ? <Map<String, dynamic>>[]
         : await _dvrAirings(now, now);
     final programs = <Map<String, dynamic>>[
-      ...limit == null ? dvr : dvr.take(limit),
+      ...(limit == null ? dvr : dvr.take(limit)),
     ];
     final remaining = limit == null
         ? _cloudOnNowLimit
-        : (limit - programs.length).clamp(0, _cloudOnNowLimit);
+        : (limit - programs.length).clamp(0, _cloudOnNowLimit).toInt();
     if (remaining > 0) {
       programs.addAll((await _freeOnNow()).take(remaining));
     }
