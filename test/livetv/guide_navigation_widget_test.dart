@@ -20,6 +20,7 @@ import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_channel_cell.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_now_next_card.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_hero_preview.dart';
 import 'package:moonfin/ui/screens/livetv/guide/guide_window.dart';
+import 'package:moonfin/ui/screens/livetv/guide/guide_layout_profile.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
 import 'package:moonfin/ui/widgets/local_search_field.dart';
 import 'package:moonfin/util/platform_detection.dart';
@@ -311,6 +312,115 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
     await _pumpFrames(tester);
     expect(_focusedLabel(), 'GuideWindowBar:0');
+  });
+
+  // A wider guide needs more time slots than the 900-point fixture.
+  Duration resizedGuideWindow(Size size) {
+    final area = guideAvailableArea(
+      maxWidth: size.width,
+      maxHeight: size.height,
+      landscape: true,
+      miniPlayerMode: false,
+    );
+    return GuideLayoutProfile.fromAvailableArea(
+      availableWidth: area.width,
+      availableHeight: area.height,
+    ).guideWindow;
+  }
+
+  testWidgets('resize survives a reload before the layout callback runs', (
+    tester,
+  ) async {
+    await pumpGuide(tester);
+    final vm = (tester.state(find.byType(LiveTvGuideScreen)) as dynamic)
+        .debugGuideViewModel as LiveTvGuideViewModel;
+    final original = vm.guideWindow;
+    const wider = Size(1700, 700);
+    final expected = resizedGuideWindow(wider);
+    expect(expected, isNot(original));
+
+    final channels = Completer<Map<String, dynamic>>();
+    when(
+      () => liveTvApi.getChannels(
+        startIndex: any(named: 'startIndex'),
+        limit: any(named: 'limit'),
+        sortBy: any(named: 'sortBy'),
+        sortOrder: any(named: 'sortOrder'),
+        fields: any(named: 'fields'),
+        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+        userId: any(named: 'userId'),
+      ),
+    ).thenAnswer((_) => channels.future);
+
+    // Registered before the frame: the reload starts after layout queues
+    // its resize, but before the resize callback can apply it.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(vm.load(window: original, windowStart: vm.windowStart));
+    });
+    tester.view.physicalSize = wider;
+    await tester.pump();
+    expect(vm.state, GuideState.loading);
+
+    channels.complete({
+      'Items': [for (var i = 0; i < channelCount; i++) _channelRaw(i)],
+    });
+    await _pumpFrames(tester);
+    expect(vm.state, GuideState.ready);
+    expect(vm.guideWindow, expected);
+  });
+
+  testWidgets('resize retries when a reload wins while its request is pending', (
+    tester,
+  ) async {
+    await pumpGuide(tester);
+    final vm = (tester.state(find.byType(LiveTvGuideScreen)) as dynamic)
+        .debugGuideViewModel as LiveTvGuideViewModel;
+    final original = vm.guideWindow;
+    const wider = Size(1700, 700);
+    final expected = resizedGuideWindow(wider);
+    expect(expected, isNot(original));
+
+    final heldResize = Completer<Map<String, dynamic>>();
+    var firstResizePending = true;
+    when(
+      () => liveTvApi.getGuide(
+        startDate: any(named: 'startDate'),
+        endDate: any(named: 'endDate'),
+        channelIds: any(named: 'channelIds'),
+        isSports: any(named: 'isSports'),
+        fields: any(named: 'fields'),
+        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+        enableImages: any(named: 'enableImages'),
+        enableUserData: any(named: 'enableUserData'),
+        userId: any(named: 'userId'),
+      ),
+    ).thenAnswer((inv) {
+      final from = inv.namedArguments[#startDate] as DateTime;
+      final to = inv.namedArguments[#endDate] as DateTime;
+      if (firstResizePending && to.difference(from) == expected) {
+        firstResizePending = false;
+        return heldResize.future;
+      }
+      final ids = (inv.namedArguments[#channelIds] as List).cast<String>();
+      return Future.value({
+        'Items': [for (final id in ids) ..._programsFor(id)],
+      });
+    });
+
+    tester.view.physicalSize = wider;
+    await _pumpFrames(tester);
+    expect(firstResizePending, isFalse);
+    expect(vm.guideWindow, original);
+
+    // The older-size reload finishes while the resize request is still
+    // pending. The callback must notice that the resize never committed.
+    await vm.load(window: original, windowStart: vm.windowStart);
+    expect(vm.state, GuideState.ready);
+    expect(vm.guideWindow, original);
+
+    heldResize.complete({'Items': <dynamic>[]});
+    await _pumpFrames(tester);
+    expect(vm.guideWindow, expected);
   });
 
   for (final layout in [InterfaceLayout.tv, InterfaceLayout.phone]) {
