@@ -211,6 +211,50 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
   });
 
+  test('switching sync off keeps queued pins local even after a settings event', () async {
+    adapter.responseReady = Completer<void>();
+    adapter.responseGate = Completer<void>();
+    final first = togglePin('group:Sports');
+    await adapter.responseReady!.future;
+    final local = Completer<void>();
+    final second = service.changePinnedGuideFilter(
+      client, filter: 'group:News', onLocalChange: local.complete,
+    );
+    await local.future;
+    final event = service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    await prefs.set(UserPreferences.pluginSyncEnabled, false);
+    adapter.responseGate!.complete();
+    await first;
+    expect(await second, isNull);
+    await event;
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(resolvedCount(), 0);
+    expect(adapter.savedPins, ['group:Sports']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports', 'group:News']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:News']);
+  });
+
+  test('manual Save acknowledges pending edits and reports a failed transfer', () async {
+    Future<bool> save() => service.pushSettingsForProfile(client, profile: 'tv', force: true);
+    adapter.unavailablePin = 'group:News';
+    expect(await togglePin('group:News'), isNull);
+    expect(await save(), isFalse);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:News']);
+    adapter.unavailablePin = null;
+    adapter.savedPins = ['group:Sports'];
+    expect(await save(), isTrue);
+    expect(adapter.savedPins, ['group:Sports', 'group:News']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
+
+    await prefs.set(UserPreferences.pluginSyncEnabled, false);
+    await togglePin('group:Rejected');
+    await prefs.set(UserPreferences.pluginSyncEnabled, true);
+    adapter.rejectedPin = 'group:Rejected';
+    expect(await save(), isFalse);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
+    expect(adapter.savedPins, ['group:Sports', 'group:News']);
+  });
+
   test('only an explicit empty profile clears cached pins on another device', () async {
     await togglePin('group:News');
     adapter.savedPins = null;
