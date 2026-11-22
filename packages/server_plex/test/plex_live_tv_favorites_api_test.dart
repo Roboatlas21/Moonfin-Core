@@ -6,10 +6,7 @@ import 'package:test/test.dart';
 void main() {
   test('Plex favorites preserve account auth and the complete remote list', () async {
     const device = DeviceInfo(
-      id: 'device',
-      name: 'Test',
-      appName: 'Moonfin',
-      appVersion: '1',
+      id: 'device', name: 'Test', appName: 'Moonfin', appVersion: '1',
     );
     Map<String, dynamic> payload = {
       'MediaContainer': {
@@ -20,25 +17,24 @@ void main() {
       },
     };
     final requests = <RequestOptions>[];
-    final dio = Dio()
-      ..interceptors.add(InterceptorsWrapper(onRequest: (request, handler) {
+    final dio = Dio()..interceptors.add(InterceptorsWrapper(
+      onRequest: (request, handler) {
         requests.add(request);
         handler.resolve(Response(
           requestOptions: request,
           statusCode: 200,
           data: request.method == 'GET' ? payload : null,
         ));
-      }));
+      },
+    ));
     addTearDown(() => dio.close());
     final api = PlexLiveTvFavoritesApi(dio: dio);
-    final rows = await api.readFavorites(
-      deviceInfo: device,
-      accountToken: 'account-token',
-    );
+    Future<List<Map<String, dynamic>>> read() =>
+        api.readFavorites(deviceInfo: device, accountToken: 'account-token');
+
+    final rows = await read();
     await api.writeFavorites(
-      deviceInfo: device,
-      accountToken: 'account-token',
-      rows: rows,
+      deviceInfo: device, accountToken: 'account-token', rows: rows,
     );
     expect(rows, hasLength(2));
     expect(requests.map((r) => r.method), ['GET', 'PUT']);
@@ -50,14 +46,8 @@ void main() {
     expect(requests.last.data, rows);
 
     payload = {'MediaContainer': {'size': 0}};
-    expect(await api.readFavorites(
-      deviceInfo: device,
-      accountToken: 'account-token',
-    ), isEmpty);
+    expect(await read(), isEmpty);
     payload = {'MediaContainer': {'FavoriteChannel': [42]}};
-    await expectLater(
-      api.readFavorites(deviceInfo: device, accountToken: 'account-token'),
-      throwsA(isA<FormatException>()),
-    );
+    await expectLater(read(), throwsA(isA<FormatException>()));
   });
 }

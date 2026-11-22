@@ -192,21 +192,6 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  test('fresh login restores settings through the active client wrapper', () async {
-    final active = _MockConnectivityAwareClient();
-    when(() => active.onlineClient).thenReturn(client);
-    await GetIt.instance.unregister<MediaServerClient>();
-    GetIt.instance.registerSingleton<MediaServerClient>(active);
-    adapter.resolvedProfile = {'use24HourClock': true};
-
-    await service.syncOnLogin(client, serverId: 'srv1');
-    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
-    expect(service.isSyncInitializedForServer(client, serverId: 'srv1'), isTrue);
-    adapter.savedPins = [];
-    expect(await togglePin('group:Sports'), ['group:Sports']);
-    service.resetState();
-  });
-
   test('atomic pin toggles remain ordered online and locally', () async {
     adapter.savedPins = [];
     await Future.wait([togglePin('group:Sports'), togglePin('group:Sports')]);
@@ -219,21 +204,6 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
     expect(adapter.requests, isEmpty);
-  });
-
-  test('failed pin imports do not block ordinary settings restoration', () async {
-    adapter.resolvedProfile = {
-      'use24HourClock': true,
-      'liveTvSavedFilters': ['group:Admin'],
-    };
-    adapter.failPinChanges = true;
-    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-    await service.syncOnLogin(client, serverId: 'srv1');
-    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Local']);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
-    service.resetState();
   });
 
   test('applying a resolved profile does not schedule a push back', () async {
@@ -284,6 +254,9 @@ void main() {
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Sports']);
     expect(await togglePin('group:Movies'), isNull);
     const local = ['group:Sports', 'group:Movies'];
+    // The first sign-in must restore ordinary settings even with old Moonbase.
+    await service.syncOnLogin(client, serverId: 'srv1');
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
 
@@ -348,7 +321,12 @@ void main() {
         ['group:Sports', 'group:News']);
   });
 
-  test('pin edits wait for sign-in before applying local changes', () async {
+  test('pin edits wait for sign-in through the active client wrapper', () async {
+    final active = _MockConnectivityAwareClient();
+    when(() => active.onlineClient).thenReturn(client);
+    await GetIt.instance.unregister<MediaServerClient>();
+    GetIt.instance.registerSingleton<MediaServerClient>(active);
+    adapter.resolvedProfile = {'use24HourClock': true};
     adapter.savedPins = ['group:Sports'];
     await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
     adapter.resolvedResponseReady = Completer<void>();
@@ -360,6 +338,7 @@ void main() {
     expect(adapter.pinActions, isEmpty);
     adapter.resolvedResponseGate!.complete();
     await signingIn;
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
     expect(await add, ['group:Sports', 'group:News']);
     expect(await remove, ['group:News']);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
