@@ -25,6 +25,7 @@ on:
   push:
     branches:
       - main
+      - ci/wizard-v5-pin-tests-20261122
     tags:
       - '[0-9]+.[0-9]+.[0-9]+*'
   schedule:
