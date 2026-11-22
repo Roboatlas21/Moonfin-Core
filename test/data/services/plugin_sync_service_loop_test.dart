@@ -35,6 +35,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   String? unavailablePin;
   String? rejectedPin;
   bool missingProfileUntilPins = false;
+  bool confirmsEmptyPins = false;
   Completer<void>? responseReady;
   Completer<void>? responseGate;
   final List<String> pinActions = [];
@@ -75,7 +76,13 @@ class _RecordingAdapter implements HttpClientAdapter {
       body = {'installed': true, 'settingsSyncEnabled': true};
     } else if (path.contains('/Moonfin/Settings/Resolved/')) {
       if (missingProfileUntilPins && savedPins == null) {
-        return ResponseBody.fromString('', 404);
+        return ResponseBody.fromString(
+          confirmsEmptyPins && options.queryParameters['includeLiveTvSavedFilters'] == true
+              ? '{"liveTvSavedFilters":[]}'
+              : '{}',
+          404,
+          headers: {Headers.contentTypeHeader: [Headers.jsonContentType]},
+        );
       }
       body = {
         ...resolvedProfile,
@@ -184,11 +191,43 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  test('atomic pin toggles preserve request order', () async {
+  test('a second tap updates the guide while the first upload is waiting', () async {
     adapter.savedPins = [];
-    await Future.wait([togglePin('group:Sports'), togglePin('group:Sports')]);
-    expect(adapter.pinActions, ['add', 'remove']);
+    adapter.responseReady = Completer<void>();
+    adapter.responseGate = Completer<void>();
+    final first = togglePin('group:Sports');
+    await adapter.responseReady!.future;
+    final local = Completer<void>();
+    final second = service.changePinnedGuideFilter(
+      client, filter: 'group:Sports', onLocalChange: local.complete,
+    );
+    await local.future;
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+    expect(adapter.pinActions, ['add']);
+    adapter.responseGate!.complete();
+    await Future.wait([first, second]);
+    expect(adapter.pinActions, ['add', 'remove']);
+    expect(adapter.savedPins, isEmpty);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
+  });
+
+  test('only an explicit empty profile clears cached pins on another device', () async {
+    await togglePin('group:News');
+    adapter.savedPins = null;
+    adapter.missingProfileUntilPins = true;
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
+    adapter.confirmsEmptyPins = true;
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+
+    service.resetState();
+    await togglePin('group:Sports');
+    await service.refreshAvailability(client);
+    adapter.failPinChanges = true;
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:Sports']);
   });
 
   test('regular settings updates do not overwrite atomic guide pins', () async {
@@ -363,15 +402,22 @@ void main() {
     adapter.responseGate = Completer<void>();
     final stale = togglePin('group:Movies');
     await adapter.responseReady!.future;
-    final queued = togglePin('group:Kids');
+    final local = Completer<void>();
+    final queued = service.changePinnedGuideFilter(
+      client, filter: 'group:Kids', onLocalChange: local.complete,
+    );
+    await local.future;
     final rejected = expectLater(stale, throwsA(isA<StateError>()));
     final queuedRejected = expectLater(queued, throwsA(isA<StateError>()));
     when(() => client.userId).thenReturn('other');
     adapter.responseGate!.complete();
     await Future.wait([rejected, queuedRejected]);
-    // The original account keeps its local edit. The queued Kids edit never ran.
+    // The old account keeps both local edits. Neither stale reply acknowledges them.
     expect(prefs.get(UserPreferences.liveTvSavedFilters),
-        ['group:Sports', 'group:News', 'group:Movies']);
+        ['group:Sports', 'group:News', 'group:Movies', 'group:Kids']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges),
+        ['add:group:Movies', 'add:group:Kids']);
+    expect(adapter.pinActions, ['add', 'add']);
   });
 
   test('settings events wait for the sign-in pin snapshot to apply', () async {
