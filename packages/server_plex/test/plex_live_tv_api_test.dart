@@ -92,7 +92,7 @@ const _teletubbies = {
               'id': 'abc-66635fc0',
               'vcn': '000',
               'title': 'CW Forever',
-              'genreRatingKeys': ['movie-key', 'news-key', 'unknown'],
+              'genreRatingKeys': [8, '7', 'blank', 'unknown'],
               'thumb': 'https://provider-static.plex.tv/cw.png',
             },
             // Present in All Channels, but deliberately absent from Featured.
@@ -126,8 +126,9 @@ const _teletubbies = {
             {
               'type': 'grid',
               'GridChannelFilter': [
-                {'genreRatingKey': 'news-key', 'title': 'News'},
-                {'genreRatingKey': 'movie-key', 'title': 'Movies'},
+                {'genreRatingKey': 7.0, 'title': ' News '},
+                {'genreRatingKey': '8', 'title': 'Movies'},
+                {'genreRatingKey': 'blank', 'title': '   '},
               ],
               'PromotedGridChannelFilter': [
                 {'key': '/lineups/plex/channels/featured', 'title': 'Featured'},
@@ -328,7 +329,7 @@ void main() {
     expect(badGridRequests, previousRequests);
   });
 
-  test('Plex joins genres and loads Featured on demand', () async {
+  test('Plex matches Moonbase genre names and loads Featured on demand', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
     final lineup = await api.getChannelGroups();

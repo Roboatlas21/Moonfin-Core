@@ -344,6 +344,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     throw const FormatException('Invalid Plex Featured lineup');
   }
 
+  // The provider catalog and channel lineup can encode the same ID differently.
+  static String? _genreKey(Object? key) => switch (key) {
+    String id when id.isNotEmpty => id,
+    double id when id == id.truncateToDouble() => id.toStringAsFixed(0),
+    num id => id.toString(),
+    _ => null,
+  };
+
   Future<_CloudGroups> _providerGroups() async {
     final response = await _dio.get<Map<String, dynamic>>(
       '$plexCloudEpg/',
@@ -359,11 +367,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (feature['type'] != 'grid') continue;
       for (final filter
           in feature['GridChannelFilter'] as List? ?? const []) {
-        if (filter case {
-          'genreRatingKey': String key,
-          'title': String name,
-        } when key.isNotEmpty && name.isNotEmpty) {
-          genres[key] = name;
+        if (filter case {'genreRatingKey': final rawKey, 'title': String title}) {
+          final key = _genreKey(rawKey);
+          final name = title.trim();
+          if (key != null && name.isNotEmpty) genres[key] = name;
         }
       }
       for (final filter
@@ -424,7 +431,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           channel['Id'] as String: {
             if (_hadDvrChannels) ChannelGroupSource.plexFreeTv.groupId,
             for (final key in channel['genreRatingKeys'] as List? ?? const [])
-              ?catalog.genres[key],
+              ?catalog.genres[_genreKey(key)],
           },
       },
       channels: [...dvr, ...free],
