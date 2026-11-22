@@ -589,19 +589,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   Future<void> toggleSavedFilter(GuideFilterChoice choice) async {
     if (!choice.canFavorite) return;
-    final sync = GetIt.instance.isRegistered<PluginSyncService>()
-        ? GetIt.instance<PluginSyncService>()
-        : null;
-    if (sync != null) {
-      await sync.changePinnedGuideFilter(_client, filter: choice.preferenceKey);
-    } else {
-      // The app always registers the service; keep standalone view models usable.
-      final prefs = GetIt.instance<UserPreferences>();
-      final keys = prefs.get(UserPreferences.liveTvSavedFilters).toSet();
-      if (!keys.remove(choice.preferenceKey)) keys.add(choice.preferenceKey);
-      await prefs.set(UserPreferences.liveTvSavedFilters, keys.toList());
-      await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-    }
+    await GetIt.instance<PluginSyncService>().changePinnedGuideFilter(
+      _client, filter: choice.preferenceKey,
+    );
     _notifyListeners();
   }
 

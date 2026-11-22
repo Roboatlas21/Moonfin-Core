@@ -209,7 +209,7 @@ void main() {
 
     adapter.savedPins = [];
     final pins = await service.changePinnedGuideFilter(
-      client, filter: 'group:Sports', add: true,
+      client, filter: 'group:Sports',
     );
     expect(pins, ['group:Sports']);
     service.resetState();
@@ -280,7 +280,6 @@ void main() {
     final updated = await service.changePinnedGuideFilter(
       client,
       filter: 'group:News, English',
-      add: true,
     );
     expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
     expect(updated, [...local, 'group:News, English']);
@@ -300,11 +299,11 @@ void main() {
     adapter.pinResponseReady = Completer<void>();
     adapter.pinResponseGate = Completer<void>();
     final first = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports', add: true,
+      client, filter: 'group:Sports',
     );
     await adapter.pinResponseReady!.future;
     final queued = service.changePinnedGuideFilter(
-      client, filter: 'group:News', add: true,
+      client, filter: 'group:News',
     );
     final firstRejected = expectLater(first, throwsA(isA<StateError>()));
     final queuedRejected = expectLater(queued, throwsA(isA<StateError>()));
@@ -338,7 +337,7 @@ void main() {
     adapter.pinResponseGate = Completer<void>();
 
     final saving = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports', add: true,
+      client, filter: 'group:Sports',
     );
     await adapter.pinResponseReady!.future;
     // Another device adds News after the server handled our Sports request,
@@ -362,7 +361,7 @@ void main() {
     final pulling = service.pullSettingsForProfile(client, profile: 'desktop');
     await adapter.resolvedResponseReady!.future;
     final saving = service.changePinnedGuideFilter(
-      client, filter: 'group:News', add: true,
+      client, filter: 'group:News',
     );
     await Future<void>.delayed(Duration.zero);
     expect(adapter.pinActions, isEmpty, reason: 'save must wait for the manual pull');
@@ -383,10 +382,10 @@ void main() {
     final signingIn = service.syncOnLogin(client, serverId: 'srv1');
     await adapter.resolvedResponseReady!.future;
     final addNews = service.changePinnedGuideFilter(
-      client, filter: 'group:News', add: true,
+      client, filter: 'group:News',
     );
     final removeSports = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports', add: false,
+      client, filter: 'group:Sports',
     );
     expect(adapter.pinActions, isEmpty);
     adapter.resolvedResponseGate!.complete();
@@ -423,15 +422,14 @@ void main() {
     final remote = await service.changePinnedGuideFilter(
       client,
       filter: 'group:Movies',
-      add: true,
     );
     expect(remote, isNull);
     expect(adapter.requests, isEmpty, reason: 'pinning must not discover Moonbase');
 
-    // The guide's local fallback stores the new pin without a plugin.
+    // The service now owns the local fallback as well as remote edits.
     const localWithMovies = [...existing, 'group:Movies'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, localWithMovies);
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), localWithMovies);
+    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
 
     // A later normal availability check and settings sync import all three.
     expect(await service.refreshAvailability(client), isTrue);
@@ -447,17 +445,17 @@ void main() {
     adapter.supportsPinChanges = false;
     adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Admin']};
     const local = ['group:Sports', 'group:Movies'];
+    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Sports']);
     expect(
       await service.changePinnedGuideFilter(
-        client, filter: 'group:Movies', add: true,
+        client, filter: 'group:Movies',
       ),
       isNull,
     );
     expect(postCount(), 1);
     expect(adapter.pinActions, isEmpty);
-    // The guide handles a null result by saving the pin locally.
-    await prefs.set(UserPreferences.liveTvSavedFilters, local);
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
+    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(adapter.savedPins, isNull);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
@@ -530,7 +528,6 @@ void main() {
     final pins = await service.changePinnedGuideFilter(
       client,
       filter: 'group:Movies',
-      add: true,
     );
     expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
     expect(pins, ['group:Movies']);

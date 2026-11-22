@@ -986,12 +986,10 @@ class PluginSyncService extends ChangeNotifier {
     return running;
   }
 
-  /// Explicit callers supply add/remove; the guide omits [add] so rapid
-  /// toggles use the latest pin list inside the same queue as settings updates.
+  /// Toggle the latest queued pin list; Moonbase changes stay atomic.
   Future<List<String>?> changePinnedGuideFilter(
     MediaServerClient client, {
     required String filter,
-    bool? add,
   }) {
     final current = _guidePinAccountCheck(client);
     return _withGuidePinSync(() async {
@@ -1006,7 +1004,7 @@ class PluginSyncService extends ChangeNotifier {
       }
       requireCurrent();
       final keys = _prefs.get(UserPreferences.liveTvSavedFilters).toSet();
-      final shouldAdd = add ?? !keys.contains(filter);
+      final shouldAdd = !keys.contains(filter);
       var canPost =
           _pluginAvailable && _prefs.get(UserPreferences.pluginSyncEnabled);
       if (canPost && _prefs.get(UserPreferences.liveTvSavedFiltersUnsynced)) {
@@ -1022,13 +1020,9 @@ class PluginSyncService extends ChangeNotifier {
       requireCurrent();
       if (pins != null) {
         await _prefs.set(UserPreferences.liveTvSavedFilters, pins);
-      } else if (add == null) {
+      } else {
         // No plugin or an old plugin: keep local edits pending for import.
-        if (shouldAdd) {
-          keys.add(filter);
-        } else {
-          keys.remove(filter);
-        }
+        if (!keys.remove(filter)) keys.add(filter);
         await _prefs.set(UserPreferences.liveTvSavedFilters, keys.toList());
         await _prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
       }
