@@ -87,6 +87,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   static const _cloudGridLife = Duration(minutes: 10);
 
   Future<List<_Dvr>>? _dvrs;
+  bool _hadDvrChannels = false;
   Future<String?>? _favoriteMachineId;
   Future<List<Map<String, dynamic>>>? _cloudChannels;
   Future<ChannelGroupLineup>? _lineupRead;
@@ -198,12 +199,20 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return machine;
   }
 
-  Future<List<Map<String, dynamic>>> _dvrChannels() async {
+  // Missing or inaccessible tuners can be removed from the guide. A timeout
+  // or server failure cannot establish whether their channels still exist.
+  static bool _temporaryDvrFailure(Object error) {
+    final status = error is DioException ? error.response?.statusCode : null;
+    return status == null || status == 408 || status == 429 || status >= 500;
+  }
+
+  Future<_Channels> _dvrChannels({void Function()? onUnavailable}) async {
     final dvrs = await _dvrList();
     if (dvrs.isEmpty) return [];
     // Fetch optional favorite metadata while the DVR lineups are loading.
     final machineIdFuture = _machineIdForFavorites();
     final channels = <({String key, String epg, Map channel})>[];
+    var unavailable = false;
     for (final dvr in dvrs) {
       try {
         final lineup = await plexContainer(
@@ -217,9 +226,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         }
       } catch (error) {
         if (_accessDenied(error)) rethrow;
-        // One unavailable tuner must not hide the other DVRs.
+        if (_temporaryDvrFailure(error)) unavailable = true;
       }
     }
+    if (unavailable) onUnavailable?.call();
     final machineId = await machineIdFuture;
     return [
       for (final entry in channels)
@@ -284,11 +294,17 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   /// One source failing, like plex.tv being unreachable, still leaves the
   /// other's channels.
-  Future<(_Channels, _Channels)> _channelSources({Future<_Channels>? previousFree}) async {
+  Future<(_Channels, _Channels)> _channelSources({
+    Future<_Channels>? previousFree,
+    void Function()? onDvrUnavailable,
+  }) async {
     // Future.wait preserves the original DioException (including 401/403)
     // rather than wrapping failures in ParallelWaitError as record .wait does.
     final results = await Future.wait<_Channels>([
-      _dvrChannels().catchError((_) => <Map<String, dynamic>>[]),
+      _dvrChannels(onUnavailable: onDvrUnavailable).catchError((Object error) {
+        if (_temporaryDvrFailure(error)) onDvrUnavailable?.call();
+        return <Map<String, dynamic>>[];
+      }),
       // A failed Cloud-only lineup is an error, not an empty channel list.
       cloudOnly
           ? _freeChannels()
@@ -374,7 +390,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     // Only a full guide load refreshes the catalog. EPG paging reuses it.
     final previousFree = _cloudChannels;
     _cloudChannels = null;
-    final (dvr, free) = await _channelSources(previousFree: previousFree);
+    _dvrs = null;
+    var dvrUnavailable = false;
+    final (dvr, free) = await _channelSources(
+      previousFree: previousFree,
+      onDvrUnavailable: () => dvrUnavailable = true,
+    );
+    if (dvr.isNotEmpty || !dvrUnavailable) _hadDvrChannels = dvr.isNotEmpty;
     if (free.isEmpty) {
       // Keep DVR channels in their own group when Free TV is unavailable.
       return ChannelGroupLineup(
@@ -383,7 +405,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             channel['Id'] as String: {ChannelGroupSource.dvr.groupId},
         },
         channels: dvr,
-        sources: dvr.isEmpty ? const [] : const [ChannelGroupSource.dvr],
+        sources: _hadDvrChannels ? const [ChannelGroupSource.dvr] : const [],
+        partial: dvrUnavailable,
+        unresolvedChannelIds: dvrUnavailable ? const <String>{} : null,
       );
     }
     // Keep existing groups if the provider metadata is temporarily unavailable.
@@ -398,18 +422,18 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           channel['Id'] as String: {ChannelGroupSource.dvr.groupId},
         for (final channel in free)
           channel['Id'] as String: {
-            if (dvr.isNotEmpty) ChannelGroupSource.plexFreeTv.groupId,
+            if (_hadDvrChannels) ChannelGroupSource.plexFreeTv.groupId,
             for (final key in channel['genreRatingKeys'] as List? ?? const [])
               ?catalog.genres[key],
           },
       },
       channels: [...dvr, ...free],
-      sources: dvr.isEmpty ? const [] : ChannelGroupSource.values,
+      sources: _hadDvrChannels ? ChannelGroupSource.values : const [],
       promoted: catalog.promoted,
-      partial: metadataUnavailable,
+      partial: metadataUnavailable || dvrUnavailable,
       unresolvedChannelIds: metadataUnavailable
           ? {for (final channel in free) channel['Id'] as String}
-          : null,
+          : dvrUnavailable ? const <String>{} : null,
     );
   }
 

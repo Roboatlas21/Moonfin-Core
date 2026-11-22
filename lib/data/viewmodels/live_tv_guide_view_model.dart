@@ -1687,7 +1687,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   void _rebuildGroupChoices({required bool complete}) {
     final promoted = _promoted?.name;
-    final counts = <String, int>{?promoted: 0};
+    final counts = <String, int>{
+      for (final source in _sources) source.groupId: 0,
+      ?promoted: 0,
+    };
     for (final channel in _channels) {
       for (final group in _channelGroups[channel.id] ?? const <String>{}) {
         counts[group] = (counts[group] ?? 0) + 1;

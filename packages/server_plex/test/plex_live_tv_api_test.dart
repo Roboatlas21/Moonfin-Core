@@ -377,6 +377,25 @@ void main() {
     expect(server.requests, hasLength(4));
   });
 
+  test('a DVR outage keeps both source filters until the lineup confirms removal', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final healthy = await api.getChannelGroups();
+    server.failWhen = (r) => r.uri.path.endsWith('/lineups/dvr/channels');
+    server.failureStatus = () => 503;
+    final outage = await api.getChannelGroups();
+    expect(outage.partial, isTrue);
+    expect(outage.sources, healthy.sources);
+    expect(outage.groupsByChannelId['channel-plex-abc-66635fc0'], contains('source:plexFreeTv'));
+    expect(outage.groupsByChannelId.containsKey('channel-2-4'), isFalse);
+
+    server.failWhen = null;
+    expect((await api.getChannelGroups()).groupsByChannelId, healthy.groupsByChannelId);
+    server.failWhen = (r) => r.uri.path.endsWith('/lineups/dvr/channels');
+    server.failureStatus = () => 403;
+    expect((await api.getChannelGroups()).sources, isEmpty);
+  });
+
   test('a Free TV outage preserves the last lineup alongside the DVR', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
