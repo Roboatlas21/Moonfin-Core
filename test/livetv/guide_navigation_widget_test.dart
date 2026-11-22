@@ -739,7 +739,11 @@ void main() {
       expect(picker, findsOneWidget);
 
       DialogBackSuppressor.newBackPress();
-      await _sendKeyAndPump(tester, LogicalKeyboardKey.goBack);
+      await tester.sendKeyEvent(
+        LogicalKeyboardKey.goBack,
+        physicalKey: PhysicalKeyboardKey.escape,
+      );
+      await _pumpFrames(tester);
       expect(picker, findsNothing);
       if (sendsPopRoute) {
         await tester.binding.handlePopRoute();

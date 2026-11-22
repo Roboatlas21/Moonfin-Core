@@ -77,7 +77,7 @@ Map<String, dynamic> _seerrEvent({String route = '/seerr/media/1'}) => {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late PluginSyncService service;
+  late PluginSyncService Function() createService;
   late _StreamAdapter adapter;
   late _MockClient client;
 
@@ -112,7 +112,8 @@ void main() {
     GetIt.instance.registerSingleton<MediaServerClient>(client);
 
     adapter = _StreamAdapter();
-    service = PluginSyncService(
+    // Construct the service in the clock zone that drives its sign-in queue.
+    createService = () => PluginSyncService(
       prefs,
       store,
       dio: Dio(pluginRequestOptions())..httpClientAdapter = adapter,
@@ -125,6 +126,7 @@ void main() {
   group('settings stream', () {
     test('a quiet stream stays open past the server heartbeat', () {
       fakeAsync((async) {
+        final service = createService();
         final heard = <SeerrNotificationEvent>[];
         service.seerrNotifications.listen(heard.add);
         service.syncOnLogin(client, serverId: 'srv1');
@@ -145,6 +147,7 @@ void main() {
       when(() => client.serverType).thenReturn(ServerType.plex);
       when(() => client.baseUrl).thenReturn('http://plex.test:32400');
       fakeAsync((async) {
+        final service = createService();
         final heard = <SeerrNotificationEvent>[];
         service.seerrNotifications.listen(heard.add);
         service.syncOnLogin(client, serverId: 'srv1');
@@ -168,6 +171,7 @@ void main() {
 
     test('a stream quiet past the idle limit opens again', () {
       fakeAsync((async) {
+        final service = createService();
         service.syncOnLogin(client, serverId: 'srv1');
         async.elapse(const Duration(seconds: 5));
         adapter.send(':connected\n\n');
@@ -181,6 +185,9 @@ void main() {
   });
 
   group('Seerr notifications', () {
+    late PluginSyncService service;
+    setUp(() => service = createService());
+
     test('every listener hears one, even after another stops', () async {
       final kept = <SeerrNotificationEvent>[];
       final dropped = service.seerrNotifications.listen((_) {});
