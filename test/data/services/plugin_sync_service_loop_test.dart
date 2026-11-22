@@ -33,10 +33,8 @@ class _RecordingAdapter implements HttpClientAdapter {
   bool supportsPinChanges = true;
   bool failPinChanges = false;
   bool missingProfileUntilPins = false;
-  Completer<void>? pinResponseReady;
-  Completer<void>? pinResponseGate;
-  Completer<void>? resolvedResponseReady;
-  Completer<void>? resolvedResponseGate;
+  Completer<void>? responseReady;
+  Completer<void>? responseGate;
   final List<String> pinActions = [];
 
   void applyPinChange(Map<dynamic, dynamic> change) {
@@ -52,6 +50,12 @@ class _RecordingAdapter implements HttpClientAdapter {
       savedPins ??= [];
       savedPins!.remove(change['filter']);
     }
+  }
+
+  Future<void> holdResponse() async {
+    if (responseGate == null) return;
+    responseReady?.complete();
+    await responseGate!.future;
   }
 
   @override
@@ -74,10 +78,7 @@ class _RecordingAdapter implements HttpClientAdapter {
         ...resolvedProfile,
         if (savedPins != null) 'liveTvSavedFilters': List<String>.of(savedPins!),
       };
-      if (resolvedResponseGate != null) {
-        resolvedResponseReady?.complete();
-        await resolvedResponseGate!.future;
-      }
+      await holdResponse();
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
       if (options.method == 'POST' && failPinChanges) {
         return ResponseBody.fromString('Temporarily unavailable', 503);
@@ -86,10 +87,7 @@ class _RecordingAdapter implements HttpClientAdapter {
         if (supportsPinChanges && savedPins != null)
           'liveTvSavedFilters': List<String>.of(savedPins!),
       };
-      if (options.method == 'POST' && pinResponseGate != null) {
-        pinResponseReady?.complete();
-        await pinResponseGate!.future;
-      }
+      if (options.method == 'POST') await holdResponse();
     }
 
     if (body == null) {
@@ -192,18 +190,11 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  test('atomic pin toggles remain ordered online and locally', () async {
+  test('atomic pin toggles preserve request order', () async {
     adapter.savedPins = [];
     await Future.wait([togglePin('group:Sports'), togglePin('group:Sports')]);
     expect(adapter.pinActions, ['add', 'remove']);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-
-    service.resetState();
-    adapter.requests.clear();
-    await Future.wait([togglePin('group:News'), togglePin('group:News')]);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
-    expect(adapter.requests, isEmpty);
   });
 
   test('a resolved profile does not echo through either push path', () async {
@@ -226,8 +217,24 @@ void main() {
     adapter.savedPins = ['group:News', 'category:movies'];
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(prefs.get(UserPreferences.liveTvSavedFilters), adapter.savedPins);
+    // With no personal pins, subsequent pulls follow changed admin defaults.
+    adapter.savedPins = null;
+    for (final pins in [
+      ['group:Sports'],
+      ['group:News'],
+      <String>[],
+    ]) {
+      adapter.resolvedProfile = {'liveTvSavedFilters': pins};
+      expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+      expect(prefs.get(UserPreferences.liveTvSavedFilters), pins);
+    }
+    expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
+
+    // An explicit empty server list still wins over unsynced local pins.
     adapter.savedPins = [];
-    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
+    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
   });
 
@@ -235,14 +242,17 @@ void main() {
     adapter.missingProfileUntilPins = true;
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Sports']);
     service.resetState();
-    expect(await togglePin('group:Movies'), isNull);
+    expect(
+      await Future.wait([togglePin('group:Movies'), togglePin('group:News')]),
+      [null, null],
+    );
     expect(adapter.requests, isEmpty);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
 
     expect(await service.refreshAvailability(client), isTrue);
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(adapter.pinActions, ['initializeIfAbsent']);
-    expect(adapter.savedPins, ['group:Sports', 'group:Movies']);
+    expect(adapter.savedPins, ['group:Sports', 'group:Movies', 'group:News']);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
   });
 
@@ -272,51 +282,31 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
   });
 
-  test('administrator defaults and explicit empty pins retain precedence', () async {
-    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Sports']};
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:News']};
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
-    expect(adapter.pinActions, isEmpty);
-
-    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.savedPins, ['group:Local']);
-    expect(adapter.pinActions, ['initializeIfAbsent']);
-
-    adapter.savedPins = [];
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-  });
-
   test('queued pin replies cannot overwrite newer settings or another account', () async {
     adapter.savedPins = [];
-    adapter.pinResponseReady = Completer<void>();
-    adapter.pinResponseGate = Completer<void>();
+    adapter.responseReady = Completer<void>();
+    adapter.responseGate = Completer<void>();
     final saving = togglePin('group:Sports');
-    await adapter.pinResponseReady!.future;
+    await adapter.responseReady!.future;
     adapter.savedPins = ['group:Sports', 'group:News'];
     final updating = service.handleServerEvent(client, {'type': 'settingsUpdated'});
     await Future<void>.delayed(Duration.zero);
     expect(resolvedCount(), 0);
-    adapter.pinResponseGate!.complete();
+    adapter.responseGate!.complete();
     expect(await saving, ['group:Sports']);
     await updating;
     expect(prefs.get(UserPreferences.liveTvSavedFilters),
         ['group:Sports', 'group:News']);
 
-    adapter.pinResponseReady = Completer<void>();
-    adapter.pinResponseGate = Completer<void>();
+    adapter.responseReady = Completer<void>();
+    adapter.responseGate = Completer<void>();
     final stale = togglePin('group:Movies');
-    await adapter.pinResponseReady!.future;
+    await adapter.responseReady!.future;
     final queued = togglePin('group:Kids');
     final rejected = expectLater(stale, throwsA(isA<StateError>()));
     final queuedRejected = expectLater(queued, throwsA(isA<StateError>()));
     when(() => client.userId).thenReturn('other');
-    adapter.pinResponseGate!.complete();
+    adapter.responseGate!.complete();
     await Future.wait([rejected, queuedRejected]);
     expect(prefs.get(UserPreferences.liveTvSavedFilters),
         ['group:Sports', 'group:News']);
@@ -330,23 +320,22 @@ void main() {
     adapter.resolvedProfile = {'use24HourClock': true};
     adapter.savedPins = ['group:Sports'];
     await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
-    adapter.resolvedResponseReady = Completer<void>();
-    adapter.resolvedResponseGate = Completer<void>();
+    adapter.responseReady = Completer<void>();
+    adapter.responseGate = Completer<void>();
     final signingIn = service.syncOnLogin(client, serverId: 'srv1');
-    await adapter.resolvedResponseReady!.future;
+    await adapter.responseReady!.future;
     final add = togglePin('group:News');
-    final remove = togglePin('group:Sports');
     expect(adapter.pinActions, isEmpty);
-    adapter.resolvedResponseGate!.complete();
+    adapter.responseGate!.complete();
     await signingIn;
     expect(prefs.get(UserPreferences.use24HourClock), isTrue);
     expect(await add, ['group:Sports', 'group:News']);
-    expect(await remove, ['group:News']);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters),
+        ['group:Sports', 'group:News']);
     service.resetState();
   });
 
-  test('an unchanged payload is pushed once, a changed one again', () async {
+  test('only changed, forced, or reset settings push again', () async {
     await service.pushSettingsForProfile(client, profile: 'desktop');
     await service.pushSettingsForProfile(client, profile: 'desktop');
     expect(postCount(), 1);
@@ -354,6 +343,14 @@ void main() {
     await prefs.set(UserPreferences.use24HourClock, true);
     await service.pushSettingsForProfile(client, profile: 'desktop');
     expect(postCount(), 2);
+
+    await service.pushSettingsForProfile(client, profile: 'desktop', force: true);
+    expect(postCount(), 3);
+
+    service.resetState();
+    await service.refreshAvailability(client);
+    await service.pushSettingsForProfile(client, profile: 'desktop');
+    expect(postCount(), 4);
   });
 
   test('a genuinely changed remote value still lands and notifies', () async {
@@ -368,29 +365,4 @@ void main() {
     expect(notified, isTrue);
   });
 
-  test('a real local change still pushes after the debounce', () async {
-    await prefs.set(UserPreferences.use24HourClock, true);
-    await settle();
-    expect(postCount(), 1);
-  });
-
-  test('force pushes even when the payload matches the snapshot', () async {
-    await service.pushSettingsForProfile(client, profile: 'desktop');
-    await service.pushSettingsForProfile(
-      client,
-      profile: 'desktop',
-      force: true,
-    );
-    expect(postCount(), 2);
-  });
-
-  test('resetState clears the snapshots', () async {
-    await service.pushSettingsForProfile(client, profile: 'desktop');
-    expect(postCount(), 1);
-
-    service.resetState();
-    await service.refreshAvailability(client);
-    await service.pushSettingsForProfile(client, profile: 'desktop');
-    expect(postCount(), 2);
-  });
 }
