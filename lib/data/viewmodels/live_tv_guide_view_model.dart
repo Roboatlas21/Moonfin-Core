@@ -587,42 +587,22 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     ];
   }
 
-  // Serialize local toggles so rapid taps cannot submit the same operation twice.
-  Future<void> _savedFilterOperations = Future<void>.value();
-
-  Future<void> toggleSavedFilter(GuideFilterChoice choice) {
-    if (!choice.canFavorite) return Future<void>.value();
-    final update = _savedFilterOperations.then((_) async {
+  Future<void> toggleSavedFilter(GuideFilterChoice choice) async {
+    if (!choice.canFavorite) return;
+    final sync = GetIt.instance.isRegistered<PluginSyncService>()
+        ? GetIt.instance<PluginSyncService>()
+        : null;
+    if (sync != null) {
+      await sync.changePinnedGuideFilter(_client, filter: choice.preferenceKey);
+    } else {
+      // The app always registers the service; keep standalone view models usable.
       final prefs = GetIt.instance<UserPreferences>();
       final keys = prefs.get(UserPreferences.liveTvSavedFilters).toSet();
-      final key = choice.preferenceKey;
-      final add = !keys.contains(key);
-      final sync = GetIt.instance.isRegistered<PluginSyncService>()
-          ? GetIt.instance<PluginSyncService>()
-          : null;
-      List<String>? shared;
-      if (sync != null) {
-        shared = await sync.changePinnedGuideFilter(_client, filter: key, add: add);
-      }
-      if (shared == null) {
-        // Moonbase applies successful saves inside the settings-sync guard.
-        if (add) {
-          keys.add(key);
-        } else {
-          keys.remove(key);
-        }
-        await prefs.set(UserPreferences.liveTvSavedFilters, keys.toList());
-        await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-      }
-      _notifyListeners();
-    });
-    // Preserve the queue after a failed write while reporting the failure to
-    // the picker, which already displays a save error.
-    _savedFilterOperations = update.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace __) {},
-    );
-    return update;
+      if (!keys.remove(choice.preferenceKey)) keys.add(choice.preferenceKey);
+      await prefs.set(UserPreferences.liveTvSavedFilters, keys.toList());
+      await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
+    }
+    _notifyListeners();
   }
 
   String? _selectedGroup;

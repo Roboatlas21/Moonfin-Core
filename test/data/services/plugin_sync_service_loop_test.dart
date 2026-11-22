@@ -215,6 +215,52 @@ void main() {
     service.resetState();
   });
 
+  test('rapid pin toggles share the server update queue', () async {
+    adapter.savedPins = [];
+    final first = service.changePinnedGuideFilter(
+      client, filter: 'group:Sports',
+    );
+    final second = service.changePinnedGuideFilter(
+      client, filter: 'group:Sports',
+    );
+    await Future.wait([first, second]);
+    expect(adapter.pinActions, ['add', 'remove']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+  });
+
+  test('rapid local pin toggles are ordered without Moonbase', () async {
+    service.resetState();
+    final first = service.changePinnedGuideFilter(
+      client, filter: 'group:Sports',
+    );
+    final second = service.changePinnedGuideFilter(
+      client, filter: 'group:Sports',
+    );
+    await Future.wait([first, second]);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
+    expect(adapter.requests, isEmpty);
+  });
+
+  test('failed pin import cannot block fresh settings restore', () async {
+    adapter.resolvedProfile = {
+      'use24HourClock': true,
+      'liveTvSavedFilters': ['group:Server'],
+    };
+    adapter.failPinChanges = true;
+    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
+    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
+
+    await service.syncOnLogin(client, serverId: 'srv1');
+
+    expect(resolvedCount(), 1);
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Local']);
+    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
+    expect(service.isSyncInitializedForServer(client, serverId: 'srv1'), isTrue);
+    service.resetState();
+  });
+
   test('applying a resolved profile does not schedule a push back', () async {
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     await settle();
