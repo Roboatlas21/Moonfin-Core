@@ -87,6 +87,14 @@ void main() {
     await GetIt.instance.reset();
   });
 
+  HomeRow favoriteChannels([List<AggregatedItem> items = const []]) =>
+      HomeRow(
+        id: 'liveTvFavorites',
+        title: 'Favorite Channels',
+        rowType: HomeRowType.liveTvFavorites,
+        items: items,
+      );
+
   void stubLiveTvRows() {
     when(() => source.hasLiveTvChannels()).thenAnswer((_) async => true);
     when(() => source.loadOnNow('http://server.test')).thenAnswer(
@@ -103,13 +111,8 @@ void main() {
         ],
       ),
     );
-    when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
-      (_) async => const HomeRow(
-        id: 'liveTvFavorites',
-        title: 'Favorite Channels',
-        rowType: HomeRowType.liveTvFavorites,
-      ),
-    );
+    when(() => source.loadFavoritesChannels('http://server.test'))
+        .thenAnswer((_) async => favoriteChannels());
   }
 
   Future<HomeRow> loadPopulatedRow() async {
@@ -285,11 +288,8 @@ void main() {
     when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
       (_) async {
         loads++;
-        return HomeRow(
-          id: 'liveTvFavorites',
-          title: 'Favorite Channels',
-          rowType: HomeRowType.liveTvFavorites,
-          items: prefs.get(Preference<List<String>>(
+        return favoriteChannels(
+          prefs.get(Preference<List<String>>(
             key: 'plex_live_tv_favorite_keys_plex-user',
             defaultValue: const [],
           )).contains('provider://tv.plex.provider.epg\u0000free123')
@@ -334,18 +334,13 @@ void main() {
     when(() => source.loadOnNow('http://server.test'))
         .thenAnswer((_) async => throw Exception('EPG unavailable'));
     when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
-      (_) async => HomeRow(
-        id: 'liveTvFavorites',
-        title: 'Favorite Channels',
-        rowType: HomeRowType.liveTvFavorites,
-        items: [
-          AggregatedItem(
-            id: 'favorite',
-            serverId: 'http://server.test',
-            rawData: {'Type': 'TvChannel'},
-          ),
-        ],
-      ),
+      (_) async => favoriteChannels([
+        AggregatedItem(
+          id: 'favorite',
+          serverId: 'http://server.test',
+          rawData: {'Type': 'TvChannel'},
+        ),
+      ]),
     );
 
     await model.load();
@@ -358,18 +353,13 @@ void main() {
     await enableSections({HomeSectionType.liveTv});
     stubLiveTvRows();
     when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
-      (_) async => HomeRow(
-        id: 'liveTvFavorites',
-        title: 'Favorite Channels',
-        rowType: HomeRowType.liveTvFavorites,
-        items: [
-          AggregatedItem(
-            id: 'favorite',
-            serverId: 'http://server.test',
-            rawData: {'Type': 'TvChannel'},
-          ),
-        ],
-      ),
+      (_) async => favoriteChannels([
+        AggregatedItem(
+          id: 'favorite',
+          serverId: 'http://server.test',
+          rawData: {'Type': 'TvChannel'},
+        ),
+      ]),
     );
     await model.load();
     final ids = model.rows.map((row) => row.id).toList();
@@ -431,14 +421,8 @@ void main() {
       when(() => serverClient.baseUrl).thenReturn('http://server.test');
 
       var favorites = <AggregatedItem>[];
-      when(() => source.loadFavoritesChannels('http://server.test')).thenAnswer(
-        (_) async => HomeRow(
-          id: 'liveTvFavorites',
-          title: 'Favorite Channels',
-          rowType: HomeRowType.liveTvFavorites,
-          items: List.of(favorites),
-        ),
-      );
+      when(() => source.loadFavoritesChannels('http://server.test'))
+          .thenAnswer((_) async => favoriteChannels(List.of(favorites)));
       model.dispose();
       final mediaBar = _MockMediaBar();
       when(() => mediaBar.load(force: any(named: 'force')))

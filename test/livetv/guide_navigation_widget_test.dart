@@ -303,6 +303,31 @@ void main() {
     await _pumpFrames(tester);
   }
 
+  /// Open the guide through a host route so Back and focus restoration are real.
+  Future<void> openGuideRoute(WidgetTester tester) async {
+    tester.view.physicalSize = const Size(900, 700);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const LiveTvGuideScreen(),
+              ),
+            ),
+            child: const Text('open guide'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open guide'));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('TV guide error Retry is reachable from the window bar', (
     tester,
   ) async {
@@ -1273,31 +1298,11 @@ void main() {
     addTearDown(
       () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
     );
-    tester.view.physicalSize = const Size(900, 700);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvLastChannelId,
       'ch3',
     );
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        home: Builder(
-          builder: (context) => ElevatedButton(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const LiveTvGuideScreen(),
-              ),
-            ),
-            child: const Text('open guide'),
-          ),
-        ),
-      ),
-    );
-    await tester.tap(find.text('open guide'));
-    await tester.pumpAndSettle();
+    await openGuideRoute(tester);
     _nodeLabelled(tester, 'GuideChannel:4').requestFocus();
     await tester.pumpAndSettle();
     clearInteractions(liveTvApi);
@@ -1370,28 +1375,7 @@ void main() {
         },
       );
 
-      tester.view.physicalSize = const Size(900, 700);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const LiveTvGuideScreen(),
-                ),
-              ),
-              child: const Text('open guide'),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open guide'));
-      await tester.pumpAndSettle();
+      await openGuideRoute(tester);
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
 
       // Switch to the favorites filter, which excludes the entry channel.
@@ -1442,28 +1426,7 @@ void main() {
         },
       );
 
-      tester.view.physicalSize = const Size(900, 700);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const LiveTvGuideScreen(),
-                ),
-              ),
-              child: const Text('open guide'),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open guide'));
-      await tester.pumpAndSettle();
+      await openGuideRoute(tester);
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
 
       // Establish a selection in the grid before the guide is covered.
@@ -1563,28 +1526,7 @@ void main() {
     'a back press re-homes to the channel the user has since tuned, not '
     'the one playing when the guide opened',
     (tester) async {
-      tester.view.physicalSize = const Size(900, 700);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const LiveTvGuideScreen(),
-                ),
-              ),
-              child: const Text('open guide'),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open guide'));
-      await tester.pumpAndSettle();
+      await openGuideRoute(tester);
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
 
       // Simulate the player having tuned ch2 while the guide sat underneath;
@@ -1619,28 +1561,7 @@ void main() {
   testWidgets(
     'a back press re-homes to row 0 when no channel has ever been tuned',
     (tester) async {
-      tester.view.physicalSize = const Size(900, 700);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      await tester.pumpWidget(
-        MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          supportedLocales: AppLocalizations.supportedLocales,
-          home: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => const LiveTvGuideScreen(),
-                ),
-              ),
-              child: const Text('open guide'),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open guide'));
-      await tester.pumpAndSettle();
+      await openGuideRoute(tester);
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
 
       // liveTvLastChannelId is empty (never tuned), so the guide entered on

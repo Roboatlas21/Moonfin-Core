@@ -130,6 +130,11 @@ const double _stripWidth = ChannelCarouselCard.cardPitch * 5;
 const double _surfaceWidth = _stripWidth + 100;
 const double _stripCentre = _surfaceWidth / 2;
 
+List<GuideChannel> _guideChannels(int count) => [
+  for (var i = 0; i < count; i++)
+    GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
+];
+
 List<ChannelCarouselEntry> _lineup(int count) => List.generate(
   count,
   (i) => ChannelCarouselEntry(
@@ -398,14 +403,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1000, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
-    final channels = [
-      for (var i = 0; i < 6; i++)
-        GuideChannel(
-          id: 'ch$i',
-          name: 'Channel $i',
-          rawData: const {},
-        ),
-    ];
+    final channels = _guideChannels(6);
     final vm = _CarouselGuide(client, channels)..failTopUp = true;
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
     try {
@@ -441,10 +439,7 @@ void main() {
     tester,
   ) async {
     final client = _CarouselClient();
-    final channels = [
-      for (var i = 0; i < 20; i++)
-        GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
-    ];
+    final channels = _guideChannels(20);
     final vm = _CarouselGuide(client, channels)
       ..failedChannels.addAll(['ch10', 'ch14']);
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
@@ -468,10 +463,7 @@ void main() {
 
   testWidgets('failed visible cards retry again after cooldown', (tester) async {
     final client = _CarouselClient();
-    final channels = [
-      for (var i = 0; i < 4; i++)
-        GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
-    ];
+    final channels = _guideChannels(4);
     final vm = _CarouselGuide(client, channels)..failedChannels.add('ch1');
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
     try {
@@ -501,10 +493,7 @@ void main() {
     tester,
   ) async {
     final client = _CarouselClient();
-    final channels = [
-      for (var i = 0; i < 4; i++)
-        GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
-    ];
+    final channels = _guideChannels(4);
     final vm = _CarouselGuide(client, channels)
       ..failedChannels.add('ch1');
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
