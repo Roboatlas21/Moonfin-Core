@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/models/live_tv_recording_state.dart';
@@ -8,6 +10,7 @@ import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 
 import 'package:server_core/server_core.dart';
+import 'package:server_emby/server_emby.dart';
 
 
 class _MockClient extends Mock implements MediaServerClient {}
@@ -141,6 +144,63 @@ void main() {
       when(() => client.serverType).thenReturn(type);
       expect(LiveTvGuideViewModel(client).filters, GuideFilter.values);
     }
+  });
+
+  test('Emby guide keeps channels with malformed optional metadata', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'https://emby.test'));
+    var channelReads = 0;
+    dio.interceptors.add(InterceptorsWrapper(onRequest: (options, handler) {
+      if (options.path == '/LiveTv/Channels') channelReads++;
+      handler.resolve(Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: 200,
+        data: options.path == '/LiveTv/Channels'
+            ? {
+                'Items': [
+                  {
+                    'Id': 'sports',
+                    'Name': 'Sports',
+                    'ChannelNumber': '2',
+                    'ImageTags': {'Primary': 'sports-logo', 'Thumb': 'sports-thumb'},
+                    'UserData': {'IsFavorite': true},
+                    'Tags': ['Sports'],
+                  },
+                  {
+                    'Id': 'news',
+                    'Name': 'News',
+                    'ImageTags': <dynamic>[],
+                    'UserData': <dynamic>[],
+                    'ChannelNumber': 3,
+                    'Tags': ['News'],
+                  },
+                  {'Id': 'invalid', 'Name': 123},
+                ],
+              }
+            : {'Items': <Map<String, dynamic>>[]},
+      ));
+    }));
+    when(() => client.liveTvApi).thenReturn(EmbyLiveTvApi(dio));
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    when(() => client.baseUrl).thenReturn('https://emby.test');
+
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+
+    expect(vm.state, GuideState.ready);
+    expect(channelReads, 1);
+    final channels = {for (final channel in vm.playbackChannels) channel.id: channel};
+    expect(channels.keys, containsAll(['sports', 'news']));
+    expect(channels, hasLength(2));
+    expect(channels['sports']!.imageTag, 'sports-logo');
+    expect(channels['sports']!.rawData['ImageTags'], {
+      'Primary': 'sports-logo',
+      'Thumb': 'sports-thumb',
+    });
+    expect(channels['news']!.imageTag, isNull);
+    expect(channels['news']!.number, isNull);
+    expect(channels['news']!.rawData.containsKey('UserData'), isFalse);
+    expect(vm.availableGroups, ['News', 'Sports']);
   });
 
   group('group membership on guide reload', () {
