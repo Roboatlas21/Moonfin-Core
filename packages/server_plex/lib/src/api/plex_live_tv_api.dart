@@ -1080,7 +1080,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       airing.beginsAt * 1000,
       isUtc: true,
     );
-    final showing = (await _dvrGrid(at, at)).firstWhere(
+    final showing = (await _dvrGrid(at, at)).showings.firstWhere(
       (s) =>
           s.dvr.key == airing.source &&
           s.media['beginsAt'] == airing.beginsAt &&
