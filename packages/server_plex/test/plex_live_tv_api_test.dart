@@ -57,7 +57,7 @@ const _teletubbies = {
   ],
 };
 
-(Dio, _FakeServer) _server() {
+(Dio, _FakeServer) _server({bool secondDvr = false}) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final server = _FakeServer(
     (options) => switch (options.uri.path) {
@@ -68,6 +68,8 @@ const _teletubbies = {
         'MediaContainer': {
           'Dvr': [
             {'key': '2', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:2'},
+            if (secondDvr)
+              {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
           ],
         },
       },
@@ -290,37 +292,13 @@ void main() {
   );
 
   test('a failed DVR preserves healthy DVR channels and programs', () async {
-    final (dio, _) = _server();
+    final (dio, server) = _server(secondDvr: true);
     var badGridRequests = 0;
-    dio.interceptors.insert(
-      0,
-      InterceptorsWrapper(
-        onRequest: (options, handler) {
-          if (options.uri.path == '/livetv/dvrs') {
-            handler.resolve(
-              Response(requestOptions: options, data: {
-                'MediaContainer': {
-                  'Dvr': [
-                    {'key': '2', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:2'},
-                    {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
-                  ],
-                },
-              }),
-            );
-            return;
-          }
-          if (options.uri.path.startsWith('/tv.plex.providers.epg.xmltv:3/')) {
-            if (options.uri.path.endsWith('/grid')) badGridRequests++;
-            handler.reject(DioException(
-              requestOptions: options,
-              type: DioExceptionType.connectionError,
-            ));
-            return;
-          }
-          handler.next(options);
-        },
-      ),
-    );
+    server.failWhen = (options) {
+      final failed = options.uri.path.startsWith('/tv.plex.providers.epg.xmltv:3/');
+      if (failed && options.uri.path.endsWith('/grid')) badGridRequests++;
+      return failed;
+    };
 
     final api = PlexLiveTvApi(dio);
     final lineup = await api.getChannelGroups();
