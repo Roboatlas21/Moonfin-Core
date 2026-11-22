@@ -25,6 +25,7 @@ on:
   push:
     branches:
       - main
+      - ci/wizard-v5-gate-retry2-20261122
     tags:
       - '[0-9]+.[0-9]+.[0-9]+*'
   schedule:
