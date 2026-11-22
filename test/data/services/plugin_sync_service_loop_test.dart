@@ -32,6 +32,8 @@ class _RecordingAdapter implements HttpClientAdapter {
   List<String>? savedPins;
   bool supportsPinChanges = true;
   bool failPinChanges = false;
+  String? unavailablePin;
+  String? rejectedPin;
   bool missingProfileUntilPins = false;
   Completer<void>? responseReady;
   Completer<void>? responseGate;
@@ -81,7 +83,9 @@ class _RecordingAdapter implements HttpClientAdapter {
       };
       await holdResponse();
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
-      if (options.method == 'POST' && failPinChanges) {
+      final filter = options.data?['liveTvSavedFilterChange']?['filter'];
+      if (filter != null && filter == rejectedPin) return ResponseBody.fromString('', 400);
+      if (options.method == 'POST' && (failPinChanges || (filter != null && filter == unavailablePin))) {
         return ResponseBody.fromString('Temporarily unavailable', 503);
       }
       body = {
@@ -158,7 +162,8 @@ void main() {
           adapter.lastPushedProfile = Map<String, dynamic>.from(profile);
         }
         if (body['liveTvSavedFilterChange'] case final Map change
-            when adapter.supportsPinChanges && !adapter.failPinChanges) {
+            when adapter.supportsPinChanges && !adapter.failPinChanges &&
+                change['filter'] != adapter.unavailablePin && change['filter'] != adapter.rejectedPin) {
           adapter.applyPinChange(change);
         }
       }
@@ -288,6 +293,40 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
   });
 
+  test('replay keeps the last choice per group and retires confirmed edits', () async {
+    service.resetState();
+    await togglePin('group:Sports');
+    await togglePin('group:Sports');
+    await togglePin('group:Sports');
+    await togglePin('group:News');
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges),
+        ['add:group:Sports', 'add:group:News']);
+    await service.refreshAvailability(client);
+    adapter.unavailablePin = 'group:News';
+    await service.pullSettingsForProfile(client, profile: 'global');
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:News']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports', 'group:News']);
+    adapter.savedPins!.remove('group:Sports'); // Another device unpins it.
+    adapter.unavailablePin = null;
+    await service.pullSettingsForProfile(client, profile: 'global');
+    expect(adapter.savedPins, ['group:News']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), adapter.savedPins);
+  });
+
+  test('invalid pins surface an error and never block later edits', () async {
+    await expectLater(togglePin('group:${'x' * 1024}'), throwsFormatException);
+    adapter.rejectedPin = 'group:Rejected';
+    await expectLater(togglePin('group:Rejected'), throwsA(isA<DioException>()));
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+    service.resetState();
+    await togglePin('group:Rejected');
+    await togglePin('group:News');
+    await service.refreshAvailability(client);
+    await service.pullSettingsForProfile(client, profile: 'global');
+    expect(adapter.savedPins, ['group:News']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
+  });
+
   test('failed pin POST keeps the intended removal pending', () async {
     adapter.savedPins = ['group:Sports'];
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
@@ -310,6 +349,7 @@ void main() {
     final saving = togglePin('group:Sports');
     await adapter.responseReady!.future;
     adapter.savedPins = ['group:Sports', 'group:News'];
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
     final updating = service.handleServerEvent(client, {'type': 'settingsUpdated'});
     await Future<void>.delayed(Duration.zero);
     expect(resolvedCount(), 0);
@@ -329,8 +369,9 @@ void main() {
     when(() => client.userId).thenReturn('other');
     adapter.responseGate!.complete();
     await Future.wait([rejected, queuedRejected]);
+    // The original account keeps its local edit. The queued Kids edit never ran.
     expect(prefs.get(UserPreferences.liveTvSavedFilters),
-        ['group:Sports', 'group:News']);
+        ['group:Sports', 'group:News', 'group:Movies']);
   });
 
   test('settings events wait for the sign-in pin snapshot to apply', () async {

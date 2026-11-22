@@ -997,6 +997,7 @@ class PluginSyncService extends ChangeNotifier {
   Future<List<String>?> changePinnedGuideFilter(
     MediaServerClient client, {
     required String filter,
+    VoidCallback? onLocalChange,
   }) async {
     final current = _guidePinAccountCheck(client);
     // Sign-in also uses the queue, so wait outside it.
@@ -1006,56 +1007,50 @@ class PluginSyncService extends ChangeNotifier {
     return _withGuidePinSync(() async {
       void requireCurrent() {
         if (!current()) {
-          throw StateError('Live TV account changed while saving a guide shortcut');
+          throw StateError(
+            'Live TV account changed while saving a guide shortcut',
+          );
         }
       }
 
       requireCurrent();
-      final profile = syncProfile;
-      // Both effective keys must belong to the original account.
       final pinsPref = _prefs.getEffectivePreference(
         UserPreferences.liveTvSavedFilters,
       );
       final changesPref = _prefs.getEffectivePreference(
         UserPreferences.liveTvSavedFilterChanges,
       );
-      final shouldAdd = !_prefs.get(pinsPref).contains(filter);
-      final action = shouldAdd ? 'add' : 'remove';
-      var canPost =
-          _pluginAvailable && _prefs.get(UserPreferences.pluginSyncEnabled);
-      if (canPost && _prefs.get(changesPref).isNotEmpty) {
-        canPost = await _replayPendingGuidePins(client, profile) != null;
+      final pins = _prefs.get(UserPreferences.liveTvSavedFilters).toSet();
+      final add = !pins.remove(filter);
+      final length = switch (client.serverType) {
+        ServerType.plex || ServerType.silo => utf8.encode(filter).length,
+        _ => filter.length,
+      };
+      if (add && length > 1024) {
+        throw const FormatException('Guide shortcut is too long');
       }
+      if (add) pins.add(filter);
+      final changes = [
+        for (final change in _prefs.get(
+          UserPreferences.liveTvSavedFilterChanges,
+        ))
+          if (change != 'add:$filter' && change != 'remove:$filter') change,
+        if (length <= 1024) '${add ? 'add' : 'remove'}:$filter',
+      ];
+      await _prefs.set(changesPref, changes);
+      await _prefs.set(pinsPref, pins.toList());
       requireCurrent();
-      List<String>? pins;
-      if (canPost) {
-        try {
-          pins = await _postGuidePinsChange(client, profile, {
-            'action': action,
-            'filter': filter,
-          });
-        } catch (_) {
-          // An uncertain POST can be retried with the same add/remove intent.
-        }
+      onLocalChange?.call();
+      if (!_pluginAvailable || !_prefs.get(UserPreferences.pluginSyncEnabled)) {
+        return null;
       }
+      final saved = await _replayPendingGuidePins(
+        client,
+        syncProfile,
+        editedFilter: filter,
+      );
       requireCurrent();
-      if (pins != null) {
-        await _prefs.set(pinsPref, pins);
-      } else {
-        // Save intent first so a failed list write remains recoverable.
-        await _prefs.set(changesPref, [
-          ..._prefs.get(changesPref),
-          '$action:$filter',
-        ]);
-        final local = _prefs.get(pinsPref).toSet();
-        if (shouldAdd) {
-          local.add(filter);
-        } else {
-          local.remove(filter);
-        }
-        await _prefs.set(pinsPref, local.toList());
-      }
-      return pins;
+      return saved;
     });
   }
 
@@ -1083,45 +1078,65 @@ class PluginSyncService extends ChangeNotifier {
         (serverId == null || scope == '${serverId}_${userId ?? ''}');
   }
 
-  /// Replay offline edits against the current server list. Each operation
-  /// is idempotent, so a failed or partial replay can safely retry.
+  /// Apply each pending choice once its predecessor has been acknowledged.
   Future<List<String>?> _replayPendingGuidePins(
     MediaServerClient client,
     String profile, {
     String? serverId,
+    String? editedFilter,
   }) async {
     final current = _guidePinAccountCheck(client, serverId: serverId);
     if (!current()) return null;
-    final changes = _prefs.get(UserPreferences.liveTvSavedFilterChanges);
     final pinsPref = _prefs.getEffectivePreference(
       UserPreferences.liveTvSavedFilters,
     );
     final changesPref = _prefs.getEffectivePreference(
       UserPreferences.liveTvSavedFilterChanges,
     );
-    List<String>? pins;
-    try {
-      for (final encoded in changes) {
-        if (!current()) return null;
-        final separator = encoded.indexOf(':');
-        if (separator <= 0 || separator == encoded.length - 1) return null;
-        final action = encoded.substring(0, separator);
-        if (action != 'add' && action != 'remove') return null;
-        pins = await _postGuidePinsChange(client, profile, {
-          'action': action,
-          'filter': encoded.substring(separator + 1),
-        });
-        if (pins == null || !current()) return null;
-      }
-      if (pins == null) return null;
-      // Acknowledged pins must be saved before pending actions are cleared.
-      // Both writes retain the original account scope.
-      await _prefs.set(pinsPref, pins);
-      await _prefs.set(changesPref, <String>[]);
-      return current() ? pins : null;
-    } catch (_) {
-      return null;
+    // Older queues can contain several edits to the same shortcut.
+    final latest = <String, String>{};
+    for (final entry in _prefs.get(UserPreferences.liveTvSavedFilterChanges)) {
+      final key = entry.substring(entry.indexOf(':') + 1);
+      latest.remove(key);
+      latest[key] = entry;
     }
+    final changes = latest.values.toList();
+    List<String>? pins;
+    for (var i = 0; i < changes.length; i++) {
+      if (!current()) return null;
+      final encoded = changes[i];
+      final separator = encoded.indexOf(':');
+      final action = separator < 0 ? '' : encoded.substring(0, separator);
+      final filter = encoded.substring(separator + 1);
+      DioException? rejection;
+      if ((action == 'add' || action == 'remove') && filter.isNotEmpty) {
+        try {
+          final saved = await _postGuidePinsChange(client, profile, {
+            'action': action,
+            'filter': filter,
+          });
+          if (!current() || saved == null) return null;
+          pins = saved;
+        } on DioException catch (error) {
+          if (!current() || error.response?.statusCode != 400) return null;
+          // Undo a rejected local edit. Later entries can still be sent.
+          final local = _prefs.get(pinsPref).toSet();
+          if (action == 'add') {
+            local.remove(filter);
+          } else {
+            local.add(filter);
+          }
+          await _prefs.set(pinsPref, local.toList());
+          if (filter == editedFilter) rejection = error;
+        } catch (_) {
+          return null;
+        }
+      }
+      await _prefs.set(changesPref, changes.sublist(i + 1));
+      if (rejection != null) throw rejection;
+    }
+    if (current() && pins != null) await _prefs.set(pinsPref, pins);
+    return current() ? pins : null;
   }
 
   Future<Map<String, dynamic>?> _fetchProfileAndImportGuidePins(
@@ -1134,10 +1149,15 @@ class PluginSyncService extends ChangeNotifier {
       return resolved;
     }
     final pins = await _replayPendingGuidePins(
-      client, profile, serverId: serverId,
+      client,
+      profile,
+      serverId: serverId,
     );
     if (pins == null) {
-      // Keep offline edits visible until the entire replay succeeds.
+      if (_prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
+        return resolved;
+      }
+      // Keep offline edits visible until the remaining requests succeed.
       resolved?.remove('liveTvSavedFilters');
       resolved?.remove('LiveTvSavedFilters');
     } else {
@@ -1492,34 +1512,41 @@ class PluginSyncService extends ChangeNotifier {
     if (!_prefs.get(UserPreferences.pluginSyncEnabled)) return false;
     if (!supportedProfiles.contains(profile)) return false;
 
-    final ep = await moonbaseEndpoint(client, _dio);
-    if (ep == null) return false;
-    final headers = ep.headers;
+    final current = _guidePinAccountCheck(client);
+    final reset = await _withGuidePinSync(() async {
+      if (!current()) return false;
+      final ep = await moonbaseEndpoint(client, _dio);
+      if (ep == null || !current()) return false;
 
-    // A push queued by an earlier edit would put the old settings back moments
-    // after the delete, so drop it before anything is removed.
-    _pushDebounceTimer?.cancel();
+      // A push queued by an earlier edit would put the old settings back moments
+      // after the delete, so drop it before anything is removed.
+      _pushDebounceTimer?.cancel();
 
-    try {
-      await _dio.delete(
-        profile == 'global'
-            ? '${ep.base}/Moonfin/Settings'
-            : '${ep.base}/Moonfin/Settings/Profile/$profile',
-        options: Options(headers: headers),
-      );
-    } catch (_) {
-      return false;
-    }
+      try {
+        await _dio.delete(
+          profile == 'global'
+              ? '${ep.base}/Moonfin/Settings'
+              : '${ep.base}/Moonfin/Settings/Profile/$profile',
+          options: Options(headers: ep.headers),
+        );
+      } catch (_) {
+        return false;
+      }
 
-    // Nothing this device sent still stands, so a later push must not be
-    // skipped for matching a snapshot the server no longer holds.
-    if (profile == 'global') {
-      _lastSyncedProfileJson.clear();
-    } else {
-      _lastSyncedProfileJson.remove(_snapshotKey(client, profile));
-    }
+      if (!current()) return false;
 
-    await _restoreLocalDefaults();
+      // Nothing this device sent still stands, so a later push must not be
+      // skipped for matching a snapshot the server no longer holds.
+      if (profile == 'global') {
+        _lastSyncedProfileJson.clear();
+      } else {
+        _lastSyncedProfileJson.remove(_snapshotKey(client, profile));
+      }
+
+      await _restoreLocalDefaults(global: profile == 'global');
+      return true;
+    });
+    if (!reset || !current()) return false;
 
     // Admin defaults, plus the global profile when this was a device one, are
     // what the profile resolves to from here on.
@@ -1534,16 +1561,29 @@ class PluginSyncService extends ChangeNotifier {
   /// Guarded and batched the way the apply path is, because these writes must
   /// not read back as a local edit and push themselves straight to the server
   /// that was just cleared.
-  Future<void> _restoreLocalDefaults() async {
+  Future<void> _restoreLocalDefaults({required bool global}) async {
     _isSyncingFromServer = true;
     try {
-      await _prefs.batchNotifications(_restoreLocalDefaultsUnbatched);
+      await _prefs.batchNotifications(
+        () => _restoreLocalDefaultsUnbatched(global),
+      );
     } finally {
       _isSyncingFromServer = false;
     }
   }
 
-  Future<void> _restoreLocalDefaultsUnbatched() async {
+  Future<void> _restoreLocalDefaultsUnbatched(bool global) async {
+    if (global) {
+      final pins = _prefs.getEffectivePreference(
+        UserPreferences.liveTvSavedFilters,
+      );
+      final changes = _prefs.getEffectivePreference(
+        UserPreferences.liveTvSavedFilterChanges,
+      );
+      await _prefs.set(changes, <String>[]);
+      await _prefs.set(pins, <String>[]);
+    }
+
     // removePreference rather than a plain store delete, because reads fall
     // back to the unscoped key when the scoped one is gone, and a value from
     // before per-server scoping would resurface instead of the default.
