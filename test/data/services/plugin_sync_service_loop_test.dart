@@ -116,6 +116,9 @@ void main() {
   late PluginSyncService service;
   late _MockClient client;
 
+  Future<List<String>?> togglePin(String filter) =>
+      service.changePinnedGuideFilter(client, filter: filter);
+
   int postCount() => adapter.requests
       .where((r) => r.startsWith('POST') && r.contains('/Settings/Profile/'))
       .length;
@@ -208,21 +211,15 @@ void main() {
     expect(service.isSyncInitializedForServer(client, serverId: 'srv1'), isTrue);
 
     adapter.savedPins = [];
-    final pins = await service.changePinnedGuideFilter(
-      client, filter: 'group:Sports',
-    );
+    final pins = await togglePin('group:Sports');
     expect(pins, ['group:Sports']);
     service.resetState();
   });
 
   test('rapid pin toggles share the server update queue', () async {
     adapter.savedPins = [];
-    final first = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports',
-    );
-    final second = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports',
-    );
+    final first = togglePin('group:Sports');
+    final second = togglePin('group:Sports');
     await Future.wait([first, second]);
     expect(adapter.pinActions, ['add', 'remove']);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
@@ -230,12 +227,8 @@ void main() {
 
   test('rapid local pin toggles are ordered without Moonbase', () async {
     service.resetState();
-    final first = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports',
-    );
-    final second = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports',
-    );
+    final first = togglePin('group:Sports');
+    final second = togglePin('group:Sports');
     await Future.wait([first, second]);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
@@ -277,10 +270,7 @@ void main() {
     expect(adapter.lastPushedProfile?.containsKey('liveTvSavedFilters'), isFalse);
 
     // Import pending pins before the first atomic edit, without a prior pull.
-    final updated = await service.changePinnedGuideFilter(
-      client,
-      filter: 'group:News, English',
-    );
+    final updated = await togglePin('group:News, English');
     expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
     expect(updated, [...local, 'group:News, English']);
 
@@ -298,13 +288,9 @@ void main() {
     adapter.savedPins = [];
     adapter.pinResponseReady = Completer<void>();
     adapter.pinResponseGate = Completer<void>();
-    final first = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports',
-    );
+    final first = togglePin('group:Sports');
     await adapter.pinResponseReady!.future;
-    final queued = service.changePinnedGuideFilter(
-      client, filter: 'group:News',
-    );
+    final queued = togglePin('group:News');
     final firstRejected = expectLater(first, throwsA(isA<StateError>()));
     final queuedRejected = expectLater(queued, throwsA(isA<StateError>()));
     when(() => client.userId).thenReturn('user2');
@@ -336,9 +322,7 @@ void main() {
     adapter.pinResponseReady = Completer<void>();
     adapter.pinResponseGate = Completer<void>();
 
-    final saving = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports',
-    );
+    final saving = togglePin('group:Sports');
     await adapter.pinResponseReady!.future;
     // Another device adds News after the server handled our Sports request,
     // but before its older response reaches this device.
@@ -360,9 +344,7 @@ void main() {
 
     final pulling = service.pullSettingsForProfile(client, profile: 'desktop');
     await adapter.resolvedResponseReady!.future;
-    final saving = service.changePinnedGuideFilter(
-      client, filter: 'group:News',
-    );
+    final saving = togglePin('group:News');
     await Future<void>.delayed(Duration.zero);
     expect(adapter.pinActions, isEmpty, reason: 'save must wait for the manual pull');
 
@@ -381,12 +363,8 @@ void main() {
 
     final signingIn = service.syncOnLogin(client, serverId: 'srv1');
     await adapter.resolvedResponseReady!.future;
-    final addNews = service.changePinnedGuideFilter(
-      client, filter: 'group:News',
-    );
-    final removeSports = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports',
-    );
+    final addNews = togglePin('group:News');
+    final removeSports = togglePin('group:Sports');
     expect(adapter.pinActions, isEmpty);
     adapter.resolvedResponseGate!.complete();
     await signingIn;
@@ -419,10 +397,7 @@ void main() {
     await prefs.set(UserPreferences.liveTvSavedFilters, existing);
     service.resetState(); // Moonbase has not been detected in this session.
 
-    final remote = await service.changePinnedGuideFilter(
-      client,
-      filter: 'group:Movies',
-    );
+    final remote = await togglePin('group:Movies');
     expect(remote, isNull);
     expect(adapter.requests, isEmpty, reason: 'pinning must not discover Moonbase');
 
@@ -447,9 +422,7 @@ void main() {
     const local = ['group:Sports', 'group:Movies'];
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Sports']);
     expect(
-      await service.changePinnedGuideFilter(
-        client, filter: 'group:Movies',
-      ),
+      await togglePin('group:Movies'),
       isNull,
     );
     expect(postCount(), 1);
@@ -525,10 +498,7 @@ void main() {
     expect(adapter.pinActions, ['initializeIfAbsent']);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-    final pins = await service.changePinnedGuideFilter(
-      client,
-      filter: 'group:Movies',
-    );
+    final pins = await togglePin('group:Movies');
     expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
     expect(pins, ['group:Movies']);
   });

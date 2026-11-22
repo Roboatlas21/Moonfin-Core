@@ -159,6 +159,28 @@ List<double> _horizontalOffsets(WidgetTester tester) => tester
     .map((state) => state.position.pixels)
     .toList();
 
+Future<Map<String, dynamic>> _channelsRequest(LiveTvApi api) => api.getChannels(
+  startIndex: any(named: 'startIndex'),
+  limit: any(named: 'limit'),
+  sortBy: any(named: 'sortBy'),
+  sortOrder: any(named: 'sortOrder'),
+  fields: any(named: 'fields'),
+  enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+  userId: any(named: 'userId'),
+);
+
+Future<Map<String, dynamic>> _guideRequest(LiveTvApi api) => api.getGuide(
+  startDate: any(named: 'startDate'),
+  endDate: any(named: 'endDate'),
+  channelIds: any(named: 'channelIds'),
+  isSports: any(named: 'isSports'),
+  fields: any(named: 'fields'),
+  enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
+  enableImages: any(named: 'enableImages'),
+  enableUserData: any(named: 'enableUserData'),
+  userId: any(named: 'userId'),
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -207,35 +229,13 @@ void main() {
         .thenAnswer((_) async => const ChannelGroupLineup({}));
     when(() => client.userId).thenReturn('user');
 
-    when(
-      () => liveTvApi.getChannels(
-        startIndex: any(named: 'startIndex'),
-        limit: any(named: 'limit'),
-        sortBy: any(named: 'sortBy'),
-        sortOrder: any(named: 'sortOrder'),
-        fields: any(named: 'fields'),
-        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-        userId: any(named: 'userId'),
-      ),
-    ).thenAnswer(
+    when(() => _channelsRequest(liveTvApi)).thenAnswer(
       (_) async => <String, dynamic>{
         'Items': [for (var i = 0; i < channelCount; i++) _channelRaw(i)],
       },
     );
 
-    when(
-      () => liveTvApi.getGuide(
-        startDate: any(named: 'startDate'),
-        endDate: any(named: 'endDate'),
-        channelIds: any(named: 'channelIds'),
-        isSports: any(named: 'isSports'),
-        fields: any(named: 'fields'),
-        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-        enableImages: any(named: 'enableImages'),
-        enableUserData: any(named: 'enableUserData'),
-        userId: any(named: 'userId'),
-      ),
-    ).thenAnswer((invocation) async {
+    when(() => _guideRequest(liveTvApi)).thenAnswer((invocation) async {
       if (guideFailure case final failure?) throw failure;
       final ids =
           (invocation.namedArguments[#channelIds] as List?)?.cast<String>() ??
@@ -303,6 +303,26 @@ void main() {
     await _pumpFrames(tester);
   }
 
+  void stubFavoriteChannel(int index) {
+    final favorite = _channelRaw(index)
+      ..['UserData'] = <String, dynamic>{'IsFavorite': true};
+    when(() => _channelsRequest(liveTvApi)).thenAnswer(
+      (_) async => <String, dynamic>{
+        'Items': [
+          for (var i = 0; i < channelCount; i++)
+            if (i == index) favorite else _channelRaw(i),
+        ],
+      },
+    );
+  }
+
+  void useTvLayout() {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(
+      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+    );
+  }
+
   /// Open the guide through a host route so Back and focus restoration are real.
   Future<void> openGuideRoute(WidgetTester tester) async {
     tester.view.physicalSize = const Size(900, 700);
@@ -331,10 +351,7 @@ void main() {
   testWidgets('TV guide error Retry is reachable from the window bar', (
     tester,
   ) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
+    useTvLayout();
     guideFailure = Exception('Guide unavailable');
     await pumpGuide(tester);
     expect(find.text('Retry'), findsOneWidget);
@@ -374,17 +391,7 @@ void main() {
     expect(expected, isNot(original));
 
     final channels = Completer<Map<String, dynamic>>();
-    when(
-      () => liveTvApi.getChannels(
-        startIndex: any(named: 'startIndex'),
-        limit: any(named: 'limit'),
-        sortBy: any(named: 'sortBy'),
-        sortOrder: any(named: 'sortOrder'),
-        fields: any(named: 'fields'),
-        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-        userId: any(named: 'userId'),
-      ),
-    ).thenAnswer((_) => channels.future);
+    when(() => _channelsRequest(liveTvApi)).thenAnswer((_) => channels.future);
 
     // Registered before the frame: the reload starts after layout queues
     // its resize, but before the resize callback can apply it.
@@ -416,19 +423,7 @@ void main() {
 
     final heldResize = Completer<Map<String, dynamic>>();
     var firstResizePending = true;
-    when(
-      () => liveTvApi.getGuide(
-        startDate: any(named: 'startDate'),
-        endDate: any(named: 'endDate'),
-        channelIds: any(named: 'channelIds'),
-        isSports: any(named: 'isSports'),
-        fields: any(named: 'fields'),
-        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-        enableImages: any(named: 'enableImages'),
-        enableUserData: any(named: 'enableUserData'),
-        userId: any(named: 'userId'),
-      ),
-    ).thenAnswer((inv) {
+    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) {
       final from = inv.namedArguments[#startDate] as DateTime;
       final to = inv.namedArguments[#endDate] as DateTime;
       if (firstResizePending && to.difference(from) == expected) {
@@ -473,19 +468,7 @@ void main() {
           programmeCategories: {'sports'},
         ),
       );
-      when(
-        () => liveTvApi.getGuide(
-          startDate: any(named: 'startDate'),
-          endDate: any(named: 'endDate'),
-          channelIds: any(named: 'channelIds'),
-          isSports: any(named: 'isSports'),
-          fields: any(named: 'fields'),
-          enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-          enableImages: any(named: 'enableImages'),
-          enableUserData: any(named: 'enableUserData'),
-          userId: any(named: 'userId'),
-        ),
-      ).thenAnswer((inv) async {
+      when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
         final ids =
             (inv.namedArguments[#channelIds] as List?)?.cast<String>() ??
             const <String>[];
@@ -539,10 +522,7 @@ void main() {
   testWidgets('playback uses the guide filter until a mini-guide selection', (
     tester,
   ) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
+    useTvLayout();
     tester.view.physicalSize = const Size(900, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -668,10 +648,7 @@ void main() {
 
 
   testWidgets('TV picker OK selects and Right or Back cancels', (tester) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
+    useTvLayout();
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvCategoryDisplay,
       LiveTvCategoryDisplay.groups,
@@ -710,10 +687,7 @@ void main() {
   });
 
   testWidgets('holding Select pins a group and reports storage errors', (tester) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
+    useTvLayout();
     final prefs = _PickerPreferences(GetIt.instance<PreferenceStore>());
     await GetIt.instance.unregister<UserPreferences>();
     GetIt.instance.registerSingleton<UserPreferences>(prefs);
@@ -790,10 +764,7 @@ void main() {
   );
 
   testWidgets('holding Select updates Favorites and rolls back failures', (tester) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
+    useTvLayout();
     userDataSync.reset();
     addTearDown(userDataSync.reset);
     final api = _MockUserLibrary();
@@ -1294,10 +1265,7 @@ void main() {
   testWidgets('TV back returns to the tuned channel, then header, then exits', (
     tester,
   ) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
+    useTvLayout();
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvLastChannelId,
       'ch3',
@@ -1354,26 +1322,7 @@ void main() {
       // ch5 is the only favorite; the entry channel (ch0, the default when no
       // last-channel preference is set) is not, so switching to the
       // favorites filter drops the entry channel from filteredChannels.
-      final favoriteChannel = _channelRaw(5)
-        ..['UserData'] = <String, dynamic>{'IsFavorite': true};
-      when(
-        () => liveTvApi.getChannels(
-          startIndex: any(named: 'startIndex'),
-          limit: any(named: 'limit'),
-          sortBy: any(named: 'sortBy'),
-          sortOrder: any(named: 'sortOrder'),
-          fields: any(named: 'fields'),
-          enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-          userId: any(named: 'userId'),
-        ),
-      ).thenAnswer(
-        (_) async => <String, dynamic>{
-          'Items': [
-            for (var i = 0; i < channelCount; i++)
-              if (i == 5) favoriteChannel else _channelRaw(i),
-          ],
-        },
-      );
+      stubFavoriteChannel(5);
 
       await openGuideRoute(tester);
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
@@ -1405,26 +1354,7 @@ void main() {
       // ch5 is the only favorite, so switching to the favorites filter later
       // drops every other channel (including the one holding the current
       // selection) from filteredChannels.
-      final favoriteChannel = _channelRaw(5)
-        ..['UserData'] = <String, dynamic>{'IsFavorite': true};
-      when(
-        () => liveTvApi.getChannels(
-          startIndex: any(named: 'startIndex'),
-          limit: any(named: 'limit'),
-          sortBy: any(named: 'sortBy'),
-          sortOrder: any(named: 'sortOrder'),
-          fields: any(named: 'fields'),
-          enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-          userId: any(named: 'userId'),
-        ),
-      ).thenAnswer(
-        (_) async => <String, dynamic>{
-          'Items': [
-            for (var i = 0; i < channelCount; i++)
-              if (i == 5) favoriteChannel else _channelRaw(i),
-          ],
-        },
-      );
+      stubFavoriteChannel(5);
 
       await openGuideRoute(tester);
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
@@ -1598,26 +1528,7 @@ void main() {
       // ch5 is the only favorite; switching to favorites collapses the
       // lineup to that one channel, so row 0 -- still focused from entry --
       // now holds ch5 instead of the entry channel ch0.
-      final favoriteChannel = _channelRaw(5)
-        ..['UserData'] = <String, dynamic>{'IsFavorite': true};
-      when(
-        () => liveTvApi.getChannels(
-          startIndex: any(named: 'startIndex'),
-          limit: any(named: 'limit'),
-          sortBy: any(named: 'sortBy'),
-          sortOrder: any(named: 'sortOrder'),
-          fields: any(named: 'fields'),
-          enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-          userId: any(named: 'userId'),
-        ),
-      ).thenAnswer(
-        (_) async => <String, dynamic>{
-          'Items': [
-            for (var i = 0; i < channelCount; i++)
-              if (i == 5) favoriteChannel else _channelRaw(i),
-          ],
-        },
-      );
+      stubFavoriteChannel(5);
 
       await pumpGuide(tester);
 
