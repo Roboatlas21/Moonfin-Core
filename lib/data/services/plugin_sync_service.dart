@@ -1157,8 +1157,8 @@ class PluginSyncService extends ChangeNotifier {
     String profile, {
     String? serverId,
   }) async {
-    final current = _guidePinAccountCheck(client, serverId: serverId);
-    var resolved = await _fetchResolvedProfile(client, profile);
+    final current = _guidePinAccountCheck(client);
+    var resolved = await _fetchResolvedProfile(client, profile, serverId: serverId);
     if (!current()) return null;
     if (_prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
       return resolved;
@@ -1178,7 +1178,7 @@ class PluginSyncService extends ChangeNotifier {
       resolved?.remove('LiveTvSavedFilters');
     } else {
       // A pin change can create a previously missing server profile.
-      resolved ??= await _fetchResolvedProfile(client, profile);
+      resolved ??= await _fetchResolvedProfile(client, profile, serverId: serverId);
       resolved?['liveTvSavedFilters'] = pins;
     }
     return resolved;
@@ -1679,9 +1679,10 @@ class PluginSyncService extends ChangeNotifier {
 
   Future<Map<String, dynamic>?> _fetchResolvedProfile(
     MediaServerClient client,
-    String profile,
-  ) async {
-    final current = _guidePinAccountCheck(client);
+    String profile, {
+    String? serverId,
+  }) async {
+    final current = _guidePinAccountCheck(client, serverId: serverId);
     final ep = await moonbaseEndpoint(client, _dio);
     if (ep == null) return null;
     final headers = ep.headers;
