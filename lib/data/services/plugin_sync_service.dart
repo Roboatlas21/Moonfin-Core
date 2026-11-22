@@ -13,6 +13,7 @@ import 'package:server_plex/server_plex.dart' show plexItemToJellyfin;
 import 'package:server_silo/server_silo.dart';
 
 import '../../auth/services/silo_token_storage.dart';
+import '../offline/connectivity_aware_media_server_client.dart';
 import '../../data/repositories/seerr_repository.dart';
 import 'seerr/seerr_discover_sliders.dart';
 import 'incomplete_recordings_service.dart';
@@ -582,7 +583,6 @@ class PluginSyncService extends ChangeNotifier {
     _signInProfileRead = readDone;
     _readingProfileOnSignIn = true;
     final userKey = _userSyncKey(client, serverId: serverId);
-    final current = _guidePinAccountCheck(client, serverId: serverId);
     _signInSettingsRead.remove(userKey);
     var retrying = false;
     try {
@@ -610,11 +610,11 @@ class PluginSyncService extends ChangeNotifier {
           final resolved = await _fetchProfileAndImportGuidePins(
             client, profile, serverId: serverId,
           );
-          if (resolved != null && current()) {
+          if (resolved != null) {
             await _applyServerSettings(client, profile, resolved);
           }
 
-          if (current()) unawaited(_startSettingsStream(client));
+          unawaited(_startSettingsStream(client));
         }
 
         if (availability == _PluginAvailabilityStatus.unknown) {
@@ -640,13 +640,12 @@ class PluginSyncService extends ChangeNotifier {
       final resolved = await _fetchProfileAndImportGuidePins(
         client, profile, serverId: serverId,
       );
-      if (resolved == null || !current()) return;
+      if (resolved == null) return;
 
       await _prefs.set(UserPreferences.pluginSyncEnabled, true);
-      if (!current()) return;
       await _applyServerSettings(client, profile, resolved);
       await _prefs.set(syncInitializedPref, true);
-      if (current()) unawaited(_startSettingsStream(client));
+      unawaited(_startSettingsStream(client));
     } catch (_) {
       resetState();
     } finally {
@@ -1043,6 +1042,12 @@ class PluginSyncService extends ChangeNotifier {
     });
   }
 
+  // Active clients have an offline wrapper; compare their online clients.
+  static MediaServerClient _onlineClient(MediaServerClient client) =>
+      client is ConnectivityAwareMediaServerClient
+          ? client.onlineClient
+          : client;
+
   // Capture the account once so queued operations reject stale responses.
   bool Function() _guidePinAccountCheck(
     MediaServerClient client, {
@@ -1054,7 +1059,10 @@ class PluginSyncService extends ChangeNotifier {
         client.userId == userId &&
         _prefs.activeProfileScopeSuffix() == scope &&
         (!GetIt.instance.isRegistered<MediaServerClient>() ||
-            identical(GetIt.instance<MediaServerClient>(), client)) &&
+            identical(
+              _onlineClient(GetIt.instance<MediaServerClient>()),
+              _onlineClient(client),
+            )) &&
         (serverId == null || scope == '${serverId}_${userId ?? ''}');
   }
 
@@ -1065,10 +1073,10 @@ class PluginSyncService extends ChangeNotifier {
     String? serverId,
   }) async {
     final current = _guidePinAccountCheck(client, serverId: serverId);
-    if (!current()) return null;
+    // An optional pin import cannot gate the ordinary settings download.
     var resolved = await _fetchResolvedProfile(client, profile);
-    if (!current()) return null;
     if (!_prefs.get(UserPreferences.liveTvSavedFiltersUnsynced)) return resolved;
+    if (!current()) return null;
 
     try {
       final pins = await _postGuidePinsChange(client, profile, {

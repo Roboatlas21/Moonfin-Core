@@ -8,6 +8,7 @@ import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/auth/repositories/session_repository.dart';
+import 'package:moonfin/data/offline/connectivity_aware_media_server_client.dart';
 import 'package:moonfin/data/services/plugin_sync_service.dart';
 import 'package:moonfin/preference/seerr_preferences.dart';
 import 'package:moonfin/preference/user_preferences.dart';
@@ -15,6 +16,8 @@ import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _MockClient extends Mock implements MediaServerClient {}
+class _MockConnectivityAwareClient extends Mock
+    implements ConnectivityAwareMediaServerClient {}
 
 class _MockSessionRepository extends Mock implements SessionRepository {}
 
@@ -184,6 +187,32 @@ void main() {
 
   tearDown(() async {
     await GetIt.instance.reset();
+  });
+
+  test('fresh login restores settings through an active client wrapper', () async {
+    // Production registers a different wrapper from the factory client used
+    // for sign-in. The account is the same despite different object identities.
+    final active = _MockConnectivityAwareClient();
+    when(() => active.onlineClient).thenReturn(client);
+    await GetIt.instance.unregister<MediaServerClient>();
+    GetIt.instance.registerSingleton<MediaServerClient>(active);
+    adapter.resolvedProfile = {
+      'use24HourClock': true,
+      'navbarPosition': 'bottom',
+    };
+
+    await service.syncOnLogin(client, serverId: 'srv1');
+    expect(resolvedCount(), 1, reason: 'the first login must read Moonbase');
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+    expect(prefs.containsPreference(UserPreferences.navbarPosition), isTrue);
+    expect(service.isSyncInitializedForServer(client, serverId: 'srv1'), isTrue);
+
+    adapter.savedPins = [];
+    final pins = await service.changePinnedGuideFilter(
+      client, filter: 'group:Sports', add: true,
+    );
+    expect(pins, ['group:Sports']);
+    service.resetState();
   });
 
   test('applying a resolved profile does not schedule a push back', () async {
