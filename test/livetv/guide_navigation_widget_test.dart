@@ -128,6 +128,16 @@ Future<void> _sendKeyAndPump(WidgetTester tester, LogicalKeyboardKey key) async 
   await _pumpFrames(tester);
 }
 
+/// Drive a real held Select (rather than a tap) through the TV focus path.
+Future<void> _holdSelect(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+  await tester.pump(const Duration(milliseconds: 550));
+  await _pumpFrames(tester);
+  await tester.sendKeyRepeatEvent(LogicalKeyboardKey.select);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+  await _pumpFrames(tester);
+}
+
 /// Every focus node in the guide carries a debug label, which is the only
 /// handle a test has on the rows' private nodes.
 FocusNode _nodeLabelled(WidgetTester tester, String label) => tester
@@ -706,23 +716,15 @@ void main() {
       of: picker,
       matching: find.widgetWithText(ListTile, 'CA| SPORTS'),
     );
-    Future<void> hold() async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
-      await tester.pump(const Duration(milliseconds: 550));
-      await _pumpFrames(tester);
-      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.select);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
-      await _pumpFrames(tester);
-    }
     tester.widget<ListTile>(rows().first).focusNode!.requestFocus();
     await _pumpFrames(tester);
-    await hold();
+    await _holdSelect(tester);
     expect(rows(), findsNWidgets(2));
     final previous = prefs.get(UserPreferences.liveTvSavedFilters);
     tester.widget<ListTile>(rows().first).focusNode!.requestFocus();
     await _pumpFrames(tester);
     prefs.save = Completer<void>();
-    await hold();
+    await _holdSelect(tester);
     prefs.save!.completeError(StateError('storage unavailable'));
     await _pumpFrames(tester);
     expect(find.text("Couldn't save filter. Try again."), findsOneWidget);
@@ -777,21 +779,13 @@ void main() {
     await pumpGuide(tester);
     _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
     await _pumpFrames(tester);
-    Future<void> toggle() async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
-      await tester.pump(const Duration(milliseconds: 550));
-      await _pumpFrames(tester);
-      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.select);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
-      await _pumpFrames(tester);
-    }
     bool isFavorite() => tester.widget<EpgChannelCell>(
       find.byType(EpgChannelCell).first,
     ).isFavorite;
-    await toggle();
+    await _holdSelect(tester);
     verify(() => api.markFavorite('ch0')).called(1);
     expect(isFavorite(), isTrue);
-    await toggle();
+    await _holdSelect(tester);
     expect(isFavorite(), isTrue);
     when(() => api.unmarkFavorite('ch0')).thenAnswer((_) async {});
     await tester.tap(find.byTooltip('Filters'));
@@ -804,7 +798,7 @@ void main() {
     expect(isFavorite(), isTrue);
     _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
     await _pumpFrames(tester);
-    await toggle();
+    await _holdSelect(tester);
     expect(find.byType(EpgChannelCell), findsNothing);
   });
 
