@@ -130,9 +130,14 @@ const double _stripWidth = ChannelCarouselCard.cardPitch * 5;
 const double _surfaceWidth = _stripWidth + 100;
 const double _stripCentre = _surfaceWidth / 2;
 
-List<GuideChannel> _guideChannels(int count) => [
+List<GuideChannel> _guideChannels(int count, {bool numbered = false}) => [
   for (var i = 0; i < count; i++)
-    GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
+    GuideChannel(
+      id: 'ch$i',
+      name: 'Channel $i',
+      number: numbered ? '${i + 1}' : null,
+      rawData: const {},
+    ),
 ];
 
 List<ChannelCarouselEntry> _lineup(int count) => List.generate(
@@ -232,15 +237,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1000, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
-    final channels = List.generate(
-      20,
-      (i) => GuideChannel(
-        id: 'ch$i',
-        name: 'Channel $i',
-        number: '${i + 1}',
-        rawData: const {},
-      ),
-    );
+    final channels = _guideChannels(20, numbered: true);
     final vm = _CarouselGuide(client, channels);
     await tester.pumpWidget(
       MaterialApp(
@@ -521,15 +518,7 @@ void main() {
     tester,
   ) async {
     final client = _CarouselClient();
-    final channels = List.generate(
-      4,
-      (i) => GuideChannel(
-        id: 'ch$i',
-        name: 'Channel $i',
-        number: '${i + 1}',
-        rawData: const {},
-      ),
-    );
+    final channels = _guideChannels(4, numbered: true);
     final vm = _CarouselGuide(client, channels)
       ..duringLoad = notifyLiveTvRecordingsChanged;
     final prewarm = ChannelCarouselPrewarm(
@@ -551,15 +540,7 @@ void main() {
     tester,
   ) async {
     final client = _CarouselClient();
-    final channels = List.generate(
-      4,
-      (i) => GuideChannel(
-        id: 'ch$i',
-        name: 'Channel $i',
-        number: '${i + 1}',
-        rawData: const {},
-      ),
-    );
+    final channels = _guideChannels(4, numbered: true);
     final vm = _CarouselGuide(client, channels);
     var now = DateTime(2026, 9, 13, 18);
     final prewarm = ChannelCarouselPrewarm(
@@ -584,15 +565,7 @@ void main() {
     'normal tune only ensures missing programs when coverage is current',
     (tester) async {
       final client = _CarouselClient();
-      final channels = List.generate(
-        4,
-        (i) => GuideChannel(
-          id: 'ch$i',
-          name: 'Channel $i',
-          number: '${i + 1}',
-          rawData: const {},
-        ),
-      );
+      final channels = _guideChannels(4, numbered: true);
       final vm = _CarouselGuide(client, channels);
       final prewarm = ChannelCarouselPrewarm(
         client,
@@ -733,15 +706,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1000, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
-    final channels = List.generate(
-      20,
-      (i) => GuideChannel(
-        id: 'ch$i',
-        name: 'Channel $i',
-        number: '${i + 1}',
-        rawData: const {},
-      ),
-    );
+    final channels = _guideChannels(20, numbered: true);
     final vm = _CarouselGuide(client, channels);
     late StateSetter setHostState;
     const currentChannelId = 'ch10';
@@ -834,15 +799,7 @@ void main() {
     final above = FocusNode(debugLabel: 'above');
     addTearDown(above.dispose);
     final client = _CarouselClient();
-    final channels = List.generate(
-      20,
-      (i) => GuideChannel(
-        id: 'ch$i',
-        name: 'Channel $i',
-        number: '${i + 1}',
-        rawData: const {},
-      ),
-    );
+    final channels = _guideChannels(20, numbered: true);
     final vm = _CarouselGuide(client, channels);
     var dismissals = 0;
     var controls = 0;
