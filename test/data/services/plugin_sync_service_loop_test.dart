@@ -53,7 +53,6 @@ class _RecordingAdapter implements HttpClientAdapter {
   Future<void> holdResponse() async {
     final gate = responseGate;
     if (gate == null) return;
-    responseGate = null; // The next request should not be held again.
     responseReady?.complete();
     await gate.future;
   }
