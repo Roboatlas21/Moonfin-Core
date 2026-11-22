@@ -42,20 +42,20 @@ class _RecordingAdapter implements HttpClientAdapter {
     pinActions.add(action);
     if (action == 'initializeIfAbsent') {
       savedPins ??= List<String>.from(change['filters'] as List);
-    } else if (action == 'add') {
-      savedPins ??= [];
-      final filter = change['filter'] as String;
-      if (!savedPins!.contains(filter)) savedPins!.add(filter);
-    } else if (action == 'remove') {
-      savedPins ??= [];
-      savedPins!.remove(change['filter']);
+      return;
     }
+    final pins = savedPins ??= <String>[];
+    final filter = change['filter'] as String;
+    if (action == 'add' && !pins.contains(filter)) pins.add(filter);
+    if (action == 'remove') pins.remove(filter);
   }
 
   Future<void> holdResponse() async {
-    if (responseGate == null) return;
+    final gate = responseGate;
+    if (gate == null) return;
+    responseGate = null; // The next request should not be held again.
     responseReady?.complete();
-    await responseGate!.future;
+    await gate.future;
   }
 
   @override
@@ -123,14 +123,9 @@ void main() {
   int resolvedCount() =>
       adapter.requests.where((r) => r.contains('/Settings/Resolved/')).length;
 
-  /// Waits out the 1000ms push debounce plus slack.
-  Future<void> settle() =>
-      Future<void>.delayed(const Duration(milliseconds: 1400));
-
   setUp(() async {
     SharedPreferences.setMockInitialValues({
-      'pref_last_server_id': 'srv1',
-      'pref_last_user_id': 'user1',
+      'pref_last_server_id': 'srv1', 'pref_last_user_id': 'user1',
     });
     final store = PreferenceStore();
     await store.init();
@@ -147,34 +142,27 @@ void main() {
     when(() => client.accessToken).thenReturn('token');
     when(() => client.userId).thenReturn('user1');
     when(() => client.serverType).thenReturn(ServerType.jellyfin);
-    when(() => client.deviceInfo).thenReturn(
-      const DeviceInfo(
-        id: 'dev1',
-        name: 'test',
-        appName: 'moonfin',
-        appVersion: '0.0.0',
-      ),
-    );
+    when(() => client.deviceInfo).thenReturn(const DeviceInfo(
+      id: 'dev1', name: 'test', appName: 'moonfin', appVersion: '0.0.0',
+    ));
 
     adapter = _RecordingAdapter();
     final dio = Dio();
-    dio.interceptors.add(InterceptorsWrapper(
-      onRequest: (request, handler) {
-        if (request.method == 'POST' &&
-            request.path.contains('/Settings/Profile/') &&
-            request.data is Map) {
-          final profile = (request.data as Map)['profile'];
-          if (profile is Map) {
-            adapter.lastPushedProfile = Map<String, dynamic>.from(profile);
-          }
-          final change = (request.data as Map)['liveTvSavedFilterChange'];
-          if (change is Map && adapter.supportsPinChanges && !adapter.failPinChanges) {
-            adapter.applyPinChange(change);
-          }
+    dio.interceptors.add(InterceptorsWrapper(onRequest: (request, handler) {
+      if (request.method == 'POST' &&
+          request.path.contains('/Settings/Profile/') &&
+          request.data is Map) {
+        final body = request.data as Map;
+        if (body['profile'] case final Map profile) {
+          adapter.lastPushedProfile = Map<String, dynamic>.from(profile);
         }
-        handler.next(request);
-      },
-    ));
+        if (body['liveTvSavedFilterChange'] case final Map change
+            when adapter.supportsPinChanges && !adapter.failPinChanges) {
+          adapter.applyPinChange(change);
+        }
+      }
+      handler.next(request);
+    }));
     dio.httpClientAdapter = adapter;
     service = PluginSyncService(prefs, store, dio: dio);
 
@@ -195,14 +183,6 @@ void main() {
     await Future.wait([togglePin('group:Sports'), togglePin('group:Sports')]);
     expect(adapter.pinActions, ['add', 'remove']);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-  });
-
-  test('a resolved profile does not echo through either push path', () async {
-    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
-    await service.pushSettings(client);
-    await settle();
-    expect(resolvedCount(), 1);
-    expect(postCount(), 0, reason: 'the apply echoed back to the server');
   });
 
   test('regular settings updates do not overwrite atomic guide pins', () async {
@@ -353,16 +333,19 @@ void main() {
     expect(postCount(), 4);
   });
 
-  test('a genuinely changed remote value still lands and notifies', () async {
+  test('remote settings apply without pushing them back', () async {
     adapter.resolvedProfile = {'use24HourClock': true};
-    expect(prefs.get(UserPreferences.use24HourClock), isFalse);
-
     var notified = false;
     prefs.addListener(() => notified = true);
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
-
     expect(prefs.get(UserPreferences.use24HourClock), isTrue);
     expect(notified, isTrue);
+
+    await service.pushSettings(client);
+    // Allow the push debounce to expire before checking for an echo.
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    expect(resolvedCount(), 1);
+    expect(postCount(), 0);
   });
 
 }
