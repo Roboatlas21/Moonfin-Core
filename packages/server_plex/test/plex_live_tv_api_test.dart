@@ -8,9 +8,24 @@ class _FakeServer extends Interceptor {
 
   final Object? Function(RequestOptions options) answer;
   final requests = <RequestOptions>[];
+  bool Function(RequestOptions)? failWhen;
+  int? Function()? failureStatus;
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    if (failWhen?.call(options) == true) {
+      final code = failureStatus?.call();
+      handler.reject(DioException(
+        requestOptions: options,
+        type: code == null
+            ? DioExceptionType.connectionError
+            : DioExceptionType.badResponse,
+        response: code == null
+            ? null
+            : Response(requestOptions: options, statusCode: code),
+      ));
+      return;
+    }
     requests.add(options);
     handler.resolve(Response(requestOptions: options, data: answer(options)));
   }
@@ -364,23 +379,9 @@ void main() {
   test('Plex retains unresolved genre groups when metadata fails and recovers', () async {
     final (dio, server) = _server();
     var metadataUnavailable = true;
-    dio.interceptors.insert(
-      0,
-      InterceptorsWrapper(
-        onRequest: (options, handler) {
-          if (metadataUnavailable &&
-              options.uri.host == 'epg.provider.plex.tv' &&
-              options.uri.path == '/') {
-            handler.reject(DioException(
-              requestOptions: options,
-              type: DioExceptionType.connectionError,
-            ));
-          } else {
-            handler.next(options);
-          }
-        },
-      ),
-    );
+    server.failWhen = (request) => metadataUnavailable &&
+        request.uri.host == 'epg.provider.plex.tv' &&
+        request.uri.path == '/';
 
     final api = PlexLiveTvApi(dio);
     final incomplete = await api.getChannelGroups();
@@ -405,23 +406,7 @@ void main() {
 
   test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
     final (dio, server) = _server();
-    dio.interceptors.insert(
-      0,
-      InterceptorsWrapper(
-        onRequest: (options, handler) {
-          if (options.uri.path == '/lineups/plex/channels') {
-            handler.reject(
-              DioException(
-                requestOptions: options,
-                type: DioExceptionType.connectionError,
-              ),
-            );
-          } else {
-            handler.next(options);
-          }
-        },
-      ),
-    );
+    server.failWhen = (request) => request.uri.path == '/lineups/plex/channels';
 
     final cloud = PlexLiveTvApi(dio, cloudOnly: true);
     final cloudFailure = isA<DioException>().having(
@@ -469,18 +454,10 @@ void main() {
   });
 
   test('an unavailable Plex hub does not discard DVR On Now', () async {
-    final (dio, _) = _server();
-    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (options, handler) {
-      if (options.uri.path == '/hubs/sections/home/whatsOnNow') {
-        handler.reject(DioException(
-          requestOptions: options,
-          type: DioExceptionType.badResponse,
-          response: Response(requestOptions: options, statusCode: 404),
-        ));
-      } else {
-        handler.next(options);
-      }
-    }));
+    final (dio, server) = _server();
+    server.failWhen = (request) =>
+        request.uri.path == '/hubs/sections/home/whatsOnNow';
+    server.failureStatus = () => 404;
     // Request room for the Free TV hub so its failure is actually exercised.
     final programs = (await PlexLiveTvApi(dio)
         .getRecommendedPrograms(limit: 4))['Items'] as List;
@@ -492,19 +469,9 @@ void main() {
   test('Plex On Now falls back to Free TV on DVR transport failures', () async {
     final (dio, server) = _server();
     var accessDenied = false;
-    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (options, handler) {
-      if (options.uri.path != '/tv.plex.providers.epg.xmltv:2/grid') {
-        handler.next(options);
-        return;
-      }
-      handler.reject(DioException(
-        requestOptions: options,
-        type: accessDenied ? DioExceptionType.badResponse : DioExceptionType.connectionError,
-        response: accessDenied
-            ? Response(requestOptions: options, statusCode: 401)
-            : null,
-      ));
-    }));
+    server.failWhen = (request) =>
+        request.uri.path == '/tv.plex.providers.epg.xmltv:2/grid';
+    server.failureStatus = () => accessDenied ? 401 : null;
 
     final programs = (await PlexLiveTvApi(dio)
         .getRecommendedPrograms(limit: 3))['Items'] as List;
