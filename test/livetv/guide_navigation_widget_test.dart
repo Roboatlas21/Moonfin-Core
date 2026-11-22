@@ -122,6 +122,12 @@ Future<void> _pumpFrames(WidgetTester tester) async {
   }
 }
 
+/// Send one remote key and let the guide settle its deferred focus frames.
+Future<void> _sendKeyAndPump(WidgetTester tester, LogicalKeyboardKey key) async {
+  await tester.sendKeyEvent(key);
+  await _pumpFrames(tester);
+}
+
 /// Every focus node in the guide carries a debug label, which is the only
 /// handle a test has on the rows' private nodes.
 FocusNode _nodeLabelled(WidgetTester tester, String label) => tester
@@ -357,11 +363,9 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
     _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
     await _pumpFrames(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
     expect(_focusedLabel(), 'GuideErrorRetry');
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
     expect(_focusedLabel(), 'GuideWindowBar:0');
   });
 
@@ -501,11 +505,9 @@ void main() {
       if (layout == InterfaceLayout.tv) {
         _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
         await _pumpFrames(tester);
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-        await _pumpFrames(tester);
+        await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
         expect(_focusedLabel(), 'GuideEmptyCategoryRetry');
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-        await _pumpFrames(tester);
+        await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
         expect(_focusedLabel(), 'GuideWindowBar:0');
       }
 
@@ -593,8 +595,7 @@ void main() {
     );
     _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
     await _pumpFrames(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
     expect(lineup.map((channel) => channel.id), ['ch46', 'ch47']);
     final visible = tester
         .widgetList<EpgChannelCell>(find.byType(EpgChannelCell).hitTestable())
@@ -657,20 +658,16 @@ void main() {
       (_) async => const ChannelGroupLineup({'ch1': {'Sports'}, 'ch2': {'Sports'}}),
     );
     await pumpGuide(tester);
-    Future<void> key(LogicalKeyboardKey event) async {
-      await tester.sendKeyEvent(event);
-      await _pumpFrames(tester);
-    }
     _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
     await _pumpFrames(tester);
-    await key(LogicalKeyboardKey.arrowLeft);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
     final picker = find.byType(GuideFilterPicker);
     expect(picker, findsOneWidget);
     tester.widget<ListTile>(
       find.widgetWithText(ListTile, 'Sports'),
     ).focusNode!.requestFocus();
     await _pumpFrames(tester);
-    await key(LogicalKeyboardKey.select);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
     expect(picker, findsNothing);
     expect(
       tester.widget<EpgChannelCell>(find.byType(EpgChannelCell).first).name,
@@ -678,11 +675,11 @@ void main() {
     );
     _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
     await _pumpFrames(tester);
-    await key(LogicalKeyboardKey.arrowLeft);
-    await key(LogicalKeyboardKey.arrowRight);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
     expect(picker, findsNothing);
-    await key(LogicalKeyboardKey.arrowLeft);
-    await key(LogicalKeyboardKey.escape);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.escape);
     expect(picker, findsNothing);
   });
 
@@ -703,8 +700,7 @@ void main() {
     await pumpGuide(tester);
     _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
     await _pumpFrames(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
     final picker = find.byType(GuideFilterPicker);
     Finder rows() => find.descendant(
       of: picker,
@@ -832,8 +828,7 @@ void main() {
 
   Future<void> pressDown(WidgetTester tester, int times) async {
     for (var i = 0; i < times; i++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await _pumpFrames(tester);
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
     }
   }
 
@@ -969,8 +964,7 @@ void main() {
   ) async {
     final anchorMinutes = await reachLoadedEdge(tester);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
 
     final focused = _focusedCell();
     expect(focused, isNotNull, reason: 'focus left the grid');
@@ -981,12 +975,10 @@ void main() {
   testWidgets('a later UP supersedes the deferred DOWN', (tester) async {
     final anchorMinutes = await reachLoadedEdge(tester);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
     expect(_focusedCell()!.row, 49);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
     expect(_focusedCell()!.row, 48);
 
     await releaseGuideData(tester);
@@ -1000,13 +992,11 @@ void main() {
   testWidgets('opening a dialog cancels the deferred DOWN', (tester) async {
     final anchorMinutes = await reachLoadedEdge(tester);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
     expect(_focusedCell()!.row, 49);
 
     // Select on the focused program opens the details dialog.
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
     expect(_alertDialog, findsOneWidget);
 
     await releaseGuideData(tester);
@@ -1034,8 +1024,7 @@ void main() {
   ) async {
     final anchorMinutes = await reachLoadedEdge(tester);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
     expect(_focusedCell()!.row, 49);
 
     await releaseGuideData(tester);
@@ -1104,26 +1093,22 @@ void main() {
     await tester.pumpAndSettle();
     expect(_focusedLabel(), 'GuideChannel:0');
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.mediaFastForward);
     expect(_focusedLabel(), startsWith('GuideChannel:'));
     final pagedRow = int.parse(_focusedLabel()!.split(':').last);
     expect(pagedRow, greaterThan(0));
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.mediaRewind);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.mediaRewind);
     expect(_focusedLabel(), 'GuideChannel:0');
 
     final anchorMinutes = await establishAnchor(tester);
     final offsets = _horizontalOffsets(tester);
-    await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.mediaFastForward);
     expect(_focusedCell()!.row, pagedRow);
     expect(_focusedCell()!.index, _cellIndexForRow(pagedRow, anchorMinutes));
     expect(_horizontalOffsets(tester), offsets);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.mediaRewind);
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.mediaRewind);
     expect(_focusedCell()!.row, 0);
     expect(_focusedCell()!.index, _cellIndexForRow(0, anchorMinutes));
     expect(_horizontalOffsets(tester), offsets);

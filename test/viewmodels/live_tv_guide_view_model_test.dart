@@ -1192,18 +1192,22 @@ void main() {
       expect(vm.hasMorePrograms, isTrue);
     });
 
-    test('a malformed targeted retry still reports a guide error', () async {
+    // Both cases start with healthy c0 and an initially failed c1.
+    // The retry's error type decides whether to preserve c0 or fail the guide.
+    void stubFailedSportsRetry(Object error) {
       _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
       when(() => _guide(liveTv, category: GuideFilter.sports))
           .thenAnswer((inv) async {
-        if (_requestedIds(inv).length == 1) {
-          throw const FormatException('Invalid EPG grid');
-        }
+        if (_requestedIds(inv).length == 1) throw error;
         return {
           'Items': [_program('sport-c0', 'c0', isSports: true)],
           'FailedChannelIds': ['c1'],
         };
       });
+    }
+
+    test('a malformed targeted retry still reports a guide error', () async {
+      stubFailedSportsRetry(const FormatException('Invalid EPG grid'));
 
       final vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);
@@ -1216,17 +1220,7 @@ void main() {
     });
 
     test('temporary retry failure keeps healthy category programs', () async {
-      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
-      when(() => _guide(liveTv, category: GuideFilter.sports))
-          .thenAnswer((inv) async {
-        if (_requestedIds(inv).length == 1) {
-          throw TimeoutException('Plex grid temporarily unavailable');
-        }
-        return {
-          'Items': [_program('sport-c0', 'c0', isSports: true)],
-          'FailedChannelIds': ['c1'],
-        };
-      });
+      stubFailedSportsRetry(TimeoutException('Plex grid temporarily unavailable'));
 
       final vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);
