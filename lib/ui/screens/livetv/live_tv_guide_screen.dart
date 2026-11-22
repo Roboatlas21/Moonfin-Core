@@ -46,6 +46,7 @@ import 'epg/widgets/epg_now_next_card.dart';
 import 'epg/widgets/epg_program_cell.dart';
 import 'guide/guide_cell.dart';
 import 'guide/guide_filter_picker.dart';
+import 'guide/guide_filter_labels.dart';
 import 'guide/guide_layout_profile.dart';
 import 'guide/guide_selection.dart';
 import 'guide/guide_window.dart';
@@ -2687,19 +2688,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
   }
 
-  String _filterLabel(GuideFilter filter, [AppLocalizations? labels]) {
-    final l10n = labels ?? AppLocalizations.of(context);
-    return switch (filter) {
-      GuideFilter.all => l10n.all,
-      GuideFilter.movies => l10n.movies,
-      GuideFilter.series => l10n.series,
-      GuideFilter.sports => l10n.sports,
-      GuideFilter.news => l10n.news,
-      GuideFilter.kids => l10n.kids,
-      GuideFilter.premiere => l10n.premiere,
-      GuideFilter.favorites => l10n.favorites,
-    };
-  }
+  String _filterLabel(GuideFilter filter, [AppLocalizations? labels]) =>
+      guideFilterLabel(filter, labels ?? AppLocalizations.of(context));
 
   Widget _buildBody() {
     switch (_vm.state) {

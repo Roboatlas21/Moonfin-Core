@@ -15,6 +15,7 @@ import '../../../preference/preference_constants.dart';
 import '../../../util/focus/dpad_keys.dart';
 import '../../screens/livetv/epg/epg_genre.dart';
 import '../../screens/livetv/guide/guide_window.dart';
+import '../../screens/livetv/guide/guide_filter_labels.dart';
 import 'channel_carousel.dart';
 import 'channel_carousel_card.dart';
 import '../marquee_text.dart';
@@ -859,24 +860,9 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     return null;
   }
 
-  /// [GuideFilter] is localised here, at the UI edge, so the data layer stays
-  /// language-free.
-  String _filterLabel(GuideFilter filter) {
-    final l10n = AppLocalizations.of(context);
-    return switch (filter) {
-      GuideFilter.all => l10n.all,
-      GuideFilter.movies => l10n.movies,
-      GuideFilter.series => l10n.series,
-      GuideFilter.sports => l10n.sports,
-      GuideFilter.news => l10n.news,
-      GuideFilter.kids => l10n.kids,
-      GuideFilter.premiere => l10n.premiere,
-      GuideFilter.favorites => l10n.favorites,
-    };
-  }
-
   List<String> _categoryLabels(GuideProgram program) => [
-    for (final tag in program.categoryTags) _filterLabel(tag),
+    for (final tag in program.categoryTags)
+      guideFilterLabel(tag, AppLocalizations.of(context)),
   ];
 
   String _timeRange(GuideProgram program) =>
