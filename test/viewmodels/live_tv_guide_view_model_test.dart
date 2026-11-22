@@ -241,11 +241,44 @@ void main() {
       ]);
     });
 
+    test('Next follows a Featured lineup change while listings are pending', () async {
+      var featured = 'one';
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {},
+          channels: [_channel('one'), _channel('two')],
+          promoted: PromotedChannelGroup('Featured', () async => {featured}),
+        ),
+      );
+      await vm.load();
+      vm.setGroup('Featured');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.single.id, 'one');
 
+      final next = vm.windowEnd;
+      final oldReply = Completer<Map<String, dynamic>>();
+      final requests = <String>[];
+      when(() => _guide(api)).thenAnswer((inv) async {
+        final id = _requestedIds(inv).single;
+        requests.add(id);
+        if (id == 'one') return oldReply.future;
+        final start = inv.namedArguments[#startDate] as DateTime;
+        return {'Items': [_program('new', id, start: start)]};
+      });
+      final move = vm.setWindowStart(next, paging: true);
+      await pumpEventQueue();
+      expect(requests, ['one']);
 
+      featured = 'two';
+      await vm.refreshPromotedGroup(force: true);
+      oldReply.complete({'FailedChannelIds': ['one']});
 
-
-
+      expect(await move, isTrue);
+      expect(requests, ['one', 'two']);
+      expect(vm.windowStart, next);
+      expect(vm.programsForChannel('two').single.startDate, next);
+    });
 
     test('missing group metadata restores program categories', () async {
       _stubChannels(api, [_channel('one')]);

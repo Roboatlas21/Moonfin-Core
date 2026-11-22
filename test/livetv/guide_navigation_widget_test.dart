@@ -24,9 +24,23 @@ import 'package:moonfin/ui/screens/livetv/guide/guide_window.dart';
 import 'package:moonfin/ui/screens/livetv/guide/guide_layout_profile.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
 import 'package:moonfin/ui/widgets/local_search_field.dart';
+import 'package:moonfin/ui/widgets/overlay_sheet.dart' show DialogBackSuppressor;
 import 'package:moonfin/util/platform_detection.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+// MaterialApp hosts the guide in these tests. Forward Android's system Back
+// through the same dismissal check that MoonfinApp uses before its navigator.
+class _DialogBackObserver extends WidgetsBindingObserver {
+  int suppressed = 0;
+
+  @override
+  Future<bool> didPopRoute() async {
+    if (!DialogBackSuppressor.consume()) return false;
+    suppressed++;
+    return true;
+  }
+}
 
 class _MockMediaServerClient extends Mock implements MediaServerClient {}
 
@@ -393,6 +407,28 @@ void main() {
     ).guideWindow;
   }
 
+  testWidgets('Right retries a failed page without moving remote focus', (tester) async {
+    useTvLayout();
+    await pumpGuide(tester);
+    // Row 4 has one program spanning the visible window.
+    final cell = _nodeLabelled(tester, 'GuideProgramRow4:0');
+    cell.requestFocus();
+    await _pumpFrames(tester);
+    final range = _windowRangeText(tester);
+    final notice = find.textContaining('Couldn’t load');
+
+    guideFailure = Exception('offline');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+    expect(_windowRangeText(tester), range);
+    expect(FocusManager.instance.primaryFocus, same(cell));
+    expect(notice, findsOneWidget);
+
+    guideFailure = null;
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+    expect(_windowRangeText(tester), isNot(range));
+    expect(notice, findsNothing);
+  });
+
   testWidgets('resize survives a reload before the layout callback runs', (
     tester,
   ) async {
@@ -658,8 +694,15 @@ void main() {
   });
 
 
-  testWidgets('TV picker OK selects and Right or Back cancels', (tester) async {
+  testWidgets('TV picker selects with OK and closes with Right or Android Back', (
+    tester,
+  ) async {
     useTvLayout();
+    channelCount = 3;
+    final observer = _DialogBackObserver();
+    tester.binding.addObserver(observer);
+    addTearDown(() => tester.binding.removeObserver(observer));
+    addTearDown(DialogBackSuppressor.newBackPress);
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvCategoryDisplay,
       LiveTvCategoryDisplay.groups,
@@ -667,7 +710,7 @@ void main() {
     when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
       (_) async => const ChannelGroupLineup({'ch1': {'Sports'}, 'ch2': {'Sports'}}),
     );
-    await pumpGuide(tester);
+    await openGuideRoute(tester);
     _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
     await _pumpFrames(tester);
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
@@ -688,9 +731,23 @@ void main() {
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
     expect(picker, findsNothing);
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.escape);
-    expect(picker, findsNothing);
+
+    for (final sendsPopRoute in [false, true]) {
+      _nodeLabelled(tester, 'GuideBrowse').requestFocus();
+      await _pumpFrames(tester);
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
+      expect(picker, findsOneWidget);
+
+      DialogBackSuppressor.newBackPress();
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.goBack);
+      expect(picker, findsNothing);
+      if (sendsPopRoute) {
+        await tester.binding.handlePopRoute();
+        await _pumpFrames(tester);
+      }
+      expect(observer.suppressed, sendsPopRoute ? 1 : 0);
+      expect(find.byType(LiveTvGuideScreen), findsOneWidget);
+    }
   });
 
   testWidgets('holding Select pins a group and reports storage errors', (tester) async {
