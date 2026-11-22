@@ -333,6 +333,23 @@ void main() {
         ['group:Sports', 'group:News']);
   });
 
+  test('settings events wait for the sign-in pin snapshot to apply', () async {
+    adapter.savedPins = ['group:Sports'];
+    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
+    adapter.responseReady = Completer<void>();
+    adapter.responseGate = Completer<void>();
+    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
+    await adapter.responseReady!.future;
+    final event = service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    await Future<void>.delayed(Duration.zero);
+    // The event must not fetch and apply a competing profile during sign-in.
+    expect(resolvedCount(), 1);
+    adapter.responseGate!.complete();
+    await signingIn;
+    await event;
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+  });
+
   test('pin edits wait for sign-in through the active client wrapper', () async {
     final active = _MockConnectivityAwareClient();
     when(() => active.onlineClient).thenReturn(client);

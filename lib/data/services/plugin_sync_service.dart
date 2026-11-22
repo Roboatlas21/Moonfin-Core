@@ -616,7 +616,7 @@ class PluginSyncService extends ChangeNotifier {
       }
 
       await _refreshCustomThemes(client, serverId: serverId);
-      final accountCurrent = _guidePinAccountCheck(client, serverId: serverId);
+      final accountCurrent = _guidePinAccountCheck(client);
       bool current() =>
           identical(_signInProfileRead, readDone) && accountCurrent();
       var restored = false;
@@ -1139,6 +1139,7 @@ class PluginSyncService extends ChangeNotifier {
     if (pins == null) {
       // Keep offline edits visible until the entire replay succeeds.
       resolved?.remove('liveTvSavedFilters');
+      resolved?.remove('LiveTvSavedFilters');
     } else {
       // A pin change can create a previously missing server profile.
       resolved ??= await _fetchResolvedProfile(client, profile);
