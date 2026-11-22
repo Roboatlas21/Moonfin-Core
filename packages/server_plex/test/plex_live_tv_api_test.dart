@@ -274,6 +274,67 @@ void main() {
     },
   );
 
+  test('a failed DVR preserves healthy DVR channels and programs', () async {
+    final (dio, _) = _server();
+    var badGridRequests = 0;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == '/livetv/dvrs') {
+            handler.resolve(
+              Response(requestOptions: options, data: {
+                'MediaContainer': {
+                  'Dvr': [
+                    {'key': '2', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:2'},
+                    {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
+                  ],
+                },
+              }),
+            );
+            return;
+          }
+          if (options.uri.path.startsWith('/tv.plex.providers.epg.xmltv:3/')) {
+            if (options.uri.path.endsWith('/grid')) badGridRequests++;
+            handler.reject(DioException(
+              requestOptions: options,
+              type: DioExceptionType.connectionError,
+            ));
+            return;
+          }
+          handler.next(options);
+        },
+      ),
+    );
+
+    final api = PlexLiveTvApi(dio);
+    final lineup = await api.getChannelGroups();
+    expect(lineup.groupsByChannelId['channel-2-4'], {'source:dvr'});
+    expect(lineup.sources.where((s) => s.groupId == 'source:dvr'), hasLength(1));
+
+    final start = DateTime.utc(2026, 10, 22);
+    final end = DateTime.utc(2026, 10, 23);
+    final partial = await api.getGuide(
+      startDate: start,
+      endDate: end,
+      channelIds: ['channel-2-4', 'channel-3-9'],
+    );
+    expect(partial['FailedChannelIds'], ['channel-3-9']);
+    expect(
+      (partial['Items'] as List).map((p) => p['ChannelId']).toSet(),
+      {'channel-2-4'},
+    );
+
+    final previousRequests = badGridRequests;
+    final healthy = await api.getGuide(
+      startDate: start,
+      endDate: end,
+      channelIds: ['channel-2-4'],
+    );
+    expect(healthy.containsKey('FailedChannelIds'), isFalse);
+    expect(badGridRequests, previousRequests);
+  });
+
   test('Plex joins genres and loads Featured on demand', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
