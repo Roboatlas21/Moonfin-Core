@@ -247,7 +247,7 @@ extension GuideFilterChoiceKind on GuideFilterChoice {
 enum GuideState { loading, ready, error }
 
 /// Per-channel program fetch state, distinct from the guide-wide [GuideState].
-enum GuideChannelLoadState { loaded, loading, failed, partial }
+enum GuideChannelLoadState { loaded, loading, failed }
 
 class LiveTvGuideViewModel extends ChangeNotifier {
   final MediaServerClient _client;
@@ -373,12 +373,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _accessDenied(_error);
 
   GuideChannelLoadState loadStateFor(String channelId) {
-    final incomplete = _isCategory(_filter)
-        ? _categoryFailedIds.contains(channelId)
-        : _failedProgramIds.contains(channelId);
-    if (incomplete && programsForChannel(channelId).isNotEmpty) {
-      return GuideChannelLoadState.partial;
-    }
     if (hasProgramsFor(channelId)) return GuideChannelLoadState.loaded;
     if (!listingsAccessDenied && _retryingFailedProgramIds.contains(channelId)) {
       return GuideChannelLoadState.loading;
@@ -981,15 +975,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!current()) return null;
       failed.addAll(fetched.failedChannelIds);
       for (final channel in batch) {
-        if (fetched.failedChannelIds.contains(channel.id)) {
-          final partial = fetched.programs[channel.id];
-          if (partial != null) {
-            refreshed[channel.id] = _mergePartialPrograms(
-              _categoryPrograms[channel.id] ?? const [], partial,
-            );
-          }
-          continue;
-        }
+        if (fetched.failedChannelIds.contains(channel.id)) continue;
         succeeded.add(channel.id);
         final programs = fetched.programs[channel.id];
         if (programs != null) refreshed[channel.id] = programs;
@@ -1286,20 +1272,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             category: filter,
           );
           if (!current()) return false;
-          for (final id in failed) {
-            final programs = retry.programs[id];
-            if (!retry.failedChannelIds.contains(id)) {
-              if (programs == null) {
-                fetched.programs.remove(id);
-              } else {
-                fetched.programs[id] = programs;
-              }
-            } else if (programs != null) {
-              fetched.programs[id] = _mergePartialPrograms(
-                fetched.programs[id] ?? const [], programs,
-              );
-            }
-          }
+          fetched.programs.addAll(retry.programs);
           failed = retry.failedChannelIds;
         } catch (error) {
           if (!current()) return false;
@@ -1360,13 +1333,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _categoryPrograms.removeWhere((id, _) => recovered.contains(id));
         _categoryFailedIds.removeAll(requested);
         _categoryFailedIds.addAll(reply.failedChannelIds);
-        for (final entry in reply.programs.entries) {
-          _categoryPrograms[entry.key] = reply.failedChannelIds.contains(entry.key)
-              ? _mergePartialPrograms(
-                  _categoryPrograms[entry.key] ?? const [], entry.value,
-                )
-              : entry.value;
-        }
+        _categoryPrograms.addAll(reply.programs);
         _notifyListeners();
       }
     } catch (_) {
@@ -1862,12 +1829,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _failedProgramIds.addAll(failed);
         for (final id in ids) {
           if (failed.contains(id)) {
-            final partial = fetched[id];
-            if (partial != null && partial.isNotEmpty) {
-              _programsByChannel[id] = _mergePartialPrograms(
-                _programsByChannel[id] ?? const [], partial,
-              );
-            }
+            _programsByChannel.remove(id);
             _programsLoadedIds.remove(id);
           } else {
             _programsByChannel[id] = fetched[id] ?? const [];
@@ -1876,6 +1838,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         }
         _advanceProgramsCursor();
       } else {
+        fetched.removeWhere((id, _) => failed.contains(id));
         _categoryPrograms
           ..clear()
           ..addAll(fetched);
@@ -2166,7 +2129,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Retries failed listings in the current filter without reloading
   /// the lineup or channels that already have programs.
   Future<void> retryFailedPrograms() {
-    if (_isCategory(_filter)) return retryFailedCategoryListings();
     final page = _pageGeneration;
     final active = _failedProgramsRetry;
     if (active != null && active.page == page) return active.task;
@@ -2593,14 +2555,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       failed.addAll(failedInBatch);
       final parsed = _parsePrograms(response);
       for (final id in chunk) {
-        if (failedInBatch.contains(id)) {
-          final partial = parsed[id];
-          if (partial != null && partial.isNotEmpty) {
-            replacements[id] = _mergePartialPrograms(
-              _programsByChannel[id] ?? const [], partial,
-            );
-          }
-        } else {
+        if (!failedInBatch.contains(id)) {
           replacements[id] = parsed[id] ?? <GuideProgram>[];
         }
       }
@@ -2736,6 +2691,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     );
     final byChannel = _parsePrograms(response);
     final failed = _failedGuideIds(response);
+    byChannel.removeWhere((id, _) => failed.contains(id));
     if (category != null) {
       byChannel.removeWhere((_, programs) {
         programs.removeWhere((p) => !_matches(category, p));
@@ -2749,19 +2705,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     for (final id in response['FailedChannelIds'] as List? ?? const [])
       if (id is String) id,
   };
-
-  /// Accumulate successful EPG slices while a channel still has missing days.
-  static List<GuideProgram> _mergePartialPrograms(
-    List<GuideProgram> previous,
-    List<GuideProgram> incoming,
-  ) {
-    final programs = {
-      for (final p in previous) p.id: p,
-      for (final p in incoming) p.id: p,
-    }.values.toList()
-      ..sort((a, b) => a.startDate.compareTo(b.startDate));
-    return programs;
-  }
 
   /// Parses a guide response into start-ordered programs keyed by channel id.
   Map<String, List<GuideProgram>> _parsePrograms(
@@ -3087,12 +3030,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         for (final id in ids) {
           if (failed.contains(id)) {
             _failedProgramIds.add(id);
-            final partial = parsed[id];
-            if (partial != null && partial.isNotEmpty) {
-              _programsByChannel[id] = _mergePartialPrograms(
-                _programsByChannel[id] ?? const [], partial,
-              );
-            }
             continue;
           }
           // Don't overwrite newer listings if a page refresh finished first.

@@ -29,8 +29,7 @@ List<GuideCell> buildRowCells({
   required DateTime windowEnd,
   required GuideChannelLoadState loadState,
 }) {
-  if (loadState != GuideChannelLoadState.loaded &&
-      loadState != GuideChannelLoadState.partial) {
+  if (loadState != GuideChannelLoadState.loaded) {
     final kind = loadState == GuideChannelLoadState.loading
         ? GuideCellKind.loading
         : GuideCellKind.failed;
@@ -73,16 +72,6 @@ List<GuideCell> buildRowCells({
   }
   if (cursor.isBefore(windowEnd)) {
     cells.addAll(_fillHole(cursor, windowEnd, unfiltered));
-  }
-  // Unknown intervals remain retryable without hiding the successful programs.
-  if (loadState == GuideChannelLoadState.partial) {
-    return [
-      for (final cell in cells)
-        if (cell.kind == GuideCellKind.gap)
-          GuideCell(start: cell.start, end: cell.end, kind: GuideCellKind.failed)
-        else
-          cell,
-    ];
   }
   return cells;
 }

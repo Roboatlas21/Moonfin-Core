@@ -54,8 +54,6 @@ class EpgNowNextCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
     final muted = AppColorScheme.onSurface.withValues(alpha: 0.7);
     final radius = apple ? 18.0 : 14.0;
-    final showPrograms = loadState == GuideChannelLoadState.loaded ||
-        loadState == GuideChannelLoadState.partial;
 
     final content = Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -143,7 +141,7 @@ class EpgNowNextCard extends StatelessWidget {
                   AppLocalizations.of(context).noProgramData,
                   style: textTheme.bodyMedium?.copyWith(color: muted),
                 ),
-              if (showPrograms && nowTitle != null)
+              if (loadState == GuideChannelLoadState.loaded && nowTitle != null)
                 Row(
                   children: [
                     if (isLive) ...[
@@ -160,7 +158,7 @@ class EpgNowNextCard extends StatelessWidget {
                     ),
                   ],
                 ),
-              if (showPrograms &&
+              if (loadState == GuideChannelLoadState.loaded &&
                   nowTitle != null) ...[
                 const SizedBox(height: 8),
                 Row(
@@ -189,7 +187,7 @@ class EpgNowNextCard extends StatelessWidget {
                   ],
                 ),
               ],
-              if (showPrograms &&
+              if (loadState == GuideChannelLoadState.loaded &&
                   nextLabel != null) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -199,12 +197,6 @@ class EpgNowNextCard extends StatelessWidget {
                   style: textTheme.labelMedium?.copyWith(color: muted),
                 ),
               ],
-              if (loadState == GuideChannelLoadState.partial && onRetry != null)
-                TextButton.icon(
-                  onPressed: onRetry,
-                  icon: const Icon(Icons.refresh, size: 16),
-                  label: Text(AppLocalizations.of(context).retry),
-                ),
             ],
           ),
         ),
