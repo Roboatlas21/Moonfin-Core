@@ -1219,9 +1219,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (channel == null) return false;
 
     final request = _categoryRequest;
+    final session = userDataSync.session;
     final reply = await _fetchPrograms([channel], category: category);
     if (_disposed ||
         request != _categoryRequest ||
+        session != userDataSync.session ||
         category != _filter ||
         !_pageChannels.any((c) => c.id == channelId)) {
       return false;

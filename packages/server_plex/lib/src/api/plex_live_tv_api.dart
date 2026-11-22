@@ -98,7 +98,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   static const _cloudOnNowLimit = 15;
   static const _cloudOnNowCacheLife = Duration(minutes: 5);
   static const _cloudOnNowTimeout = Duration(seconds: 3);
-  DateTime? _cloudOnNowFetchedAt;
+  DateTime? _cloudOnNowExpiresAt;
   Future<List<Map<String, dynamic>>>? _cloudOnNow;
 
   Future<List> _freeGrid(String channel, String day) {
@@ -905,14 +905,28 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<List<Map<String, dynamic>>> _freeOnNow() {
     final now = DateTime.now();
     if (_cloudOnNow != null &&
-        _cloudOnNowFetchedAt != null &&
-        now.difference(_cloudOnNowFetchedAt!) < _cloudOnNowCacheLife) {
+        _cloudOnNowExpiresAt != null &&
+        now.isBefore(_cloudOnNowExpiresAt!)) {
       return _cloudOnNow!;
     }
-    _cloudOnNowFetchedAt = now;
-    return _cloudOnNow = _fetchCloudOnNow()
+
+    _cloudOnNowExpiresAt = now.add(_cloudOnNowCacheLife);
+    late final Future<List<Map<String, dynamic>>> loading;
+    loading = _fetchCloudOnNow()
         .timeout(_cloudOnNowTimeout)
-        .catchError((Object _) => <Map<String, dynamic>>[]);
+        .catchError((Object _) => <Map<String, dynamic>>[])
+        .then((programs) {
+          if (identical(_cloudOnNow, loading)) {
+            for (final program in programs) {
+              final end = DateTime.tryParse(program['EndDate'] as String? ?? '');
+              if (end != null && end.isBefore(_cloudOnNowExpiresAt!)) {
+                _cloudOnNowExpiresAt = end;
+              }
+            }
+          }
+          return programs;
+        });
+    return _cloudOnNow = loading;
   }
 
   /// Prefer the user's own DVR channels; Free TV fills the remaining Home
