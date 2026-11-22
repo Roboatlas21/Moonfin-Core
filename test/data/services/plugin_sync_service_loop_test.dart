@@ -206,8 +206,9 @@ void main() {
     expect(adapter.requests, isEmpty);
   });
 
-  test('applying a resolved profile does not schedule a push back', () async {
+  test('a resolved profile does not echo through either push path', () async {
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    await service.pushSettings(client);
     await settle();
     expect(resolvedCount(), 1);
     expect(postCount(), 0, reason: 'the apply echoed back to the server');
@@ -353,12 +354,6 @@ void main() {
     await prefs.set(UserPreferences.use24HourClock, true);
     await service.pushSettingsForProfile(client, profile: 'desktop');
     expect(postCount(), 2);
-  });
-
-  test('a push right after an apply is recognized as the echo', () async {
-    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
-    await service.pushSettings(client);
-    expect(postCount(), 0);
   });
 
   test('a genuinely changed remote value still lands and notifies', () async {
