@@ -630,6 +630,61 @@ void main() {
     );
   });
 
+  test('Plex retains one UTC day when another fails, then fills the gap', () async {
+    final (dio, _) = _server();
+    final start = DateTime.utc(2026, 10, 22, 23, 30);
+    final end = DateTime.utc(2026, 10, 23, 0, 30);
+    var dayTwoFails = true;
+    final requestedDays = <String>[];
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (options, handler) {
+      if (options.uri.path != '/grid') {
+        handler.next(options);
+        return;
+      }
+      final day = options.uri.queryParameters['date']!;
+      requestedDays.add(day);
+      if (day == '2026-10-23' && dayTwoFails) {
+        handler.reject(DioException(
+          requestOptions: options,
+          type: DioExceptionType.connectionError,
+        ));
+        return;
+      }
+      final begins = day == '2026-10-22'
+          ? DateTime.utc(2026, 10, 22, 23, 40)
+          : DateTime.utc(2026, 10, 23, 0, 10);
+      handler.resolve(Response(requestOptions: options, data: {
+        'MediaContainer': {'Metadata': [{
+          'type': 'movie',
+          'title': 'Program $day',
+          'Media': [{
+            'beginsAt': begins.millisecondsSinceEpoch ~/ 1000,
+            'endsAt': begins.add(const Duration(minutes: 20))
+                .millisecondsSinceEpoch ~/ 1000,
+          }],
+        }]},
+      }));
+    }));
+
+    final api = PlexLiveTvApi(dio);
+    const channel = 'channel-plex-abc-66635fc0';
+    final incomplete = await api.getGuide(
+      startDate: start, endDate: end, channelIds: [channel],
+    );
+    expect(incomplete['FailedChannelIds'], [channel]);
+    expect((incomplete['Items'] as List).map((p) => p['Name']),
+        ['Program 2026-10-22']);
+
+    dayTwoFails = false;
+    final complete = await api.getGuide(
+      startDate: start, endDate: end, channelIds: [channel],
+    );
+    expect(complete.containsKey('FailedChannelIds'), isFalse);
+    expect((complete['Items'] as List).map((p) => p['Name']),
+        ['Program 2026-10-22', 'Program 2026-10-23']);
+    expect(requestedDays, ['2026-10-22', '2026-10-23', '2026-10-23']);
+  });
+
   test('a free channel only asks plex.tv for showings in the window', () async {
     final (dio, server) = _server();
     final result = await PlexLiveTvApi(dio).getGuide(

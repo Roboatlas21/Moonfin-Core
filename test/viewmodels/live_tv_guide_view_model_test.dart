@@ -5,6 +5,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/models/live_tv_recording_state.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
+import 'package:moonfin/ui/screens/livetv/guide/guide_cell.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 
 import 'package:server_core/server_core.dart';
@@ -1255,7 +1256,80 @@ void main() {
     vm.dispose();
   });
 
+  test('partial EPG shows successful cells and remains retryable', () async {
+    _stubChannels(liveTv, [_channel('c0')]);
+    final start = DateTime(2026, 10, 22, 19);
+    final first = _span('first', 'c0', start,
+        start.add(const Duration(minutes: 30)));
+    final second = _span('second', 'c0',
+        start.add(const Duration(minutes: 30)),
+        start.add(const Duration(hours: 1)));
+    var attempts = 0;
+    when(() => _guide(liveTv)).thenAnswer((_) async {
+      attempts++;
+      return {
+        'Items': attempts == 1 ? [first] : attempts == 2 ? [second] : [first, second],
+        if (attempts < 3) 'FailedChannelIds': ['c0'],
+      };
+    });
+
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load(windowStart: start, window: const Duration(hours: 1));
+    expect(vm.loadStateFor('c0'), GuideChannelLoadState.partial);
+    expect(vm.hasProgramsFor('c0'), isFalse);
+    final cells = buildRowCells(
+      visible: vm.programsForChannel('c0'),
+      unfiltered: vm.unfilteredProgramsForChannel('c0'),
+      windowStart: vm.windowStart,
+      windowEnd: vm.windowEnd,
+      loadState: vm.loadStateFor('c0'),
+    );
+    expect(cells.map((c) => c.kind),
+        [GuideCellKind.program, GuideCellKind.failed]);
+
+    await vm.retryFailedPrograms();
+    expect(vm.loadStateFor('c0'), GuideChannelLoadState.partial);
+    expect(vm.programsForChannel('c0').map((p) => p.id), ['first', 'second']);
+    await vm.retryFailedPrograms();
+    expect(vm.loadStateFor('c0'), GuideChannelLoadState.loaded);
+    expect(vm.hasProgramsFor('c0'), isTrue);
+    expect(vm.programsForChannel('c0').map((p) => p.id), ['first', 'second']);
+  });
+
   group('category filters', () {
+    test('partial category listings survive the first retry', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      var attempts = 0;
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer((_) async {
+        attempts++;
+        return {
+          'Items': [
+            if (attempts != 2) _program('first', 'c0', isSports: true),
+            if (attempts >= 2)
+              _program('second', 'c0',
+                  start: DateTime.utc(2026, 9, 11, 10, 30), isSports: true),
+          ],
+          if (attempts < 3) 'FailedChannelIds': ['c0'],
+        };
+      });
+
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      expect(attempts, 2);
+      expect(vm.filteredChannels.map((c) => c.id), ['c0']);
+      expect(vm.loadStateFor('c0'), GuideChannelLoadState.partial);
+      expect(vm.programsForChannel('c0').map((p) => p.id), ['first', 'second']);
+      await vm.retryFailedPrograms();
+      expect(vm.hasFailedCategoryListings, isFalse);
+      expect(vm.loadStateFor('c0'), GuideChannelLoadState.loaded);
+    });
+
     test('a stale session clears category loading and old rows', () async {
       _stubChannels(liveTv, [_channel('c0')]);
       final pending = Completer<Map<String, dynamic>>();

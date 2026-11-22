@@ -289,7 +289,9 @@ class ChannelCarouselPrewarm {
     final now = _now();
     final failed = [
       for (final id in _retryNeighborhood)
-        if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed) id,
+        if (viewModel.loadStateFor(id)
+            case GuideChannelLoadState.failed || GuideChannelLoadState.partial)
+          id,
     ];
     if (failed.isEmpty) return;
 
@@ -312,7 +314,8 @@ class ChannelCarouselPrewarm {
       if (_disposed || !isWarm || viewModel.listingsAccessDenied) return;
       final eligible = [
         for (final id in _retryNeighborhood)
-          if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
+          if ((viewModel.loadStateFor(id) == GuideChannelLoadState.failed ||
+                  viewModel.loadStateFor(id) == GuideChannelLoadState.partial) &&
               (_failedListingsLastAttempt[id] == null ||
                   !_failedListingsLastAttempt[id]!
                       .add(_failedListingsRetryCooldown)
