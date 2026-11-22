@@ -274,6 +274,67 @@ void main() {
     },
   );
 
+  test('a failed DVR preserves healthy DVR channels and programs', () async {
+    final (dio, _) = _server();
+    var badGridRequests = 0;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (options.uri.path == '/livetv/dvrs') {
+            handler.resolve(
+              Response(requestOptions: options, data: {
+                'MediaContainer': {
+                  'Dvr': [
+                    {'key': '2', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:2'},
+                    {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
+                  ],
+                },
+              }),
+            );
+            return;
+          }
+          if (options.uri.path.startsWith('/tv.plex.providers.epg.xmltv:3/')) {
+            if (options.uri.path.endsWith('/grid')) badGridRequests++;
+            handler.reject(DioException(
+              requestOptions: options,
+              type: DioExceptionType.connectionError,
+            ));
+            return;
+          }
+          handler.next(options);
+        },
+      ),
+    );
+
+    final api = PlexLiveTvApi(dio);
+    final lineup = await api.getChannelGroups();
+    expect(lineup.groupsByChannelId['channel-2-4'], {'source:dvr'});
+    expect(lineup.sources.where((s) => s.groupId == 'source:dvr'), hasLength(1));
+
+    final start = DateTime.utc(2026, 10, 22);
+    final end = DateTime.utc(2026, 10, 23);
+    final partial = await api.getGuide(
+      startDate: start,
+      endDate: end,
+      channelIds: ['channel-2-4', 'channel-3-9'],
+    );
+    expect(partial['FailedChannelIds'], ['channel-3-9']);
+    expect(
+      (partial['Items'] as List).map((p) => p['ChannelId']).toSet(),
+      {'channel-2-4'},
+    );
+
+    final previousRequests = badGridRequests;
+    final healthy = await api.getGuide(
+      startDate: start,
+      endDate: end,
+      channelIds: ['channel-2-4'],
+    );
+    expect(healthy.containsKey('FailedChannelIds'), isFalse);
+    expect(badGridRequests, previousRequests);
+  });
+
   test('Plex joins genres and loads Featured on demand', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
@@ -299,6 +360,48 @@ void main() {
 
 
 
+
+  test('Plex retains unresolved genre groups when metadata fails and recovers', () async {
+    final (dio, server) = _server();
+    var metadataUnavailable = true;
+    dio.interceptors.insert(
+      0,
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (metadataUnavailable &&
+              options.uri.host == 'epg.provider.plex.tv' &&
+              options.uri.path == '/') {
+            handler.reject(DioException(
+              requestOptions: options,
+              type: DioExceptionType.connectionError,
+            ));
+          } else {
+            handler.next(options);
+          }
+        },
+      ),
+    );
+
+    final api = PlexLiveTvApi(dio);
+    final incomplete = await api.getChannelGroups();
+    expect(incomplete.partial, isTrue);
+    expect(incomplete.unresolvedChannelIds, {
+      'channel-plex-abc-66635fc0',
+      'channel-plex-news-extra',
+    });
+    expect(incomplete.groupsByChannelId['channel-2-4'], {'source:dvr'});
+    expect(incomplete.groupsByChannelId['channel-plex-abc-66635fc0'],
+        {'source:plexFreeTv'});
+    expect(incomplete.channels, hasLength(3));
+
+    metadataUnavailable = false;
+    final recovered = await api.getChannelGroups();
+    expect(recovered.partial, isFalse);
+    expect(recovered.unresolvedChannelIds, isNull);
+    expect(recovered.groupsByChannelId['channel-plex-abc-66635fc0'],
+        {'source:plexFreeTv', 'Movies', 'News'});
+    expect(server.requests.where((r) => r.uri.path == '/'), hasLength(1));
+  });
 
   test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
     final (dio, server) = _server();
@@ -357,9 +460,11 @@ void main() {
 
     final dvr = PlexLiveTvApi(dio);
     expect((await dvr.getRecommendedPrograms(limit: 2))['Items'], hasLength(2));
-    final combined = (await dvr.getRecommendedPrograms(limit: 3))['Items'] as List;
+    // Three DVR airings fill the first three slots; Free TV fills the fourth.
+    final combined = (await dvr.getRecommendedPrograms(limit: 4))['Items'] as List;
     expect(combined.map((item) => item['ChannelId']), [
-      'channel-2-4', 'channel-2-4', 'channel-plex-abc-66635fc0',
+      'channel-2-4', 'channel-2-9', 'channel-2-4',
+      'channel-plex-abc-66635fc0',
     ]);
   });
 
@@ -376,9 +481,12 @@ void main() {
         handler.next(options);
       }
     }));
+    // Request room for the Free TV hub so its failure is actually exercised.
     final programs = (await PlexLiveTvApi(dio)
-        .getRecommendedPrograms(limit: 3))['Items'] as List;
-    expect(programs, hasLength(2));
+        .getRecommendedPrograms(limit: 4))['Items'] as List;
+    expect(programs.map((item) => item['ChannelId']), [
+      'channel-2-4', 'channel-2-9', 'channel-2-4',
+    ]);
   });
 
   test('Plex On Now falls back to Free TV on DVR transport failures', () async {
