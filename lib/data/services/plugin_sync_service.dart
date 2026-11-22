@@ -2616,8 +2616,7 @@ class PluginSyncService extends ChangeNotifier {
       // Everything the field table describes. The bespoke entries below cover the
       // settings that need real logic rather than a straight codec.
       for (final field in syncedFields)
-        if (!field.receiveOnly && field.serverKey != 'liveTvSavedFilters')
-          field.serverKey: _encodeSyncedField(field),
+        if (!field.receiveOnly) field.serverKey: _encodeSyncedField(field),
       'sinceYouWatchedNumRows': _prefs.get(UserPreferences.sinceYouWatchedNumRows).value,
       'mediaBarEnabled': mediaBarEnabled,
       'mediaBarMode': mediaBarMode,
