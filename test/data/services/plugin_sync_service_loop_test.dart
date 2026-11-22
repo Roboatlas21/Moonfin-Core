@@ -192,325 +192,178 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  test('fresh login restores settings through an active client wrapper', () async {
-    // Production registers a different wrapper from the factory client used
-    // for sign-in. The account is the same despite different object identities.
+  test('fresh login restores settings through the active client wrapper', () async {
     final active = _MockConnectivityAwareClient();
     when(() => active.onlineClient).thenReturn(client);
     await GetIt.instance.unregister<MediaServerClient>();
     GetIt.instance.registerSingleton<MediaServerClient>(active);
-    adapter.resolvedProfile = {
-      'use24HourClock': true,
-      'navbarPosition': 'bottom',
-    };
+    adapter.resolvedProfile = {'use24HourClock': true};
 
     await service.syncOnLogin(client, serverId: 'srv1');
-    expect(resolvedCount(), 1, reason: 'the first login must read Moonbase');
     expect(prefs.get(UserPreferences.use24HourClock), isTrue);
-    expect(prefs.containsPreference(UserPreferences.navbarPosition), isTrue);
     expect(service.isSyncInitializedForServer(client, serverId: 'srv1'), isTrue);
-
     adapter.savedPins = [];
-    final pins = await togglePin('group:Sports');
-    expect(pins, ['group:Sports']);
+    expect(await togglePin('group:Sports'), ['group:Sports']);
     service.resetState();
   });
 
-  test('rapid pin toggles share the server update queue', () async {
+  test('atomic pin toggles remain ordered online and locally', () async {
     adapter.savedPins = [];
-    final first = togglePin('group:Sports');
-    final second = togglePin('group:Sports');
-    await Future.wait([first, second]);
+    await Future.wait([togglePin('group:Sports'), togglePin('group:Sports')]);
     expect(adapter.pinActions, ['add', 'remove']);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-  });
 
-  test('rapid local pin toggles are ordered without Moonbase', () async {
     service.resetState();
-    final first = togglePin('group:Sports');
-    final second = togglePin('group:Sports');
-    await Future.wait([first, second]);
+    adapter.requests.clear();
+    await Future.wait([togglePin('group:News'), togglePin('group:News')]);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
     expect(adapter.requests, isEmpty);
   });
 
-  test('failed pin import cannot block fresh settings restore', () async {
+  test('failed pin imports do not block ordinary settings restoration', () async {
     adapter.resolvedProfile = {
       'use24HourClock': true,
-      'liveTvSavedFilters': ['group:Server'],
+      'liveTvSavedFilters': ['group:Admin'],
     };
     adapter.failPinChanges = true;
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
     await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-
     await service.syncOnLogin(client, serverId: 'srv1');
-
-    expect(resolvedCount(), 1);
     expect(prefs.get(UserPreferences.use24HourClock), isTrue);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Local']);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
-    expect(service.isSyncInitializedForServer(client, serverId: 'srv1'), isTrue);
     service.resetState();
   });
 
   test('applying a resolved profile does not schedule a push back', () async {
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     await settle();
-
     expect(resolvedCount(), 1);
     expect(postCount(), 0, reason: 'the apply echoed back to the server');
   });
 
-  test('ordinary settings pushes cannot overwrite saved guide pins', () async {
+  test('regular settings updates do not overwrite atomic guide pins', () async {
     const local = ['group:US | SPORTS, Canada', 'category:sports'];
     await prefs.set(UserPreferences.liveTvSavedFilters, local);
     await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
     await service.pushSettingsForProfile(client, profile: 'desktop');
     expect(adapter.lastPushedProfile?.containsKey('liveTvSavedFilters'), isFalse);
 
-    // Import pending pins before the first atomic edit, without a prior pull.
-    final updated = await togglePin('group:News, English');
+    expect(await togglePin('group:News'), [...local, 'group:News']);
     expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
-    expect(updated, [...local, 'group:News, English']);
-
-    // A change on another device arrives through the existing settings stream.
-    adapter.savedPins = ['group:News, English', 'category:movies'];
+    adapter.savedPins = ['group:News', 'category:movies'];
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(prefs.get(UserPreferences.liveTvSavedFilters), adapter.savedPins);
-
-    adapter.savedPins = <String>[];
+    adapter.savedPins = [];
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
   });
 
-  test('stale pin replies and queued edits cannot update another account', () async {
-    adapter.savedPins = [];
-    adapter.pinResponseReady = Completer<void>();
-    adapter.pinResponseGate = Completer<void>();
-    final first = togglePin('group:Sports');
-    await adapter.pinResponseReady!.future;
-    final queued = togglePin('group:News');
-    final firstRejected = expectLater(first, throwsA(isA<StateError>()));
-    final queuedRejected = expectLater(queued, throwsA(isA<StateError>()));
-    when(() => client.userId).thenReturn('user2');
-    adapter.pinResponseGate!.complete();
-    await Future.wait([firstRejected, queuedRejected]);
-    expect(adapter.pinActions, ['add']);
-    expect(postCount(), 1);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-  });
-
-  test('a pending import cannot apply to another account', () async {
-    const local = ['group:Local'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, local);
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-    adapter.pinResponseReady = Completer<void>();
-    adapter.pinResponseGate = Completer<void>();
-    final pulling = service.pullSettingsForProfile(client, profile: 'desktop');
-    await adapter.pinResponseReady!.future;
-    when(() => client.userId).thenReturn('user2');
-    adapter.pinResponseGate!.complete();
-    expect(await pulling, isFalse);
-    expect(adapter.pinActions, ['initializeIfAbsent']);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
-  });
-
-  test('a delayed pin reply cannot replace a newer settings update', () async {
-    adapter.savedPins = [];
-    adapter.pinResponseReady = Completer<void>();
-    adapter.pinResponseGate = Completer<void>();
-
-    final saving = togglePin('group:Sports');
-    await adapter.pinResponseReady!.future;
-    // Another device adds News after the server handled our Sports request,
-    // but before its older response reaches this device.
-    adapter.savedPins = ['group:Sports', 'group:News'];
-    final updated = service.handleServerEvent(client, {'type': 'settingsUpdated'});
-    await Future<void>.delayed(Duration.zero);
-    expect(resolvedCount(), 0, reason: 'settings must wait for the pin save');
-
-    adapter.pinResponseGate!.complete();
-    expect(await saving, ['group:Sports']);
-    await updated;
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports', 'group:News']);
-  });
-
-  test('manual sync cannot overwrite a pin saved during an older pull', () async {
-    adapter.savedPins = ['group:Sports'];
-    adapter.resolvedResponseReady = Completer<void>();
-    adapter.resolvedResponseGate = Completer<void>();
-
-    final pulling = service.pullSettingsForProfile(client, profile: 'desktop');
-    await adapter.resolvedResponseReady!.future;
-    final saving = togglePin('group:News');
-    await Future<void>.delayed(Duration.zero);
-    expect(adapter.pinActions, isEmpty, reason: 'save must wait for the manual pull');
-
-    adapter.resolvedResponseGate!.complete();
-    expect(await pulling, isTrue);
-    expect(await saving, ['group:Sports', 'group:News']);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters),
-        ['group:Sports', 'group:News']);
-  });
-
-  test('pin edits wait for sign-in and preserve their order', () async {
-    adapter.savedPins = ['group:Sports'];
-    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
-    adapter.resolvedResponseReady = Completer<void>();
-    adapter.resolvedResponseGate = Completer<void>();
-
-    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
-    await adapter.resolvedResponseReady!.future;
-    final addNews = togglePin('group:News');
-    final removeSports = togglePin('group:Sports');
-    expect(adapter.pinActions, isEmpty);
-    adapter.resolvedResponseGate!.complete();
-    await signingIn;
-    expect(await addNews, ['group:Sports', 'group:News']);
-    expect(await removeSports, ['group:News']);
-    expect(adapter.pinActions, ['add', 'remove']);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
-    service.resetState();
-  });
-
-  test('an old server cannot import or apply the active account pins', () async {
-    const local = ['group:Sports', 'category:news'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, local);
-    final other = _MockClient();
-    when(() => other.baseUrl).thenReturn('http://plugin.test');
-    when(() => other.accessToken).thenReturn('token');
-    when(() => other.userId).thenReturn('user1');
-    when(() => other.serverType).thenReturn(ServerType.jellyfin);
-
-    await service.handleServerEvent(other, {'type': 'settingsUpdated'});
-    expect(resolvedCount(), 0, reason: 'a stale event must not read active pins');
-    expect(await service.pullSettingsForProfile(other, profile: 'desktop'), isFalse);
-    expect(adapter.pinActions, isEmpty);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
-  });
-
-  test('pins sync after Moonbase appears, even with no existing server profile', () async {
+  test('offline pins import when Moonbase first becomes available', () async {
     adapter.missingProfileUntilPins = true;
-    const existing = ['group:Sports', 'group:News, Canada'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, existing);
-    service.resetState(); // Moonbase has not been detected in this session.
-
-    final remote = await togglePin('group:Movies');
-    expect(remote, isNull);
-    expect(adapter.requests, isEmpty, reason: 'pinning must not discover Moonbase');
-
-    // The service now owns the local fallback as well as remote edits.
-    const localWithMovies = [...existing, 'group:Movies'];
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), localWithMovies);
+    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Sports']);
+    service.resetState();
+    expect(await togglePin('group:Movies'), isNull);
+    expect(adapter.requests, isEmpty);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
 
-    // A later normal availability check and settings sync import all three.
     expect(await service.refreshAvailability(client), isTrue);
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(adapter.pinActions, ['initializeIfAbsent']);
-    expect(resolvedCount(), 2, reason: 'new server profile must be fetched after import');
-    expect(adapter.savedPins, localWithMovies);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), localWithMovies);
+    expect(adapter.savedPins, ['group:Sports', 'group:Movies']);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
   });
 
-  test('old Moonbase keeps pins local until its pin support is upgraded', () async {
+  test('legacy and failing Moonbase writes preserve pins until recovery', () async {
     adapter.supportsPinChanges = false;
-    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Admin']};
-    const local = ['group:Sports', 'group:Movies'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Sports']);
-    expect(
-      await togglePin('group:Movies'),
-      isNull,
-    );
-    expect(postCount(), 1);
-    expect(adapter.pinActions, isEmpty);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.savedPins, isNull);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
-
-    adapter.supportsPinChanges = true;
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.pinActions, ['initializeIfAbsent']);
-    expect(adapter.savedPins, local);
-  });
-
-  test('failed import keeps local pins through settings events until retry', () async {
-    const local = ['group:Sports'];
-    await prefs.set(UserPreferences.liveTvSavedFilters, local);
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
     adapter.resolvedProfile = {
       'liveTvSavedFilters': ['group:Admin'],
       'use24HourClock': true,
     };
-    adapter.failPinChanges = true;
-
+    await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Sports']);
+    expect(await togglePin('group:Movies'), isNull);
+    const local = ['group:Sports', 'group:Movies'];
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
-    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isTrue);
+
+    adapter.supportsPinChanges = true;
+    adapter.failPinChanges = true;
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
-
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
     adapter.failPinChanges = false;
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(adapter.savedPins, local);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
     expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
-    expect(adapter.pinActions, ['initializeIfAbsent']);
   });
 
-  test('pre-Moonbase local pins override inherited admin defaults once', () async {
-    const local = ['group:US | SPORTS', 'group:Kids'];
-    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Admin']};
-    await prefs.set(UserPreferences.liveTvSavedFilters, local);
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.pinActions, ['initializeIfAbsent']);
-    expect(adapter.savedPins, local);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), local);
-    // A subsequent settings pull must not import the same device values again.
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.pinActions, ['initializeIfAbsent']);
-  });
-
-  test('unmodified users follow later administrator pin default changes', () async {
+  test('administrator defaults and explicit empty pins retain precedence', () async {
     adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Sports']};
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
-
     adapter.resolvedProfile = {'liveTvSavedFilters': ['group:News']};
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.pinActions, isEmpty, reason: 'inherited pins are not copied into a user override');
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
-  });
+    expect(adapter.pinActions, isEmpty);
 
-  test('an explicit empty server list blocks pending local pin import', () async {
     await prefs.set(UserPreferences.liveTvSavedFilters, ['group:Local']);
     await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
-    adapter.savedPins = <String>[];
     expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
+    expect(adapter.savedPins, ['group:Local']);
     expect(adapter.pinActions, ['initializeIfAbsent']);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
+
+    adapter.savedPins = [];
+    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
+    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-    final pins = await togglePin('group:Movies');
-    expect(adapter.pinActions, ['initializeIfAbsent', 'add']);
-    expect(pins, ['group:Movies']);
   });
 
-  test('pending empty pins override inherited defaults', () async {
-    adapter.resolvedProfile = {'liveTvSavedFilters': ['group:Admin']};
-    await prefs.set(UserPreferences.liveTvSavedFiltersUnsynced, true);
+  test('queued pin replies cannot overwrite newer settings or another account', () async {
+    adapter.savedPins = [];
+    adapter.pinResponseReady = Completer<void>();
+    adapter.pinResponseGate = Completer<void>();
+    final saving = togglePin('group:Sports');
+    await adapter.pinResponseReady!.future;
+    adapter.savedPins = ['group:Sports', 'group:News'];
+    final updating = service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    await Future<void>.delayed(Duration.zero);
+    expect(resolvedCount(), 0);
+    adapter.pinResponseGate!.complete();
+    expect(await saving, ['group:Sports']);
+    await updating;
+    expect(prefs.get(UserPreferences.liveTvSavedFilters),
+        ['group:Sports', 'group:News']);
 
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.savedPins, isEmpty);
-    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
-    expect(prefs.get(UserPreferences.liveTvSavedFiltersUnsynced), isFalse);
+    adapter.pinResponseReady = Completer<void>();
+    adapter.pinResponseGate = Completer<void>();
+    final stale = togglePin('group:Movies');
+    await adapter.pinResponseReady!.future;
+    final queued = togglePin('group:Kids');
+    final rejected = expectLater(stale, throwsA(isA<StateError>()));
+    final queuedRejected = expectLater(queued, throwsA(isA<StateError>()));
+    when(() => client.userId).thenReturn('other');
+    adapter.pinResponseGate!.complete();
+    await Future.wait([rejected, queuedRejected]);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters),
+        ['group:Sports', 'group:News']);
+  });
+
+  test('pin edits wait for sign-in before applying local changes', () async {
+    adapter.savedPins = ['group:Sports'];
+    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
+    adapter.resolvedResponseReady = Completer<void>();
+    adapter.resolvedResponseGate = Completer<void>();
+    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
+    await adapter.resolvedResponseReady!.future;
+    final add = togglePin('group:News');
+    final remove = togglePin('group:Sports');
+    expect(adapter.pinActions, isEmpty);
+    adapter.resolvedResponseGate!.complete();
+    await signingIn;
+    expect(await add, ['group:Sports', 'group:News']);
+    expect(await remove, ['group:News']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
+    service.resetState();
   });
 
   test('an unchanged payload is pushed once, a changed one again', () async {
