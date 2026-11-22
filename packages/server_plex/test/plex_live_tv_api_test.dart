@@ -342,7 +342,9 @@ void main() {
     final cloud = server.requests.where(
       (r) => r.uri.host == 'epg.provider.plex.tv',
     );
-    expect(cloud.map((r) => r.uri.path), ['/lineups/plex/channels', '/']);
+    expect(cloud.map((r) => r.uri.path), [
+      '/lineups/plex/channels', '/', '/lineups/plex/channels', '/',
+    ]);
     await promoted.refresh(DateTime.now);
     expect(promoted.channelIds, {'channel-plex-abc-66635fc0'});
     expect(promoted.channelIds, isNot(contains('channel-plex-news-extra')));
@@ -352,7 +354,41 @@ void main() {
 
 
 
+  test('full lineup refresh picks up new Free TV channels and genres', () async {
+    var name = 'Sports';
+    final server = _FakeServer((request) => switch (request.uri.path) {
+      '/lineups/plex/channels' => {'MediaContainer': {'Channel': [
+        {'id': name, 'title': name, 'genreRatingKeys': ['genre']},
+      ]}},
+      '/' => {'MediaProvider': {'Feature': [
+        {'type': 'grid', 'GridChannelFilter': [
+          {'genreRatingKey': 'genre', 'title': name},
+        ]},
+      ]}},
+      _ => throw StateError('Unexpected request ${request.uri.path}'),
+    });
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
+    await api.getChannelGroups();
+    name = 'News';
+    final (lineup, concurrent) = await (api.getChannelGroups(), api.getChannelGroups()).wait;
+    expect(concurrent, same(lineup));
+    expect(lineup.groupsByChannelId, {'channel-plex-News': {'News'}});
+    expect((await api.getChannels())['Items'], lineup.channels);
+    expect(server.requests, hasLength(4));
+  });
 
+  test('a Free TV outage preserves the last lineup alongside the DVR', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final healthy = await api.getChannelGroups();
+    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
+    for (var i = 0; i < 2; i++) {
+      expect((await api.getChannelGroups()).channels, healthy.channels);
+    }
+    server.failureStatus = () => 403;
+    final denied = await api.getChannelGroups();
+    expect(denied.channels!.length, lessThan(healthy.channels!.length));
+  });
 
   test('Plex retains unresolved genre groups when metadata fails and recovers', () async {
     final (dio, server) = _server();

@@ -89,7 +89,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<List<_Dvr>>? _dvrs;
   Future<String?>? _favoriteMachineId;
   Future<List<Map<String, dynamic>>>? _cloudChannels;
-  Future<_CloudGroups>? _cloudGroups;
+  Future<ChannelGroupLineup>? _lineupRead;
+  PromotedChannelGroup? _featuredGroup;
   final _cloudGrids = <String, ({DateTime at, Future<List> items})>{};
 
   // The Free TV Home hub is independent of channel grids and may be absent on
@@ -156,8 +157,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   ) {
     final cached = read();
     if (cached != null) return cached;
-    final loading = load().catchError((Object e) {
-      write(null);
+    late final Future<T> loading;
+    loading = load().catchError((Object e) {
+      if (identical(read(), loading)) write(null);
       throw e;
     });
     write(loading);
@@ -282,7 +284,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   /// One source failing, like plex.tv being unreachable, still leaves the
   /// other's channels.
-  Future<(_Channels, _Channels)> _channelSources() async {
+  Future<(_Channels, _Channels)> _channelSources({Future<_Channels>? previousFree}) async {
     // Future.wait preserves the original DioException (including 401/403)
     // rather than wrapping failures in ParallelWaitError as record .wait does.
     final results = await Future.wait<_Channels>([
@@ -290,7 +292,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       // A failed Cloud-only lineup is an error, not an empty channel list.
       cloudOnly
           ? _freeChannels()
-          : _freeChannels().catchError((_) => <Map<String, dynamic>>[]),
+          : _freeChannels().catchError((Object error) async {
+            if (previousFree != null && !_accessDenied(error)) {
+              final cached = await previousFree.catchError((_) => <Map<String, dynamic>>[]);
+              if (cached.isNotEmpty) _cloudChannels ??= Future.value(cached);
+              return cached;
+            }
+            return <Map<String, dynamic>>[];
+          }),
     ]);
     return (results[0], results[1]);
   }
@@ -319,45 +328,53 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     throw const FormatException('Invalid Plex Featured lineup');
   }
 
-  Future<_CloudGroups> _providerGroups() =>
-      _cached(() => _cloudGroups, (f) => _cloudGroups = f, () async {
-        final response = await _dio.get<Map<String, dynamic>>(
-          '$plexCloudEpg/',
-          options: _cloudOptions,
-        ).timeout(const Duration(seconds: 5));
-        final provider = response.data?['MediaProvider'];
-        if (provider is! Map || provider['Feature'] is! List) {
-          throw const FormatException('Invalid Plex provider');
+  Future<_CloudGroups> _providerGroups() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '$plexCloudEpg/',
+      options: _cloudOptions,
+    ).timeout(const Duration(seconds: 5));
+    final provider = response.data?['MediaProvider'];
+    if (provider is! Map || provider['Feature'] is! List) {
+      throw const FormatException('Invalid Plex provider');
+    }
+    final genres = <String, String>{};
+    PromotedChannelGroup? promoted;
+    for (final feature in (provider['Feature'] as List).whereType<Map>()) {
+      if (feature['type'] != 'grid') continue;
+      for (final filter
+          in feature['GridChannelFilter'] as List? ?? const []) {
+        if (filter case {
+          'genreRatingKey': String key,
+          'title': String name,
+        } when key.isNotEmpty && name.isNotEmpty) {
+          genres[key] = name;
         }
-        final genres = <String, String>{};
-        PromotedChannelGroup? promoted;
-        for (final feature in (provider['Feature'] as List).whereType<Map>()) {
-          if (feature['type'] != 'grid') continue;
-          for (final filter
-              in feature['GridChannelFilter'] as List? ?? const []) {
-            if (filter case {
-              'genreRatingKey': String key,
-              'title': String name,
-            } when key.isNotEmpty && name.isNotEmpty) {
-              genres[key] = name;
-            }
-          }
-          for (final filter
-              in feature['PromotedGridChannelFilter'] as List? ?? const []) {
-            if (filter case {
-              'key': _featuredPath,
-              'title': String name,
-            } when name.isNotEmpty) {
-              promoted = PromotedChannelGroup(name, _featuredIds);
-            }
-          }
+      }
+      for (final filter
+          in feature['PromotedGridChannelFilter'] as List? ?? const []) {
+        if (filter case {
+          'key': _featuredPath,
+          'title': String name,
+        } when name.isNotEmpty) {
+          promoted = _featuredGroup?.name == name
+              ? _featuredGroup
+              : PromotedChannelGroup(name, _featuredIds);
         }
-        return (genres: genres, promoted: promoted);
-      });
+      }
+    }
+    _featuredGroup = promoted;
+    return (genres: genres, promoted: promoted);
+  }
 
   @override
-  Future<ChannelGroupLineup> getChannelGroups({String? userId}) async {
-    final (dvr, free) = await _channelSources();
+  Future<ChannelGroupLineup> getChannelGroups({String? userId}) =>
+      _lineupRead ??= _loadLineup().whenComplete(() => _lineupRead = null);
+
+  Future<ChannelGroupLineup> _loadLineup() async {
+    // Only a full guide load refreshes the catalog. EPG paging reuses it.
+    final previousFree = _cloudChannels;
+    _cloudChannels = null;
+    final (dvr, free) = await _channelSources(previousFree: previousFree);
     if (free.isEmpty) {
       // Keep DVR channels in their own group when Free TV is unavailable.
       return ChannelGroupLineup(
@@ -373,7 +390,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     var metadataUnavailable = false;
     final catalog = await _providerGroups().onError<Object>((_, _) {
       metadataUnavailable = true;
-      return (genres: const <String, String>{}, promoted: null);
+      return (genres: const <String, String>{}, promoted: _featuredGroup);
     });
     return ChannelGroupLineup(
       {
