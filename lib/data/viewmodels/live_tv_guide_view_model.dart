@@ -1950,7 +1950,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _rebuildGroupChoices(complete: true);
       if (selected) {
         // Refresh the page without canceling a pending time-window move.
-        _resetPageCursor(advancePage: false);
+        _resetPageCursor();
         if (_state == GuideState.ready) unawaited(loadMorePrograms());
       }
     }
