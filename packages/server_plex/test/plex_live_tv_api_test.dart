@@ -57,7 +57,7 @@ const _teletubbies = {
   ],
 };
 
-(Dio, _FakeServer) _server({bool secondDvr = false}) {
+(Dio, _FakeServer) _server({bool secondDvr = false, bool liveDvr = false}) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final server = _FakeServer(
     (options) => switch (options.uri.path) {
@@ -105,7 +105,13 @@ const _teletubbies = {
       },
       '/tv.plex.providers.epg.xmltv:2/grid' => {
         'MediaContainer': {
-          'Metadata': [
+          'Metadata': liveDvr ? [
+            {..._teletubbies, 'Media': [
+              for (final offset in [-3600, 0, 7200])
+                {'channelIdentifier': '4', 'beginsAt': now + offset - 60,
+                 'endsAt': now + offset + 60},
+            ]},
+          ] : [
             _teletubbies,
             {
               'type': 'movie',
@@ -468,7 +474,7 @@ void main() {
 
   test('Plex On Now uses a cached hub after the DVR lineup', () async {
     const hubPath = '/hubs/sections/home/whatsOnNow';
-    final (dio, server) = _server();
+    final (dio, server) = _server(liveDvr: true);
     final cloud = PlexLiveTvApi(dio, cloudOnly: true);
     final free = (await cloud.getRecommendedPrograms(limit: 15))['Items'] as List;
     expect(free, hasLength(1));
@@ -479,12 +485,12 @@ void main() {
     expect(server.requests.any((r) => r.uri.path == '/grid'), isFalse);
 
     final dvr = PlexLiveTvApi(dio);
-    expect((await dvr.getRecommendedPrograms(limit: 2))['Items'], hasLength(2));
-    // Three DVR airings fill the first three slots; Free TV fills the fourth.
-    final combined = (await dvr.getRecommendedPrograms(limit: 4))['Items'] as List;
+    expect((await dvr.getRecommendedPrograms(limit: 1))['Items'], hasLength(1));
+    expect(server.requests.where((r) => r.uri.path == hubPath), hasLength(1));
+    // Past and future repeats of the DVR show must leave room for Free TV.
+    final combined = (await dvr.getRecommendedPrograms(limit: 2))['Items'] as List;
     expect(combined.map((item) => item['ChannelId']), [
-      'channel-2-4', 'channel-2-9', 'channel-2-4',
-      'channel-plex-abc-66635fc0',
+      'channel-2-4', 'channel-plex-abc-66635fc0',
     ]);
   });
 
@@ -543,7 +549,7 @@ void main() {
   });
 
   test('an unavailable Plex hub does not discard DVR On Now', () async {
-    final (dio, server) = _server();
+    final (dio, server) = _server(liveDvr: true);
     server.failWhen = (request) =>
         request.uri.path == '/hubs/sections/home/whatsOnNow';
     server.failureStatus = () => 404;
@@ -551,7 +557,7 @@ void main() {
     final programs = (await PlexLiveTvApi(dio)
         .getRecommendedPrograms(limit: 4))['Items'] as List;
     expect(programs.map((item) => item['ChannelId']), [
-      'channel-2-4', 'channel-2-9', 'channel-2-4',
+      'channel-2-4',
     ]);
   });
 
