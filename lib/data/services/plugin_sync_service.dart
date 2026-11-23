@@ -1042,7 +1042,7 @@ class PluginSyncService extends ChangeNotifier {
           UserPreferences.liveTvSavedFilterChanges,
         ))
           if (change != 'add:$filter' && change != 'remove:$filter') change,
-        if (length <= 1024) '${add ? 'add' : 'remove'}:$filter',
+        '${add ? 'add' : 'remove'}:$filter',
       ];
       await _prefs.set(changesPref, changes);
       await _prefs.set(pinsPref, pins.toList());

@@ -427,6 +427,18 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), adapter.savedPins);
   });
 
+  test('an over-limit saved pin can be removed and stays removed after sync', () async {
+    final pin = 'group:${'x' * 1024}';
+    adapter.savedPins = [pin];
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    await togglePin(pin);
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(adapter.pinActions, contains('remove'));
+    expect(adapter.savedPins, isEmpty);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+    await expectLater(togglePin(pin), throwsFormatException);
+  });
+
   test('invalid pins surface an error and never block later edits', () async {
     await expectLater(togglePin('group:${'x' * 1024}'), throwsFormatException);
     adapter.rejectedPin = 'group:Rejected';
