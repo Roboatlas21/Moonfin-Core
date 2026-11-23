@@ -96,6 +96,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   bool _hadDvrChannels = false;
   Future<String?>? _favoriteMachineId;
   Future<_FreeChannels>? _cloudChannels;
+  _FreeChannels? _lastFreeLineup;
   Future<ChannelGroupLineup>? _lineupRead;
   PromotedChannelGroup? _featuredGroup;
   final _cloudGrids = <String, ({DateTime at, Future<List> items})>{};
@@ -261,8 +262,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   /// Every free channel carries the same placeholder number, so they go
   /// without one and sort by name after the tuner's numbered channels.
-  Future<_FreeChannels> _freeChannels() =>
-      _cached(() => _cloudChannels, (f) => _cloudChannels = f, () async {
+  Future<_FreeChannels> _freeChannels() async {
+    final read = _cached(
+      () => _cloudChannels,
+      (f) => _cloudChannels = f,
+      () async {
         final response = await _dio.get<Map<String, dynamic>>(
           '$plexCloudEpg/lineups/plex/channels',
           options: _cloudOptions,
@@ -284,6 +288,31 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               _channelId(plexCloudSource, channel['id']):
                   _channel(plexCloudSource, channel),
         };
+      },
+    );
+    final _FreeChannels lineup;
+    try {
+      lineup = await read;
+    } on DioException catch (error) {
+      if (_accessDenied(error) && _cloudChannels == null) {
+        _lastFreeLineup = null;
+        _cloudOnNowRows = null;
+      }
+      rethrow;
+    }
+    if (!identical(read, _cloudChannels)) return _freeChannels();
+    final previous = _lastFreeLineup;
+    if (identical(previous, lineup)) return lineup;
+    if (previous != null && !_sameStationMapping(previous, lineup)) {
+      _cloudOnNowRows = null;
+    }
+    return _lastFreeLineup = lineup;
+  }
+
+  static bool _sameStationMapping(_FreeChannels a, _FreeChannels b) =>
+      a.length == b.length && b.entries.every((entry) {
+        final station = a[entry.key];
+        return station != null && station['PlexGridKey'] == entry.value['PlexGridKey'];
       });
 
   static Map<String, dynamic> _channel(
@@ -320,13 +349,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }) async {
     final free = _freeChannels().onError<Object>((error, stack) async {
       onFreeUnavailable?.call();
-      if (previousFree != null && !_accessDenied(error)) {
+      if (!cloudOnly && previousFree != null && !_accessDenied(error)) {
         final previous = await previousFree.onError<Object>(
           (_, _) => const <String, Map<String, dynamic>>{},
         );
-        // Keep confirmed station keys for guide reads during a temporary outage.
         if (previous.isNotEmpty) _cloudChannels ??= Future.value(previous);
-        if (!cloudOnly) return previous;
+        return previous;
       }
       if (cloudOnly) Error.throwWithStackTrace(error, stack);
       return const <String, Map<String, dynamic>>{};
@@ -622,8 +650,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   ) async {
     final lineup = await _freeChannels().catchError((Object error) {
       if (_accessDenied(error)) throw error;
-      // Older station IDs carry the grid key even when the catalog is down.
-      return const <String, Map<String, dynamic>>{};
+      // A known station can still use its guide key while the catalog is down.
+      return _lastFreeLineup ?? const <String, Map<String, dynamic>>{};
     });
     final first = start.toUtc();
     final exclusiveEnd = end.toUtc();
@@ -1021,7 +1049,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return programs;
   }
 
-  Future<List<Map<String, dynamic>>> _freeOnNow() async {
+  Future<List<Map<String, dynamic>>> _freeOnNow() =>
+      _loadFreeOnNow().timeout(_cloudOnNowTimeout).onError<Object>((_, _) => []);
+
+  Future<List<Map<String, dynamic>>> _loadFreeOnNow() async {
+    final lineup = await _freeChannels();
     final now = DateTime.now();
     if (_cloudOnNowRows == null || !now.isBefore(_cloudOnNowExpiresAt!)) {
       _cloudOnNowExpiresAt = now.add(_cloudOnNowCacheLife);
@@ -1031,21 +1063,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
 
     final cached = _cloudOnNowRows!;
-    Future<List<Map<String, dynamic>>> match() async {
-      final rows = await cached;
-      if (rows.isEmpty) return [];
-      // A guide key can move to a different station while the hub is cached.
-      final programs = _matchCloudOnNow(rows, await _freeChannels());
-      if (identical(cached, _cloudOnNowRows)) {
-        for (final program in programs) {
-          final end = DateTime.parse(program['EndDate'] as String);
-          if (end.isBefore(_cloudOnNowExpiresAt!)) _cloudOnNowExpiresAt = end;
-        }
-      }
-      return programs;
+    final rows = await cached;
+    // A concurrent lineup refresh may have reassigned a station during the hub read.
+    if (!identical(cached, _cloudOnNowRows)) return _loadFreeOnNow();
+    final programs = _matchCloudOnNow(rows, lineup);
+    for (final program in programs) {
+      final end = DateTime.parse(program['EndDate'] as String);
+      if (end.isBefore(_cloudOnNowExpiresAt!)) _cloudOnNowExpiresAt = end;
     }
-
-    return match().timeout(_cloudOnNowTimeout).onError<Object>((_, _) => []);
+    return programs;
   }
 
   /// Prefer the user's own DVR channels; Free TV fills the remaining Home

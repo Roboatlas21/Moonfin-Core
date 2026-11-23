@@ -480,6 +480,14 @@ void main() {
     expect(lineup.groupsByChannelId, {'channel-plex-News': {'News'}});
     expect((await api.getChannels())['Items'], lineup.channels);
     expect(server.requests, hasLength(4));
+
+    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
+    server.failureStatus = () => 503;
+    await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
+    server.failWhen = null;
+    name = 'Movies';
+    final recovered = (await api.getChannels())['Items'] as List;
+    expect(recovered.single['Id'], 'channel-plex-Movies');
   });
 
   test('a DVR outage keeps both source filters until the lineup confirms removal', () async {
@@ -614,7 +622,7 @@ void main() {
               for (final id in ['city-east', 'east', 'city-south', 'a-shared', 'b-shared'])
                 {'id': id, 'title': id},
               {'id': 'west-news', 'gridKey': 'shared-grid'},
-              if (!refreshedLineup) {'id': 'east-news', 'gridKey': 'shared-grid'},
+              {'id': 'east-news', 'gridKey': refreshedLineup ? 'east-grid' : 'shared-grid'},
               {'id': 'city-west', 'gridKey': refreshedLineup ? 'north-grid' : 'west-grid'},
               {'id': 'city-north', 'gridKey': refreshedLineup ? 'west-grid' : 'north-grid'},
             ]}
@@ -637,17 +645,23 @@ void main() {
       'Unique suffix': 'channel-plex-city-south',
     });
 
+    await api.getChannelGroups();
+    await api.getRecommendedPrograms();
+    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(1));
+
     refreshedLineup = true;
+    references['North broadcast'] = references.remove('Backup grid key')!;
     await api.getChannelGroups();
     final refreshed = (await api.getRecommendedPrograms())['Items'] as List;
     expect({for (final item in refreshed) item['Name']: item['ChannelId']}, {
       'Shared grid only': 'channel-plex-west-news',
+      'East news': 'channel-plex-east-news',
       'Exact ID': 'channel-plex-east',
-      'Backup grid key': 'channel-plex-city-north',
+      'North broadcast': 'channel-plex-city-north',
       'Nested grid key': 'channel-plex-city-west',
       'Unique suffix': 'channel-plex-city-south',
     });
-    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(1));
+    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(2));
   });
 
   test('an unavailable Plex hub does not discard DVR On Now', () async {
