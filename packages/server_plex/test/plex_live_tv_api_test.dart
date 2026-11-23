@@ -403,7 +403,10 @@ void main() {
       expect(result['FailedChannelIds'], [denied]);
       expect((result['Items'] as List).map((p) => p['ChannelId']), contains(healthy));
     }
-    await expectLater(guide([denied]), throwsA(isA<DioException>()
+    final retry = await guide([denied]);
+    expect(retry['Items'], isEmpty);
+    expect(retry['FailedChannelIds'], [denied]);
+    await expectLater(api.getProgram('airing-3-1792699380-9'), throwsA(isA<DioException>()
         .having((e) => e.response?.statusCode, 'status', 403)));
     server.failureStatus = () => 401;
     await expectLater(guide([free, denied]), throwsA(isA<DioException>()
