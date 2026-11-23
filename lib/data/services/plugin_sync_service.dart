@@ -1553,16 +1553,14 @@ class PluginSyncService extends ChangeNotifier {
     MediaServerClient client, {
     required String profile,
   }) async {
-    if (!_pluginAvailable) return false;
-    if (!_prefs.get(UserPreferences.pluginSyncEnabled)) return false;
-    if (!supportedProfiles.contains(profile)) return false;
+    if (!_syncEnabled || !supportedProfiles.contains(profile)) return false;
 
     final current = _guidePinAccountCheck(client);
     final reset = await _guidePinSync.synchronized(
       () => _localGuidePins.synchronized(() async {
-        if (!current()) return false;
+        if (!_syncEnabled || !current()) return false;
         final ep = await moonbaseEndpoint(client, _dio);
-        if (ep == null || !current()) return false;
+        if (ep == null || !_syncEnabled || !current()) return false;
 
         // A push queued by an earlier edit would put the old settings back moments
         // after the delete, so drop it before anything is removed.

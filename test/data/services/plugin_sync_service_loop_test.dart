@@ -234,6 +234,25 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:News']);
   });
 
+  test('turning sync off cancels a reset queued behind a pin upload', () async {
+    adapter.responseReady = Completer<void>();
+    adapter.responseGate = Completer<void>();
+    final saving = togglePin('group:Sports');
+    await adapter.responseReady!.future;
+
+    final reset = service.resetProfileToDefaults(client, profile: 'global');
+    await service.setSyncEnabled(false);
+    adapter.responseGate!.complete();
+    await saving;
+
+    expect(await reset, isFalse);
+    expect(
+      adapter.requests.where((request) => request.startsWith('DELETE ')),
+      isEmpty,
+    );
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+  });
+
   test('manual Save acknowledges pending edits and reports a failed transfer', () async {
     Future<bool> save() => service.pushSettingsForProfile(client, profile: 'tv', force: true);
     adapter.unavailablePin = 'group:News';
@@ -272,6 +291,18 @@ void main() {
     await service.handleServerEvent(client, {'type': 'settingsUpdated'});
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
     expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:Sports']);
+  });
+
+  test('an empty pin list in a resaved profile clears cached pins', () async {
+    await togglePin('group:Sports');
+    adapter.resolvedProfile = {'liveTvCategoryDisplay': 'groups'};
+    adapter.savedPins = null;
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+
+    adapter.savedPins = [];
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
   });
 
   test('regular settings updates do not overwrite atomic guide pins', () async {
