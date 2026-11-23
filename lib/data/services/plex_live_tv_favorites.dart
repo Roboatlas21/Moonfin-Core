@@ -358,7 +358,8 @@ class PlexLiveTvFavorites {
       } else if (!isFavorite && hadFavorite) {
         rows.removeWhere((row) => _matches(info, row));
       }
-      // Plex replaces the full favorites list on write, so keep other PMS entries.
+      // _serial orders edits in this app instance. Plex replaces the entire
+      // account list, so another device's edit between our GET and PUT can be lost.
       if (isFavorite != hadFavorite) {
         await _write(client, account.token, rows);
       }
