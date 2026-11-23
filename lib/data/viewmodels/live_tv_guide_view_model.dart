@@ -1872,6 +1872,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       (error.response?.statusCode == 401 || error.response?.statusCode == 403);
 
   void _applyChannelGroupLineup(ChannelGroupLineup lineup) {
+    final removedSources = {
+      for (final source in _sources)
+        if (!lineup.sources.contains(source)) source.groupId,
+    };
     _setGroupSources(lineup.sources, lineup.promoted);
     final unresolved = lineup.unresolvedChannelIds;
     final partial = lineup.partial;
@@ -1880,8 +1884,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final id = channel.id;
       final unknown = partial && (unresolved?.contains(id) ?? true);
       final known = lineup.groupsByChannelId[id];
-      final groups = unknown && _channelGroups.containsKey(id)
-          ? {...?_channelGroups[id], ...?known}
+      final previous = _channelGroups[id];
+      final groups = unknown && previous != null
+          ? {...previous.difference(removedSources), ...?known}
           : known;
       if (groups != null) updated[id] = groups;
     }

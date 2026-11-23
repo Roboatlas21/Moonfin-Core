@@ -241,27 +241,33 @@ void main() {
       ]);
     });
 
-    test('selected DVR survives an outage and clears after confirmed removal', () async {
-      final dvr = ChannelGroupSource.dvr.groupId;
-      final free = ChannelGroupSource.plexFreeTv.groupId;
-      var lineup = ChannelGroupLineup(
-        {'one': {dvr}, 'two': {free}}, channels: [_channel('one'), _channel('two')],
-        sources: ChannelGroupSource.values,
-      );
-      when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
-      await vm.load();
-      vm.setGroup(dvr);
-      lineup = ChannelGroupLineup(
-        {'two': {free}}, channels: [_channel('two')], sources: ChannelGroupSource.values,
-        partial: true, unresolvedChannelIds: const {},
-      );
-      await vm.load();
-      expect(vm.selectedGroup, dvr);
-      expect(vm.filteredChannels, isEmpty);
-      lineup = ChannelGroupLineup({}, channels: [_channel('two')]);
-      await vm.load();
-      expect(vm.selectedGroup, isNull);
-    });
+    for (final selected in ChannelGroupSource.values) {
+      test('keeps ${selected.name} during a DVR outage and clears it after removal', () async {
+        final dvr = ChannelGroupSource.dvr.groupId;
+        final free = ChannelGroupSource.plexFreeTv.groupId;
+        var lineup = ChannelGroupLineup(
+          {'one': {dvr}, 'two': {free}}, channels: [_channel('one'), _channel('two')],
+          sources: ChannelGroupSource.values,
+        );
+        when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
+        await vm.load();
+        vm.setGroup(selected.groupId);
+        lineup = ChannelGroupLineup(
+          {'two': {free, 'News'}}, channels: [_channel('two')], sources: ChannelGroupSource.values,
+          partial: true, unresolvedChannelIds: const {},
+        );
+        await vm.load();
+        expect(vm.selectedGroup, selected.groupId);
+        expect(vm.filteredChannels.map((row) => row.id),
+            selected == ChannelGroupSource.dvr ? isEmpty : ['two']);
+        lineup = ChannelGroupLineup(
+          {}, channels: [_channel('two')], partial: true, unresolvedChannelIds: const {'two'},
+        );
+        await vm.load();
+        expect(vm.selectedGroup, isNull);
+        expect(vm.availableGroups, ['News']);
+      });
+    }
 
     test('Next follows a Featured lineup change while listings are pending', () async {
       var featured = 'one';
