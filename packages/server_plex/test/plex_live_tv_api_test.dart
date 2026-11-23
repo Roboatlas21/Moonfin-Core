@@ -490,7 +490,7 @@ void main() {
 
   test('On Now prefers exact channel references and skips ambiguous suffixes', () async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    var eastAvailable = true;
+    var refreshedLineup = false;
     final references = {
       'Shared grid only': {'channelGridKey': 'shared-grid'},
       'East news': {'channelGridKey': 'shared-grid'},
@@ -506,9 +506,9 @@ void main() {
               for (final id in ['city-east', 'east', 'city-south', 'a-shared', 'b-shared'])
                 {'id': id, 'title': id},
               {'id': 'west-news', 'gridKey': 'shared-grid'},
-              if (eastAvailable) {'id': 'east-news', 'gridKey': 'shared-grid'},
-              {'id': 'city-west', 'title': 'West', 'gridKey': 'west-grid'},
-              {'id': 'city-north', 'title': 'North', 'gridKey': 'north-grid'},
+              if (!refreshedLineup) {'id': 'east-news', 'gridKey': 'shared-grid'},
+              {'id': 'city-west', 'gridKey': refreshedLineup ? 'north-grid' : 'west-grid'},
+              {'id': 'city-north', 'gridKey': refreshedLineup ? 'west-grid' : 'north-grid'},
             ]}
           : {'Metadata': [
               for (final entry in references.entries)
@@ -529,11 +529,16 @@ void main() {
       'Unique suffix': 'channel-plex-city-south',
     });
 
-    eastAvailable = false;
+    refreshedLineup = true;
     await api.getChannelGroups();
     final refreshed = (await api.getRecommendedPrograms())['Items'] as List;
-    expect(refreshed.map((p) => p['ChannelId']),
-        items.where((p) => p['Name'] != 'East news').map((p) => p['ChannelId']));
+    expect({for (final item in refreshed) item['Name']: item['ChannelId']}, {
+      'Shared grid only': 'channel-plex-west-news',
+      'Exact ID': 'channel-plex-east',
+      'Backup grid key': 'channel-plex-city-north',
+      'Nested grid key': 'channel-plex-city-west',
+      'Unique suffix': 'channel-plex-city-south',
+    });
     expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(1));
   });
 
@@ -683,7 +688,7 @@ void main() {
 
   test('Free TV guide and program details share the published grid key', () async {
     final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
     final result = await api.getGuide(
       startDate: DateTime.utc(2026, 10, 22, 20).toLocal(),
       endDate: DateTime.utc(2026, 10, 22, 22).toLocal(),
@@ -701,9 +706,18 @@ void main() {
     });
 
     server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
+    server.failureStatus = () => 503;
+    await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
+    expect((await api.getProgram(programs.single['Id']))['Name'], 'Law Abiding Citizen');
+    expect(server.requests.where((r) => r.uri.path == '/grid'), hasLength(1));
+
     final offline = PlexLiveTvApi(dio);
     await offline.getProgram('airing-plex-1792699200-abc-66635fc0');
     expect(server.requests.last.queryParameters['channelGridKey'], '66635fc0');
+
+    server.failureStatus = () => 403;
+    await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
+    await expectLater(api.getProgram(programs.single['Id']), throwsA(isA<DioException>()));
   });
 
   test('a free channel plays straight from plex.tv', () async {

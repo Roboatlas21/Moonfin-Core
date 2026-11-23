@@ -102,7 +102,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   static const _cloudOnNowCacheLife = Duration(minutes: 5);
   static const _cloudOnNowTimeout = Duration(seconds: 3);
   DateTime? _cloudOnNowExpiresAt;
-  Future<List<Map<String, dynamic>>>? _cloudOnNow;
+  Future<List<Map>>? _cloudOnNowRows;
 
   Future<List> _freeGrid(String gridKey, String day) {
     final key = '$gridKey/$day';
@@ -303,6 +303,18 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     Future<_FreeChannels>? previousFree,
     void Function()? onDvrUnavailable,
   }) async {
+    final free = _freeChannels().onError<Object>((error, stack) async {
+      if (previousFree != null && !_accessDenied(error)) {
+        final previous = await previousFree.onError<Object>(
+          (_, _) => const <String, Map<String, dynamic>>{},
+        );
+        // Keep confirmed station keys for guide reads during a temporary outage.
+        if (previous.isNotEmpty) _cloudChannels ??= Future.value(previous);
+        if (!cloudOnly) return previous;
+      }
+      if (cloudOnly) Error.throwWithStackTrace(error, stack);
+      return const <String, Map<String, dynamic>>{};
+    });
     // Future.wait preserves the original DioException (including 401/403)
     // rather than wrapping failures in ParallelWaitError as record .wait does.
     final results = await Future.wait<_Channels>([
@@ -310,17 +322,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         if (_temporaryDvrFailure(error)) onDvrUnavailable?.call();
         return <Map<String, dynamic>>[];
       }),
-      // A failed Cloud-only lineup is an error, not an empty channel list.
-      (cloudOnly
-          ? _freeChannels()
-          : _freeChannels().catchError((Object error) async {
-            if (previousFree != null && !_accessDenied(error)) {
-              final cached = await previousFree.catchError((_) => const <String, Map<String, dynamic>>{});
-              if (cached.isNotEmpty) _cloudChannels ??= Future.value(cached);
-              return cached;
-            }
-            return const <String, Map<String, dynamic>>{};
-          })).then((lineup) => lineup.values.toList()),
+      free.then((lineup) => lineup.values.toList()),
     ]);
     return (results[0], results[1]);
   }
@@ -850,7 +852,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return seconds > 100000000000 ? seconds ~/ 1000 : seconds;
   }
 
-  Future<List<Map<String, dynamic>>> _fetchCloudOnNow() async {
+  Future<List<Map>> _fetchCloudOnNowRows() async {
     // Plex's Home hub is a bounded alternative to one EPG grid call per
     // channel. This experimental endpoint is not guaranteed to be available.
     final response = await _dio.get<Map<String, dynamic>>(
@@ -889,9 +891,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         }
       }
     }
-    if (rows.isEmpty) return [];
+    return rows;
+  }
 
-    final lineup = await _freeChannels();
+  List<Map<String, dynamic>> _matchCloudOnNow(List<Map> rows, _FreeChannels lineup) {
     final gridKeys = <String, String?>{};
     final suffixes = <String, String?>{};
     void addAlias(Map<String, String?> index, String alias, String station) {
@@ -985,31 +988,31 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return programs;
   }
 
-  Future<List<Map<String, dynamic>>> _freeOnNow() {
+  Future<List<Map<String, dynamic>>> _freeOnNow() async {
     final now = DateTime.now();
-    if (_cloudOnNow != null &&
-        _cloudOnNowExpiresAt != null &&
-        now.isBefore(_cloudOnNowExpiresAt!)) {
-      return _cloudOnNow!;
+    if (_cloudOnNowRows == null || !now.isBefore(_cloudOnNowExpiresAt!)) {
+      _cloudOnNowExpiresAt = now.add(_cloudOnNowCacheLife);
+      _cloudOnNowRows = _fetchCloudOnNowRows()
+          .timeout(_cloudOnNowTimeout)
+          .onError<Object>((_, _) => <Map>[]);
     }
 
-    _cloudOnNowExpiresAt = now.add(_cloudOnNowCacheLife);
-    late final Future<List<Map<String, dynamic>>> loading;
-    loading = _fetchCloudOnNow()
-        .timeout(_cloudOnNowTimeout)
-        .catchError((Object _) => <Map<String, dynamic>>[])
-        .then((programs) {
-          if (identical(_cloudOnNow, loading)) {
-            for (final program in programs) {
-              final end = DateTime.tryParse(program['EndDate'] as String? ?? '');
-              if (end != null && end.isBefore(_cloudOnNowExpiresAt!)) {
-                _cloudOnNowExpiresAt = end;
-              }
-            }
-          }
-          return programs;
-        });
-    return _cloudOnNow = loading;
+    final cached = _cloudOnNowRows!;
+    Future<List<Map<String, dynamic>>> match() async {
+      final rows = await cached;
+      if (rows.isEmpty) return [];
+      // A guide key can move to a different station while the hub is cached.
+      final programs = _matchCloudOnNow(rows, await _freeChannels());
+      if (identical(cached, _cloudOnNowRows)) {
+        for (final program in programs) {
+          final end = DateTime.parse(program['EndDate'] as String);
+          if (end.isBefore(_cloudOnNowExpiresAt!)) _cloudOnNowExpiresAt = end;
+        }
+      }
+      return programs;
+    }
+
+    return match().timeout(_cloudOnNowTimeout).onError<Object>((_, _) => []);
   }
 
   /// Prefer the user's own DVR channels; Free TV fills the remaining Home
@@ -1036,16 +1039,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         ? _cloudOnNowLimit
         : (limit - programs.length).clamp(0, _cloudOnNowLimit).toInt();
     if (remaining > 0) {
-      final home = await _freeOnNow();
-      if (home.isNotEmpty) {
-        // A guide refresh can remove a station while its Home airing is cached.
-        final lineup = await _cloudChannels
-            ?.timeout(_cloudOnNowTimeout)
-            .onError<Object>((_, _) => const <String, Map<String, dynamic>>{});
-        if (lineup != null) {
-          programs.addAll(home.where((p) => lineup.containsKey(p['ChannelId'])).take(remaining));
-        }
-      }
+      programs.addAll((await _freeOnNow()).take(remaining));
     }
     return plexItemsResult(programs);
   }
