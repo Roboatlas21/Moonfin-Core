@@ -216,8 +216,16 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  const ard = GuideChannel(id: 'ard', name: 'Das Erste', rawData: {});
-  const zdf = GuideChannel(id: 'zdf', name: 'ZDF', rawData: {});
+  const ard = GuideChannel(
+    id: 'ard',
+    name: 'Das Erste',
+    rawData: {'ChannelFavoriteSyncKey': 'channel:http://server\u0000ard'},
+  );
+  const zdf = GuideChannel(
+    id: 'zdf',
+    name: 'ZDF',
+    rawData: {'ChannelFavoriteSyncKey': 'channel:http://server\u0000zdf'},
+  );
   Future<void> pumpPlayer(WidgetTester tester, {
     List<GuideChannel> channels = const [ard, zdf],
   }) async {
