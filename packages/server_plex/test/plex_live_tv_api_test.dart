@@ -618,6 +618,16 @@ void main() {
     expect(grid.queryParameters['type'], '1,4');
   });
 
+  test('DVR guide excludes showings ending at the start or starting at the end', () async {
+    final (dio, _) = _server();
+    final result = await PlexLiveTvApi(dio).getGuide(
+      startDate: DateTime.utc(2026, 10, 22, 21, 4),
+      endDate: DateTime.utc(2026, 10, 22, 23),
+      channelIds: ['channel-2-4', 'channel-2-9'],
+    );
+    expect((result['Items'] as List).map((p) => p['Name']), ['SuperKitties']);
+  });
+
   test('recording one showing holds it to its channel and time', () async {
     final (dio, server) = _server();
     await PlexLiveTvApi(dio).createTimer('airing-2-1792699380-4');

@@ -552,6 +552,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   static String? _seriesOf(Map op) =>
       (op['Metadata'] as Map?)?['grandparentSubscriptionID']?.toString();
 
+  // Plex can return other showings of a title that matches the grid query.
+  static bool _overlapsWindow(Map media, int from, int to) =>
+      (media['endsAt'] as int) > from && (media['beginsAt'] as int) < to;
+
   /// The DVR showings between [start] and [end] as programs, with any
   /// recording set for them.
   Future<_Airings> _dvrAirings(
@@ -566,9 +570,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         if (grab.op['status'] != 'error') grab.program['Id']: grab.op,
     };
     final programs = <Map<String, dynamic>>[];
+    final from = _seconds(start);
+    final to = _seconds(end);
     for (final showing in grid.showings) {
       final program = _dvrProgram(showing.dvr, showing.item, showing.media);
-      if (program == null) continue;
+      if (program == null || !_overlapsWindow(showing.media, from, to)) continue;
       if (channelIds != null && !channelIds.contains(program['ChannelId'])) {
         continue;
       }
@@ -643,9 +649,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
                     item,
                     media,
                   );
-                  if (program != null &&
-                      media['endsAt'] as int > from &&
-                      media['beginsAt'] as int < to) {
+                  if (program != null && _overlapsWindow(media, from, to)) {
                     decoded.add(program);
                   }
                 }
@@ -1029,10 +1033,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     if (!cloudOnly) {
       try {
         final airings = await _dvrAirings(now, now.add(const Duration(seconds: 1)));
-        // Plex can include other showings of a program that is airing now.
-        dvr.addAll(airings.items.where((program) =>
-            !DateTime.parse(program['StartDate'] as String).isAfter(now) &&
-            DateTime.parse(program['EndDate'] as String).isAfter(now)));
+        dvr.addAll(airings.items);
       } on DioException catch (error) {
         if (_accessDenied(error)) rethrow;
         // An unavailable DVR must not prevent loading the Free TV hub.
