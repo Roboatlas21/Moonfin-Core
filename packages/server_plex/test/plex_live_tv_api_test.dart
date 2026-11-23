@@ -90,6 +90,7 @@ const _teletubbies = {
           'Channel': [
             {
               'id': 'abc-66635fc0',
+              'gridKey': 'provider-42',
               'vcn': '000',
               'title': 'CW Forever',
               'genreRatingKeys': [8, '7', 'blank', 'unknown'],
@@ -489,7 +490,10 @@ void main() {
 
   test('On Now prefers exact channel references and skips ambiguous suffixes', () async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    var eastAvailable = true;
     final references = {
+      'Shared grid only': {'channelGridKey': 'shared-grid'},
+      'East news': {'channelGridKey': 'shared-grid'},
       'Exact ID': {'channelIdentifier': 'east'},
       'Backup grid key': {'channelIdentifier': 'stale-east', 'channelGridKey': 'west-grid'},
       'Nested grid key': {'channelId': {'id': '', 'gridKey': 'north-grid'}},
@@ -501,12 +505,16 @@ void main() {
           ? {'Channel': [
               for (final id in ['city-east', 'east', 'city-south', 'a-shared', 'b-shared'])
                 {'id': id, 'title': id},
+              {'id': 'west-news', 'gridKey': 'shared-grid'},
+              if (eastAvailable) {'id': 'east-news', 'gridKey': 'shared-grid'},
               {'id': 'city-west', 'title': 'West', 'gridKey': 'west-grid'},
               {'id': 'city-north', 'title': 'North', 'gridKey': 'north-grid'},
             ]}
           : {'Metadata': [
               for (final entry in references.entries)
-                {'title': entry.key, 'type': 'movie', 'Media': [
+                {'title': entry.key, 'type': 'movie',
+                 if (entry.key == 'East news') 'channelIdentifier': 'east-news',
+                 'Media': [
                   {...entry.value, 'beginsAt': now - 60, 'endsAt': now + 60},
                 ]},
             ]},
@@ -514,11 +522,19 @@ void main() {
     final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
     final items = (await api.getRecommendedPrograms(limit: 10))['Items'] as List;
     expect({for (final item in items) item['Name']: item['ChannelId']}, {
+      'East news': 'channel-plex-east-news',
       'Exact ID': 'channel-plex-east',
       'Backup grid key': 'channel-plex-city-west',
       'Nested grid key': 'channel-plex-city-north',
       'Unique suffix': 'channel-plex-city-south',
     });
+
+    eastAvailable = false;
+    await api.getChannelGroups();
+    final refreshed = (await api.getRecommendedPrograms())['Items'] as List;
+    expect(refreshed.map((p) => p['ChannelId']),
+        items.where((p) => p['Name'] != 'East news').map((p) => p['ChannelId']));
+    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(1));
   });
 
   test('an unavailable Plex hub does not discard DVR On Now', () async {
@@ -665,9 +681,10 @@ void main() {
     );
   });
 
-  test('a free channel only asks plex.tv for showings in the window', () async {
+  test('Free TV guide and program details share the published grid key', () async {
     final (dio, server) = _server();
-    final result = await PlexLiveTvApi(dio).getGuide(
+    final api = PlexLiveTvApi(dio);
+    final result = await api.getGuide(
       startDate: DateTime.utc(2026, 10, 22, 20).toLocal(),
       endDate: DateTime.utc(2026, 10, 22, 22).toLocal(),
       channelIds: ['channel-plex-abc-66635fc0'],
@@ -677,9 +694,16 @@ void main() {
     expect(programs.map((p) => p['Id']), [
       'airing-plex-1792699200-abc-66635fc0',
     ]);
-    final grid = server.requests.single;
-    expect(grid.uri.path, '/grid');
-    expect(grid.queryParameters['date'], '2026-10-22');
+    expect((await api.getProgram(programs.single['Id']))['Name'], 'Law Abiding Citizen');
+    expect(server.requests.map((r) => r.uri.path), ['/lineups/plex/channels', '/grid']);
+    expect(server.requests.last.queryParameters, {
+      'date': '2026-10-22', 'channelGridKey': 'provider-42',
+    });
+
+    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
+    final offline = PlexLiveTvApi(dio);
+    await offline.getProgram('airing-plex-1792699200-abc-66635fc0');
+    expect(server.requests.last.queryParameters['channelGridKey'], '66635fc0');
   });
 
   test('a free channel plays straight from plex.tv', () async {

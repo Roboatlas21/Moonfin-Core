@@ -50,6 +50,7 @@ int _seconds(DateTime time) => time.millisecondsSinceEpoch ~/ 1000;
 
 typedef _Dvr = ({String key, String epg});
 typedef _Channels = List<Map<String, dynamic>>;
+typedef _FreeChannels = Map<String, Map<String, dynamic>>;
 typedef _CloudGroups = ({
   Map<String, String> genres,
   PromotedChannelGroup? promoted,
@@ -89,7 +90,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<List<_Dvr>>? _dvrs;
   bool _hadDvrChannels = false;
   Future<String?>? _favoriteMachineId;
-  Future<List<Map<String, dynamic>>>? _cloudChannels;
+  Future<_FreeChannels>? _cloudChannels;
   Future<ChannelGroupLineup>? _lineupRead;
   PromotedChannelGroup? _featuredGroup;
   final _cloudGrids = <String, ({DateTime at, Future<List> items})>{};
@@ -103,15 +104,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   DateTime? _cloudOnNowExpiresAt;
   Future<List<Map<String, dynamic>>>? _cloudOnNow;
 
-  Future<List> _freeGrid(String channel, String day) {
-    final key = '$channel/$day';
+  Future<List> _freeGrid(String gridKey, String day) {
+    final key = '$gridKey/$day';
     final now = DateTime.now();
     _cloudGrids.removeWhere(
       (_, grid) => now.difference(grid.at) >= _cloudGridLife,
     );
     if (_cloudGrids[key] case final cached?) return cached.items;
     late final Future<List> items;
-    items = _fetchFreeGrid(channel, day).catchError((Object error) {
+    items = _fetchFreeGrid(gridKey, day).catchError((Object error) {
       // A timed-out request may have been replaced before its failure.
       if (identical(_cloudGrids[key]?.items, items)) {
         _cloudGrids.remove(key);
@@ -123,13 +124,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }
 
   /// Failed requests throw, so the guide can retry instead of caching a blank.
-  Future<List> _fetchFreeGrid(String channel, String day) async {
+  Future<List> _fetchFreeGrid(String gridKey, String day) async {
     for (var attempt = 0; ; attempt++) {
       try {
         final response = await _dio.get<Map<String, dynamic>>(
           '$plexCloudEpg/grid',
           queryParameters: {
-            'channelGridKey': channel.split('-').last,
+            'channelGridKey': gridKey,
             'date': day,
           },
           options: _cloudOptions,
@@ -246,7 +247,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   /// Every free channel carries the same placeholder number, so they go
   /// without one and sort by name after the tuner's numbered channels.
-  Future<List<Map<String, dynamic>>> _freeChannels() =>
+  Future<_FreeChannels> _freeChannels() =>
       _cached(() => _cloudChannels, (f) => _cloudChannels = f, () async {
         final response = await _dio.get<Map<String, dynamic>>(
           '$plexCloudEpg/lineups/plex/channels',
@@ -261,11 +262,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             (channels != null || container['size'] != 0)) {
           throw const FormatException('Invalid Plex Free TV lineup channels');
         }
-        return [
+        return {
           for (final channel in channels is List ? channels : const [])
-            if (channel is Map && channel['drm'] != true)
-              _channel(plexCloudSource, channel),
-        ];
+            if (channel is Map &&
+                channel['drm'] != true &&
+                channel['id']?.toString().trim().isNotEmpty == true)
+              _channelId(plexCloudSource, channel['id']):
+                  _channel(plexCloudSource, channel),
+        };
       });
 
   static Map<String, dynamic> _channel(
@@ -277,8 +281,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     'Id': _channelId(source, channel['id']),
     'Name': channel['title'] ?? channel['callSign'],
     'Type': 'TvChannel',
-    if (source == plexCloudSource && channel['gridKey'] is String)
-      'PlexGridKey': channel['gridKey'],
+    if (source == plexCloudSource)
+      if (channel['gridKey'] case final String key when key.trim().isNotEmpty)
+        'PlexGridKey': key.trim(),
     if (favoriteSource != null && channel['id'] != null) ...{
       'PlexFavoriteSource': favoriteSource,
       'PlexFavoriteId': '${channel['id']}',
@@ -295,7 +300,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   /// One source failing, like plex.tv being unreachable, still leaves the
   /// other's channels.
   Future<(_Channels, _Channels)> _channelSources({
-    Future<_Channels>? previousFree,
+    Future<_FreeChannels>? previousFree,
     void Function()? onDvrUnavailable,
   }) async {
     // Future.wait preserves the original DioException (including 401/403)
@@ -306,16 +311,16 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         return <Map<String, dynamic>>[];
       }),
       // A failed Cloud-only lineup is an error, not an empty channel list.
-      cloudOnly
+      (cloudOnly
           ? _freeChannels()
           : _freeChannels().catchError((Object error) async {
             if (previousFree != null && !_accessDenied(error)) {
-              final cached = await previousFree.catchError((_) => <Map<String, dynamic>>[]);
+              final cached = await previousFree.catchError((_) => const <String, Map<String, dynamic>>{});
               if (cached.isNotEmpty) _cloudChannels ??= Future.value(cached);
               return cached;
             }
-            return <Map<String, dynamic>>[];
-          }),
+            return const <String, Map<String, dynamic>>{};
+          })).then((lineup) => lineup.values.toList()),
     ]);
     return (results[0], results[1]);
   }
@@ -580,6 +585,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime end,
     List<String> channels,
   ) async {
+    final lineup = await _freeChannels().catchError((Object error) {
+      if (_accessDenied(error)) throw error;
+      // Older station IDs carry the grid key even when the catalog is down.
+      return const <String, Map<String, dynamic>>{};
+    });
     final first = start.toUtc();
     final exclusiveEnd = end.toUtc();
     final days = {
@@ -606,7 +616,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       final grids = await Future.wait([
         for (final request in batch)
           () async {
-            final itemsFuture = _freeGrid(request.channel, request.day);
+            final id = _channelId(plexCloudSource, request.channel);
+            final gridKey = lineup[id]?['PlexGridKey'] as String? ??
+                request.channel.split('-').last;
+            final itemsFuture = _freeGrid(gridKey, request.day);
             try {
               final items = await itemsFuture;
               // Commit a grid's programs only after it decodes completely.
@@ -638,12 +651,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               // Report an expired provider token as an auth failure, not a
               // single-channel outage.
               if (_accessDenied(error)) Error.throwWithStackTrace(error, stack);
-              failedChannelIds.add(_channelId(plexCloudSource, request.channel));
+              failedChannelIds.add(id);
               firstFailure ??= error;
               firstFailureStack ??= stack;
               // Drop malformed grids for Retry, unless a newer request already
               // replaced this cache entry.
-              final key = request.channel + '/' + request.day;
+              final key = '$gridKey/${request.day}';
               if (identical(_cloudGrids[key]?.items, itemsFuture)) {
                 _cloudGrids.remove(key);
               }
@@ -704,10 +717,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     // Omitted IDs request all Cloud-only channels; [] remains a no-op.
     final requestedIds = channelIds ??
         (cloudOnly
-            ? [
-                for (final channel in await _freeChannels())
-                  channel['Id'] as String,
-              ]
+            ? (await _freeChannels()).keys.toList()
             : const <String>[]);
     final free = [
       for (final id in requestedIds)
@@ -881,46 +891,60 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
     if (rows.isEmpty) return [];
 
-    final exact = <String, String>{};
+    final lineup = await _freeChannels();
+    final gridKeys = <String, String?>{};
     final suffixes = <String, String?>{};
-    for (final channel in await _freeChannels()) {
-      final id = plexChannelOf(channel['Id']?.toString() ?? '');
-      if (id == null || id.source != plexCloudSource || id.channel.isEmpty) continue;
-      exact[id.channel] = id.channel;
-      final gridKey = channel['PlexGridKey'] as String?;
-      if (gridKey != null && gridKey.isNotEmpty) {
-        exact.putIfAbsent(gridKey, () => id.channel);
-      }
-      for (final alias in {id.channel.split('-').last, ?gridKey}) {
-        suffixes.update(
-          alias,
-          (previous) => previous == id.channel ? previous : null,
-          ifAbsent: () => id.channel,
-        );
+    void addAlias(Map<String, String?> index, String alias, String station) {
+      index.update(
+        alias,
+        (old) => old == station ? station : null,
+        ifAbsent: () => station,
+      );
+    }
+
+    for (final entry in lineup.entries) {
+      final station = plexChannelOf(entry.key)!.channel;
+      final suffix = station.split('-').last;
+      if (suffix.isNotEmpty) addAlias(suffixes, suffix, station);
+      if (entry.value['PlexGridKey'] case final String key) {
+        addAlias(gridKeys, key, station);
+        addAlias(suffixes, key, station);
       }
     }
 
     String? matchChannel(Map media, Map row) {
-      String? fallback;
-      final references = [
-        for (final item in [media, row])
-          for (final field in const ['channelIdentifier', 'channelId', 'channelGridKey', 'gridKey'])
-            item[field],
-      ];
-      for (final ref in references) {
-        for (final value in ref is Map ? [ref['id'], ref['gridKey']] : [ref]) {
-          final raw = value?.toString().trim();
-          if (raw == null || raw.isEmpty) continue;
-          final parsed = plexChannelOf(raw);
-          final key = parsed?.source == plexCloudSource ? parsed!.channel : raw;
-          final channel = exact[key];
-          if (channel != null) return channel;
-          // A later field can still identify the channel exactly.
-          final suffix = key.split('-').last;
-          if (suffix.isNotEmpty) fallback ??= suffixes[suffix];
+      String? exact, grid, stationInGridField, suffix;
+      void consider(Object? value, {required bool stationId}) {
+        final raw = value?.toString().trim();
+        if (raw == null || raw.isEmpty) return;
+        final parsed = plexChannelOf(raw);
+        final key = parsed?.source == plexCloudSource ? parsed!.channel : raw;
+        final knownStation = lineup.containsKey(_channelId(plexCloudSource, key));
+        if (stationId && knownStation) exact ??= key;
+        if (gridKeys.containsKey(key)) {
+          // A shared guide cannot identify a station by itself.
+          grid ??= gridKeys[key];
+        } else {
+          if (knownStation) stationInGridField ??= key;
+          suffix ??= suffixes[key.split('-').last];
         }
       }
-      return fallback;
+
+      for (final item in [media, row]) {
+        for (final field in const [
+          'channelIdentifier', 'channelId', 'channelGridKey', 'gridKey',
+        ]) {
+          final ref = item[field];
+          if (ref is Map) {
+            consider(ref['id'], stationId: true);
+            consider(ref['gridKey'], stationId: false);
+          } else {
+            consider(ref,
+                stationId: field == 'channelIdentifier' || field == 'channelId');
+          }
+        }
+      }
+      return exact ?? grid ?? stationInGridField ?? suffix;
     }
 
     final now = _seconds(DateTime.now());
@@ -1012,7 +1036,16 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         ? _cloudOnNowLimit
         : (limit - programs.length).clamp(0, _cloudOnNowLimit).toInt();
     if (remaining > 0) {
-      programs.addAll((await _freeOnNow()).take(remaining));
+      final home = await _freeOnNow();
+      if (home.isNotEmpty) {
+        // A guide refresh can remove a station while its Home airing is cached.
+        final lineup = await _cloudChannels
+            ?.timeout(_cloudOnNowTimeout)
+            .onError<Object>((_, _) => const <String, Map<String, dynamic>>{});
+        if (lineup != null) {
+          programs.addAll(home.where((p) => lineup.containsKey(p['ChannelId'])).take(remaining));
+        }
+      }
     }
     return plexItemsResult(programs);
   }
