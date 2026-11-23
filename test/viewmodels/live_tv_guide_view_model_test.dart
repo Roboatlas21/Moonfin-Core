@@ -437,6 +437,50 @@ void main() {
     expect(vm.programsForChannel('c1'), isEmpty);
   });
 
+  test('a timed-out middle batch preserves other guide batches on a window move', () async {
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    final start = DateTime.utc(2026, 9, 11, 10);
+    final next = start.add(const Duration(hours: 3));
+    _stubChannels(liveTv, List.generate(120, (i) => _channel('c$i')));
+    await vm.load(windowStart: start);
+    await vm.loadMorePrograms();
+    await vm.loadMorePrograms();
+
+    when(() => _guide(liveTv)).thenAnswer((inv) async {
+      final ids = _requestedIds(inv);
+      if (ids.contains('c50')) throw TimeoutException('middle guide batch failed');
+      return {
+        'Items': [
+          for (final id in ids) _program('next-$id', id, start: next),
+        ],
+      };
+    });
+
+    expect(await vm.setWindowStart(next), isTrue);
+    expect(vm.windowStart, next);
+    expect(vm.programsForChannel('c0').single.id, 'next-c0');
+    expect(vm.hasProgramsFor('c50'), isFalse);
+    expect(vm.programsForChannel('c100').single.id, 'next-c100');
+  });
+
+  test('all timed-out guide batches leave the requested window uncommitted', () async {
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    final start = DateTime.utc(2026, 9, 11, 10);
+    final next = start.add(const Duration(hours: 3));
+    _stubChannels(liveTv, List.generate(60, (i) => _channel('c$i')));
+    await vm.load(windowStart: start);
+    await vm.loadMorePrograms();
+    final revision = vm.failedWindowMoveRevision;
+    when(() => _guide(liveTv))
+        .thenThrow(TimeoutException('guide batches unavailable'));
+
+    expect(await vm.setWindowStart(next), isFalse);
+    expect(vm.windowStart, start);
+    expect(vm.failedWindowMoveRevision, revision + 1);
+  });
+
   test('a stale lazy batch cannot merge into a reloaded window', () async {
     when(() => _channelsRequest(liveTv)).thenAnswer(
       (_) async => {
@@ -1313,6 +1357,40 @@ void main() {
       expect(vm.hasMorePrograms, isTrue);
     });
 
+    test('a session switch during load keeps the next-entry reload', () async {
+      final start = DateTime.now().add(const Duration(hours: 1));
+      var lineupReads = 0;
+      when(() => _channelsRequest(liveTv)).thenAnswer((_) async {
+        lineupReads++;
+        return {'Items': [_channel('c0')]};
+      });
+      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
+        (_) async => {'Items': [_program('old', 'c0', isKids: true)]},
+      );
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load(windowStart: start);
+      vm.setFilter(GuideFilter.kids);
+      await pumpEventQueue();
+
+      final pending = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv, category: GuideFilter.kids))
+          .thenAnswer((_) => pending.future);
+      final loading = vm.load(windowStart: start);
+      await pumpEventQueue();
+      userDataSync.reset();
+      pending.complete({'Items': [_program('stale', 'c0', isKids: true)]});
+      await loading;
+
+      final readsBeforeEntry = lineupReads;
+      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
+        (_) async => {'Items': [_program('fresh', 'c0', isKids: true)]},
+      );
+      await vm.reloadIfStale(windowStart: start);
+      expect(lineupReads, readsBeforeEntry + 1);
+      expect(vm.state, GuideState.ready);
+    });
+
     // Both cases start with healthy c0 and an initially failed c1.
     // The retry's error type decides whether to preserve c0 or fail the guide.
     void stubFailedSportsRetry(Object error) {
@@ -1732,6 +1810,44 @@ void main() {
       expect(vm.programsForChannel('c5').single.hasTimer, isTrue);
     });
 
+
+    test('category retry from before a recording change cannot erase its badge', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
+        (_) async => {'Items': [_program('k1', 'c0', isKids: true)]},
+      );
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.kids);
+      await pumpEventQueue();
+
+      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
+        (_) async => {'Items': [], 'FailedChannelIds': ['c0']},
+      );
+      await vm.recordingChanged();
+      expect(vm.hasFailedCategoryListings, isTrue);
+
+      final olderRetry = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv, category: GuideFilter.kids))
+          .thenAnswer((_) => olderRetry.future);
+      final retry = vm.retryFailedCategoryListings();
+      await pumpEventQueue();
+
+      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
+        (_) async => {
+          'Items': [recorded(_program('k1', 'c0', isKids: true))],
+        },
+      );
+      await vm.recordingChanged();
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+
+      olderRetry.complete({
+        'Items': [_program('k1', 'c0', isKids: true)],
+      });
+      await retry;
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+    });
 
     test('reloadIfRecordingsChanged does nothing until a recording changes', () async {
       _stubChannels(liveTv, [_channel('c0')]);
