@@ -341,6 +341,30 @@ void main() {
     expect(badGridRequests, previousRequests);
   });
 
+  test('a forbidden tuner grid preserves other grids, but 401 stays fatal', () async {
+    final (dio, server) = _server(secondDvr: true);
+    final api = PlexLiveTvApi(dio);
+    server.failWhen = (r) => r.uri.path == '/tv.plex.providers.epg.xmltv:3/grid';
+    server.failureStatus = () => 403;
+    const denied = 'channel-3-9';
+    const free = 'channel-plex-abc-66635fc0';
+    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22),
+      endDate: DateTime.utc(2026, 10, 23),
+      channelIds: ids,
+    );
+    for (final healthy in ['channel-2-4', free]) {
+      final result = await guide([healthy, denied]);
+      expect(result['FailedChannelIds'], [denied]);
+      expect((result['Items'] as List).map((p) => p['ChannelId']), contains(healthy));
+    }
+    await expectLater(guide([denied]), throwsA(isA<DioException>()
+        .having((e) => e.response?.statusCode, 'status', 403)));
+    server.failureStatus = () => 401;
+    await expectLater(guide([free, denied]), throwsA(isA<DioException>()
+        .having((e) => e.response?.statusCode, 'status', 401)));
+  });
+
   test('one inaccessible tuner does not discard the other DVR channels', () async {
     final (dio, server) = _server(secondDvr: true);
     server.failWhen = (request) =>

@@ -831,9 +831,16 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   void didUpdateWidget(covariant LiveTvPlayerScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.channels, widget.channels)) {
+      final playing = _currentChannel;
       _syncedChannels = [
         for (final channel in widget.channels) channel.withSyncedUserData(),
       ];
+      _currentIndex = _syncedChannels.indexWhere((c) => c.id == playing.id);
+      if (_currentIndex < 0) {
+        // A filter can hide the channel while its stream is still playing.
+        _currentIndex = _syncedChannels.length;
+        _syncedChannels.add(playing);
+      }
     }
   }
 

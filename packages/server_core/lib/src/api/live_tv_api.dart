@@ -92,7 +92,9 @@ class ChannelGroupLineup {
             row['groups'] is! List) {
           throw const FormatException('Invalid guide channel');
         }
-        channels.add(row);
+        final channel = Map<String, dynamic>.of(row);
+        if (channel['ChannelNumber'] is! String) channel.remove('ChannelNumber');
+        channels.add(channel);
         final groups = labels(row['groups'] as List);
         if (groups.isNotEmpty) memberships[row['Id'] as String] = groups;
       }

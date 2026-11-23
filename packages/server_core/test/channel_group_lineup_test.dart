@@ -28,6 +28,18 @@ void main() {
       fixture(200, body: {'supported': false, 'channels': [rows.last]}));
     expect(empty.groupsByChannelId, isEmpty);
   });
+  test('keeps channels with malformed numbers and preserves valid numbers', () async {
+    final result = await ChannelGroupLineup.fetch(fixture(200, body: {
+      'supported': true,
+      'channels': [
+        {'Id': 'a', 'Name': 'A', 'ChannelNumber': 7, 'groups': ['News']},
+        {'Id': 'b', 'Name': 'B', 'ChannelNumber': '7.1', 'groups': []},
+      ],
+    }));
+    expect(result.channels!.first.containsKey('ChannelNumber'), isFalse);
+    expect(result.channels!.last['ChannelNumber'], '7.1');
+    expect(result.groupsByChannelId['a'], {'News'});
+  });
   test('preserves labels and partial membership', () async {
     final result = await ChannelGroupLineup.fetch(fixture(200, body: {
       'supported': true, 'partial': true, 'unresolvedChannelIds': ['offline'],

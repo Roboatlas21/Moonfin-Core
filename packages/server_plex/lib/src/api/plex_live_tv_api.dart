@@ -505,7 +505,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         showings.addAll(fromDvr);
         succeeded++;
       } catch (error, stack) {
-        if (_accessDenied(error)) Error.throwWithStackTrace(error, stack);
+        if (error is DioException && error.response?.statusCode == 401) rethrow;
         failedIds.addAll(requested ?? const <String>{});
         firstFailure ??= error;
         firstFailureStack ??= stack;
@@ -759,8 +759,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       StackTrace? stack,
     })> attempt(
       Future<_Airings> Function() load,
-      Set<String> failedOnError,
-    ) async {
+      Set<String> failedOnError, {
+      bool dvr = false,
+    }) async {
       try {
         final result = await load();
         return (
@@ -770,8 +771,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           stack: null,
         );
       } catch (error, stack) {
-        // Report authentication failures even if another Plex source loaded.
-        if (_accessDenied(error)) Error.throwWithStackTrace(error, stack);
+        // A tuner may deny its grid while Free TV is still available.
+        final tunerForbidden = dvr && error is DioException &&
+            error.response?.statusCode == 403 && error.requestOptions.path.endsWith('/grid');
+        if (_accessDenied(error) && !tunerForbidden) rethrow;
         return (
           items: <Map<String, dynamic>>[],
           failedChannelIds: failedOnError,
@@ -786,6 +789,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         attempt(
           () => _dvrAirings(start, end, channelIds: channelIds?.toSet()),
           dvrIds,
+          dvr: true,
         ),
       if (free.isNotEmpty)
         attempt(() => _freeAirings(start, end, free), freeIds),

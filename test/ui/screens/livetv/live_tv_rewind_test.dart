@@ -216,7 +216,11 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  Future<void> pumpPlayer(WidgetTester tester) async {
+  const ard = GuideChannel(id: 'ard', name: 'Das Erste', rawData: {});
+  const zdf = GuideChannel(id: 'zdf', name: 'ZDF', rawData: {});
+  Future<void> pumpPlayer(WidgetTester tester, {
+    List<GuideChannel> channels = const [ard, zdf],
+  }) async {
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -224,13 +228,7 @@ void main() {
       MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: const [Locale('en')],
-        home: const LiveTvPlayerScreen(
-          channels: [
-            GuideChannel(id: 'ard', name: 'Das Erste', rawData: {}),
-            GuideChannel(id: 'zdf', name: 'ZDF', rawData: {}),
-          ],
-          startIndex: 0,
-        ),
+        home: LiveTvPlayerScreen(channels: channels, startIndex: 0),
       ),
     );
     await tester.pump();
@@ -277,6 +275,20 @@ void main() {
     await tester.pump();
     verify(() => userLibrary.unmarkFavorite('ard')).called(1);
     expect(find.byTooltip(l10n.favoriteChannel), findsOneWidget);
+  });
+
+  testWidgets('lineup changes keep actions on the playing channel', (tester) async {
+    await pumpPlayer(tester, channels: const [ard]);
+    await pumpPlayer(tester, channels: const [zdf, ard]);
+    await tester.tap(find.byTooltip(l10n.favoriteChannel));
+    await tester.pump();
+    verify(() => userLibrary.markFavorite('ard')).called(1);
+
+    await pumpPlayer(tester, channels: const [zdf]);
+    await tester.tap(find.byTooltip(l10n.unfavoriteChannel));
+    await tester.pump();
+    verify(() => userLibrary.unmarkFavorite('ard')).called(1);
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('Channel Up works off TV too', (tester) async {
