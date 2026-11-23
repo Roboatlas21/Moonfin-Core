@@ -483,7 +483,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         final fromDvr = <({_Dvr dvr, Map item, Map media})>[];
         for (final item in grid['Metadata'] as List? ?? const []) {
           if (item is! Map) continue;
-          for (final media in item['Media'] as List? ?? const []) {
+          final airings = item['Media'];
+          if (airings is! List) continue;
+          for (final media in airings) {
             if (media is Map) fromDvr.add((dvr: dvr, item: item, media: media));
           }
         }

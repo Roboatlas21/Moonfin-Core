@@ -106,6 +106,7 @@ const _teletubbies = {
       '/tv.plex.providers.epg.xmltv:2/grid' => {
         'MediaContainer': {
           'Metadata': liveDvr ? [
+            {'title': 'Malformed listing', 'Media': {}},
             {..._teletubbies, 'Media': [
               for (final offset in [-3600, 0, 7200])
                 {'channelIdentifier': '4', 'beginsAt': now + offset - 60,
