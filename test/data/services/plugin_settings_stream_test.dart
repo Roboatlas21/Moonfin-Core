@@ -24,6 +24,7 @@ class _MockSessionRepository extends Mock implements SessionRepository {}
 class _StreamAdapter implements HttpClientAdapter {
   final List<StreamController<Uint8List>> streams = [];
   final List<RequestOptions> streamRequests = [];
+  final resolved = <String, dynamic>{};
 
   void send(String text) =>
       streams.last.add(Uint8List.fromList(utf8.encode(text)));
@@ -50,6 +51,8 @@ class _StreamAdapter implements HttpClientAdapter {
     Map<String, dynamic>? body;
     if (path.endsWith('/Moonfin/Ping')) {
       body = {'installed': true, 'settingsSyncEnabled': true};
+    } else if (path.contains('/Moonfin/Settings/Resolved/')) {
+      body = resolved;
     } else if (path.contains('/Moonfin/Settings/')) {
       body = {};
     }
@@ -80,6 +83,7 @@ void main() {
   late PluginSyncService Function() createService;
   late _StreamAdapter adapter;
   late _MockClient client;
+  late UserPreferences prefs;
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({
@@ -88,7 +92,7 @@ void main() {
     });
     final store = PreferenceStore();
     await store.init();
-    final prefs = UserPreferences(store);
+    prefs = UserPreferences(store);
 
     final session = _MockSessionRepository();
     when(() => session.activeUserId).thenReturn('user1');
@@ -124,6 +128,30 @@ void main() {
   tearDown(() => GetIt.instance.reset());
 
   group('settings stream', () {
+    for (final type in [ServerType.jellyfin, ServerType.plex]) {
+      test('enabling sync after login receives an admin guide pin on ${type.name}', () async {
+        when(() => client.serverType).thenReturn(type);
+        await prefs.set(UserPreferences.pluginSyncEnabled, false);
+        await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
+        fakeAsync((async) {
+          final service = createService();
+          service.syncOnLogin(client, serverId: 'srv1');
+          async.elapse(const Duration(seconds: 5));
+          expect(service.pluginAvailable, isTrue);
+          expect(adapter.streams, isEmpty);
+
+          service.setSyncEnabled(true);
+          async.elapse(Duration.zero);
+          expect(adapter.streams, hasLength(1));
+          adapter.resolved['liveTvSavedFilters'] = ['group:Sports'];
+          adapter.send('data: {"type":"settingsUpdated"}\n\n');
+          async.elapse(Duration.zero);
+          expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+          service.dispose();
+        });
+      });
+    }
+
     test('a quiet stream stays open past the server heartbeat', () {
       fakeAsync((async) {
         final service = createService();

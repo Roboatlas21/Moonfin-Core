@@ -547,6 +547,17 @@ class PluginSyncService extends ChangeNotifier {
     return _prefs.get(syncInitializedPref);
   }
 
+  Future<void> setSyncEnabled(bool enabled) async {
+    await _prefs.set(UserPreferences.pluginSyncEnabled, enabled);
+    notifyListeners();
+    if (!enabled || !_syncEnabled) return;
+
+    final client = GetIt.instance.maybeGet<MediaServerClient>();
+    if (client == null) return;
+    unawaited(_startSettingsStream(client));
+    await pushSettings(client, force: true);
+  }
+
   /// Picking the device's own profile goes back to following it.
   Future<void> setSyncProfile(String profile) async {
     if (!supportedProfiles.contains(profile)) return;
@@ -806,12 +817,11 @@ class PluginSyncService extends ChangeNotifier {
     // here.
     if (!client.features.supportsPluginSettingsStream) return;
 
-    if (!_pluginAvailable || !_prefs.get(UserPreferences.pluginSyncEnabled)) {
-      return;
-    }
+    if (!_syncEnabled) return;
 
+    final current = _guidePinAccountCheck(client);
     final ep = await moonbaseEndpoint(client, _dio);
-    if (ep == null) {
+    if (ep == null || !_syncEnabled || !current()) {
       return;
     }
     final headers = ep.headers;

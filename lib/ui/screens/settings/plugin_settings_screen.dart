@@ -51,21 +51,6 @@ class _PluginSettingsSectionState extends State<PluginSettingsSection> {
     await _syncService.refreshAvailability(client);
   }
 
-  Future<void> _toggleSync() async {
-    await _prefs.set(
-      UserPreferences.pluginSyncEnabled,
-      !_prefs.get(UserPreferences.pluginSyncEnabled),
-    );
-    if (!mounted) return;
-    setState(() {});
-    if (_syncService.pluginAvailable) {
-      _syncService.pushSettings(
-        GetIt.instance<MediaServerClient>(),
-        force: true,
-      );
-    }
-  }
-
   Future<void> _selectProfile(String profile) async {
     if (_profileSyncBusy) return;
     await _syncService.setSyncProfile(profile);
@@ -256,7 +241,7 @@ class _PluginSettingsSectionState extends State<PluginSettingsSection> {
 
     return _SyncCard(
       autofocus: true,
-      onTap: _toggleSync,
+      onTap: () => _syncService.setSyncEnabled(!syncEnabled),
       builder: (context, focused) {
         final theme = Theme.of(context);
         final inverted = _inverts(focused);
@@ -322,7 +307,7 @@ class _PluginSettingsSectionState extends State<PluginSettingsSection> {
                     ExcludeFocus(
                       child: Switch.adaptive(
                         value: syncEnabled,
-                        onChanged: (_) => _toggleSync(),
+                        onChanged: _syncService.setSyncEnabled,
                       ),
                     ),
                     Text(
