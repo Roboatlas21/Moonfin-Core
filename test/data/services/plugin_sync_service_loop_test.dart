@@ -427,15 +427,13 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), adapter.savedPins);
   });
 
-  test('an over-limit saved pin can be removed and stays removed after sync', () async {
+  test('removing an over-limit local pin does not queue a server edit', () async {
     final pin = 'group:${'x' * 1024}';
-    adapter.savedPins = [pin];
-    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    await prefs.set(UserPreferences.liveTvSavedFilters, [pin]);
     await togglePin(pin);
-    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
-    expect(adapter.pinActions, contains('remove'));
-    expect(adapter.savedPins, isEmpty);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
+    expect(adapter.pinActions, isEmpty);
     await expectLater(togglePin(pin), throwsFormatException);
   });
 
