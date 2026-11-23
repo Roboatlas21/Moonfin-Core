@@ -164,19 +164,22 @@ void main() {
     test('applies what the socket reports', () async {
       final events = StreamController<ServerWebSocketMessage>();
       addTearDown(events.close);
-      sync.bindTo(events.stream, userId: 'user-1');
+      sync.bindTo(events.stream, userId: 'user-1', serverId: 'a');
 
       events.add(
         const UserDataChangedMessage(
           userId: 'user-1',
           userDataList: [
             {'ItemId': 'ep1', 'Played': true},
+            {'ItemId': 'ch1', 'IsFavorite': true},
           ],
         ),
       );
       await Future<void>.delayed(Duration.zero);
 
       expect(sync.apply(_episode()).isPlayed, isTrue);
+      expect(sync.favoriteFor(serverChannelKey('a', 'ch1')), isTrue);
+      expect(sync.favoriteFor(serverChannelKey('b', 'ch1')), isNull);
     });
 
     test('ignores another account, however the id is punctuated', () async {

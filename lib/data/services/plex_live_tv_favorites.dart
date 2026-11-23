@@ -297,9 +297,14 @@ class PlexLiveTvFavorites {
 
   static Map<String, dynamic> applyToItem(
     MediaServerClient client,
-    Map<String, dynamic> item,
-  ) {
+    Map<String, dynamic> item, {
+    bool fromLineup = false,
+  }) {
     final channelId = item['Id']?.toString() ?? '';
+    if ((fromLineup || item['Type'] == 'TvChannel') &&
+        channelId.isNotEmpty && client.serverType != ServerType.plex) {
+      return {...item, 'ChannelFavoriteSyncKey': serverChannelKeyFor(client, channelId)};
+    }
     final userId = client.userId;
     if (item['Type'] != 'TvChannel' ||
         !isPlexLiveTvChannel(client, channelId) ||
@@ -351,6 +356,12 @@ class PlexLiveTvFavorites {
       }
       final remote = await _read(client, account.token);
       _checkAccount(client, account.token);
+      if (!isPlexFreeTvChannel(client, channelId)) {
+        final current = _catalog(client).channels[channelId];
+        if (current == null || !_matches(info, current)) {
+          throw StateError('Plex DVR provider changed while saving favorites');
+        }
+      }
       final rows = [...remote];
       final hadFavorite = rows.any((row) => _matches(info, row));
       if (isFavorite && !hadFavorite) {

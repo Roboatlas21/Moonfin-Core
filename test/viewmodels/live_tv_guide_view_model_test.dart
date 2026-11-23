@@ -120,6 +120,7 @@ void main() {
   setUp(() {
     userDataSync.reset();
     client = _MockClient();
+    when(() => client.baseUrl).thenReturn('https://guide.test');
     liveTv = _MockLiveTvApi();
     when(() => client.liveTvApi).thenReturn(liveTv);
     when(() => client.serverType).thenReturn(ServerType.jellyfin);
@@ -1199,10 +1200,10 @@ void main() {
     vm.setFilter(GuideFilter.favorites);
     expect(vm.filteredChannels, isEmpty);
 
-    userDataSync.publish('c2', {'IsFavorite': true});
+    userDataSync.publish(serverChannelKey(client.baseUrl, 'c2'), {'IsFavorite': true});
     vm.syncChannelUserData();
     expect(vm.filteredChannels.map((channel) => channel.id), ['c2']);
-    userDataSync.publish('c2', {'IsFavorite': false});
+    userDataSync.publish(serverChannelKey(client.baseUrl, 'c2'), {'IsFavorite': false});
     vm.syncChannelUserData();
     expect(vm.filteredChannels, isEmpty);
     vm.dispose();
@@ -1217,7 +1218,7 @@ void main() {
     vm.setFilter(GuideFilter.favorites);
     expect(vm.hasProgramsFor('c110'), isFalse);
 
-    userDataSync.publish('c110', {'IsFavorite': true});
+    userDataSync.publish(serverChannelKey(client.baseUrl, 'c110'), {'IsFavorite': true});
     vm.syncChannelUserData();
     await Future<void>.delayed(Duration.zero);
     expect(vm.hasProgramsFor('c110'), isTrue);
@@ -1261,7 +1262,7 @@ void main() {
     vm.setFilter(GuideFilter.favorites);
     when(() => _guide(liveTv)).thenThrow(Exception('offline'));
 
-    userDataSync.publish('c110', {'IsFavorite': true});
+    userDataSync.publish(serverChannelKey(client.baseUrl, 'c110'), {'IsFavorite': true});
     vm.syncChannelUserData();
     await pumpEventQueue();
     expect(vm.hasProgramsFor('c110'), isFalse);
@@ -1270,6 +1271,23 @@ void main() {
     await vm.ensureProgramsForChannels(['c110']);
     expect(vm.hasProgramsFor('c110'), isTrue);
     vm.dispose();
+  });
+
+  test('a replacement playback lineup starts paging at the first missing channel', () async {
+    _stubChannels(liveTv, [_channel('kept'), _channel('old')]);
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    expect(vm.programsHighWater, 2);
+
+    vm.usePlaybackLineup([
+      GuideChannel.fromRawItem(_channel('new')),
+      vm.playbackChannels.firstWhere((c) => c.id == 'kept'),
+    ]);
+    expect(vm.programsHighWater, 0);
+    await vm.loadMorePrograms();
+    expect(vm.hasProgramsFor('new'), isTrue);
+    expect(vm.programsHighWater, 2);
   });
 
   test('a lazy batch waits on a request already out and retries it', () async {
@@ -1328,7 +1346,7 @@ void main() {
     });
     await loading;
 
-    expect(userDataSync.favoriteFor('c1'), isNull);
+    expect(userDataSync.favoriteFor(serverChannelKey(client.baseUrl, 'c1')), isNull);
     vm.dispose();
   });
 
@@ -1431,6 +1449,27 @@ void main() {
       expect(vm.filteredChannels.map((channel) => channel.id), ['c0']);
       expect(vm.hasFailedCategoryListings, isTrue);
       expect(vm.programsForChannel('c0').single.id, 'sport-c0');
+    });
+
+    test('a later category batch timeout keeps the first batch visible', () async {
+      _stubChannels(liveTv, [for (var i = 0; i < 201; i++) _channel('c$i', number: '$i')]);
+      var attempts = 0;
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        if (_requestedIds(inv).contains('c200') && ++attempts <= 2) {
+          throw TimeoutException('tuner offline');
+        }
+        final id = _requestedIds(inv).first;
+        return {'Items': [_program('p-$id', id, isSports: true)]};
+      });
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      expect(vm.filteredChannels.map((c) => c.id), ['c0']);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      await vm.retryFailedCategoryListings();
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c200']);
     });
 
     test('a partial category batch retries only failed channels', () async {

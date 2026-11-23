@@ -1020,7 +1020,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     try {
       await ItemMutationRepository(
         _client,
-      ).setFavorite(channel.id, isFavorite: !channel.isFavorite);
+      ).setFavorite(channel.id, isFavorite: !channel.isFavorite, isChannel: true);
     } catch (_) {
       final backend = _backend;
       if (!mounted || backend == null) return;

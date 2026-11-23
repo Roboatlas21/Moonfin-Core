@@ -867,6 +867,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       await ItemMutationRepository(_client).setFavorite(
         channel.id,
         isFavorite: !channel.isFavorite,
+        isChannel: true,
       );
     } catch (_) {
       if (mounted) {

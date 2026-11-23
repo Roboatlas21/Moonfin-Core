@@ -350,11 +350,18 @@ void main() {
     expect(PlexLiveTvFavorites.syncKey(client, 'channel-2-4'),
         contains('old-pms'));
 
+    final gate = Completer<void>();
+    cloud.holdGet = gate.future;
+    final pending = PlexLiveTvFavorites.setFavorite(client, 'channel-2-4', isFavorite: true);
+    await pumpEventQueue();
+    expect(cloud.requests.last.method, 'GET');
     final unverified = PlexLiveTvFavorites.applyToItem(client, {
       'Id': 'channel-2-4',
       'Type': 'TvChannel',
       'Name': 'DVR channel',
     });
+    gate.complete();
+    await expectLater(pending, throwsStateError);
     expect(unverified['PlexFavoriteSyncKey'] as String,
         isNot(contains('old-pms')));
     await expectLater(

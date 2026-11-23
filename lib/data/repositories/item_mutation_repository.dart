@@ -19,8 +19,10 @@ class ItemMutationRepository {
   /// When a request fails, only the calls asking for something other than
   /// what the server holds throw, so a caller undoing its own toggle on error
   /// lands on the server's value whichever order the callers run in.
-  Future<void> setFavorite(String itemId, {required bool isFavorite}) async {
-    final stateId = PlexLiveTvFavorites.syncKey(_client, itemId);
+  Future<void> setFavorite(String itemId, {required bool isFavorite, bool isChannel = false}) async {
+    final stateId = isChannel && _client.serverType != ServerType.plex
+        ? serverChannelKeyFor(_client, itemId)
+        : PlexLiveTvFavorites.syncKey(_client, itemId);
     userDataSync.requestFavorite(stateId, isFavorite);
     final session = userDataSync.session;
     final key = '$session:$stateId';

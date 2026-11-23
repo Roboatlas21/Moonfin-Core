@@ -35,7 +35,7 @@ class GuideChannel {
   });
 
   GuideChannel withSyncedUserData() {
-    final stateId = rawData['PlexFavoriteSyncKey'] as String? ?? id;
+    final stateId = channelFavoriteKey(rawData) ?? id;
     final synced = userDataSync.favoriteFor(stateId);
     if (synced == null || synced == isFavorite) return this;
     final current = rawData['UserData'];
@@ -536,6 +536,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programsLoadedIds.retainAll(ids);
     _failedProgramIds.retainAll(ids);
     _failedReplacementIds.retainAll(ids);
+    _resetPageCursor();
   }
 
   final Map<String, List<GuideProgram>> _programsByChannel = {};
@@ -854,7 +855,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     try {
       await ItemMutationRepository(
         _client,
-      ).setFavorite(channelId, isFavorite: next);
+      ).setFavorite(channelId, isFavorite: next, isChannel: true);
     } catch (_) {
       _applyChannelUpdate(current);
       rethrow;
@@ -1249,6 +1250,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       ? _categoryBatchSize
       : _programBatchSize;
 
+  bool _temporaryCategoryFailure(Object error) =>
+      !_accessDenied(error) &&
+      (error is TimeoutException || isTransientTransportFailure(error));
+
   Future<bool> _walkCategory() async {
     final request = _categoryRequest;
     final filter = _filter;
@@ -1268,7 +1273,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           .sublist(_categoryHighWater, end)
           .where((c) => !_categoryQueriedIds.contains(c.id))
           .toList();
-      final fetched = await _fetchPrograms(batch, category: filter);
+      final fetched = await _fetchPrograms(batch, category: filter).onError<Object>(
+        (_, _) => (
+          programs: <String, List<GuideProgram>>{},
+          failedChannelIds: batch.map((channel) => channel.id).toSet(),
+        ),
+        test: _temporaryCategoryFailure,
+      );
       if (!current()) return false;
       var failed = fetched.failedChannelIds;
       if (failed.isNotEmpty) {
@@ -1286,11 +1297,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           if (!current()) return false;
           // Keep the first reply only when the retry failed temporarily.
           // Malformed responses and other unexpected errors still surface.
-          if (_accessDenied(error) ||
-              (error is! TimeoutException &&
-                  !isTransientTransportFailure(error))) {
-            rethrow;
-          }
+          if (!_temporaryCategoryFailure(error)) rethrow;
         }
       }
       if (!current()) return false;
@@ -1662,11 +1669,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   void _publishChannels(List<Map<String, dynamic>> items, int revision) {
     final channels = [
-      for (final item in items) PlexLiveTvFavorites.applyToItem(_client, item),
+      for (final item in items) PlexLiveTvFavorites.applyToItem(_client, item, fromLineup: true),
     ];
     final fresh = <String, Map<String, dynamic>>{};
     for (final item in channels) {
-      final id = item['PlexFavoriteSyncKey'] as String? ?? item['Id']?.toString();
+      final id = channelFavoriteKey(item) ?? item['Id']?.toString();
       final data = item['UserData'];
       if (id != null &&
           data is Map &&

@@ -10,6 +10,7 @@ class _FakeServer extends Interceptor {
   final requests = <RequestOptions>[];
   bool Function(RequestOptions)? failWhen;
   int? Function()? failureStatus;
+  Map<String, dynamic>? tunerReply;
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
@@ -27,7 +28,10 @@ class _FakeServer extends Interceptor {
       return;
     }
     requests.add(options);
-    handler.resolve(Response(requestOptions: options, data: answer(options)));
+    final reply = options.uri.path.startsWith('/tv.plex.providers.epg.xmltv:2/')
+        ? tunerReply
+        : null;
+    handler.resolve(Response(requestOptions: options, data: reply ?? answer(options)));
   }
 }
 
@@ -341,6 +345,28 @@ void main() {
     expect(badGridRequests, previousRequests);
   });
 
+  test('a missing tuner envelope is retryable and a valid empty one is complete', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final healthy = await api.getChannelGroups();
+    Future<Map<String, dynamic>> guide() => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
+      channelIds: ['channel-2-4', 'channel-plex-abc-66635fc0'],
+    );
+
+    server.tunerReply = {};
+    final partial = await api.getChannelGroups();
+    expect(partial.partial, isTrue);
+    expect(partial.sources, healthy.sources);
+    expect((await guide())['FailedChannelIds'], ['channel-2-4']);
+
+    server.tunerReply = {'MediaContainer': <String, dynamic>{}};
+    final empty = await api.getChannelGroups();
+    expect(empty.partial, isFalse);
+    expect(empty.sources, isEmpty);
+    expect((await guide()).containsKey('FailedChannelIds'), isFalse);
+  });
+
   test('a forbidden tuner grid preserves other grids, but 401 stays fatal', () async {
     final (dio, server) = _server(secondDvr: true);
     final api = PlexLiveTvApi(dio);
@@ -618,23 +644,29 @@ void main() {
     ]);
   });
 
-  test('Plex On Now falls back to Free TV on DVR transport failures', () async {
+  test('Plex On Now falls back for an unavailable tuner and preserves authorization errors', () async {
     final (dio, server) = _server();
-    var accessDenied = false;
+    int? status;
     server.failWhen = (request) =>
         request.uri.path == '/tv.plex.providers.epg.xmltv:2/grid';
-    server.failureStatus = () => accessDenied ? 401 : null;
+    server.failureStatus = () => status;
+    for (final failure in [null, 403]) {
+      status = failure;
+      final programs = (await PlexLiveTvApi(dio)
+          .getRecommendedPrograms(limit: 3))['Items'] as List;
+      expect(programs.map((item) => item['ChannelId']), ['channel-plex-abc-66635fc0']);
+    }
 
-    final programs = (await PlexLiveTvApi(dio)
-        .getRecommendedPrograms(limit: 3))['Items'] as List;
-    expect(programs.map((item) => item['ChannelId']), ['channel-plex-abc-66635fc0']);
-    expect(server.requests.any((r) => r.uri.path == '/hubs/sections/home/whatsOnNow'), isTrue);
-
-    accessDenied = true;
-    await expectLater(
-      PlexLiveTvApi(dio).getRecommendedPrograms(limit: 3),
-      throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)),
-    );
+    for (final (path, denied) in [
+      ('/tv.plex.providers.epg.xmltv:2/grid', 401), ('/livetv/dvrs', 403),
+    ]) {
+      status = denied;
+      server.failWhen = (r) => r.uri.path == path;
+      await expectLater(
+        PlexLiveTvApi(dio).getRecommendedPrograms(limit: 3),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', denied)),
+      );
+    }
   });
 
   test('Plex On Now uses Free TV when the DVR grid metadata is malformed', () async {

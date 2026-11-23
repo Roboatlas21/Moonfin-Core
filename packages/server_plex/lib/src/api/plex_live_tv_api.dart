@@ -75,6 +75,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     headers: {'X-Plex-Provider-Version': '7.2'},
   );
 
+  static bool _tunerGridForbidden(Object error) =>
+      error is DioException &&
+      error.response?.statusCode == 403 &&
+      error.requestOptions.path.endsWith('/grid');
+
   static bool _accessDenied(Object error) =>
       error is DioException &&
       (error.response?.statusCode == 401 || error.response?.statusCode == 403);
@@ -207,6 +212,16 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return status == null || status == 408 || status == 429 || status >= 500;
   }
 
+  Future<Map<String, dynamic>> _dvrContainer(
+    String path, [
+    Map<String, dynamic>? query,
+  ]) async {
+    final response = await _dio.get<Map<String, dynamic>>(path, queryParameters: query);
+    final container = response.data?['MediaContainer'];
+    if (container is Map<String, dynamic>) return container;
+    throw FormatException('Missing or invalid MediaContainer at $path');
+  }
+
   Future<_Channels> _dvrChannels({void Function()? onUnavailable}) async {
     final dvrs = await _dvrList();
     if (dvrs.isEmpty) return [];
@@ -216,10 +231,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     var unavailable = false;
     for (final dvr in dvrs) {
       try {
-        final lineup = await plexContainer(
-          _dio,
-          '/' + dvr.epg + '/lineups/dvr/channels',
-        );
+        final lineup = await _dvrContainer('/${dvr.epg}/lineups/dvr/channels');
         for (final channel in lineup['Channel'] as List? ?? const []) {
           if (channel is Map) {
             channels.add((key: dvr.key, epg: dvr.epg, channel: channel));
@@ -488,7 +500,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             };
       if (requested?.isEmpty == true) continue;
       try {
-        final grid = await plexContainer(_dio, '/${dvr.epg}/grid', {
+        final grid = await _dvrContainer('/${dvr.epg}/grid', {
           'type': '1,4',
           'beginsAt<': _seconds(end),
           'endsAt>': _seconds(start),
@@ -772,9 +784,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         );
       } catch (error, stack) {
         // A tuner may deny its grid while Free TV is still available.
-        final tunerForbidden = dvr && error is DioException &&
-            error.response?.statusCode == 403 && error.requestOptions.path.endsWith('/grid');
-        if (_accessDenied(error) && !tunerForbidden) rethrow;
+        if (_accessDenied(error) && !(dvr && _tunerGridForbidden(error))) rethrow;
         return (
           items: <Map<String, dynamic>>[],
           failedChannelIds: failedOnError,
@@ -1052,7 +1062,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         final airings = await _dvrAirings(now, now.add(const Duration(seconds: 1)));
         dvr.addAll(airings.items);
       } on DioException catch (error) {
-        if (_accessDenied(error)) rethrow;
+        if (_accessDenied(error) && !_tunerGridForbidden(error)) rethrow;
         // An unavailable DVR must not prevent loading the Free TV hub.
       } on TypeError {
         // An invalid DVR grid cannot prevent loading the working Free TV hub.
