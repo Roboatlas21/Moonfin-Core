@@ -1337,7 +1337,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             .whereType<GuideChannel>()
             .toList();
         if (batch.isEmpty) continue;
-        final reply = await _fetchPrograms(batch, category: filter);
+        final requested = batch.map((c) => c.id).toSet();
+        final reply = await _fetchPrograms(batch, category: filter).onError<Object>(
+          (_, _) => (programs: <String, List<GuideProgram>>{}, failedChannelIds: requested),
+          test: _temporaryCategoryFailure,
+        );
         if (_disposed ||
             request != _categoryRequest ||
             filter != _filter ||
@@ -1345,7 +1349,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             recordingRevision != liveTvRecordingRevision.value) {
           return;
         }
-        final requested = batch.map((c) => c.id).toSet();
         final recovered = requested.difference(reply.failedChannelIds);
         _categoryPrograms.removeWhere((id, _) => recovered.contains(id));
         _categoryFailedIds.removeAll(requested);

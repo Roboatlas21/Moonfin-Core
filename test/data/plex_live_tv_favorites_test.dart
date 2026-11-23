@@ -372,6 +372,29 @@ void main() {
     });
   }
 
+  test('a queued DVR favorite rejects a replacement provider', () async {
+    final client = _plex();
+    addTearDown(client.dispose);
+    const id = 'channel-2-4';
+    void publish(String source) => PlexLiveTvFavorites.applyToItem(client, {
+      'Id': id, 'Type': 'TvChannel', 'PlexFavoriteSource': source, 'PlexFavoriteId': '4',
+    });
+    publish('server://old/epg');
+    final gate = Completer<void>();
+    cloud.holdGet = gate.future;
+    final refresh = PlexLiveTvFavorites.refresh(client);
+    await pumpEventQueue();
+    expect(cloud.requests.single.method, 'GET');
+
+    final save = PlexLiveTvFavorites.setFavorite(client, id, isFavorite: true);
+    final rejected = expectLater(save, throwsStateError);
+    publish('server://new/epg');
+    gate.complete();
+    await refresh;
+    await rejected;
+    expect(cloud.requests, hasLength(1));
+  });
+
   test('an unverified DVR row invalidates its previous provider', () async {
     final client = _plex();
     addTearDown(client.dispose);

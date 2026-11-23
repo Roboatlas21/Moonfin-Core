@@ -1451,6 +1451,30 @@ void main() {
       expect(vm.programsForChannel('c0').single.id, 'sport-c0');
     });
 
+    test('a category retry reaches a later batch after the first times out', () async {
+      _stubChannels(liveTv, [for (var i = 0; i < 201; i++) _channel('c$i', number: '$i')]);
+      final offline = {'c0', 'c200'};
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        if (ids.any(offline.contains)) throw TimeoutException('tuner offline');
+        return {'Items': [_program('p-${ids.first}', ids.first, isSports: true)]};
+      });
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      offline.remove('c200');
+      await vm.retryFailedCategoryListings();
+      expect(vm.filteredChannels.map((c) => c.id), ['c200']);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      offline.clear();
+      await vm.retryFailedCategoryListings();
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c200']);
+      expect(vm.hasFailedCategoryListings, isFalse);
+    });
+
     test('a later category batch timeout keeps the first batch visible', () async {
       _stubChannels(liveTv, [for (var i = 0; i < 201; i++) _channel('c$i', number: '$i')]);
       var attempts = 0;

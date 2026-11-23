@@ -353,9 +353,11 @@ class PlexLiveTvFavorites {
       throw ArgumentError.value(channelId, 'channelId');
     }
     final account = _account(client);
+    final free = isPlexFreeTvChannel(client, channelId);
+    final providerAtTap = _catalog(client).channels[channelId];
     await _serial(account.id, () async {
       final info = _catalog(client).channels[channelId] ??
-          (isPlexFreeTvChannel(client, channelId)
+          (free
               ? <String, dynamic>{
                   'source': _freeSource,
                   'id': channelId.substring(_freePrefix.length),
@@ -364,9 +366,12 @@ class PlexLiveTvFavorites {
       if (info == null) {
         throw StateError('Plex DVR channel has no verified EPG provider identity');
       }
+      if (!free && (providerAtTap == null || !_matches(providerAtTap, info))) {
+        throw StateError('Plex DVR provider changed while waiting to save favorites');
+      }
       final remote = await _read(client, account.token);
       _checkAccount(client, account.token);
-      if (!isPlexFreeTvChannel(client, channelId)) {
+      if (!free) {
         final current = _catalog(client).channels[channelId];
         if (current == null || !_matches(info, current)) {
           throw StateError('Plex DVR provider changed while saving favorites');
