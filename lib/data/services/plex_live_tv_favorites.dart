@@ -106,7 +106,7 @@ class PlexLiveTvFavorites {
                 (serverId == null || current.serverId == serverId)
             ? current
             : null);
-    final token = user?.plexToken;
+    final token = user?.plexToken ?? user?.accessToken;
     if (token == null || token.isEmpty) {
       throw StateError('No Plex account token for this user');
     }

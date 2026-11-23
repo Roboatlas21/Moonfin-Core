@@ -148,6 +148,21 @@ void main() {
     expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(2));
   });
 
+  test('legacy Plex owner can update favorites using the saved access token', () async {
+    users.setCurrentUser(PrivateUser.fromJson('plex-user', 'pms', {
+      'accessToken': 'legacy-owner-token',
+    }));
+    final pms = _plex();
+    addTearDown(pms.dispose);
+
+    await ItemMutationRepository(pms).setFavorite('channel-plex-free123', isFavorite: true);
+
+    expect(cloud.requests.map((r) => r.method), ['GET', 'PUT']);
+    expect(cloud.requests.map((r) => r.headers['X-Plex-Token']),
+        ['legacy-owner-token', 'legacy-owner-token']);
+    expect(cloud.rows.single['id'], 'free123');
+  });
+
   test('cloud replaces older local favorites without uploading them', () async {
     final direct = _plex(cloudOnly: true);
     addTearDown(direct.dispose);
