@@ -1025,6 +1025,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }) async {
     final loadGeneration = ++_loadGeneration;
     final recordingRevision = liveTvRecordingRevision.value;
+    final session = userDataSync.session;
     final lineupRequest = ++_lineupRequest;
     final opening = _usesPlaybackLineup ? null : Completer<bool>();
     _openingLineup?.complete(false);
@@ -1073,12 +1074,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _resetPrograms();
         listingsPage = _pageGeneration;
         _listingsStatePage = listingsPage;
-        final session = userDataSync.session;
         opening.complete(true);
         // Follow replacements until a move commits or the original time is needed.
         do {
           if (await move!.settled.future) {
-            if (loadGeneration == _loadGeneration) _reloadOnEntry = false;
+            if (loadGeneration == _loadGeneration && session == userDataSync.session) {
+              _reloadOnEntry = false;
+            }
             return;
           }
           if (!current() || session != userDataSync.session) return;
@@ -1097,7 +1099,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       } else {
         _state = GuideState.ready;
       }
-      if (loadGeneration == _loadGeneration && _state == GuideState.ready) {
+      if (loadGeneration == _loadGeneration &&
+          session == userDataSync.session &&
+          _state == GuideState.ready) {
         _reloadOnEntry = false;
         _loadedRecordingRevision = recordingRevision;
       }
@@ -1311,6 +1315,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     final request = _categoryRequest;
     final session = userDataSync.session;
+    final recordingRevision = liveTvRecordingRevision.value;
     final filter = _filter;
     final failed = _categoryFailedIds.toList();
     _categoryFetchInFlight = true;
@@ -1329,7 +1334,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (_disposed ||
             request != _categoryRequest ||
             filter != _filter ||
-            session != userDataSync.session) {
+            session != userDataSync.session ||
+            recordingRevision != liveTvRecordingRevision.value) {
           return;
         }
         final requested = batch.map((c) => c.id).toSet();
@@ -1761,13 +1767,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final size = _batchSizeFor(category);
       final fetched = <String, List<GuideProgram>>{};
       final failed = <String>{};
-      var end = 0;
-      try {
-        while (end < rows.length) {
-          final start = end;
-          end = min(start + size, rows.length);
+      Future<void> fetchBatch(List<GuideChannel> batch) async {
+        try {
           final reply = await _fetchPrograms(
-            rows.sublist(start, end),
+            batch,
             category: category,
             current: current,
             from: from,
@@ -1775,6 +1778,21 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           );
           fetched.addAll(reply.programs);
           failed.addAll(reply.failedChannelIds);
+        } catch (error) {
+          if (!samePage()) return;
+          if (_accessDenied(error) ||
+              (error is! TimeoutException && !isTransientTransportFailure(error))) {
+            rethrow;
+          }
+          failed.addAll(batch.map((channel) => channel.id));
+        }
+      }
+      var end = 0;
+      try {
+        while (end < rows.length) {
+          final start = end;
+          end = min(start + size, rows.length);
+          await fetchBatch(rows.sublist(start, end));
           if (!samePage()) break;
           if (requestedRows.isEmpty &&
               end >= _requestedPageDepth &&
@@ -1789,15 +1807,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
               if (!prefixIds.contains(channel.id)) channel,
           ];
           for (var i = 0; i < extraRows.length; i += size) {
-            final reply = await _fetchPrograms(
+            await fetchBatch(
               extraRows.sublist(i, min(i + size, extraRows.length)),
-              category: category,
-              current: current,
-              from: from,
-              to: to,
             );
-            fetched.addAll(reply.programs);
-            failed.addAll(reply.failedChannelIds);
             if (!samePage()) break;
           }
           // Only the scroll prefix advances _categoryQueriedIds. These
