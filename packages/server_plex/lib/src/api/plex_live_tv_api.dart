@@ -881,21 +881,46 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
     if (rows.isEmpty) return [];
 
-    // Use the canonical IDs that the guide and player can tune. Grid keys
-    // can also appear as the trailing portion of a provider channel ID.
-    final aliases = <String, String>{};
+    final exact = <String, String>{};
+    final suffixes = <String, String?>{};
     for (final channel in await _freeChannels()) {
       final id = plexChannelOf(channel['Id']?.toString() ?? '');
-      if (id == null || id.source != plexCloudSource) continue;
-      for (final alias in <String?>[
-        id.channel,
-        id.channel.split('-').last,
-        channel['PlexGridKey'] as String?,
-      ]) {
-        if (alias != null && alias.isNotEmpty) {
-          aliases.putIfAbsent(alias, () => id.channel);
+      if (id == null || id.source != plexCloudSource || id.channel.isEmpty) continue;
+      exact[id.channel] = id.channel;
+      final gridKey = channel['PlexGridKey'] as String?;
+      if (gridKey != null && gridKey.isNotEmpty) {
+        exact.putIfAbsent(gridKey, () => id.channel);
+      }
+      for (final alias in {id.channel.split('-').last, ?gridKey}) {
+        suffixes.update(
+          alias,
+          (previous) => previous == id.channel ? previous : null,
+          ifAbsent: () => id.channel,
+        );
+      }
+    }
+
+    String? matchChannel(Map media, Map row) {
+      String? fallback;
+      final references = [
+        for (final item in [media, row])
+          for (final field in const ['channelIdentifier', 'channelId', 'channelGridKey', 'gridKey'])
+            item[field],
+      ];
+      for (final ref in references) {
+        for (final value in ref is Map ? [ref['id'], ref['gridKey']] : [ref]) {
+          final raw = value?.toString().trim();
+          if (raw == null || raw.isEmpty) continue;
+          final parsed = plexChannelOf(raw);
+          final key = parsed?.source == plexCloudSource ? parsed!.channel : raw;
+          final channel = exact[key];
+          if (channel != null) return channel;
+          // A later field can still identify the channel exactly.
+          final suffix = key.split('-').last;
+          if (suffix.isNotEmpty) fallback ??= suffixes[suffix];
         }
       }
+      return fallback;
     }
 
     final now = _seconds(DateTime.now());
@@ -905,21 +930,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       final mediaList = row['Media'];
       if (mediaList is! List) continue;
       for (final media in mediaList.whereType<Map>()) {
-        final reference = media['channelIdentifier'] ??
-            media['channelId'] ??
-            media['channelGridKey'] ??
-            row['channelIdentifier'] ??
-            row['channelId'] ??
-            row['channelGridKey'] ??
-            row['gridKey'];
-        final value = reference is Map
-            ? reference['id'] ?? reference['gridKey']
-            : reference;
-        if (value == null) continue;
-        final raw = value.toString();
-        final parsed = plexChannelOf(raw);
-        final key = parsed?.source == plexCloudSource ? parsed!.channel : raw;
-        final channel = aliases[key] ?? aliases[key.split('-').last];
+        final channel = matchChannel(media, row);
         if (channel == null || usedChannels.contains(channel)) continue;
 
         final beginsAt = _hubEpochSeconds(

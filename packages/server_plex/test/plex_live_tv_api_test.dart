@@ -487,6 +487,40 @@ void main() {
     ]);
   });
 
+  test('On Now prefers exact channel references and skips ambiguous suffixes', () async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final references = {
+      'Exact ID': {'channelIdentifier': 'east'},
+      'Backup grid key': {'channelIdentifier': 'stale-east', 'channelGridKey': 'west-grid'},
+      'Nested grid key': {'channelId': {'id': '', 'gridKey': 'north-grid'}},
+      'Unique suffix': {'channelId': 'south'},
+      'Ambiguous suffix': {'channelId': 'shared'},
+    };
+    final server = _FakeServer((options) => {
+      'MediaContainer': options.uri.path == '/lineups/plex/channels'
+          ? {'Channel': [
+              for (final id in ['city-east', 'east', 'city-south', 'a-shared', 'b-shared'])
+                {'id': id, 'title': id},
+              {'id': 'city-west', 'title': 'West', 'gridKey': 'west-grid'},
+              {'id': 'city-north', 'title': 'North', 'gridKey': 'north-grid'},
+            ]}
+          : {'Metadata': [
+              for (final entry in references.entries)
+                {'title': entry.key, 'type': 'movie', 'Media': [
+                  {...entry.value, 'beginsAt': now - 60, 'endsAt': now + 60},
+                ]},
+            ]},
+    });
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
+    final items = (await api.getRecommendedPrograms(limit: 10))['Items'] as List;
+    expect({for (final item in items) item['Name']: item['ChannelId']}, {
+      'Exact ID': 'channel-plex-east',
+      'Backup grid key': 'channel-plex-city-west',
+      'Nested grid key': 'channel-plex-city-north',
+      'Unique suffix': 'channel-plex-city-south',
+    });
+  });
+
   test('an unavailable Plex hub does not discard DVR On Now', () async {
     final (dio, server) = _server();
     server.failWhen = (request) =>
