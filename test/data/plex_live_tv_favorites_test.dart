@@ -51,6 +51,14 @@ bool _saved(MediaServerClient client, String id) =>
       ..._channel, 'Id': id,
     })['UserData'] as Map)['IsFavorite'] == true;
 
+class _LineupApi extends Mock implements LiveTvApi, DirectChannelGroupApi {}
+
+class _LineupClient extends PlexMediaServerClient {
+  _LineupClient(this.liveTvApi) : super(baseUrl: 'https://pms.example', deviceInfo: _device);
+  @override
+  final LiveTvApi liveTvApi;
+}
+
 class _Cloud extends Interceptor {
   final requests = <RequestOptions>[];
   List<Map<String, dynamic>> rows = [];
@@ -336,6 +344,33 @@ void main() {
     expect(await PlexLiveTvFavorites.refreshForBrowse(client), isFalse);
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
   });
+
+  for (final partial in [false, true]) {
+    test('a missing DVR channel during a favorite save (partial: $partial)', () async {
+      final api = _LineupApi();
+      final client = _LineupClient(api)..userId = 'plex-user'..accessToken = 'pms-token';
+      addTearDown(client.dispose);
+      when(() => api.getChannelGroups(userId: 'plex-user'))
+          .thenAnswer((_) async => ChannelGroupLineup({}, channels: [], partial: partial));
+      final guide = LiveTvGuideViewModel(client);
+      addTearDown(guide.dispose);
+      const id = 'channel-2-4';
+      PlexLiveTvFavorites.applyToItem(client, {
+        'Id': id, 'Type': 'TvChannel', 'PlexFavoriteSource': 'server://pms/epg', 'PlexFavoriteId': '4',
+      });
+
+      final gate = Completer<void>();
+      cloud.holdGet = gate.future;
+      final save = PlexLiveTvFavorites.setFavorite(client, id, isFavorite: true);
+      await pumpEventQueue();
+      expect(cloud.requests.single.method, 'GET');
+      await guide.load();
+      expect(guide.error, isNull);
+      gate.complete();
+      await expectLater(save, partial ? completes : throwsStateError);
+      expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(partial ? 1 : 0));
+    });
+  }
 
   test('an unverified DVR row invalidates its previous provider', () async {
     final client = _plex();

@@ -1604,6 +1604,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _publishChannels(items, revision);
     if (_client.serverType == ServerType.plex) {
+      PlexLiveTvFavorites.pruneMissingDvrChannels(_client, lineup);
       // Keep cached favorites visible if Plex Cloud fails. Retry on next open.
       unawaited(PlexLiveTvFavorites.refresh(_client).catchError((Object _) {}));
     }

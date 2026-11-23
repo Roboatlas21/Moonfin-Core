@@ -295,6 +295,16 @@ class PlexLiveTvFavorites {
     }
   }
 
+  static void pruneMissingDvrChannels(MediaServerClient client, ChannelGroupLineup? lineup) {
+    final rows = lineup?.channels;
+    if (rows == null || lineup!.partial || !lineup.endpointAvailable) return;
+
+    final present = {for (final row in rows) row['Id']?.toString()};
+    _catalog(client).channels.removeWhere(
+      (id, _) => !isPlexFreeTvChannel(client, id) && !present.contains(id),
+    );
+  }
+
   static Map<String, dynamic> applyToItem(
     MediaServerClient client,
     Map<String, dynamic> item, {

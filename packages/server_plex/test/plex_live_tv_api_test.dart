@@ -11,6 +11,7 @@ class _FakeServer extends Interceptor {
   bool Function(RequestOptions)? failWhen;
   int? Function()? failureStatus;
   Map<String, dynamic>? tunerReply;
+  Map<String, dynamic>? discoveryReply;
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
@@ -31,7 +32,8 @@ class _FakeServer extends Interceptor {
     final reply = options.uri.path.startsWith('/tv.plex.providers.epg.xmltv:2/')
         ? tunerReply
         : null;
-    handler.resolve(Response(requestOptions: options, data: reply ?? answer(options)));
+    final discovery = options.uri.path == '/livetv/dvrs' ? discoveryReply : null;
+    handler.resolve(Response(requestOptions: options, data: discovery ?? reply ?? answer(options)));
   }
 }
 
@@ -343,6 +345,23 @@ void main() {
     );
     expect(healthy.containsKey('FailedChannelIds'), isFalse);
     expect(badGridRequests, previousRequests);
+  });
+
+  test('DVR discovery preserves sources until Plex confirms an empty list', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final healthy = await api.getChannelGroups();
+    expect(healthy.sources, isNotEmpty);
+
+    server.discoveryReply = {};
+    final partial = await api.getChannelGroups();
+    expect(partial.partial, isTrue);
+    expect(partial.sources, healthy.sources);
+
+    server.discoveryReply = {'MediaContainer': <String, dynamic>{}};
+    final empty = await api.getChannelGroups();
+    expect(empty.partial, isFalse);
+    expect(empty.sources, isEmpty);
   });
 
   test('a missing tuner envelope is retryable and a valid empty one is complete', () async {

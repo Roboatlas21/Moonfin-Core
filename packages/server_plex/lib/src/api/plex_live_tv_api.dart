@@ -176,7 +176,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<List<_Dvr>> _dvrList() => cloudOnly
       ? Future.value(<_Dvr>[])
       : _cached(() => _dvrs, (f) => _dvrs = f, () async {
-        final container = await plexContainer(_dio, '/livetv/dvrs');
+        final container = await _dvrContainer('/livetv/dvrs');
         return [
           for (final dvr in container['Dvr'] as List? ?? const [])
             if (dvr is Map && dvr['epgIdentifier'] is String)
