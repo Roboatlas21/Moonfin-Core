@@ -57,7 +57,11 @@ const _teletubbies = {
   ],
 };
 
-(Dio, _FakeServer) _server({bool secondDvr = false, bool liveDvr = false}) {
+(Dio, _FakeServer) _server({
+  bool secondDvr = false,
+  bool liveDvr = false,
+  bool malformedDvrGrid = false,
+}) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final server = _FakeServer(
     (options) => switch (options.uri.path) {
@@ -105,7 +109,7 @@ const _teletubbies = {
       },
       '/tv.plex.providers.epg.xmltv:2/grid' => {
         'MediaContainer': {
-          'Metadata': liveDvr ? [
+          'Metadata': malformedDvrGrid ? <String, dynamic>{} : liveDvr ? [
             {'title': 'Malformed listing', 'Media': {}},
             {..._teletubbies, 'Media': [
               for (final offset in [-3600, 0, 7200])
@@ -337,6 +341,29 @@ void main() {
     expect(badGridRequests, previousRequests);
   });
 
+  test('one inaccessible tuner does not discard the other DVR channels', () async {
+    final (dio, server) = _server(secondDvr: true);
+    server.failWhen = (request) =>
+        request.uri.path == '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';
+    server.failureStatus = () => 403;
+
+    final lineup = await PlexLiveTvApi(dio).getChannelGroups();
+    expect(lineup.groupsByChannelId['channel-2-4'], {'source:dvr'});
+    expect(lineup.channels?.map((row) => row['Id']), contains('channel-2-4'));
+    expect(lineup.partial, isFalse);
+  });
+
+  test('an expired Plex session does not become an empty DVR lineup', () async {
+    final (dio, server) = _server();
+    server.failWhen = (request) => request.uri.path == '/livetv/dvrs';
+    server.failureStatus = () => 401;
+
+    await expectLater(
+      PlexLiveTvApi(dio).getChannelGroups(),
+      throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)),
+    );
+  });
+
   test('Plex matches Moonbase genre names and loads Featured on demand', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
@@ -411,7 +438,10 @@ void main() {
     final healthy = await api.getChannelGroups();
     server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
     for (var i = 0; i < 2; i++) {
-      expect((await api.getChannelGroups()).channels, healthy.channels);
+      final stale = await api.getChannelGroups();
+      expect(stale.channels, healthy.channels);
+      expect(stale.partial, isTrue);
+      expect(stale.unresolvedChannelIds, isNull);
     }
     server.failureStatus = () => 403;
     final denied = await api.getChannelGroups();
@@ -463,6 +493,8 @@ void main() {
     final serverWithDvr = PlexLiveTvApi(dio);
     final lineup = await serverWithDvr.getChannelGroups();
     expect(lineup.channels?.map((channel) => channel['Id']), ['channel-2-4']);
+    expect(lineup.partial, isTrue);
+    expect(lineup.unresolvedChannelIds, isNull);
     expect(lineup.groupsByChannelId, {
       'channel-2-4': {'source:dvr'},
     });
@@ -581,6 +613,14 @@ void main() {
     );
   });
 
+  test('Plex On Now uses Free TV when the DVR grid metadata is malformed', () async {
+    final (dio, _) = _server(malformedDvrGrid: true);
+    final programs = (await PlexLiveTvApi(dio)
+        .getRecommendedPrograms(limit: 3))['Items'] as List;
+    expect(programs.map((item) => item['ChannelId']),
+        ['channel-plex-abc-66635fc0']);
+  });
+
   test('every showing of a program is a program of its own', () async {
     final (dio, server) = _server();
     final result = await PlexLiveTvApi(dio).getGuide(
@@ -645,6 +685,18 @@ void main() {
         containsPair('prefs[startTimeslot]', '1792699380'),
       ),
     );
+  });
+
+  test('recording a channel does not query unrelated inaccessible DVRs', () async {
+    final (dio, server) = _server(secondDvr: true);
+    server.failWhen = (request) =>
+        request.uri.path == '/tv.plex.providers.epg.xmltv:3/grid';
+    server.failureStatus = () => 403;
+
+    await PlexLiveTvApi(dio).createTimer('airing-2-1792699380-4');
+    expect(server.requests.where((request) => request.uri.path ==
+        '/tv.plex.providers.epg.xmltv:3/grid'), isEmpty);
+    expect(server.requests.where((request) => request.method == 'POST'), hasLength(1));
   });
 
   test('a series rule takes repeats or not, and can be changed', () async {

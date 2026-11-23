@@ -226,7 +226,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           }
         }
       } catch (error) {
-        if (_accessDenied(error)) rethrow;
+        if (error is DioException && error.response?.statusCode == 401) rethrow;
+        // A tuner the account cannot access must not discard other DVRs.
+        if (error is DioException && error.response?.statusCode == 403) continue;
         if (_temporaryDvrFailure(error)) unavailable = true;
       }
     }
@@ -302,8 +304,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<(_Channels, _Channels)> _channelSources({
     Future<_FreeChannels>? previousFree,
     void Function()? onDvrUnavailable,
+    void Function()? onFreeUnavailable,
   }) async {
     final free = _freeChannels().onError<Object>((error, stack) async {
+      onFreeUnavailable?.call();
       if (previousFree != null && !_accessDenied(error)) {
         final previous = await previousFree.onError<Object>(
           (_, _) => const <String, Map<String, dynamic>>{},
@@ -319,6 +323,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     // rather than wrapping failures in ParallelWaitError as record .wait does.
     final results = await Future.wait<_Channels>([
       _dvrChannels(onUnavailable: onDvrUnavailable).catchError((Object error) {
+        if (error is DioException && error.response?.statusCode == 401) {
+          throw error;
+        }
         if (_temporaryDvrFailure(error)) onDvrUnavailable?.call();
         return <Map<String, dynamic>>[];
       }),
@@ -406,9 +413,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     _cloudChannels = null;
     _dvrs = null;
     var dvrUnavailable = false;
+    var freeUnavailable = false;
     final (dvr, free) = await _channelSources(
       previousFree: previousFree,
       onDvrUnavailable: () => dvrUnavailable = true,
+      onFreeUnavailable: () => freeUnavailable = true,
     );
     if (dvr.isNotEmpty || !dvrUnavailable) _hadDvrChannels = dvr.isNotEmpty;
     if (free.isEmpty) {
@@ -420,8 +429,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         },
         channels: dvr,
         sources: _hadDvrChannels ? const [ChannelGroupSource.dvr] : const [],
-        partial: dvrUnavailable,
-        unresolvedChannelIds: dvrUnavailable ? const <String>{} : null,
+        partial: dvrUnavailable || freeUnavailable,
+        unresolvedChannelIds: freeUnavailable
+            ? null
+            : dvrUnavailable ? const <String>{} : null,
       );
     }
     // Keep existing groups if the provider metadata is temporarily unavailable.
@@ -444,10 +455,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       channels: [...dvr, ...free],
       sources: _hadDvrChannels ? ChannelGroupSource.values : const [],
       promoted: catalog.promoted,
-      partial: metadataUnavailable || dvrUnavailable,
-      unresolvedChannelIds: metadataUnavailable
-          ? {for (final channel in free) channel['Id'] as String}
-          : dvrUnavailable ? const <String>{} : null,
+      partial: metadataUnavailable || dvrUnavailable || freeUnavailable,
+      unresolvedChannelIds: freeUnavailable
+          ? null
+          : metadataUnavailable
+              ? {for (final channel in free) channel['Id'] as String}
+              : dvrUnavailable ? const <String>{} : null,
     );
   }
 
@@ -1037,6 +1050,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       } on DioException catch (error) {
         if (_accessDenied(error)) rethrow;
         // An unavailable DVR must not prevent loading the Free TV hub.
+      } on TypeError {
+        // An invalid DVR grid cannot prevent loading the working Free TV hub.
+      } on FormatException {
+        // Treat malformed provider metadata as an unavailable DVR grid.
       }
     }
     final programs = <Map<String, dynamic>>[
@@ -1187,7 +1204,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       airing.beginsAt * 1000,
       isUtc: true,
     );
-    final showing = (await _dvrGrid(at, at)).showings.firstWhere(
+    final showing = (await _dvrGrid(
+      at,
+      at,
+      channelIds: {_channelId(airing.source, airing.channel)},
+    )).showings.firstWhere(
       (s) =>
           s.dvr.key == airing.source &&
           s.media['beginsAt'] == airing.beginsAt &&
