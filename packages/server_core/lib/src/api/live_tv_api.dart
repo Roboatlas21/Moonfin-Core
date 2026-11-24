@@ -100,6 +100,12 @@ class ChannelGroupLineup {
         }
         final channel = Map<String, dynamic>.of(row);
         if (channel['ChannelNumber'] is! String) channel.remove('ChannelNumber');
+        final userData = channel['UserData'];
+        if (userData is! Map<String, dynamic>) {
+          channel.remove('UserData');
+        } else if (userData.containsKey('IsFavorite') && userData['IsFavorite'] is! bool) {
+          channel['UserData'] = Map.of(userData)..remove('IsFavorite');
+        }
         if (channel['ImageTags'] case Map<String, dynamic> tags) {
           channel['ImageTags'] = {
             for (final entry in tags.entries)

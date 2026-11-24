@@ -148,11 +148,26 @@ void main() {
     }
   });
 
-  test('Jellyfin guide keeps channels with malformed logo tags', () async {
+  test('Jellyfin guide keeps channels with malformed logo or favorite data', () async {
     final rows = [
-      {..._channel('news'), 'groups': ['Local'], 'ImageTags': {'Primary': 123, 'Thumb': 'news-thumb'}},
-      {..._channel('sports'), 'groups': [], 'ImageTags': {'Primary': 'sports-logo'}},
-      {..._channel('weather'), 'groups': [], 'ImageTags': []},
+      {
+        ..._channel('news'),
+        'groups': ['Local'],
+        'ImageTags': {'Primary': 123, 'Thumb': 'news-thumb'},
+        'UserData': [],
+      },
+      {
+        ..._channel('sports'),
+        'groups': [],
+        'ImageTags': {'Primary': 'sports-logo'},
+        'UserData': {'IsFavorite': true},
+      },
+      {
+        ..._channel('weather'),
+        'groups': [],
+        'ImageTags': [],
+        'UserData': {'IsFavorite': 'yes', 'Played': true},
+      },
     ];
     final jellyfin = JellyfinMediaServerClient(
       baseUrl: 'https://guide.test',
@@ -178,6 +193,10 @@ void main() {
     expect(vm.groupsForChannel('news'), contains('Local'));
     expect(channels['sports']!.imageTag, 'sports-logo');
     expect(channels['weather']!.imageTag, isNull);
+    expect(channels['news']!.rawData.containsKey('UserData'), isFalse);
+    expect(channels['sports']!.isFavorite, isTrue);
+    expect(channels['weather']!.isFavorite, isFalse);
+    expect(channels['weather']!.rawData['UserData'], {'Played': true});
   });
 
   test('Emby guide keeps channels with malformed optional metadata', () async {
