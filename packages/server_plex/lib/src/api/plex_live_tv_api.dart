@@ -1091,6 +1091,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
 
     String? matchChannel(Map media, Map row) {
+      final stationIds = <String>[];
       String? exact, grid, stationInGridField, suffix;
       void consider(Object? value, {required bool stationId}) {
         final raw = value?.toString().trim();
@@ -1098,7 +1099,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         final parsed = plexChannelOf(raw);
         final key = parsed?.source == plexCloudSource ? parsed!.channel : raw;
         final knownStation = lineup.containsKey(_channelId(plexCloudSource, key));
-        if (stationId && knownStation) exact ??= key;
+        if (stationId) {
+          stationIds.add(raw);
+          if (knownStation) exact ??= key;
+        }
         if (gridKeys.containsKey(key)) {
           // A shared guide cannot identify a station by itself.
           grid ??= gridKeys[key];
@@ -1122,7 +1126,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           }
         }
       }
-      return exact ?? (allowAliases ? grid ?? stationInGridField ?? suffix : null);
+      if (exact != null || !allowAliases) return exact;
+      final match = grid ?? stationInGridField ?? suffix;
+      if (match == null || stationIds.isEmpty) return match;
+      // A guide key can change owners. An explicit short ID must agree with its unique station.
+      final shortId = match.split('-').last;
+      return suffixes[shortId] == match && stationIds.every((id) => id == shortId)
+          ? match : null;
     }
 
     final now = _seconds(DateTime.now());

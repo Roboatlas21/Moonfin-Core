@@ -818,7 +818,9 @@ void main() {
       'Shared grid only': {'channelGridKey': 'shared-grid'},
       'East news': {'channelGridKey': 'shared-grid'},
       'Exact ID': {'channelIdentifier': 'east'},
-      'Backup grid key': {'channelIdentifier': 'stale-east', 'channelGridKey': 'west-grid'},
+      'Retired station': {'channelId': {'id': 'retired-west', 'gridKey': 'west-grid'}},
+      'Conflicting short ID': {'channelIdentifier': 'south', 'channelGridKey': 'west-grid'},
+      'West broadcast': {'channelGridKey': 'west-grid'},
       'Nested grid key': {'channelId': {'id': '', 'gridKey': 'north-grid'}},
       'Unique suffix': {'channelId': 'south'},
       'Ambiguous suffix': {'channelId': 'shared'},
@@ -847,7 +849,7 @@ void main() {
     expect({for (final item in items) item['Name']: item['ChannelId']}, {
       'East news': 'channel-plex-east-news',
       'Exact ID': 'channel-plex-east',
-      'Backup grid key': 'channel-plex-city-west',
+      'West broadcast': 'channel-plex-city-west',
       'Nested grid key': 'channel-plex-city-north',
       'Unique suffix': 'channel-plex-city-south',
     });
@@ -857,7 +859,7 @@ void main() {
     expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(1));
 
     refreshedLineup = true;
-    references['North broadcast'] = references.remove('Backup grid key')!;
+    references['North broadcast'] = references.remove('West broadcast')!;
     await api.getChannelGroups();
     final refreshed = (await api.getRecommendedPrograms())['Items'] as List;
     expect({for (final item in refreshed) item['Name']: item['ChannelId']}, {
