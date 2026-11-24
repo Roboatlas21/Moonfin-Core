@@ -105,7 +105,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   /// don't ask plex.tv again.
   static const _cloudGridLife = Duration(minutes: 10);
 
-  Future<({List rows, bool incomplete})>? _dvrs;
+  Future<({List rows, bool incomplete, bool implicitEmpty})>? _dvrs;
+  bool _hadDiscoveredDvr = false;
   Map<_Dvr, _Channels> _lastDvrChannels = {};
   int _dvrLineupRequest = 0;
   Future<String?>? _favoriteMachineId;
@@ -212,9 +213,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (rows.isEmpty && incomplete) {
         throw const FormatException('Missing Plex DVR list');
       }
-      return (rows: rows, incomplete: incomplete);
+      final implicitEmpty = !container.containsKey('Dvr') && !container.containsKey('size');
+      return (rows: rows, incomplete: incomplete, implicitEmpty: implicitEmpty);
     });
-    final (:rows, :incomplete) = await read;
+    final (:rows, :incomplete, :implicitEmpty) = await read;
     final dvrs = <_Dvr>[];
     for (final row in rows.whereType<Map>()) {
       final key = row['key'], epg = row['epgIdentifier'];
@@ -223,10 +225,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         dvrs.add((key: '$key', epg: epg));
       }
     }
-    if (incomplete || dvrs.length != rows.length) {
-      if (identical(read, _dvrs)) _dvrs = null;
-      onIncomplete?.call();
+    final partial = incomplete || dvrs.length != rows.length;
+    if (identical(read, _dvrs)) {
+      // After a known tuner disappears without an explicit count or list, recheck once.
+      if (partial || (implicitEmpty && _hadDiscoveredDvr)) _dvrs = null;
+      if (!partial || dvrs.isNotEmpty) _hadDiscoveredDvr = dvrs.isNotEmpty;
     }
+    if (partial) onIncomplete?.call();
     return dvrs;
   }
 

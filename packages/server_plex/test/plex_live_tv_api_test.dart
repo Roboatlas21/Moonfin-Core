@@ -385,6 +385,35 @@ void main() {
     expect(empty.sources, isEmpty);
   });
 
+  test('ordinary channel reads recheck an ambiguous DVR removal only once', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    int discoveries() => server.requests.where((r) => r.uri.path == '/livetv/dvrs').length;
+    Future<List> channelIds() async =>
+        [for (final row in (await api.getChannels())['Items'] as List) row['Id']];
+
+    for (final empty in <Map<String, dynamic>>[{}, {'size': 0}, {'Dvr': []}]) {
+      server.discoveryReply = null;
+      expect((await api.getChannelGroups()).groupsByChannelId, contains('channel-2-4'));
+      server.discoveryReply = {'MediaContainer': empty};
+      expect((await api.getChannelGroups()).sources, isEmpty);
+      final before = discoveries();
+      server.discoveryReply = null;
+      final ids = await channelIds();
+      expect(ids.contains('channel-2-4'), empty.isEmpty);
+      await channelIds();
+      expect(discoveries() - before, empty.isEmpty ? 1 : 0);
+    }
+
+    await api.getChannelGroups();
+    server.discoveryReply = {'MediaContainer': <String, dynamic>{}};
+    await api.getChannelGroups();
+    final before = discoveries();
+    expect(await channelIds(), isNot(contains('channel-2-4')));
+    expect(await channelIds(), isNot(contains('channel-2-4')));
+    expect(discoveries() - before, 1);
+  });
+
   test('incomplete discovery marks only unresolved tuner schedules for retry', () async {
     final (dio, server) = _server(secondDvr: true);
     final api = PlexLiveTvApi(dio);
