@@ -1984,6 +1984,31 @@ void main() {
       expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
     });
 
+    test('a failed recording reload is retried on re-entry until listings recover', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      final vm = LiveTvGuideViewModel(client, now: () => DateTime(2026, 9, 11, 10, 10));
+      await vm.load();
+      var reads = 0;
+      when(() => _guide(liveTv)).thenAnswer((_) async {
+        if (++reads == 1) throw const FormatException('Invalid recording refresh');
+        throw TimeoutException('Listings unavailable');
+      });
+      await vm.recordingChanged();
+      expect(reads, 2);
+
+      await vm.reloadIfStale();
+      expect(reads, 3);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {
+        'Items': [recorded(_program('p0', 'c0'))],
+      });
+      await vm.reloadIfRecordingsChanged();
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+      clearInteractions(liveTv);
+      await vm.reloadIfStale();
+      verifyNever(() => _guide(liveTv));
+      vm.dispose();
+    });
+
     test('reloadIfRecordingsChanged does nothing until a recording changes', () async {
       _stubChannels(liveTv, [_channel('c0')]);
       when(() => _guide(liveTv)).thenAnswer(

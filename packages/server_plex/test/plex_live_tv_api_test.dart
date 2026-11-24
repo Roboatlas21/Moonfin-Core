@@ -733,17 +733,22 @@ void main() {
 
   for (final cloudOnly in [true, false]) {
     test('Free TV retains its stations until Plex confirms zero (cloudOnly=$cloudOnly)', () async {
-      var rows = <Map<String, dynamic>>[{'id': 'news', 'title': 'News'}];
-      var size = 1;
+      final rows = [
+        {'id': 'news', 'title': 'News'}, {'id': 'film', 'title': 'Film'},
+        {'id': 'locked', 'drm': true},
+      ];
+      var size = rows.length;
       final server = _FakeServer((r) => {'MediaContainer': r.uri.path == '/lineups/plex/channels'
           ? {'Channel': rows, 'size': size} : <String, dynamic>{}});
       final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: cloudOnly);
       final healthy = await api.getChannelGroups();
-      expect(healthy.channels, hasLength(1));
-      rows = [];
-      final incomplete = await api.getChannelGroups();
-      expect(incomplete.partial, isTrue);
-      expect(incomplete.channels, healthy.channels);
+      expect(healthy.channels, hasLength(2));
+      for (final count in [1, 0]) {
+        rows.length = count;
+        final incomplete = await api.getChannelGroups();
+        expect(incomplete.partial, isTrue);
+        expect(incomplete.channels, healthy.channels);
+      }
       size = 0;
       expect((await api.getChannels())['Items'], isEmpty);
       expect((await api.getChannelGroups()).partial, isFalse);

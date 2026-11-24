@@ -956,7 +956,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final request = _categoryRequest;
     final session = userDataSync.session;
     final filter = _filter;
-    final channels = _categoryPrograms.keys
+    final channels = {..._categoryPrograms.keys, ..._categoryFailedIds}
         .map(channelForId)
         .whereType<GuideChannel>()
         .toList();
@@ -1104,7 +1104,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           session == userDataSync.session &&
           _state == GuideState.ready) {
         _reloadOnEntry = false;
-        _loadedRecordingRevision = recordingRevision;
+        if (_failedProgramIds.isEmpty && !hasFailedCategoryListings) {
+          _loadedRecordingRevision = recordingRevision;
+        }
       }
     } catch (e) {
       if (!current()) return;
@@ -1500,7 +1502,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   Future<void> _reloadPrograms() async {
     final loadGeneration = ++_loadGeneration;
-    final recordingRevision = liveTvRecordingRevision.value;
     final depth = _requestedPageDepth;
     _resetPrograms();
     _reloadDepth = depth;
@@ -1516,8 +1517,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         page == _pageGeneration;
     try {
       await _replaceProgramPages(current);
-      if (!current()) return;
-      _loadedRecordingRevision = recordingRevision;
     } catch (e) {
       if (!current()) return;
       _error = e;
@@ -1878,7 +1877,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _windowEnd = to;
         _guideDate = windowStart;
         _atLivePosition = livePosition;
-        _loadedRecordingRevision = recordingRevision;
       }
       if (category == null) {
         _failedProgramIds.removeAll(ids);
@@ -1907,6 +1905,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _categoryLoadedFor = category;
       }
       _reloadDepth = 0;
+      if (failed.isEmpty && recordingRevision == liveTvRecordingRevision.value) {
+        _loadedRecordingRevision = recordingRevision;
+      }
       _listingsStatePage = null;
       _state = GuideState.ready;
       _error = null;
@@ -2273,6 +2274,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     _programsByChannel.addAll(replacements.programs);
     _programsLoadedIds.addAll(replacements.programs.keys);
+    _failedProgramIds.removeAll(replacements.programs.keys);
     _failedReplacementIds.removeAll(channelIds);
     _failedReplacementIds.addAll(replacements.failedChannelIds);
     _notifyListeners();
@@ -2540,6 +2542,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     bool includeAll = false,
   }) {
     final ids = [
+      if (includeAll) ..._failedProgramIds.difference(_programsLoadedIds),
       for (final id in _programsLoadedIds)
         if (includeAll ||
             _failedReplacementIds.isEmpty ||

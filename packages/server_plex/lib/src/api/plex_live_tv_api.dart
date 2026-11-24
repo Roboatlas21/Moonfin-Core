@@ -323,8 +323,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         final channels = container['Channel'];
         final size = container['size'];
         final zero = size == 0 || size == '0';
-        if (channels is List && channels.isEmpty && size != null && !zero) {
-          throw const FormatException('Free TV channel count exceeds the empty lineup');
+        if (channels is List && size != null && int.tryParse('$size') != channels.length) {
+          throw const FormatException('Free TV channel count does not match the lineup');
         }
         if (channels is! List && (channels != null || !zero)) {
           throw const FormatException('Invalid Plex Free TV lineup channels');
