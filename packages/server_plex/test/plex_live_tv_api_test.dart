@@ -883,10 +883,13 @@ void main() {
     final reference = <String, dynamic>{'channelIdentifier': 'west'};
     final server = _FakeServer((r) {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      return {'MediaContainer': r.uri.path == '/lineups/plex/channels'
-          ? {'Channel': [for (final id in ['west', 'north'])
-              {'id': id, if (id == owner) 'gridKey': 'moving-key'}]}
-          : {'Metadata': [{'title': 'On now', 'Media': [
+      if (r.uri.path == '/lineups/plex/channels') {
+        return {'MediaContainer': {'Channel': [for (final id in ['west', 'north'])
+            {'id': id, if (id == owner) 'gridKey': 'moving-key'}]}};
+      }
+      final title = '$owner broadcast';
+      if (reference.containsKey('channelGridKey')) owner = 'north';
+      return {'MediaContainer': {'Metadata': [{'title': title, 'Media': [
               {...reference, 'beginsAt': now - 60, 'endsAt': now + 2},
           ]}]}};
     });
@@ -897,13 +900,12 @@ void main() {
     final first = await onNow();
     expect(first['ChannelId'], 'channel-plex-west');
     expect(server.requests.where((r) => r.uri.path == '/lineups/plex/channels'), hasLength(1));
-    owner = 'north';
     reference..clear()..['channelGridKey'] = 'moving-key';
     await Future<void>.delayed(DateTime.parse(first['EndDate']).difference(DateTime.now()));
     final refreshed = await Future.wait([onNow(), onNow()]);
     expect(refreshed.map((row) => row['ChannelId']), everyElement('channel-plex-north'));
-    expect(server.requests.where((r) => r.uri.path == '/lineups/plex/channels'), hasLength(2));
-    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(2));
+    expect(refreshed.map((row) => row['Name']), everyElement('north broadcast'));
+    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(3));
   });
 
   test('an unavailable Plex hub does not discard DVR On Now', () async {
@@ -925,7 +927,7 @@ void main() {
     server.failWhen = (request) =>
         request.uri.path == '/tv.plex.providers.epg.xmltv:2/grid';
     server.failureStatus = () => status;
-    for (final failure in [null, 403]) {
+    for (final failure in [null, 403, 503]) {
       status = failure;
       final programs = (await PlexLiveTvApi(dio)
           .getRecommendedPrograms(limit: 3))['Items'] as List;
@@ -942,6 +944,24 @@ void main() {
         throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', denied)),
       );
     }
+  });
+
+  test('On Now preserves the tuner outage when Free TV has no programmes', () async {
+    final (_, fixture) = _server(liveDvr: true);
+    final server = _FakeServer((r) => r.uri.path == '/lineups/plex/channels'
+        ? {'MediaContainer': {'size': 0, 'Channel': []}} : fixture.answer(r));
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server));
+    Future<List> onNow() async => (await api.getRecommendedPrograms(limit: 1))['Items'] as List;
+    expect(await onNow(), hasLength(1));
+    server.failWhen = (r) => r.uri.path.endsWith(':2/grid');
+    server.failureStatus = () => 503;
+    await expectLater(onNow(), throwsA(isA<DioException>()
+        .having((e) => e.response?.statusCode, 'status', 503)
+        .having((e) => e.requestOptions.uri.path, 'path', endsWith(':2/grid'))));
+    server.failWhen = null;
+    expect(await onNow(), hasLength(1));
+    server.tunerReply = {'MediaContainer': {'Metadata': []}};
+    expect(await onNow(), isEmpty);
   });
 
   test('Plex On Now uses Free TV when the DVR grid metadata is malformed', () async {

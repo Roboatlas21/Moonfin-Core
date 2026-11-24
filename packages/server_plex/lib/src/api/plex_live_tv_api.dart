@@ -347,8 +347,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     if (!identical(read, _cloudChannels)) return _freeChannels();
     final previous = _lastFreeLineup;
     if (identical(previous, lineup)) return lineup;
-    if (previous != null && _cloudOnNowExpiresAt != null &&
-        !_sameStationMapping(previous, lineup)) {
+    if (previous != null && !_sameStationMapping(previous, lineup)) {
       _cloudOnNowRows = null;
     }
     return _lastFreeLineup = lineup;
@@ -1167,8 +1166,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<List<Map<String, dynamic>>> _freeOnNow() =>
       _loadFreeOnNow().timeout(_cloudOnNowTimeout).onError<Object>((_, _) => []);
 
-  Future<List<Map<String, dynamic>>> _loadFreeOnNow() async {
-    final previousCatalog = _cloudChannels;
+  Future<List<Map<String, dynamic>>> _loadFreeOnNow({bool retry = true}) async {
     var stale = false;
     var lineup = await _freeLineupForBrowse(onUnavailable: () => stale = true);
     var catalog = stale ? null : _cloudChannels;
@@ -1185,22 +1183,24 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
     final cached = _cloudOnNowRows!;
     final rows = await cached;
-    // A concurrent lineup refresh may have reassigned a station during the hub read.
-    if (!identical(cached, _cloudOnNowRows)) return _loadFreeOnNow();
-    if (fresh && catalog != null && identical(previousCatalog, catalog) &&
+    if (fresh && identical(cached, _cloudOnNowRows) && catalog != null &&
         identical(catalog, _cloudChannels) && _hubNeedsStationMapping(rows, lineup)) {
       _cloudChannels = null;
-      // Keep these fresh hub rows while their own station mapping is verified.
+      // Concurrent Home reads share this catalog check.
       _cloudOnNowExpiresAt = null;
     }
-    if (_cloudOnNowExpiresAt == null) {
+    if (identical(cached, _cloudOnNowRows) && _cloudOnNowExpiresAt == null) {
       lineup = await _freeLineupForBrowse(onUnavailable: () => stale = true);
       catalog = stale ? null : _cloudChannels;
       if (identical(cached, _cloudOnNowRows)) {
         _cloudOnNowExpiresAt ??= now.add(_cloudOnNowCacheLife);
       }
       if (lineup.isEmpty) return [];
-      if (!identical(cached, _cloudOnNowRows)) return _loadFreeOnNow();
+    }
+    if (!identical(cached, _cloudOnNowRows)) {
+      // The key changed owners. Fetch the programmes again against the new lineup.
+      if (retry) return _loadFreeOnNow(retry: false);
+      return [];
     }
     // Only a verified lineup can match a program by a reassignable guide key.
     final programs = _matchCloudOnNow(
@@ -1222,13 +1222,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }) async {
     final now = DateTime.now();
     final dvr = <Map<String, dynamic>>[];
+    (DioException, StackTrace)? tunerFailure;
     if (!cloudOnly) {
       try {
         final airings = await _dvrAirings(now, now.add(const Duration(seconds: 1)));
         dvr.addAll(airings.items);
-      } on DioException catch (error) {
+      } on DioException catch (error, stack) {
         if (_accessDenied(error) && !_tunerGridForbidden(error)) rethrow;
-        // An unavailable DVR must not prevent loading the Free TV hub.
+        if (_temporaryLineupFailure(error)) tunerFailure = (error, stack);
       } on TypeError {
         // An invalid DVR grid cannot prevent loading the working Free TV hub.
       } on FormatException {
@@ -1243,6 +1244,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         : (limit - programs.length).clamp(0, _cloudOnNowLimit).toInt();
     if (remaining > 0) {
       programs.addAll((await _freeOnNow()).take(remaining));
+      if (programs.isEmpty && tunerFailure != null) {
+        Error.throwWithStackTrace(tunerFailure.$1, tunerFailure.$2);
+      }
     }
     return plexItemsResult(programs);
   }
