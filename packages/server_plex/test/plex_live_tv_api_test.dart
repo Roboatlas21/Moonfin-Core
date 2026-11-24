@@ -371,6 +371,24 @@ void main() {
     expect(empty.sources, isEmpty);
   });
 
+  test('a malformed tuner reports its channels for retry and preserves Free TV', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    const tuner = 'channel-2-4', free = 'channel-plex-abc-66635fc0';
+    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23), channelIds: ids,
+    );
+    server.tunerReply = {'MediaContainer': {'Metadata': [{'Media': 'invalid'}]}};
+    final mixed = await guide([tuner, free]);
+    expect(mixed['FailedChannelIds'], [tuner]);
+    expect((mixed['Items'] as List).map((p) => p['ChannelId']).toSet(), {free});
+    expect((await guide([tuner]))['FailedChannelIds'], [tuner]);
+    server.tunerReply = null;
+    final recovered = await guide([tuner]);
+    expect(recovered.containsKey('FailedChannelIds'), isFalse);
+    expect((recovered['Items'] as List).first['ChannelId'], tuner);
+  });
+
   test('a missing tuner envelope is retryable and a valid empty one is complete', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
@@ -577,6 +595,25 @@ void main() {
     final denied = await api.getChannelGroups();
     expect(denied.channels!.length, lessThan(healthy.channels!.length));
   });
+
+  for (final cloudOnly in [true, false]) {
+    test('Free TV retains its stations until Plex confirms zero (cloudOnly=$cloudOnly)', () async {
+      var rows = <Map<String, dynamic>>[{'id': 'news', 'title': 'News'}];
+      var size = 1;
+      final server = _FakeServer((r) => {'MediaContainer': r.uri.path == '/lineups/plex/channels'
+          ? {'Channel': rows, 'size': size} : <String, dynamic>{}});
+      final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: cloudOnly);
+      final healthy = await api.getChannelGroups();
+      expect(healthy.channels, hasLength(1));
+      rows = [];
+      final incomplete = await api.getChannelGroups();
+      expect(incomplete.partial, isTrue);
+      expect(incomplete.channels, healthy.channels);
+      size = 0;
+      expect((await api.getChannels())['Items'], isEmpty);
+      expect((await api.getChannelGroups()).partial, isFalse);
+    });
+  }
 
   test('Plex retains unresolved genre groups when metadata fails and recovers', () async {
     final (dio, server) = _server();

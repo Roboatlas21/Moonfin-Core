@@ -297,8 +297,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           throw const FormatException('Invalid Plex Free TV lineup');
         }
         final channels = container['Channel'];
-        if (channels is! List &&
-            (channels != null || container['size'] != 0)) {
+        final size = container['size'];
+        final zero = size == 0 || size == '0';
+        if (channels is List && channels.isEmpty && size != null && !zero) {
+          throw const FormatException('Free TV channel count exceeds the empty lineup');
+        }
+        if (channels is! List && (channels != null || !zero)) {
           throw const FormatException('Invalid Plex Free TV lineup channels');
         }
         return {
@@ -366,7 +370,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       return await _freeChannels();
     } catch (error) {
       onUnavailable?.call();
-      if (cloudOnly) rethrow;
+      if (cloudOnly && (error is! FormatException || _lastFreeLineup == null)) rethrow;
       // Keep the last lineup visible without caching it as a successful retry.
       return _accessDenied(error) ? const {} : _lastFreeLineup ?? const {};
     }
@@ -523,7 +527,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime start,
     DateTime end, {
     Set<String>? channelIds,
-    bool reportForbiddenChannels = false,
+    bool reportGuideFailures = false,
   }) async {
     final showings = <({_Dvr dvr, Map item, Map media})>[];
     final failedIds = <String>{};
@@ -548,7 +552,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         for (final item in grid['Metadata'] as List? ?? const []) {
           if (item is! Map) continue;
           final airings = item['Media'];
-          if (airings is! List) continue;
+          if (airings is! List) {
+            if (reportGuideFailures && airings != null) {
+              throw const FormatException('Invalid Plex DVR grid Media');
+            }
+            continue;
+          }
           for (final media in airings) {
             if (media is Map) fromDvr.add((dvr: dvr, item: item, media: media));
           }
@@ -558,7 +567,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       } catch (error, stack) {
         if (error is DioException && error.response?.statusCode == 401) rethrow;
         failedIds.addAll(requested ?? const <String>{});
-        if (reportForbiddenChannels && requested != null && _tunerGridForbidden(error)) {
+        if (reportGuideFailures && requested != null &&
+            (error is FormatException || _tunerGridForbidden(error))) {
           continue;
         }
         firstFailure ??= error;
@@ -629,11 +639,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime start,
     DateTime end, {
     Set<String>? channelIds,
-    bool reportForbiddenChannels = false,
+    bool reportGuideFailures = false,
   }) async {
     final grabs = _grabs().catchError((_) => <_Grab>[]);
     final grid = await _dvrGrid(start, end,
-        channelIds: channelIds, reportForbiddenChannels: reportForbiddenChannels);
+        channelIds: channelIds, reportGuideFailures: reportGuideFailures);
     final scheduled = {
       for (final grab in await grabs)
         if (grab.op['status'] != 'error') grab.program['Id']: grab.op,
@@ -790,7 +800,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime start,
     DateTime end, {
     List<String>? channelIds,
-    bool reportForbiddenChannels = false,
+    bool reportGuideFailures = false,
   }) async {
     // Omitted IDs request all Cloud-only channels; [] remains a no-op.
     final requestedIds = channelIds ??
@@ -843,7 +853,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (!cloudOnly && (channelIds == null || channelIds.length > free.length))
         attempt(
           () => _dvrAirings(start, end, channelIds: channelIds?.toSet(),
-              reportForbiddenChannels: reportForbiddenChannels),
+              reportGuideFailures: reportGuideFailures),
           dvrIds,
           dvr: true,
         ),
@@ -911,7 +921,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       start,
       endDate ?? start.add(const Duration(hours: 3)),
       channelIds: channelIds,
-      reportForbiddenChannels: true,
+      reportGuideFailures: true,
     );
     return {
       ...plexItemsResult(airings.items),
