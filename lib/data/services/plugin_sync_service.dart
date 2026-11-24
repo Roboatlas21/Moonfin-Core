@@ -35,6 +35,8 @@ import '../../util/signed_in_server_features.dart';
 
 enum _PluginAvailabilityStatus { available, unavailable, unknown }
 
+enum ProfilePushResult { saved, savedWithPinErrors, failed }
+
 /// Bounds for the plugin's own requests.
 ///
 /// Without them the socket falls back to whatever the system allows, which is
@@ -1222,36 +1224,43 @@ class PluginSyncService extends ChangeNotifier {
   /// [force] skips the identity check, since an explicit push means overwrite
   /// whatever the server holds. The snapshot only proves what this device sent
   /// last, not what another device has written since.
-  Future<bool> pushSettingsForProfile(
+  Future<ProfilePushResult> pushSettingsForProfile(
     MediaServerClient client, {
     required String profile,
     bool force = false,
   }) async {
-    if (!_syncEnabled || !supportedProfiles.contains(profile)) return false;
+    if (!_syncEnabled || !supportedProfiles.contains(profile)) return ProfilePushResult.failed;
     final accountCurrent = _guidePinAccountCheck(client);
     bool current() => _syncEnabled && accountCurrent();
 
-    Future<bool> push() async {
-      if (!current()) return false;
+    Future<ProfilePushResult> push() async {
+      if (!current()) return ProfilePushResult.failed;
       final ep = await moonbaseEndpoint(client, _dio);
-      if (ep == null || !current()) return false;
+      if (ep == null || !current()) return ProfilePushResult.failed;
       final payload = _buildProfileFromLocal();
       final key = _snapshotKey(client, profile);
       final json = jsonEncode(payload);
-      if (!force && _lastSyncedProfileJson[key] == json) return true;
+      if (!force && _lastSyncedProfileJson[key] == json) return ProfilePushResult.saved;
 
       await _dio.post(
         '${ep.base}/Moonfin/Settings/Profile/$profile',
         data: {'profile': payload, 'clientId': 'moonfin-flutter'},
         options: Options(headers: {...ep.headers, 'Content-Type': 'application/json'}),
       );
-      if (!current()) return false;
+      if (!current()) return ProfilePushResult.failed;
       _lastSyncedProfileJson[key] = json;
       if (force && _prefs.get(UserPreferences.liveTvSavedFilterChanges).isNotEmpty) {
-        await _replayPendingGuidePins(client, profile, reportRejections: true);
-        return current() && _prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty;
+        try {
+          await _replayPendingGuidePins(client, profile, reportRejections: true);
+        } catch (_) {
+          return current() ? ProfilePushResult.savedWithPinErrors : ProfilePushResult.failed;
+        }
+        if (!current()) return ProfilePushResult.failed;
+        if (_prefs.get(UserPreferences.liveTvSavedFilterChanges).isNotEmpty) {
+          return ProfilePushResult.savedWithPinErrors;
+        }
       }
-      return true;
+      return ProfilePushResult.saved;
     }
 
     try {
@@ -1259,7 +1268,7 @@ class PluginSyncService extends ChangeNotifier {
       // Finish the explicit transfer, including its pin edits, before that pull.
       return await (force ? _guidePinSync.synchronized(push) : push());
     } catch (_) {
-      return false;
+      return ProfilePushResult.failed;
     }
   }
 

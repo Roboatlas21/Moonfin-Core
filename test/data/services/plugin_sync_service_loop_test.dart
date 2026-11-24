@@ -253,15 +253,18 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
   });
 
-  test('manual Save acknowledges pending edits and reports a failed transfer', () async {
-    Future<bool> save() => service.pushSettingsForProfile(client, profile: 'tv', force: true);
+  test('manual Save distinguishes profile failure from a pending or rejected pin', () async {
+    Future<ProfilePushResult> save() => service.pushSettingsForProfile(client, profile: 'tv', force: true);
+    adapter.failPinChanges = true; // The adapter returns 503 for all profile POSTs.
+    expect(await save(), ProfilePushResult.failed);
+    adapter.failPinChanges = false;
     adapter.unavailablePin = 'group:News';
     expect(await togglePin('group:News'), isNull);
-    expect(await save(), isFalse);
+    expect(await save(), ProfilePushResult.savedWithPinErrors);
     expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:News']);
     adapter.unavailablePin = null;
     adapter.savedPins = ['group:Sports'];
-    expect(await save(), isTrue);
+    expect(await save(), ProfilePushResult.saved);
     expect(adapter.savedPins, ['group:Sports', 'group:News']);
     expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
 
@@ -269,7 +272,7 @@ void main() {
     await togglePin('group:Rejected');
     await prefs.set(UserPreferences.pluginSyncEnabled, true);
     adapter.rejectedPin = 'group:Rejected';
-    expect(await save(), isFalse);
+    expect(await save(), ProfilePushResult.savedWithPinErrors);
     expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
     expect(adapter.savedPins, ['group:Sports', 'group:News']);
   });

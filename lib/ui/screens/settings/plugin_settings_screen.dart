@@ -117,7 +117,7 @@ class _PluginSettingsSectionState extends State<PluginSettingsSection> {
     setState(() => _profileSyncBusy = true);
     final client = GetIt.instance<MediaServerClient>();
     final profile = _syncService.syncProfile;
-    final saved = await _syncService.pushSettingsForProfile(
+    final result = await _syncService.pushSettingsForProfile(
       client,
       profile: profile,
       force: true,
@@ -128,10 +128,11 @@ class _PluginSettingsSectionState extends State<PluginSettingsSection> {
     final l10n = AppLocalizations.of(context);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          saved ? l10n.syncedSettingsToProfile(_profileLabel(profile, l10n))
-              : l10n.friendsSaveFailed,
-        ),
+        content: Text(switch (result) {
+          ProfilePushResult.saved => l10n.syncedSettingsToProfile(_profileLabel(profile, l10n)),
+          ProfilePushResult.savedWithPinErrors => l10n.profileSavedWithPinErrors,
+          ProfilePushResult.failed => l10n.friendsSaveFailed,
+        }),
       ),
     );
   }
