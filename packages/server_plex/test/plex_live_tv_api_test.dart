@@ -516,13 +516,20 @@ void main() {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
     final healthy = await api.getChannelGroups();
-    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
+    bool isFreeLineup(RequestOptions r) => r.uri.path == '/lineups/plex/channels';
+    server.failWhen = isFreeLineup;
     for (var i = 0; i < 2; i++) {
       final stale = await api.getChannelGroups();
       expect(stale.channels, healthy.channels);
       expect(stale.partial, isTrue);
       expect(stale.unresolvedChannelIds, isNull);
     }
+    expect((await api.getChannels())['Items'], healthy.channels);
+    server.failWhen = null;
+    server.requests.clear();
+    await api.getChannels();
+    expect(server.requests.where(isFreeLineup), hasLength(1));
+    server.failWhen = isFreeLineup;
     server.failureStatus = () => 403;
     final denied = await api.getChannelGroups();
     expect(denied.channels!.length, lessThan(healthy.channels!.length));
@@ -665,6 +672,13 @@ void main() {
       'Unique suffix': 'channel-plex-city-south',
     });
     expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(2));
+    final pms = PlexLiveTvApi(Dio()..interceptors.add(server));
+    await pms.getChannels();
+    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
+    server.failureStatus = () => 503;
+    await pms.getChannelGroups();
+    final duringOutage = (await pms.getRecommendedPrograms())['Items'] as List;
+    expect(duringOutage.map((row) => row['Name']), ['East news', 'Exact ID']);
   });
 
   test('an unavailable Plex hub does not discard DVR On Now', () async {

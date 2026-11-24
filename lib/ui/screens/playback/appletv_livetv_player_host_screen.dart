@@ -391,24 +391,34 @@ class _AppleTvLiveTvPlayerHostScreenState
     final channels = lineup ?? _syncedChannels;
     final index = channels.indexWhere((c) => c.id == channelId);
     if (index < 0) return;
-    final alreadyPlaying = _currentChannel.id == channelId;
-    _syncedChannels = channels;
-    _currentIndex = index;
-    if (lineup != null) {
-      _logoUrlCache.clear();
-      _nowPlayingByChannel.clear();
-      _warmSchedule();
-    }
-    if (alreadyPlaying) {
-      _readSchedule();
-      _pushMetadata();
-      return;
-    }
+    final alreadyPlaying = _currentChannel.id == channelId && _channelIsUp;
+    final originalChannels = widget.channels;
     _switching = true;
     try {
+      if (!alreadyPlaying) {
+        var target = _syncedChannels.indexWhere((channel) => channel.id == channelId);
+        if (target < 0) {
+          target = _syncedChannels.length;
+          _syncedChannels = [..._syncedChannels, channels[index]];
+        }
+        _currentIndex = target;
+        _readSchedule();
+        _pushMetadata();
+        await _playCurrentChannel();
+        if (!mounted || _exiting || !_channelIsUp || lineup == null ||
+            !identical(originalChannels, widget.channels)) {
+          return;
+        }
+      }
+      if (lineup != null) {
+        _syncedChannels = GuideChannel.withSyncedUserDataAll(lineup) ?? lineup;
+        _currentIndex = index;
+        _logoUrlCache.clear();
+        _nowPlayingByChannel.clear();
+        _warmSchedule();
+      }
       _readSchedule();
       _pushMetadata();
-      await _playCurrentChannel();
     } finally {
       _switching = false;
     }

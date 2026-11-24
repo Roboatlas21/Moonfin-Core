@@ -20,6 +20,7 @@ import 'package:moonfin/platform/pip_service.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/navigation/destinations.dart';
+import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_player_screen.dart';
 import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
 import 'package:moonfin/ui/widgets/live_tv/channel_carousel.dart';
@@ -83,6 +84,7 @@ class _Manager extends PlaybackManager {
   final _Backend fakeBackend;
   final seeks = <Duration>[];
   final playedChannelIds = <String>[];
+  String? failedChannel;
   final resumes = <bool>[];
   var stops = 0;
   final _bringup = StreamController<PlaybackBringupState>.broadcast();
@@ -129,7 +131,7 @@ class _Manager extends PlaybackManager {
       )
       ..add(
         PlaybackBringupState(
-          phase: PlaybackBringupPhase.ready,
+          phase: id == failedChannel ? PlaybackBringupPhase.failed : PlaybackBringupPhase.ready,
           sessionToken: 1,
           itemId: id,
         ),
@@ -298,6 +300,22 @@ void main() {
     verify(() => userLibrary.unmarkFavorite('ard')).called(1);
     await tester.pumpWidget(const SizedBox());
   });
+
+  for (final fails in [true, false]) {
+    testWidgets('filtered lineup is adopted only after a successful tune (fails=$fails)', (tester) async {
+      await pumpPlayer(tester, channels: const [ard]);
+      await tester.tap(find.byTooltip(l10n.guide));
+      await tester.pump();
+      if (fails) manager.failedChannel = zdf.id;
+      tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
+          .onChannelSelected!(zdf.id, const [zdf]);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await press(tester, LogicalKeyboardKey.channelUp);
+      expect(manager.playedChannelIds, fails ? ['ard', 'zdf', 'ard'] : ['ard', 'zdf']);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 
   testWidgets('Channel Up works off TV too', (tester) async {
     PlatformDetection.setTvMode(false);

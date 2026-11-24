@@ -340,25 +340,24 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     'UserData': {'IsFavorite': false},
   };
 
+  Future<_FreeChannels> _freeLineupForBrowse({void Function()? onUnavailable}) async {
+    try {
+      return await _freeChannels();
+    } catch (error) {
+      onUnavailable?.call();
+      if (cloudOnly) rethrow;
+      // Keep the last lineup visible without caching it as a successful retry.
+      return _accessDenied(error) ? const {} : _lastFreeLineup ?? const {};
+    }
+  }
+
   /// One source failing, like plex.tv being unreachable, still leaves the
   /// other's channels.
   Future<(_Channels, _Channels)> _channelSources({
-    Future<_FreeChannels>? previousFree,
     void Function()? onDvrUnavailable,
     void Function()? onFreeUnavailable,
   }) async {
-    final free = _freeChannels().onError<Object>((error, stack) async {
-      onFreeUnavailable?.call();
-      if (!cloudOnly && previousFree != null && !_accessDenied(error)) {
-        final previous = await previousFree.onError<Object>(
-          (_, _) => const <String, Map<String, dynamic>>{},
-        );
-        if (previous.isNotEmpty) _cloudChannels ??= Future.value(previous);
-        return previous;
-      }
-      if (cloudOnly) Error.throwWithStackTrace(error, stack);
-      return const <String, Map<String, dynamic>>{};
-    });
+    final free = _freeLineupForBrowse(onUnavailable: onFreeUnavailable);
     // Future.wait preserves the original DioException (including 401/403)
     // rather than wrapping failures in ParallelWaitError as record .wait does.
     final results = await Future.wait<_Channels>([
@@ -448,14 +447,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       _lineupRead ??= _loadLineup().whenComplete(() => _lineupRead = null);
 
   Future<ChannelGroupLineup> _loadLineup() async {
-    // Only a full guide load refreshes the catalog. EPG paging reuses it.
-    final previousFree = _cloudChannels;
+    // A full guide load refreshes even a successfully cached catalog.
     _cloudChannels = null;
     _dvrs = null;
     var dvrUnavailable = false;
     var freeUnavailable = false;
     final (dvr, free) = await _channelSources(
-      previousFree: previousFree,
       onDvrUnavailable: () => dvrUnavailable = true,
       onFreeUnavailable: () => freeUnavailable = true,
     );
@@ -964,7 +961,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return rows;
   }
 
-  List<Map<String, dynamic>> _matchCloudOnNow(List<Map> rows, _FreeChannels lineup) {
+  List<Map<String, dynamic>> _matchCloudOnNow(
+    List<Map> rows,
+    _FreeChannels lineup, {
+    required bool allowAliases,
+  }) {
     final gridKeys = <String, String?>{};
     final suffixes = <String, String?>{};
     void addAlias(Map<String, String?> index, String alias, String station) {
@@ -1017,7 +1018,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           }
         }
       }
-      return exact ?? grid ?? stationInGridField ?? suffix;
+      return exact ?? (allowAliases ? grid ?? stationInGridField ?? suffix : null);
     }
 
     final now = _seconds(DateTime.now());
@@ -1062,7 +1063,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       _loadFreeOnNow().timeout(_cloudOnNowTimeout).onError<Object>((_, _) => []);
 
   Future<List<Map<String, dynamic>>> _loadFreeOnNow() async {
-    final lineup = await _freeChannels();
+    var stale = false;
+    final lineup = await _freeLineupForBrowse(onUnavailable: () => stale = true);
+    final catalog = stale ? null : _cloudChannels;
+    if (lineup.isEmpty) return [];
     final now = DateTime.now();
     if (_cloudOnNowRows == null || !now.isBefore(_cloudOnNowExpiresAt!)) {
       _cloudOnNowExpiresAt = now.add(_cloudOnNowCacheLife);
@@ -1075,7 +1079,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final rows = await cached;
     // A concurrent lineup refresh may have reassigned a station during the hub read.
     if (!identical(cached, _cloudOnNowRows)) return _loadFreeOnNow();
-    final programs = _matchCloudOnNow(rows, lineup);
+    // Only a verified lineup can match a program by a reassignable guide key.
+    final programs = _matchCloudOnNow(
+      rows, lineup, allowAliases: catalog != null && identical(catalog, _cloudChannels),
+    );
     for (final program in programs) {
       final end = DateTime.parse(program['EndDate'] as String);
       if (end.isBefore(_cloudOnNowExpiresAt!)) _cloudOnNowExpiresAt = end;

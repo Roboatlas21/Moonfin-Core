@@ -1051,8 +1051,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     });
   }
 
-  Future<void> _switchChannel(int newIndex) async {
-    if (_isSwitching) return;
+  Future<bool> _switchChannel(int newIndex) async {
+    if (_isSwitching) return false;
     _isSwitching = true;
     try {
       setState(() {
@@ -1060,8 +1060,9 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         _currentProgram = null;
         _infoVisible = true;
       });
-      await _playCurrentChannel();
-      _scheduleHide();
+      final succeeded = await _playCurrentChannel();
+      if (mounted && !_isStopping) _scheduleHide();
+      return succeeded;
     } finally {
       _isSwitching = false;
     }
@@ -1870,13 +1871,25 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     if (_isSwitching) return;
     final index = lineup.indexWhere((channel) => channel.id == channelId);
     if (index < 0) return;
-    final alreadyPlaying = _currentChannel.id == channelId;
+    if (_currentChannel.id != channelId || !_channelIsUp) {
+      final originalChannels = widget.channels;
+      var target = _syncedChannels.indexWhere((channel) => channel.id == channelId);
+      if (target < 0) {
+        // Keep the current lineup available if the new channel fails to tune.
+        target = _syncedChannels.length;
+        _syncedChannels = [..._syncedChannels, lineup[index]];
+      }
+      final succeeded = await _switchChannel(target);
+      if (!succeeded || !mounted || _isStopping ||
+          !identical(originalChannels, widget.channels)) {
+        return;
+      }
+    }
     setState(() {
-      _syncedChannels = lineup;
+      _syncedChannels = GuideChannel.withSyncedUserDataAll(lineup) ?? lineup;
       _currentIndex = index;
     });
     _warmChannelCarousel();
-    if (!alreadyPlaying) await _switchChannel(index);
   }
 
   Future<void> _exitPlayback() async {
