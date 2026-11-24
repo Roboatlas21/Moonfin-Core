@@ -92,7 +92,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   /// don't ask plex.tv again.
   static const _cloudGridLife = Duration(minutes: 10);
 
-  Future<List<_Dvr>>? _dvrs;
+  Future<List>? _dvrs;
   Map<_Dvr, _Channels> _lastDvrChannels = {};
   int _dvrLineupRequest = 0;
   Future<String?>? _favoriteMachineId;
@@ -176,21 +176,32 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return loading;
   }
 
-  Future<List<_Dvr>> _dvrList() => cloudOnly
-      ? Future.value(<_Dvr>[])
-      : _cached(() => _dvrs, (f) => _dvrs = f, () async {
-        final container = await _dvrContainer('/livetv/dvrs');
-        final rows = container['Dvr'] as List? ?? const [];
-        final size = container['size'];
-        if (rows.isEmpty && size != null && size != 0 && size != '0') {
-          throw const FormatException('Missing Plex DVR list');
-        }
-        return [
-          for (final dvr in rows)
-            if (dvr is Map && dvr['epgIdentifier'] is String)
-              (key: '${dvr['key']}', epg: dvr['epgIdentifier'] as String),
-        ];
-      });
+  Future<List<_Dvr>> _dvrList({void Function()? onIncomplete}) async {
+    if (cloudOnly) return [];
+    final read = _cached(() => _dvrs, (f) => _dvrs = f, () async {
+      final container = await _dvrContainer('/livetv/dvrs');
+      final rows = container['Dvr'] as List? ?? const [];
+      final size = container['size'];
+      if (rows.isEmpty && size != null && size != 0 && size != '0') {
+        throw const FormatException('Missing Plex DVR list');
+      }
+      return rows;
+    });
+    final rows = await read;
+    final dvrs = <_Dvr>[];
+    for (final row in rows.whereType<Map>()) {
+      final key = row['key'], epg = row['epgIdentifier'];
+      if ((key is int || (key is String && key.trim().isNotEmpty)) &&
+          epg is String && epg.trim().isNotEmpty) {
+        dvrs.add((key: '$key', epg: epg));
+      }
+    }
+    if (dvrs.length != rows.length) {
+      if (identical(read, _dvrs)) _dvrs = null;
+      onIncomplete?.call();
+    }
+    return dvrs;
+  }
 
   // Plex Cloud favorites use machine+provider, not Moonfin's DVR key.
   Future<String?> _machineIdForFavorites() async {
@@ -233,7 +244,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final request = ++_dvrLineupRequest;
     final next = <_Dvr, _Channels>{};
     try {
-      final dvrs = await _dvrList();
+      var incomplete = false;
+      final dvrs = await _dvrList(onIncomplete: () => incomplete = true);
+      if (incomplete) {
+        final found = {for (final dvr in dvrs) dvr.key};
+        next.addEntries(_lastDvrChannels.entries.where((e) => !found.contains(e.key.key)));
+        onUnavailable?.call(next.values.expand((rows) => rows).toList());
+      }
       final machineIdFuture = dvrs.isEmpty ? null : _machineIdForFavorites();
       for (final dvr in dvrs) {
         try {
@@ -330,7 +347,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     if (!identical(read, _cloudChannels)) return _freeChannels();
     final previous = _lastFreeLineup;
     if (identical(previous, lineup)) return lineup;
-    if (previous != null && !_sameStationMapping(previous, lineup)) {
+    if (previous != null && _cloudOnNowExpiresAt != null &&
+        !_sameStationMapping(previous, lineup)) {
       _cloudOnNowRows = null;
     }
     return _lastFreeLineup = lineup;
@@ -687,6 +705,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       // A known station can still use its guide key while the catalog is down.
       return _lastFreeLineup ?? const <String, Map<String, dynamic>>{};
     });
+    final catalog = _cloudChannels;
     final first = start.toUtc();
     final exclusiveEnd = end.toUtc();
     final days = {
@@ -729,16 +748,22 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
                   throw const FormatException('Invalid Plex Free TV grid Media');
                 }
                 for (final media in mediaItems) {
-                  if (media is! Map) continue;
+                  if (media is! Map || !_overlapsWindow(media, from, to)) continue;
+                  final station = _stationIds(media, item).firstOrNull;
+                  if (station != null && station != request.channel) {
+                    failedChannelIds.add(id);
+                    if (identical(catalog, _cloudChannels)) _cloudChannels = null;
+                    final key = '$gridKey/${request.day}';
+                    if (identical(_cloudGrids[key]?.items, itemsFuture)) _cloudGrids.remove(key);
+                    continue;
+                  }
                   final program = _program(
                     plexCloudSource,
                     request.channel,
                     item,
                     media,
                   );
-                  if (program != null && _overlapsWindow(media, from, to)) {
-                    decoded.add(program);
-                  }
+                  if (program != null) decoded.add(program);
                 }
               }
               return decoded;
@@ -965,6 +990,22 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return seconds > 100000000000 ? seconds ~/ 1000 : seconds;
   }
 
+  // Plex can identify a station on the showing or its parent programme.
+  static Iterable<String> _stationIds(Map media, Map row) sync* {
+    for (final entry in [media, row]) {
+      for (final field in const ['channelIdentifier', 'channelId', 'channelGridKey', 'gridKey']) {
+        final ref = entry[field];
+        if (ref is! Map && field != 'channelIdentifier' && field != 'channelId') continue;
+        final value = ref is Map ? ref['id'] : ref;
+        final id = value?.toString().trim();
+        if (id != null && id.isNotEmpty) {
+          final parsed = plexChannelOf(id);
+          yield parsed?.source == plexCloudSource ? parsed!.channel : id;
+        }
+      }
+    }
+  }
+
   Future<List<Map>> _fetchCloudOnNowRows() async {
     // Plex's Home hub is a bounded alternative to one EPG grid call per
     // channel. This experimental endpoint is not guaranteed to be available.
@@ -1005,6 +1046,16 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       }
     }
     return rows;
+  }
+
+  static bool _hubNeedsStationMapping(List<Map> rows, _FreeChannels lineup) {
+    bool known(String id) => lineup.containsKey(_channelId(plexCloudSource, id));
+    for (final row in rows) {
+      for (final media in (row['Media'] as List).whereType<Map>()) {
+        if (!_stationIds(media, row).any(known)) return true;
+      }
+    }
+    return false;
   }
 
   List<Map<String, dynamic>> _matchCloudOnNow(
@@ -1109,12 +1160,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       _loadFreeOnNow().timeout(_cloudOnNowTimeout).onError<Object>((_, _) => []);
 
   Future<List<Map<String, dynamic>>> _loadFreeOnNow() async {
+    final previousCatalog = _cloudChannels;
     var stale = false;
-    final lineup = await _freeLineupForBrowse(onUnavailable: () => stale = true);
-    final catalog = stale ? null : _cloudChannels;
+    var lineup = await _freeLineupForBrowse(onUnavailable: () => stale = true);
+    var catalog = stale ? null : _cloudChannels;
     if (lineup.isEmpty) return [];
     final now = DateTime.now();
-    if (_cloudOnNowRows == null || !now.isBefore(_cloudOnNowExpiresAt!)) {
+    final expires = _cloudOnNowExpiresAt;
+    final fresh = _cloudOnNowRows == null || (expires != null && !now.isBefore(expires));
+    if (fresh) {
       _cloudOnNowExpiresAt = now.add(_cloudOnNowCacheLife);
       _cloudOnNowRows = _fetchCloudOnNowRows()
           .timeout(_cloudOnNowTimeout)
@@ -1125,6 +1179,21 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final rows = await cached;
     // A concurrent lineup refresh may have reassigned a station during the hub read.
     if (!identical(cached, _cloudOnNowRows)) return _loadFreeOnNow();
+    if (fresh && catalog != null && identical(previousCatalog, catalog) &&
+        identical(catalog, _cloudChannels) && _hubNeedsStationMapping(rows, lineup)) {
+      _cloudChannels = null;
+      // Keep these fresh hub rows while their own station mapping is verified.
+      _cloudOnNowExpiresAt = null;
+    }
+    if (_cloudOnNowExpiresAt == null) {
+      lineup = await _freeLineupForBrowse(onUnavailable: () => stale = true);
+      catalog = stale ? null : _cloudChannels;
+      if (identical(cached, _cloudOnNowRows)) {
+        _cloudOnNowExpiresAt ??= now.add(_cloudOnNowCacheLife);
+      }
+      if (lineup.isEmpty) return [];
+      if (!identical(cached, _cloudOnNowRows)) return _loadFreeOnNow();
+    }
     // Only a verified lineup can match a program by a reassignable guide key.
     final programs = _matchCloudOnNow(
       rows, lineup, allowAliases: catalog != null && identical(catalog, _cloudChannels),
