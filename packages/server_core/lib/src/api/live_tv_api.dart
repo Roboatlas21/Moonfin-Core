@@ -100,6 +100,14 @@ class ChannelGroupLineup {
         }
         final channel = Map<String, dynamic>.of(row);
         if (channel['ChannelNumber'] is! String) channel.remove('ChannelNumber');
+        if (channel['ImageTags'] case Map<String, dynamic> tags) {
+          channel['ImageTags'] = {
+            for (final entry in tags.entries)
+              if (entry.value is String) entry.key: entry.value,
+          };
+        } else {
+          channel.remove('ImageTags');
+        }
         channels.add(channel);
         final groups = labels(row['groups'] as List);
         if (groups.isNotEmpty) memberships[row['Id'] as String] = groups;

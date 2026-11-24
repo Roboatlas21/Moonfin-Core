@@ -11,6 +11,7 @@ import 'package:moonfin/preference/preference_constants.dart';
 
 import 'package:server_core/server_core.dart';
 import 'package:server_emby/server_emby.dart';
+import 'package:server_jellyfin/server_jellyfin.dart';
 
 
 class _MockClient extends Mock implements MediaServerClient {}
@@ -145,6 +146,38 @@ void main() {
       when(() => client.serverType).thenReturn(type);
       expect(LiveTvGuideViewModel(client).filters, GuideFilter.values);
     }
+  });
+
+  test('Jellyfin guide keeps channels with malformed logo tags', () async {
+    final rows = [
+      {..._channel('news'), 'groups': ['Local'], 'ImageTags': {'Primary': 123, 'Thumb': 'news-thumb'}},
+      {..._channel('sports'), 'groups': [], 'ImageTags': {'Primary': 'sports-logo'}},
+      {..._channel('weather'), 'groups': [], 'ImageTags': []},
+    ];
+    final jellyfin = JellyfinMediaServerClient(
+      baseUrl: 'https://guide.test',
+      deviceInfo: const DeviceInfo(id: 'test', name: 'Test', appName: 'Moonfin', appVersion: '1'),
+      interceptors: [InterceptorsWrapper(onRequest: (request, handler) {
+        handler.resolve(Response(
+          requestOptions: request,
+          statusCode: 200,
+          data: request.path == '/Moonfin/LiveTv/ChannelGroups'
+              ? {'supported': true, 'channels': rows}
+              : {'Items': []},
+        ));
+      })],
+    )..userId = 'viewer';
+    final vm = LiveTvGuideViewModel(jellyfin);
+    addTearDown(vm.dispose);
+    await vm.load();
+
+    expect(vm.state, GuideState.ready);
+    final channels = {for (final channel in vm.playbackChannels) channel.id: channel};
+    expect(channels['news']!.imageTag, isNull);
+    expect(channels['news']!.rawData['ImageTags'], {'Thumb': 'news-thumb'});
+    expect(vm.groupsForChannel('news'), contains('Local'));
+    expect(channels['sports']!.imageTag, 'sports-logo');
+    expect(channels['weather']!.imageTag, isNull);
   });
 
   test('Emby guide keeps channels with malformed optional metadata', () async {
