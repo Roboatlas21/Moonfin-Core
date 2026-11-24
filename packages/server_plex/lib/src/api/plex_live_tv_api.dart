@@ -748,7 +748,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
                   throw const FormatException('Invalid Plex Free TV grid Media');
                 }
                 for (final media in mediaItems) {
-                  if (media is! Map || !_overlapsWindow(media, from, to)) continue;
+                  if (media is! Map) continue;
+                  final program = _program(plexCloudSource, request.channel, item, media);
+                  if (program == null || !_overlapsWindow(media, from, to)) continue;
                   final station = _stationIds(media, item).firstOrNull;
                   if (station != null && station != request.channel) {
                     failedChannelIds.add(id);
@@ -757,13 +759,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
                     if (identical(_cloudGrids[key]?.items, itemsFuture)) _cloudGrids.remove(key);
                     continue;
                   }
-                  final program = _program(
-                    plexCloudSource,
-                    request.channel,
-                    item,
-                    media,
-                  );
-                  if (program != null) decoded.add(program);
+                  decoded.add(program);
                 }
               }
               return decoded;

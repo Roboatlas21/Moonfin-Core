@@ -1122,7 +1122,9 @@ void main() {
     final media = <String, dynamic>{'channelIdentifier': 'news-extra',
         'beginsAt': 1792699200, 'endsAt': 1792706400};
     final server = _FakeServer((r) => r.uri.path == '/grid'
-        ? {'MediaContainer': {'Metadata': [{'title': 'News', 'Media': [media]}]}}
+        ? {'MediaContainer': {'Metadata': [{'title': 'News', 'Media': [
+            media, {'beginsAt': 1792699200},
+          ]}]}}
         : fixture.answer(r));
     final api = PlexLiveTvApi(Dio()..interceptors.add(server));
     await api.getChannels();
