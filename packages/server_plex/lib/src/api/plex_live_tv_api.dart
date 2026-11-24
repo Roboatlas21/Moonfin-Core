@@ -105,7 +105,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   /// don't ask plex.tv again.
   static const _cloudGridLife = Duration(minutes: 10);
 
-  Future<({List rows, bool incomplete, bool implicitEmpty})>? _dvrs;
+  Future<({List rows, bool incomplete, bool recheckEmpty})>? _dvrs;
   bool _hadDiscoveredDvr = false;
   Map<_Dvr, _Channels> _lastDvrChannels = {};
   int _dvrLineupRequest = 0;
@@ -213,10 +213,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (rows.isEmpty && incomplete) {
         throw const FormatException('Missing Plex DVR list');
       }
-      final implicitEmpty = !container.containsKey('Dvr') && !container.containsKey('size');
-      return (rows: rows, incomplete: incomplete, implicitEmpty: implicitEmpty);
+      // Keep known tuners through one ambiguous empty reply, until discovery confirms removal.
+      final recheckEmpty = _hadDiscoveredDvr && !container.containsKey('Dvr') && !container.containsKey('size');
+      return (rows: rows, incomplete: incomplete, recheckEmpty: recheckEmpty);
     });
-    final (:rows, :incomplete, :implicitEmpty) = await read;
+    final (:rows, :incomplete, :recheckEmpty) = await read;
     final dvrs = <_Dvr>[];
     for (final row in rows.whereType<Map>()) {
       final key = row['key'], epg = row['epgIdentifier'];
@@ -225,13 +226,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         dvrs.add((key: '$key', epg: epg));
       }
     }
-    final partial = incomplete || dvrs.length != rows.length;
+    final invalidRows = incomplete || dvrs.length != rows.length;
     if (identical(read, _dvrs)) {
-      // After a known tuner disappears without an explicit count or list, recheck once.
-      if (partial || (implicitEmpty && _hadDiscoveredDvr)) _dvrs = null;
-      if (!partial || dvrs.isNotEmpty) _hadDiscoveredDvr = dvrs.isNotEmpty;
+      if (invalidRows || recheckEmpty) _dvrs = null;
+      if (!invalidRows || dvrs.isNotEmpty) _hadDiscoveredDvr = dvrs.isNotEmpty;
     }
-    if (partial) onIncomplete?.call();
+    if (invalidRows || recheckEmpty) onIncomplete?.call();
     return dvrs;
   }
 

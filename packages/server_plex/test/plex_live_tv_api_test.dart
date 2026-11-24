@@ -379,7 +379,7 @@ void main() {
     expect(cold.partial, isTrue);
     expect(cold.channels, healthy.channels);
 
-    server.discoveryReply = {'MediaContainer': <String, dynamic>{}};
+    server.discoveryReply = {'MediaContainer': {'Dvr': []}};
     final empty = await api.getChannelGroups();
     expect(empty.partial, isFalse);
     expect(empty.sources, isEmpty);
@@ -396,7 +396,9 @@ void main() {
       server.discoveryReply = null;
       expect((await api.getChannelGroups()).groupsByChannelId, contains('channel-2-4'));
       server.discoveryReply = {'MediaContainer': empty};
-      expect((await api.getChannelGroups()).sources, isEmpty);
+      final first = await api.getChannelGroups();
+      expect(first.partial, empty.isEmpty);
+      expect(first.groupsByChannelId.containsKey('channel-2-4'), empty.isEmpty);
       final before = discoveries();
       server.discoveryReply = null;
       final ids = await channelIds();
@@ -408,6 +410,10 @@ void main() {
     await api.getChannelGroups();
     server.discoveryReply = {'MediaContainer': <String, dynamic>{}};
     await api.getChannelGroups();
+    server.failWhen = (r) => r.uri.path == '/livetv/dvrs';
+    server.failureStatus = () => 503;
+    expect(await channelIds(), contains('channel-2-4'));
+    server.failWhen = null;
     final before = discoveries();
     expect(await channelIds(), isNot(contains('channel-2-4')));
     expect(await channelIds(), isNot(contains('channel-2-4')));
