@@ -923,7 +923,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// that would rebuild the grid and drop the focused cell. A failed refresh
   /// reloads in full.
   Future<void> _refreshRecordingState() async {
-    if (_isCategory(_filter) && _listingsStatePage == _pageGeneration) {
+    if (_listingsStatePage == _pageGeneration) {
       if (!listingsAccessDenied) await _reloadPrograms();
       return;
     }
@@ -1768,9 +1768,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           current() &&
           page == _pageGeneration &&
           generation == _programGeneration &&
-          (windowStart == null ||
-              (span == _requestedGuideWindow &&
-                  recordingRevision == liveTvRecordingRevision.value));
+          recordingRevision == liveTvRecordingRevision.value &&
+          (windowStart == null || span == _requestedGuideWindow);
       final category = _isCategory(_filter) ? _filter : null;
       // Carry over rows already loaded or requested within the active filter.
       final requestedRows = windowStart != null && category == null

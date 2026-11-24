@@ -2009,6 +2009,31 @@ void main() {
       vm.dispose();
     });
 
+    test('a second recording change supersedes an in-flight reload', () async {
+      _stubChannels(liveTv, [_channel('c0')]);
+      final vm = LiveTvGuideViewModel(client);
+      await vm.load();
+      final started = Completer<void>(), release = Completer<void>();
+      var reads = 0;
+      final program = _program('p0', 'c0');
+      when(() => _guide(liveTv)).thenAnswer((_) async {
+        if (++reads == 1) throw const FormatException('Invalid recording refresh');
+        if (reads == 2) {
+          started.complete();
+          await release.future;
+          return {'Items': [program]};
+        }
+        return {'Items': [recorded(program)]};
+      });
+      final first = vm.recordingChanged();
+      await started.future;
+      final second = vm.recordingChanged();
+      release.complete();
+      await Future.wait([first, second]);
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+      vm.dispose();
+    });
+
     test('reloadIfRecordingsChanged does nothing until a recording changes', () async {
       _stubChannels(liveTv, [_channel('c0')]);
       when(() => _guide(liveTv)).thenAnswer(
