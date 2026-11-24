@@ -114,6 +114,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   }
 
   late List<GuideChannel> _syncedChannels;
+  List<GuideChannel>? _retryGuideLineup;
 
   void _syncChannels() => _syncedChannels = [
     for (final channel in widget.channels) channel.withSyncedUserData(),
@@ -229,7 +230,10 @@ class _AppleTvLiveTvPlayerHostScreenState
   @override
   void didUpdateWidget(covariant AppleTvLiveTvPlayerHostScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.channels, widget.channels)) _syncChannels();
+    if (!identical(oldWidget.channels, widget.channels)) {
+      _retryGuideLineup = null;
+      _syncChannels();
+    }
   }
 
   @override
@@ -375,6 +379,8 @@ class _AppleTvLiveTvPlayerHostScreenState
 
   Future<void> _retryCurrentChannel() async {
     if (_switching || _exiting) return;
+    final lineup = _retryGuideLineup;
+    if (lineup != null) return _switchChannel(_currentChannel.id, lineup: lineup);
     _switching = true;
     try {
       await _playCurrentChannel();
@@ -393,6 +399,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     if (index < 0) return;
     final alreadyPlaying = _currentChannel.id == channelId && _channelIsUp;
     final originalChannels = widget.channels;
+    _retryGuideLineup = null;
     _switching = true;
     try {
       if (!alreadyPlaying) {
@@ -405,8 +412,12 @@ class _AppleTvLiveTvPlayerHostScreenState
         _readSchedule();
         _pushMetadata();
         await _playCurrentChannel();
-        if (!mounted || _exiting || !_channelIsUp || lineup == null ||
+        if (!mounted || _exiting || lineup == null ||
             !identical(originalChannels, widget.channels)) {
+          return;
+        }
+        if (!_channelIsUp) {
+          _retryGuideLineup = lineup;
           return;
         }
       }

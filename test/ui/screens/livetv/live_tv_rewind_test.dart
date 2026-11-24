@@ -17,11 +17,13 @@ import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/platform/pip_service.dart';
+import 'package:moonfin/playback/native_apple_player_backend.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/navigation/destinations.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_player_screen.dart';
+import 'package:moonfin/ui/screens/playback/appletv_livetv_player_host_screen.dart';
 import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
 import 'package:moonfin/ui/widgets/live_tv/channel_carousel.dart';
 import 'package:moonfin/util/platform_detection.dart';
@@ -42,6 +44,9 @@ class _Log extends Fake implements LogService {
 }
 
 class _Screensaver extends Fake implements ScreensaverController {
+  @override
+  void setNativePlayerPresented(bool presented) {}
+
   @override
   void setPlaybackActive(bool active) {}
 }
@@ -254,6 +259,46 @@ void main() {
     await tester.sendKeyEvent(key);
     await tester.pump();
   }
+
+  testWidgets('native player adopts the selected guide lineup after Retry', (tester) async {
+    final messenger = tester.binding.defaultBinaryMessenger;
+    const events = MethodChannel('moonfin/native_apple_player_events');
+    const control = MethodChannel('moonfin/native_apple_player_control');
+    messenger.setMockMethodCallHandler(events, (_) async => null);
+    messenger.setMockMethodCallHandler(control, (_) async => null);
+    final native = NativeApplePlayerBackend(GetIt.instance<UserPreferences>());
+    GetIt.instance.registerSingleton<NativeApplePlayerBackend>(native);
+    addTearDown(() {
+      native.dispose();
+      messenger.setMockMethodCallHandler(events, null);
+      messenger.setMockMethodCallHandler(control, null);
+    });
+    Future<void> send(Map<String, Object> action) async {
+      await messenger.handlePlatformMessage(events.name,
+          const StandardMethodCodec().encodeSuccessEnvelope(action), (_) {});
+      await tester.pump();
+    }
+
+    await tester.pumpWidget(const MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      home: AppleTvLiveTvPlayerHostScreen(channels: [ard], startIndex: 0),
+    ));
+    await tester.pump();
+    await send({'event': 'openGuide'});
+    await tester.pumpAndSettle();
+    final guide = find.byType(LiveTvGuideScreen);
+    const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
+    tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(zdf.id, const [zdf, third]);
+    manager.failedChannel = zdf.id;
+    Navigator.of(tester.element(guide)).pop(zdf.id);
+    await tester.pumpAndSettle();
+    manager.failedChannel = null;
+    await send({'event': 'messageAction'});
+    await send({'event': 'selectChannel', 'channelId': third.id});
+    expect(manager.playedChannelIds, [ard.id, zdf.id, zdf.id, third.id]);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 2));
+  });
 
   testWidgets('favorite control toggles the channel and follows tuning', (
     tester,

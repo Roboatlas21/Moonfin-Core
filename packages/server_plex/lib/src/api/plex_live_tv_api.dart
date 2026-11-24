@@ -180,8 +180,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       ? Future.value(<_Dvr>[])
       : _cached(() => _dvrs, (f) => _dvrs = f, () async {
         final container = await _dvrContainer('/livetv/dvrs');
+        final rows = container['Dvr'] as List? ?? const [];
+        final size = container['size'];
+        if (rows.isEmpty && size != null && size != 0 && size != '0') {
+          throw const FormatException('Missing Plex DVR list');
+        }
         return [
-          for (final dvr in container['Dvr'] as List? ?? const [])
+          for (final dvr in rows)
             if (dvr is Map && dvr['epgIdentifier'] is String)
               (key: '${dvr['key']}', epg: dvr['epgIdentifier'] as String),
         ];
@@ -838,7 +843,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (!cloudOnly && (channelIds == null || channelIds.length > free.length))
         attempt(
           () => _dvrAirings(start, end, channelIds: channelIds?.toSet(),
-              reportForbiddenChannels: reportForbiddenChannels && free.isEmpty),
+              reportForbiddenChannels: reportForbiddenChannels),
           dvrIds,
           dvr: true,
         ),

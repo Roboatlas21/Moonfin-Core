@@ -356,12 +356,14 @@ void main() {
     final healthy = await api.getChannelGroups();
     expect(healthy.sources, isNotEmpty);
 
-    server.discoveryReply = {};
-    final partial = await api.getChannelGroups();
-    expect(partial.partial, isTrue);
-    expect(partial.sources, healthy.sources);
-    expect(partial.channels, healthy.channels);
-    expect(partial.unresolvedChannelIds, {'channel-2-4'});
+    for (final incomplete in <Map<String, dynamic>>[{}, {'MediaContainer': {'size': 1}}]) {
+      server.discoveryReply = incomplete;
+      final partial = await api.getChannelGroups();
+      expect(partial.partial, isTrue);
+      expect(partial.sources, healthy.sources);
+      expect(partial.channels, healthy.channels);
+      expect(partial.unresolvedChannelIds, {'channel-2-4'});
+    }
 
     server.discoveryReply = {'MediaContainer': <String, dynamic>{}};
     final empty = await api.getChannelGroups();
@@ -432,6 +434,17 @@ void main() {
     server.failureStatus = () => 401;
     await expectLater(guide([free, denied]), throwsA(isA<DioException>()
         .having((e) => e.response?.statusCode, 'status', 401)));
+
+    server.failWhen = (r) {
+      final path = r.uri.path;
+      server.failureStatus = () => path == '/grid' ? 503 : 403;
+      return path == '/grid' || path == '/tv.plex.providers.epg.xmltv:3/grid';
+    };
+    final mixed = await PlexLiveTvApi(dio).getGuide(
+      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
+      channelIds: [denied, free],
+    );
+    expect(mixed['FailedChannelIds'], unorderedEquals([denied, free]));
   });
 
   test('one inaccessible tuner does not discard the other DVR channels', () async {

@@ -1,5 +1,8 @@
 import 'package:dio/dio.dart';
 
+/// Opts a request into the same redirect restrictions as a protected client.
+const sameOriginRedirectsOnly = 'sameOriginRedirectsOnly';
+
 /// Interceptor that follows HTTP redirects (301, 302, 307, 308) for all
 /// request methods including POST/PUT, which Dart's HttpClient does not
 /// follow automatically.
@@ -25,7 +28,8 @@ Interceptor redirectInterceptor(Dio dio, {bool sameOriginOnly = false}) {
         final location = error.response?.headers.value('location');
         if (location != null && location.isNotEmpty) {
           final redirectUri = error.requestOptions.uri.resolve(location);
-          if (sameOriginOnly &&
+          final restrictOrigin = sameOriginOnly || error.requestOptions.extra[sameOriginRedirectsOnly] == true;
+          if (restrictOrigin &&
               !isSameOriginRedirect(error.requestOptions.uri, redirectUri)) {
             return handler.next(error);
           }

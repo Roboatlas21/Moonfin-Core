@@ -50,7 +50,7 @@ void main() {
       );
       dio.httpClientAdapter = _Adapter((options) {
         requested.add(options.uri);
-        if (options.uri.path == '/start') {
+        if (options.uri.path == '/start' || options.uri.path == '/Moonfin/LiveTv/ChannelGroups') {
           return ResponseBody.fromString(
             '',
             307,
@@ -107,6 +107,12 @@ void main() {
       final dio = dioFor('https://other.example/next', sameOriginOnly: false);
       expect(await send(dio), 200);
       expect(requested.last.host, 'other.example');
+    });
+
+    test('the optional channel group request falls back on an external redirect', () async {
+      final dio = dioFor('https://other.example/next', sameOriginOnly: false);
+      expect((await ChannelGroupLineup.fetch(dio)).endpointAvailable, isFalse);
+      expect(requested.map((uri) => uri.host), ['silo.example']);
     });
   });
 }
