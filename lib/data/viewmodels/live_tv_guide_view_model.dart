@@ -974,7 +974,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         recordingRevision == liveTvRecordingRevision.value;
     for (var i = 0; i < channels.length; i += size) {
       final batch = channels.sublist(i, min(i + size, channels.length));
-      final fetched = await _fetchPrograms(batch, category: filter);
+      final fetched = await _fetchPrograms(batch, category: filter, current: current);
       if (!current()) return null;
       failed.addAll(fetched.failedChannelIds);
       for (final channel in batch) {

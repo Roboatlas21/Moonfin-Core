@@ -95,6 +95,9 @@ const _teletubbies = {
           ],
         },
       },
+      '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels' => {
+        'MediaContainer': {'Channel': [{'id': '7', 'title': 'Station Seven'}]},
+      },
       '/lineups/plex/channels' || '/lineups/plex/channels/featured' => {
         'MediaContainer': {
           'Channel': [
@@ -357,6 +360,8 @@ void main() {
     final partial = await api.getChannelGroups();
     expect(partial.partial, isTrue);
     expect(partial.sources, healthy.sources);
+    expect(partial.channels, healthy.channels);
+    expect(partial.unresolvedChannelIds, {'channel-2-4'});
 
     server.discoveryReply = {'MediaContainer': <String, dynamic>{}};
     final empty = await api.getChannelGroups();
@@ -493,23 +498,32 @@ void main() {
     expect(recovered.single['Id'], 'channel-plex-Movies');
   });
 
-  test('a DVR outage keeps both source filters until the lineup confirms removal', () async {
-    final (dio, server) = _server();
+  test('a tuner outage retains only its last lineup until access is denied', () async {
+    final (dio, server) = _server(secondDvr: true);
+    const second = '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';
     final api = PlexLiveTvApi(dio);
     final healthy = await api.getChannelGroups();
-    server.failWhen = (r) => r.uri.path.endsWith('/lineups/dvr/channels');
+    server.tunerReply = {'MediaContainer': {'Channel': [{'id': '5', 'title': 'New station'}]}};
+    server.failWhen = (r) => r.uri.path == second;
     server.failureStatus = () => 503;
     final outage = await api.getChannelGroups();
     expect(outage.partial, isTrue);
     expect(outage.sources, healthy.sources);
     expect(outage.groupsByChannelId['channel-plex-abc-66635fc0'], contains('source:plexFreeTv'));
     expect(outage.groupsByChannelId.containsKey('channel-2-4'), isFalse);
+    expect(outage.groupsByChannelId['channel-2-5'], {'source:dvr'});
+    expect(outage.groupsByChannelId['channel-3-7'], {'source:dvr'});
+    expect(outage.unresolvedChannelIds, {'channel-3-7'});
+    expect(outage.channels?.map((row) => row['Id']), contains('channel-3-7'));
+    expect((await api.getChannels())['Items'], outage.channels);
 
     server.failWhen = null;
-    expect((await api.getChannelGroups()).groupsByChannelId, healthy.groupsByChannelId);
-    server.failWhen = (r) => r.uri.path.endsWith('/lineups/dvr/channels');
+    expect((await api.getChannelGroups()).partial, isFalse);
+    server.failWhen = (r) => r.uri.path == second;
     server.failureStatus = () => 403;
-    expect((await api.getChannelGroups()).sources, isEmpty);
+    expect((await api.getChannelGroups()).groupsByChannelId.containsKey('channel-3-7'), isFalse);
+    server.failureStatus = () => 503;
+    expect((await api.getChannelGroups()).unresolvedChannelIds, isEmpty);
   });
 
   test('a Free TV outage preserves the last lineup alongside the DVR', () async {

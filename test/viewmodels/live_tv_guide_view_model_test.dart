@@ -1846,7 +1846,7 @@ void main() {
     });
 
 
-    test('a category filter refreshes its own rows too', () async {
+    test('a late 403 cannot clear a newer category recording refresh', () async {
       _stubChannels(liveTv, List.generate(10, (i) => _channel('c$i')));
       when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
         (_) async => {
@@ -1859,15 +1859,29 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(vm.programsForChannel('c5').single.hasTimer, isFalse);
 
-      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
-        (_) async => {
-          'Items': [recorded(_program('k1', 'c5', isKids: true))],
-        },
-      );
+      final pending = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv, category: GuideFilter.kids))
+          .thenAnswer((_) => pending.future);
+      final older = vm.recordingChanged();
+      await pumpEventQueue();
+
+      final newerReply = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv, category: GuideFilter.kids))
+          .thenAnswer((_) => newerReply.future);
       final states = <GuideState>[];
       vm.addListener(() => states.add(vm.state));
-      await vm.recordingChanged();
+      final newer = vm.recordingChanged();
+      await pumpEventQueue();
 
+      final options = RequestOptions();
+      pending.completeError(DioException(
+        requestOptions: options,
+        response: Response(requestOptions: options, statusCode: 403),
+      ));
+      await older;
+      newerReply.complete({'Items': [recorded(_program('k1', 'c5', isKids: true))]});
+      await newer;
+      expect(vm.state, GuideState.ready);
       expect(states, isNot(contains(GuideState.loading)));
       expect(vm.filteredChannels.map((c) => c.id), ['c5']);
       expect(vm.programsForChannel('c5').single.hasTimer, isTrue);
