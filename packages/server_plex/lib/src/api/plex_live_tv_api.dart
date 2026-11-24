@@ -679,8 +679,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<_Airings> _freeAirings(
     DateTime start,
     DateTime end,
-    List<String> channels,
-  ) async {
+    List<String> channels, {
+    required bool reportGuideFailures,
+  }) async {
     final lineup = await _freeChannels().catchError((Object error) {
       if (_accessDenied(error)) throw error;
       // A known station can still use its guide key while the catalog is down.
@@ -742,10 +743,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               }
               return decoded;
             } catch (error, stack) {
-              // Report an expired provider token as an auth failure, not a
-              // single-channel outage.
-              if (_accessDenied(error)) Error.throwWithStackTrace(error, stack);
               failedChannelIds.add(id);
+              // Plex can deny one station's grid while other stations are available.
+              if (reportGuideFailures &&
+                  error is DioException && error.response?.statusCode == 403) {
+                return null;
+              }
+              if (_accessDenied(error)) rethrow;
               firstFailure ??= error;
               firstFailureStack ??= stack;
               // Drop malformed grids for Retry, unless a newer request already
@@ -865,7 +869,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           dvr: true,
         ),
       if (free.isNotEmpty)
-        attempt(() => _freeAirings(start, end, free), freeIds),
+        attempt(
+          () => _freeAirings(start, end, free, reportGuideFailures: reportGuideFailures),
+          freeIds,
+        ),
     ], eagerError: true);
     // Preserve the healthy source while retaining failed channel IDs for Retry.
     if (results.isNotEmpty && results.every((result) => result.error != null)) {

@@ -465,6 +465,34 @@ void main() {
     expect(mixed['FailedChannelIds'], unorderedEquals([denied, free]));
   });
 
+  test('a forbidden Free TV grid leaves other guide listings available', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    const denied = 'channel-plex-abc-66635fc0';
+    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
+      channelIds: ids,
+    );
+    server.failWhen = (r) =>
+        r.uri.path == '/grid' && r.queryParameters['channelGridKey'] == 'provider-42';
+    server.failureStatus = () => 403;
+    for (final healthy in ['channel-2-4', 'channel-plex-news-extra']) {
+      final result = await guide([healthy, denied]);
+      expect(result['FailedChannelIds'], [denied]);
+      expect((result['Items'] as List).map((row) => row['ChannelId']), contains(healthy));
+    }
+    expect((await guide([denied]))['FailedChannelIds'], [denied]);
+    await expectLater(api.getProgram('airing-plex-1792699200-abc-66635fc0'),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 403)));
+    server.failureStatus = () => 401;
+    await expectLater(guide([denied, 'channel-2-4']),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)));
+    server.failWhen = null;
+    final recovered = await guide([denied]);
+    expect(recovered.containsKey('FailedChannelIds'), isFalse);
+    expect((recovered['Items'] as List).single['ChannelId'], denied);
+  });
+
   test('one inaccessible tuner does not discard the other DVR channels', () async {
     final (dio, server) = _server(secondDvr: true);
     server.failWhen = (request) =>
