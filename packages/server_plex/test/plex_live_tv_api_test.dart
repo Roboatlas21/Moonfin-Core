@@ -891,10 +891,10 @@ void main() {
     );
   });
 
-  test('a missing Free TV program list is retryable when the count is positive', () async {
-    var size = 1;
+  test('a missing Free TV program list is retryable until Plex confirms zero', () async {
+    final grid = <String, dynamic>{'size': 1};
     final server = _FakeServer((r) => r.uri.path == '/grid'
-        ? {'MediaContainer': {'size': size}}
+        ? {'MediaContainer': grid}
         : {'MediaContainer': {'Channel': [{'id': 'test', 'gridKey': 'test'}]}});
     final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
     Future<Map<String, dynamic>> guide() => api.getGuide(
@@ -902,10 +902,12 @@ void main() {
       channelIds: ['channel-plex-test'],
     );
     await expectLater(guide(), throwsFormatException);
-    size = 0;
+    grid.clear();
+    await expectLater(guide(), throwsFormatException);
+    grid['size'] = 0;
     expect((await guide())['Items'], isEmpty);
     expect((await guide())['Items'], isEmpty);
-    expect(server.requests.where((r) => r.uri.path == '/grid'), hasLength(2));
+    expect(server.requests.where((r) => r.uri.path == '/grid'), hasLength(3));
   });
 
   test('Free TV guide and program details share the published grid key', () async {

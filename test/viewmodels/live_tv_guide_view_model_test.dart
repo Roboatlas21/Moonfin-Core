@@ -1688,6 +1688,42 @@ void main() {
       expect(vm.hasMorePrograms, isFalse);
     });
 
+    test('a Premiere window move stops after two consecutive timeouts', () async {
+      _stubChannels(liveTv, List.generate(500, (i) => _channel('c$i', number: '$i')));
+      when(() => _guide(liveTv, category: GuideFilter.premiere)).thenAnswer((inv) async => {
+        'Items': [if (_requestedIds(inv).contains('c499')) _program('old', 'c499', isPremiere: true)],
+      });
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.setFilter(GuideFilter.premiere);
+      await pumpEventQueue();
+      final from = vm.windowStart;
+      final next = from.add(const Duration(hours: 3));
+      final attempts = <String>[];
+      var firstBatchHealthy = false;
+      when(() => _guide(liveTv, category: GuideFilter.premiere)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        attempts.add(ids.first);
+        if (firstBatchHealthy && ids.contains('c0')) {
+          return {'Items': [_program('new', 'c0', start: next, isPremiere: true)]};
+        }
+        throw TimeoutException('guide unavailable');
+      });
+      expect(await vm.setWindowStart(next), isFalse);
+      expect(attempts, ['c0', 'c50']);
+      expect(vm.windowStart, from);
+      expect(vm.programsForChannel('c499').single.id, 'old');
+
+      attempts.clear();
+      firstBatchHealthy = true;
+      expect(await vm.setWindowStart(next), isTrue);
+      expect(attempts, ['c0', 'c50', 'c100']);
+      expect(vm.programsForChannel('c0').single.id, 'new');
+      expect(vm.hasFailedCategoryListings, isTrue);
+      expect(vm.hasMorePrograms, isTrue);
+    });
+
     test('switching chips drops a stale in-flight category response', () async {
       _stubChannels(liveTv, List.generate(10, (i) => _channel('c$i')));
       final sports = Completer<Map<String, dynamic>>();

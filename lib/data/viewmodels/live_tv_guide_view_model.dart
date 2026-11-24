@@ -1789,6 +1789,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final size = _batchSizeFor(category);
       final fetched = <String, List<GuideProgram>>{};
       final failed = <String>{};
+      var consecutiveTransportFailures = 0;
+      bool canFetchMore() => windowStart == null || consecutiveTransportFailures < 2;
       Future<void> fetchBatch(List<GuideChannel> batch) async {
         try {
           final reply = await _fetchPrograms(
@@ -1800,6 +1802,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           );
           fetched.addAll(reply.programs);
           failed.addAll(reply.failedChannelIds);
+          consecutiveTransportFailures = 0;
         } catch (error) {
           if (!samePage()) return;
           if (_accessDenied(error) ||
@@ -1807,11 +1810,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             rethrow;
           }
           failed.addAll(batch.map((channel) => channel.id));
+          consecutiveTransportFailures++;
         }
       }
       var end = 0;
       try {
-        while (end < rows.length) {
+        while (end < rows.length && canFetchMore()) {
           final start = end;
           end = min(start + size, rows.length);
           await fetchBatch(rows.sublist(start, end));
@@ -1822,6 +1826,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             break;
           }
         }
+        // Previously requested rows beyond the cutoff remain available for Retry.
+        failed.addAll(requestedRows.skip(end).map((channel) => channel.id));
         if (windowStart != null && category != null && samePage()) {
           final prefixIds = rows.take(end).map((channel) => channel.id).toSet();
           final extraRows = [
@@ -1829,6 +1835,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
               if (!prefixIds.contains(channel.id)) channel,
           ];
           for (var i = 0; i < extraRows.length; i += size) {
+            if (!canFetchMore()) {
+              failed.addAll(extraRows.skip(i).map((channel) => channel.id));
+              break;
+            }
             await fetchBatch(
               extraRows.sublist(i, min(i + size, extraRows.length)),
             );
