@@ -383,6 +383,29 @@ void main() {
     expect(empty.sources, isEmpty);
   });
 
+  test('incomplete discovery marks only unresolved tuner schedules for retry', () async {
+    final (dio, server) = _server(secondDvr: true);
+    final api = PlexLiveTvApi(dio);
+    const missing = 'channel-2-4', empty = 'channel-3-7', free = 'channel-plex-abc-66635fc0';
+    Future<Map> guide([List<String>? ids]) => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23), channelIds: ids,
+    );
+    await api.getChannelGroups();
+    server.discoveryReply = {'MediaContainer': {'Dvr': [
+      {'key': '2'}, {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
+    ]}};
+    expect((await api.getChannelGroups()).unresolvedChannelIds, {missing});
+    final mixed = await guide([missing, empty, free]);
+    expect(mixed['FailedChannelIds'], [missing]);
+    expect((mixed['Items'] as List).map((row) => row['ChannelId']).toSet(), {free});
+    expect((await guide())['FailedChannelIds'], [missing]);
+    expect((await guide([empty])).containsKey('FailedChannelIds'), isFalse);
+    server.discoveryReply = null;
+    final recovered = await guide([missing]);
+    expect(recovered.containsKey('FailedChannelIds'), isFalse);
+    expect((recovered['Items'] as List).first['ChannelId'], missing);
+  });
+
   test('a malformed tuner reports its channels for retry and preserves Free TV', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
@@ -1114,6 +1137,30 @@ void main() {
     server.failureStatus = () => 403;
     await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
     await expectLater(api.getProgram(programs.single['Id']), throwsA(isA<DioException>()));
+  });
+
+  test('a reassigned guide key loads a separate schedule for each station', () async {
+    var station = 'west';
+    final server = _FakeServer((r) => {'MediaContainer': switch (r.uri.path) {
+      '/lineups/plex/channels' => {'Channel': [{'id': station, 'gridKey': 'shared'}]},
+      '/grid' => {'Metadata': [{'title': '$station show', 'Media': [
+        {'beginsAt': 1792699200, 'endsAt': 1792706400},
+      ]}]},
+      _ => <String, dynamic>{},
+    }});
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
+    for (station in ['west', 'north']) {
+      await api.getChannelGroups();
+      for (var read = 0; read < 2; read++) {
+        final result = await api.getGuide(startDate: DateTime.utc(2026, 10, 22),
+            endDate: DateTime.utc(2026, 10, 23), channelIds: ['channel-plex-$station']);
+        final item = (result['Items'] as List).single;
+        expect(item['ChannelId'], 'channel-plex-$station');
+        expect(item['Name'], '$station show');
+      }
+    }
+    final grids = server.requests.where((r) => r.uri.path == '/grid');
+    expect(grids.map((r) => r.queryParameters['channelGridKey']), ['shared', 'shared']);
   });
 
   test('a conflicting grid station during a catalog outage is retryable', () async {

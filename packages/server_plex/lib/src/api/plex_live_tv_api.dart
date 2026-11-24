@@ -51,6 +51,7 @@ int _seconds(DateTime time) => time.millisecondsSinceEpoch ~/ 1000;
 typedef _Dvr = ({String key, String epg});
 typedef _Channels = List<Map<String, dynamic>>;
 typedef _FreeChannels = Map<String, Map<String, dynamic>>;
+typedef _FreeGridKey = ({String station, String gridKey, String day});
 typedef _CloudGroups = ({
   Map<String, String> genres,
   PromotedChannelGroup? promoted,
@@ -100,7 +101,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   _FreeChannels? _lastFreeLineup;
   Future<ChannelGroupLineup>? _lineupRead;
   PromotedChannelGroup? _featuredGroup;
-  final _cloudGrids = <String, ({DateTime at, Future<List> items})>{};
+  final _cloudGrids = <_FreeGridKey, ({DateTime at, Future<List> items})>{};
 
   // The Free TV Home hub is independent of channel grids and may be absent on
   // some Plex accounts or regions. Cache its small result, including failures,
@@ -111,15 +112,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   DateTime? _cloudOnNowExpiresAt;
   Future<List<Map>>? _cloudOnNowRows;
 
-  Future<List> _freeGrid(String gridKey, String day) {
-    final key = '$gridKey/$day';
+  Future<List> _freeGrid(_FreeGridKey key) {
     final now = DateTime.now();
     _cloudGrids.removeWhere(
       (_, grid) => now.difference(grid.at) >= _cloudGridLife,
     );
     if (_cloudGrids[key] case final cached?) return cached.items;
     late final Future<List> items;
-    items = _fetchFreeGrid(gridKey, day).catchError((Object error) {
+    items = _fetchFreeGrid(key.gridKey, key.day).catchError((Object error) {
       // A timed-out request may have been replaced before its failure.
       if (identical(_cloudGrids[key]?.items, items)) {
         _cloudGrids.remove(key);
@@ -559,7 +559,20 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     Object? firstFailure;
     StackTrace? firstFailureStack;
     var succeeded = 0;
-    for (final dvr in await _dvrList()) {
+    var incomplete = false;
+    final dvrs = await _dvrList(onIncomplete: () => incomplete = true);
+    if (reportGuideFailures && incomplete) {
+      final found = {for (final dvr in dvrs) dvr.key};
+      final requested = channelIds ??
+          _lastDvrChannels.values.expand((rows) => rows.map((row) => row['Id'] as String));
+      for (final id in requested) {
+        final source = plexChannelOf(id)?.source;
+        if (source != null && source != plexCloudSource && !found.contains(source)) {
+          failedIds.add(id);
+        }
+      }
+    }
+    for (final dvr in dvrs) {
       final requested = channelIds == null
           ? null
           : {
@@ -735,7 +748,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             final id = _channelId(plexCloudSource, request.channel);
             final gridKey = lineup[id]?['PlexGridKey'] as String? ??
                 request.channel.split('-').last;
-            final itemsFuture = _freeGrid(gridKey, request.day);
+            final key = (station: request.channel, gridKey: gridKey, day: request.day);
+            final itemsFuture = _freeGrid(key);
             try {
               final items = await itemsFuture;
               // Commit a grid's programs only after it decodes completely.
@@ -755,7 +769,6 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
                   if (station != null && station != request.channel) {
                     failedChannelIds.add(id);
                     if (identical(catalog, _cloudChannels)) _cloudChannels = null;
-                    final key = '$gridKey/${request.day}';
                     if (identical(_cloudGrids[key]?.items, itemsFuture)) _cloudGrids.remove(key);
                     continue;
                   }
@@ -775,7 +788,6 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               firstFailureStack ??= stack;
               // Drop malformed grids for Retry, unless a newer request already
               // replaced this cache entry.
-              final key = '$gridKey/${request.day}';
               if (identical(_cloudGrids[key]?.items, itemsFuture)) {
                 _cloudGrids.remove(key);
               }
