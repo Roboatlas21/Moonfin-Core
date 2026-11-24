@@ -964,6 +964,22 @@ void main() {
     expect(await onNow(), isEmpty);
   });
 
+  test('On Now distinguishes malformed DVR data from a confirmed empty schedule', () async {
+    final (_, fixture) = _server(liveDvr: true);
+    final server = _FakeServer((r) => r.uri.path.endsWith('/whatsOnNow')
+        ? {'MediaContainer': {'Metadata': []}} : fixture.answer(r));
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server));
+    Future<List> onNow() async => (await api.getRecommendedPrograms())['Items'] as List;
+
+    expect(await onNow(), hasLength(1));
+    server.tunerReply = {'MediaContainer': {'Metadata': {}}};
+    await expectLater(onNow(), throwsA(isA<TypeError>()));
+    server.tunerReply = {};
+    await expectLater(onNow(), throwsFormatException);
+    server.tunerReply = {'MediaContainer': {'Metadata': []}};
+    expect(await onNow(), isEmpty);
+  });
+
   test('Plex On Now uses Free TV when the DVR grid metadata is malformed', () async {
     final (dio, _) = _server(malformedDvrGrid: true);
     final programs = (await PlexLiveTvApi(dio)

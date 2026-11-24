@@ -1222,7 +1222,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }) async {
     final now = DateTime.now();
     final dvr = <Map<String, dynamic>>[];
-    (DioException, StackTrace)? tunerFailure;
+    (Object, StackTrace)? tunerFailure;
     if (!cloudOnly) {
       try {
         final airings = await _dvrAirings(now, now.add(const Duration(seconds: 1)));
@@ -1230,10 +1230,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       } on DioException catch (error, stack) {
         if (_accessDenied(error) && !_tunerGridForbidden(error)) rethrow;
         if (_temporaryLineupFailure(error)) tunerFailure = (error, stack);
-      } on TypeError {
-        // An invalid DVR grid cannot prevent loading the working Free TV hub.
-      } on FormatException {
-        // Treat malformed provider metadata as an unavailable DVR grid.
+      } on TypeError catch (error, stack) {
+        tunerFailure = (error, stack);
+      } on FormatException catch (error, stack) {
+        tunerFailure = (error, stack);
       }
     }
     final programs = <Map<String, dynamic>>[
