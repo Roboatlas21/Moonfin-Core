@@ -493,6 +493,40 @@ void main() {
     expect((recovered['Items'] as List).single['ChannelId'], denied);
   });
 
+  test('a forbidden Free TV catalog preserves DVR listings in a mixed guide', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    const dvr = 'channel-2-4';
+    const free = ['channel-plex-abc-66635fc0', 'channel-plex-news-extra'];
+    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
+      channelIds: ids,
+    );
+    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
+    server.failureStatus = () => 403;
+    final partial = await guide([dvr, ...free]);
+    expect((partial['Items'] as List).map((row) => row['ChannelId']).toSet(), {dvr});
+    expect(partial['FailedChannelIds'], unorderedEquals(free));
+    expect(server.requests.where((r) => r.uri.path == '/grid'), isEmpty);
+    await expectLater(guide(free),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 403)));
+    server.failWhen = (r) {
+      final catalog = r.uri.path == '/lineups/plex/channels';
+      server.failureStatus = () => catalog ? 403 : 503;
+      return catalog || r.uri.path.endsWith('/grid');
+    };
+    await expectLater(guide([dvr, ...free]),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 403)));
+    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
+    server.failureStatus = () => 401;
+    await expectLater(guide([dvr, ...free]),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)));
+    server.failWhen = null;
+    final recovered = await guide(free);
+    expect(recovered.containsKey('FailedChannelIds'), isFalse);
+    expect((recovered['Items'] as List).map((row) => row['ChannelId']).toSet(), free.toSet());
+  });
+
   test('one inaccessible tuner does not discard the other DVR channels', () async {
     final (dio, server) = _server(secondDvr: true);
     server.failWhen = (request) =>

@@ -849,8 +849,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           stack: null,
         );
       } catch (error, stack) {
-        // A tuner may deny its grid while Free TV is still available.
-        if (_accessDenied(error) && !(dvr && _tunerGridForbidden(error))) rethrow;
+        // A forbidden tuner grid or Free TV catalog can leave the other source usable.
+        final freeCatalogForbidden = !dvr && reportGuideFailures &&
+            error is DioException && error.response?.statusCode == 403 &&
+            error.requestOptions.uri.path == '/lineups/plex/channels';
+        if (_accessDenied(error) && !(dvr && _tunerGridForbidden(error)) &&
+            !freeCatalogForbidden) {
+          rethrow;
+        }
         return (
           items: <Map<String, dynamic>>[],
           failedChannelIds: failedOnError,
@@ -876,7 +882,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     ], eagerError: true);
     // Preserve the healthy source while retaining failed channel IDs for Retry.
     if (results.isNotEmpty && results.every((result) => result.error != null)) {
-      final failure = results.first;
+      final failure = results.firstWhere(
+        (result) => _accessDenied(result.error!),
+        orElse: () => results.first,
+      );
       Error.throwWithStackTrace(failure.error!, failure.stack!);
     }
     final programs = [for (final result in results) ...result.items]
