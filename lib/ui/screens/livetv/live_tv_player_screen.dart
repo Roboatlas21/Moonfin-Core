@@ -902,7 +902,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     unawaited(_prefs.set(UserPreferences.liveTvLastChannelId, channel.id));
     final item = AggregatedItem(
       id: channel.id,
-      serverId: _client.baseUrl,
+      serverId: GetIt.instance.maybeGet<MediaServerClientFactory>()?.serverIdOf(_client) ?? _client.baseUrl,
       rawData: channel.rawData,
     );
     final allowDirect = _prefs.get(UserPreferences.liveTvDirectPlayEnabled);

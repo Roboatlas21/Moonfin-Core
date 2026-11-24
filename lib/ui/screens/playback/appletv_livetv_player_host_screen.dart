@@ -12,6 +12,7 @@ import '../../../playback/subtitle_style.dart';
 import '../../../data/models/aggregated_item.dart';
 import '../../../data/models/live_tv_recording_state.dart';
 import '../../../data/repositories/item_mutation_repository.dart';
+import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/services/user_data_sync.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../playback/apple_player_ui.dart';
@@ -323,7 +324,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     unawaited(_prefs.set(UserPreferences.liveTvLastChannelId, channel.id));
     final item = AggregatedItem(
       id: channel.id,
-      serverId: _client.baseUrl,
+      serverId: GetIt.instance.maybeGet<MediaServerClientFactory>()?.serverIdOf(_client) ?? _client.baseUrl,
       rawData: channel.rawData,
     );
     final allowDirect = _prefs.get(UserPreferences.liveTvDirectPlayEnabled);

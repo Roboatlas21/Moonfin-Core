@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/services/log_service.dart';
+import 'package:moonfin/data/services/media_server_client_factory.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
@@ -29,6 +30,8 @@ import 'package:moonfin/ui/widgets/live_tv/channel_carousel.dart';
 import 'package:moonfin/util/platform_detection.dart';
 
 class _Client extends Mock implements MediaServerClient {}
+
+class _Factory extends Mock implements MediaServerClientFactory {}
 
 class _LiveTvApi extends Mock implements LiveTvApi {}
 
@@ -89,6 +92,7 @@ class _Manager extends PlaybackManager {
   final _Backend fakeBackend;
   final seeks = <Duration>[];
   final playedChannelIds = <String>[];
+  String? playedServerId;
   String? failedChannel;
   Completer<void>? failedTune;
   final resumes = <bool>[];
@@ -125,7 +129,9 @@ class _Manager extends PlaybackManager {
     bool carryTrackSelections = false,
     bool stopCurrentAsFinished = false,
   }) async {
-    final id = (items.first as AggregatedItem).id;
+    final item = items.first as AggregatedItem;
+    final id = item.id;
+    playedServerId = item.serverId;
     playedChannelIds.add(id);
     if (id == failedChannel) await failedTune?.future;
     _bringup
@@ -250,6 +256,27 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
+  }
+
+  for (final apple in [false, true]) {
+    testWidgets('Live TV sends the saved account ID to playback (Apple TV: $apple)', (tester) async {
+      final client = GetIt.instance<MediaServerClient>();
+      when(() => client.baseUrl).thenReturn('https://plex.tv');
+      final factory = _Factory();
+      when(() => factory.serverIdOf(client)).thenReturn('plex-cloud-viewer');
+      GetIt.instance.registerSingleton<MediaServerClientFactory>(factory);
+      if (apple) {
+        await tester.pumpWidget(MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          home: const AppleTvLiveTvPlayerHostScreen(channels: [ard], startIndex: 0),
+        ));
+        await tester.pump();
+      } else {
+        await pumpPlayer(tester, channels: const [ard]);
+      }
+      expect(manager.playedServerId, 'plex-cloud-viewer');
+      await tester.pumpWidget(const SizedBox());
+    });
   }
 
   Future<void> hideControls(WidgetTester tester) async {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:server_jellyfin/src/api/jellyfin_live_tv_api.dart';
 import 'package:test/test.dart';
@@ -81,6 +83,38 @@ void main() {
       expect(statuses, isEmpty);
     },
   );
+
+  test('an older 404 cannot hide a working groups endpoint', () async {
+    final dio = Dio(BaseOptions(baseUrl: 'https://one.test'));
+    final started = Completer<void>();
+    final release = Completer<void>();
+    var requests = 0;
+    dio.interceptors.add(InterceptorsWrapper(onRequest: (request, handler) async {
+      if (++requests == 1) {
+        started.complete();
+        await release.future;
+        handler.reject(DioException.badResponse(
+          statusCode: 404,
+          requestOptions: request,
+          response: Response(requestOptions: request, statusCode: 404),
+        ));
+        return;
+      }
+      handler.resolve(Response(
+        requestOptions: request,
+        statusCode: 200,
+        data: {'supported': true, 'channels': []},
+      ));
+    }));
+    final api = JellyfinLiveTvApi(dio);
+    final older = api.getChannelGroups(userId: 'viewer');
+    await started.future;
+    expect((await api.getChannelGroups(userId: 'viewer')).endpointAvailable, isTrue);
+    release.complete();
+    expect((await older).endpointAvailable, isFalse);
+    expect((await api.getChannelGroups(userId: 'viewer')).endpointAvailable, isTrue);
+    expect(requests, 3);
+  });
 
   group('JellyfinLiveTvApi.getGuide /LiveTv/Programs transport', () {
     test('small channel list → GET with comma-joined ChannelIds string', () async {
