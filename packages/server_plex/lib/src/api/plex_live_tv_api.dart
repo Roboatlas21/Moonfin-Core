@@ -728,7 +728,6 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       // A known station can still use its guide key while the catalog is down.
       return _lastFreeLineup ?? const <String, Map<String, dynamic>>{};
     });
-    final catalog = _cloudChannels;
     final first = start.toUtc();
     final exclusiveEnd = end.toUtc();
     final days = {
@@ -756,6 +755,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         for (final request in batch)
           () async {
             final id = _channelId(plexCloudSource, request.channel);
+            final catalog = _cloudChannels;
             final station = _lastFreeLineup?[id];
             if (lineup.containsKey(id) && station == null) {
               failedChannelIds.add(id);
