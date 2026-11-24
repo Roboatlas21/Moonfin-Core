@@ -1451,11 +1451,13 @@ void main() {
       expect(vm.programsForChannel('c0').single.id, 'sport-c0');
     });
 
-    test('a category retry reaches a later batch after the first times out', () async {
-      _stubChannels(liveTv, [for (var i = 0; i < 201; i++) _channel('c$i', number: '$i')]);
-      final offline = {'c0', 'c200'};
+    test('a category outage stops after one retry and manual Retry resumes the scan', () async {
+      _stubChannels(liveTv, [for (var i = 0; i < 600; i++) _channel('c$i', number: '$i')]);
+      final offline = {'c0', 'c200', 'c400'};
+      final requests = <String>[];
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
         final ids = _requestedIds(inv);
+        requests.add(ids.first);
         if (ids.any(offline.contains)) throw TimeoutException('tuner offline');
         return {'Items': [_program('p-${ids.first}', ids.first, isSports: true)]};
       });
@@ -1465,13 +1467,15 @@ void main() {
       vm.setFilter(GuideFilter.sports);
       await pumpEventQueue();
 
-      offline.remove('c200');
+      expect(requests, ['c0', 'c0']);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      offline.removeAll(['c200', 'c400']);
       await vm.retryFailedCategoryListings();
-      expect(vm.filteredChannels.map((c) => c.id), ['c200']);
+      expect(vm.filteredChannels.map((c) => c.id), ['c200', 'c400']);
       expect(vm.hasFailedCategoryListings, isTrue);
       offline.clear();
       await vm.retryFailedCategoryListings();
-      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c200']);
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c200', 'c400']);
       expect(vm.hasFailedCategoryListings, isFalse);
     });
 

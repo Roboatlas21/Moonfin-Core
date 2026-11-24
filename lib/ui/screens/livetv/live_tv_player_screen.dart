@@ -72,6 +72,7 @@ class LiveTvPlayerScreen extends StatefulWidget {
 class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     with WidgetsBindingObserver, ImmersiveSystemUi {
   late List<GuideChannel> _syncedChannels;
+  List<GuideChannel>? _retryGuideLineup;
   final _manager = GetIt.instance<PlaybackManager>();
   // media_kit isn't registered on platforms that run a different backend, so
   // ask the container rather than listing them.
@@ -831,6 +832,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   void didUpdateWidget(covariant LiveTvPlayerScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.channels, widget.channels)) {
+      _retryGuideLineup = null;
       final playing = _currentChannel;
       _syncedChannels = [
         for (final channel in widget.channels) channel.withSyncedUserData(),
@@ -883,6 +885,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   Future<bool> _playCurrentChannel() async {
+    _retryGuideLineup = null;
     // A channel change starts a new stream, so whatever caption choice is
     // remembered has to be put back once this one reports its own captions.
     _captionTrackApplied = false;
@@ -994,6 +997,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   /// What the failure card's Retry control does.
   Future<void> _retryCurrentChannel() async {
     if (_isSwitching) return;
+    final lineup = _retryGuideLineup;
+    if (lineup != null) return _onGuideChannelSelected(_currentChannel.id, lineup);
     _isSwitching = true;
     try {
       await _playCurrentChannel();
@@ -1880,12 +1885,14 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         _syncedChannels = [..._syncedChannels, lineup[index]];
       }
       final succeeded = await _switchChannel(target);
-      if (!succeeded || !mounted || _isStopping ||
-          !identical(originalChannels, widget.channels)) {
+      if (!mounted || _isStopping || !identical(originalChannels, widget.channels)) return;
+      if (!succeeded) {
+        _retryGuideLineup = lineup;
         return;
       }
     }
     setState(() {
+      _retryGuideLineup = null;
       _syncedChannels = GuideChannel.withSyncedUserDataAll(lineup) ?? lineup;
       _currentIndex = index;
     });

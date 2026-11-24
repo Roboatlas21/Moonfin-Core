@@ -875,6 +875,23 @@ void main() {
     );
   });
 
+  test('a missing Free TV program list is retryable when the count is positive', () async {
+    var size = 1;
+    final server = _FakeServer((r) => r.uri.path == '/grid'
+        ? {'MediaContainer': {'size': size}}
+        : {'MediaContainer': {'Channel': [{'id': 'test', 'gridKey': 'test'}]}});
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
+    Future<Map<String, dynamic>> guide() => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22, 20), endDate: DateTime.utc(2026, 10, 22, 22),
+      channelIds: ['channel-plex-test'],
+    );
+    await expectLater(guide(), throwsFormatException);
+    size = 0;
+    expect((await guide())['Items'], isEmpty);
+    expect((await guide())['Items'], isEmpty);
+    expect(server.requests.where((r) => r.uri.path == '/grid'), hasLength(2));
+  });
+
   test('Free TV guide and program details share the published grid key', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio, cloudOnly: true);

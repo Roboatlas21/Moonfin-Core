@@ -301,18 +301,26 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  for (final fails in [true, false]) {
-    testWidgets('filtered lineup is adopted only after a successful tune (fails=$fails)', (tester) async {
+  for (final attempt in ['success', 'failure', 'retry']) {
+    testWidgets('filtered lineup follows a successful guide tune ($attempt)', (tester) async {
       await pumpPlayer(tester, channels: const [ard]);
       await tester.tap(find.byTooltip(l10n.guide));
       await tester.pump();
-      if (fails) manager.failedChannel = zdf.id;
+      if (attempt != 'success') manager.failedChannel = zdf.id;
       tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
           .onChannelSelected!(zdf.id, const [zdf]);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
+      if (attempt == 'retry') {
+        manager.failedChannel = null;
+        await tester.tap(find.text(l10n.retry));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+      }
       await press(tester, LogicalKeyboardKey.channelUp);
-      expect(manager.playedChannelIds, fails ? ['ard', 'zdf', 'ard'] : ['ard', 'zdf']);
+      expect(manager.playedChannelIds, [
+        'ard', 'zdf', if (attempt == 'retry') 'zdf', if (attempt == 'failure') 'ard',
+      ]);
       await tester.pumpWidget(const SizedBox());
     });
   }

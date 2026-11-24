@@ -1273,11 +1273,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           .sublist(_categoryHighWater, end)
           .where((c) => !_categoryQueriedIds.contains(c.id))
           .toList();
+      var transportFailed = false;
       final fetched = await _fetchPrograms(batch, category: filter).onError<Object>(
-        (_, _) => (
-          programs: <String, List<GuideProgram>>{},
-          failedChannelIds: batch.map((channel) => channel.id).toSet(),
-        ),
+        (_, _) {
+          transportFailed = true;
+          return (
+            programs: <String, List<GuideProgram>>{},
+            failedChannelIds: batch.map((channel) => channel.id).toSet(),
+          );
+        },
         test: _temporaryCategoryFailure,
       );
       if (!current()) return false;
@@ -1293,6 +1297,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           if (!current()) return false;
           fetched.programs.addAll(retry.programs);
           failed = retry.failedChannelIds;
+          transportFailed = false;
         } catch (error) {
           if (!current()) return false;
           // Keep the first reply only when the retry failed temporarily.
@@ -1306,6 +1311,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       // as visited so failed channels don't block pagination; Retry handles them.
       _categoryQueriedIds.addAll(batch.map((c) => c.id));
       _advanceCategoryCursor();
+      // Two transport failures on the same batch are enough for this walk.
+      if (transportFailed) break;
       if (fetched.programs.isEmpty) continue;
       _categoryPrograms.addAll(fetched.programs);
       _notifyListeners();
@@ -1317,7 +1324,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Failed rows are absent from the category list, so the usual row Retry
   /// control cannot target them.
   Future<void> _retryCategoryFailures() async {
-    if (_disposed || _categoryFetchInFlight || _state != GuideState.ready) {
+    if (_disposed || _categoryFetchInFlight || _state != GuideState.ready ||
+        _categoryFailedIds.isEmpty) {
       return;
     }
     final request = _categoryRequest;
@@ -1355,6 +1363,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _categoryFailedIds.addAll(reply.failedChannelIds);
         _categoryPrograms.addAll(reply.programs);
         _notifyListeners();
+      }
+      if (hasMorePrograms && _categoryPrograms.length < _categoryMinRowsPerPage) {
+        await _walkCategory();
       }
     } catch (_) {
       // Keep the failed IDs for the next explicit selection. An authorization

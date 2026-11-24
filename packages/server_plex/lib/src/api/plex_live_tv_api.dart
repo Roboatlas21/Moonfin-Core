@@ -147,7 +147,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           throw const FormatException('Invalid Plex Free TV grid response');
         }
         final metadata = container['Metadata'];
-        if (metadata == null) return const [];
+        final size = container['size'];
+        if (metadata == null && (size == null || size == 0 || size == '0')) return const [];
         if (metadata is! List) {
           throw const FormatException('Invalid Plex Free TV grid metadata');
         }
