@@ -24,6 +24,20 @@ class _MockConnectivityAwareClient extends Mock
 
 class _MockSessionRepository extends Mock implements SessionRepository {}
 
+class _TestPreferences extends UserPreferences {
+  _TestPreferences(super.store);
+  String? failWrite;
+
+  @override
+  Future<void> set<T>(Preference<T> pref, T value) async {
+    await super.set(pref, value);
+    if (pref.key == failWrite) {
+      failWrite = null;
+      throw StateError('Simulated preference write failure');
+    }
+  }
+}
+
 /// Serves canned plugin responses and records every request, so the tests can
 /// assert exactly which sync calls went over the wire.
 class _RecordingAdapter implements HttpClientAdapter {
@@ -96,7 +110,10 @@ class _RecordingAdapter implements HttpClientAdapter {
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
       if (options.data?['liveTvSavedFilterChange'] != null) lastPinRequest = options;
       final filter = options.data?['liveTvSavedFilterChange']?['filter'];
-      if (filter != null && filter == rejectedPin) return ResponseBody.fromString('', 400);
+      if (filter != null && filter == rejectedPin) {
+        await holdResponse();
+        return ResponseBody.fromString('', 400);
+      }
       if (options.method == 'POST' && (failPinChanges || (filter != null && filter == unavailablePin))) {
         return ResponseBody.fromString('Temporarily unavailable', 503);
       }
@@ -127,7 +144,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late _RecordingAdapter adapter;
-  late UserPreferences prefs;
+  late _TestPreferences prefs;
   late PluginSyncService service;
   late _MockClient client;
 
@@ -146,7 +163,7 @@ void main() {
     });
     final store = PreferenceStore();
     await store.init();
-    prefs = UserPreferences(store);
+    prefs = _TestPreferences(store);
 
     final session = _MockSessionRepository();
     when(() => session.activeUserId).thenReturn('user1');
@@ -215,6 +232,43 @@ void main() {
       }),
     );
     expect(reply.data?['liveTvSavedFilters'], ['group:Sports']);
+  });
+
+  for (final pref in [UserPreferences.liveTvSavedFilters, UserPreferences.liveTvSavedFilterChanges]) {
+    test('a failed write to ${pref.key} preserves only earlier pin edits', () async {
+      adapter.failPinChanges = true;
+      await togglePin('group:News');
+      prefs.failWrite = prefs.getEffectivePreference(pref).key;
+      await expectLater(togglePin('group:Sports'), throwsStateError);
+      expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:News']);
+      expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:News']);
+      adapter.failPinChanges = false;
+      await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+      expect(adapter.savedPins, ['group:News']);
+      expect(adapter.pinActions, ['add']);
+    });
+  }
+
+  test('rejecting the first add preserves a later add of the same pin', () async {
+    const filter = 'group:Sports';
+    adapter.rejectedPin = filter;
+    adapter.responseReady = Completer<void>();
+    adapter.responseGate = Completer<void>();
+    final first = togglePin(filter);
+    await adapter.responseReady!.future;
+    adapter.rejectedPin = null;
+    final removed = Completer<void>();
+    final remove = service.changePinnedGuideFilter(client, filter: filter, onLocalChange: removed.complete);
+    await removed.future;
+    final added = Completer<void>();
+    final add = service.changePinnedGuideFilter(client, filter: filter, onLocalChange: added.complete);
+    await added.future;
+    adapter.responseGate!.complete();
+    await Future.wait([first, remove, add]);
+    expect(postCount(), 2);
+    expect(adapter.savedPins, [filter]);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), [filter]);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
   });
 
   test('a second tap updates the guide while the first upload is waiting', () async {

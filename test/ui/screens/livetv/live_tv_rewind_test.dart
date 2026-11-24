@@ -90,6 +90,7 @@ class _Manager extends PlaybackManager {
   final seeks = <Duration>[];
   final playedChannelIds = <String>[];
   String? failedChannel;
+  Completer<void>? failedTune;
   final resumes = <bool>[];
   var stops = 0;
   final _bringup = StreamController<PlaybackBringupState>.broadcast();
@@ -126,6 +127,7 @@ class _Manager extends PlaybackManager {
   }) async {
     final id = (items.first as AggregatedItem).id;
     playedChannelIds.add(id);
+    if (id == failedChannel) await failedTune?.future;
     _bringup
       ..add(
         PlaybackBringupState(
@@ -369,6 +371,30 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   }
+
+  testWidgets('Retry stays available when the carousel cannot restore the old station', (tester) async {
+    await pumpPlayer(tester);
+    await hideControls(tester);
+    await press(tester, LogicalKeyboardKey.arrowUp);
+    await tester.pump(const Duration(milliseconds: 100));
+    final carousel = tester.widget<ChannelCarousel>(find.byType(ChannelCarousel));
+    manager.failedChannel = zdf.id;
+    manager.failedTune = Completer<void>();
+    carousel.onChannelSelected!(carousel.channels.firstWhere((c) => c.channelId == zdf.id));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(manager.playedChannelIds, [ard.id, zdf.id]);
+    await pumpPlayer(tester, channels: const [zdf]);
+    manager.failedTune!.complete();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.byType(ChannelCarousel), findsNothing);
+    manager.failedChannel = null;
+    await tester.tap(find.text(l10n.retry));
+    await tester.pump();
+    expect(manager.playedChannelIds, [ard.id, zdf.id, zdf.id]);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('Channel Up works off TV too', (tester) async {
     PlatformDetection.setTvMode(false);

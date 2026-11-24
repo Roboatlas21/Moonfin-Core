@@ -310,6 +310,27 @@ void main() {
       return (client: client, itemsApi: itemsApi);
     }
 
+    test('an earlier refresh preserves a confirmed channel favorite', () async {
+      final fake = clientReturning([]);
+      when(() => fake.client.baseUrl).thenReturn('http://media.test');
+      final reply = Completer<Map<String, dynamic>>();
+      when(() => fake.itemsApi.getItems(
+        ids: any(named: 'ids'), fields: 'UserData', recursive: true,
+        limit: 2, enableTotalRecordCount: false,
+      )).thenAnswer((_) => reply.future);
+      final key = serverChannelKeyFor(fake.client, 'news');
+      final refreshing = sync.refreshFromServer(fake.client, ['news', 'sports']);
+      sync.requestFavorite(key, true);
+      sync.confirmFavorite(key, true);
+      reply.complete({'Items': [
+        for (final id in ['news', 'sports'])
+          {'Id': id, 'Type': 'TvChannel', 'UserData': {'IsFavorite': false}},
+      ]});
+      await refreshing;
+      expect(sync.favoriteFor(key), isTrue);
+      expect(sync.favoriteFor(serverChannelKeyFor(fake.client, 'sports')), isFalse);
+    });
+
     test('publishes the user data the server returned', () async {
       final fake = clientReturning([
         {

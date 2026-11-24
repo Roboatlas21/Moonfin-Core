@@ -221,6 +221,8 @@ class PluginSyncService extends ChangeNotifier {
   // Order pin saves and incoming settings so an old response cannot win.
   final _guidePinSync = Lock();
   final _localGuidePins = Lock();
+  // Network writes are serialized. A new tap on this filter invalidates its reply.
+  String? _guidePinAwaitingReply;
   Timer? _pushDebounceTimer;
   static const _pushDebounce = Duration(milliseconds: 1000);
 
@@ -1039,7 +1041,9 @@ class PluginSyncService extends ChangeNotifier {
       final changesPref = _prefs.getEffectivePreference(
         UserPreferences.liveTvSavedFilterChanges,
       );
-      final pins = _prefs.get(UserPreferences.liveTvSavedFilters).toSet();
+      final previousPins = _prefs.get(UserPreferences.liveTvSavedFilters);
+      final previousChanges = _prefs.get(UserPreferences.liveTvSavedFilterChanges);
+      final pins = previousPins.toSet();
       final add = !pins.remove(filter);
       final length = switch (client.serverType) {
         ServerType.plex || ServerType.silo => utf8.encode(filter).length,
@@ -1050,14 +1054,22 @@ class PluginSyncService extends ChangeNotifier {
       }
       if (add) pins.add(filter);
       final changes = [
-        for (final change in _prefs.get(
-          UserPreferences.liveTvSavedFilterChanges,
-        ))
+        for (final change in previousChanges)
           if (change != 'add:$filter' && change != 'remove:$filter') change,
         if (length <= 1024) '${add ? 'add' : 'remove'}:$filter',
       ];
-      await _prefs.set(changesPref, changes);
-      await _prefs.set(pinsPref, pins.toList());
+      await _prefs.batchNotifications(() async {
+        try {
+          await _prefs.set(changesPref, changes);
+          await _prefs.set(pinsPref, pins.toList());
+        } catch (_) {
+          // A failed write may already have updated the preferences cache.
+          await _prefs.set(changesPref, previousChanges);
+          await _prefs.set(pinsPref, previousPins);
+          rethrow;
+        }
+      });
+      if (_guidePinAwaitingReply == filter) _guidePinAwaitingReply = null;
       requireCurrent();
       onLocalChange?.call();
       return changes;
@@ -1136,8 +1148,14 @@ class PluginSyncService extends ChangeNotifier {
       final encoded = entry.value;
       final separator = encoded.indexOf(':');
       final action = separator < 0 ? '' : encoded.substring(0, separator);
-      final pendingBeforeSend = _prefs.get(UserPreferences.liveTvSavedFilterChanges);
-      if (!pendingBeforeSend.contains(encoded)) continue;
+      final shouldSend = await _localGuidePins.synchronized(() {
+        if (!canSend() || !_prefs.get(UserPreferences.liveTvSavedFilterChanges).contains(encoded)) {
+          return false;
+        }
+        _guidePinAwaitingReply = filter;
+        return true;
+      });
+      if (!shouldSend) continue;
       DioException? rejection;
       try {
         if ((action == 'add' || action == 'remove') && filter.isNotEmpty) {
@@ -1155,7 +1173,8 @@ class PluginSyncService extends ChangeNotifier {
       }
 
       await _localGuidePins.synchronized(() async {
-        if (!current()) return;
+        if (!current() || _guidePinAwaitingReply != filter) return;
+        _guidePinAwaitingReply = null;
         final pending = _prefs.get(UserPreferences.liveTvSavedFilterChanges);
         // A newer choice for this group supersedes this response.
         bool forThisFilter(String change) =>

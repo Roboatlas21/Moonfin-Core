@@ -547,6 +547,24 @@ void main() {
     expect(recovered.single['Id'], 'channel-plex-Movies');
   });
 
+  test('an advertised tuner with a 404 stays unresolved until discovery confirms removal', () async {
+    final (dio, server) = _server(secondDvr: true);
+    final api = PlexLiveTvApi(dio);
+    await api.getChannelGroups();
+    server.failWhen = (r) => r.uri.path == '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';
+    server.failureStatus = () => 404;
+    final missing = await api.getChannelGroups();
+    expect(missing.partial, isTrue);
+    expect(missing.unresolvedChannelIds, {'channel-3-7'});
+    expect(missing.groupsByChannelId, contains('channel-3-7'));
+    server.discoveryReply = {'MediaContainer': {'Dvr': [
+      {'key': '2', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:2'},
+    ]}};
+    final channels = (await api.getChannels())['Items'] as List;
+    expect(channels.map((row) => row['Id']), isNot(contains('channel-3-7')));
+    expect((await api.getChannelGroups()).partial, isFalse);
+  });
+
   test('a tuner outage retains only its last lineup until access is denied', () async {
     final (dio, server) = _server(secondDvr: true);
     const second = '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';

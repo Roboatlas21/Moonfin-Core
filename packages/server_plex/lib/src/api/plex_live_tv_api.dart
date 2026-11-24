@@ -257,8 +257,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             );
           }).toList();
         } catch (error) {
-          if (error is DioException && error.response?.statusCode == 401) rethrow;
-          if (_temporaryLineupFailure(error)) {
+          final status = error is DioException ? error.response?.statusCode : null;
+          if (status == 401) rethrow;
+          // Discovery still advertised this tuner. Recheck it on the next read.
+          if (status == 404 && request == _dvrLineupRequest) _dvrs = null;
+          if (status == 404 || _temporaryLineupFailure(error)) {
             final retained = _lastDvrChannels[dvr] ?? [];
             next[dvr] = retained;
             onUnavailable?.call(retained);

@@ -1470,7 +1470,11 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       final restoreIndex = _syncedChannels.indexWhere(
         (channel) => channel.id == previousId,
       );
-      if (restoreIndex < 0) return;
+      if (restoreIndex < 0) {
+        // The previous station left the lineup. Expose Retry for the failed tune.
+        _dismissChannelCarousel();
+        return;
+      }
       setState(() {
         _currentIndex = restoreIndex;
         _currentProgram = previousProgram;

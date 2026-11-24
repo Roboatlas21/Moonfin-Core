@@ -200,12 +200,14 @@ class UserDataSync extends ChangeNotifier {
         : all;
     if (ids.isEmpty) return;
 
+    final readSession = session;
     for (var start = 0; start < ids.length; start += _refreshChunkSize) {
       final chunk = ids.sublist(
         start,
         min(start + _refreshChunkSize, ids.length),
       );
       try {
+        final readRevision = revision;
         final data = await client.itemsApi.getItems(
           ids: chunk,
           fields: 'UserData',
@@ -221,7 +223,10 @@ class UserDataSync extends ChangeNotifier {
           if (id == null || id.isEmpty || userData is! Map) continue;
           changes[id] = Map<String, dynamic>.from(userData);
           if (raw['Type'] == 'TvChannel' && userData['IsFavorite'] is bool) {
-            changes[serverChannelKeyFor(client, id)] = {'IsFavorite': userData['IsFavorite']};
+            final key = serverChannelKeyFor(client, id);
+            if (session == readSession && revisionFor(key) <= readRevision) {
+              changes[key] = {'IsFavorite': userData['IsFavorite']};
+            }
           }
         }
         publishAll(changes, replace: true);
