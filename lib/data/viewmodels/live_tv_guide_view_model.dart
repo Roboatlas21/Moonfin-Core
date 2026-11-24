@@ -1287,8 +1287,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (!current()) return false;
       var failed = fetched.failedChannelIds;
       if (failed.isNotEmpty) {
-        // A temporary failure in the targeted retry must not discard
-        // listings that succeeded in the first request.
         try {
           final retry = await _fetchPrograms(
             batch.where((channel) => failed.contains(channel.id)).toList(),
@@ -1300,9 +1298,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           transportFailed = false;
         } catch (error) {
           if (!current()) return false;
-          // Keep the first reply only when the retry failed temporarily.
-          // Malformed responses and other unexpected errors still surface.
-          if (!_temporaryCategoryFailure(error)) rethrow;
+          if (!_temporaryCategoryFailure(error)) {
+            // Dio wraps JSON decoder errors before the response reaches the guide.
+            final cause = error is DioException && error.type == DioExceptionType.unknown
+                ? error.error
+                : error;
+            final malformed = cause is FormatException || cause is TypeError;
+            final hasListings = fetched.programs.isNotEmpty || _categoryPrograms.isNotEmpty;
+            if (!malformed || !hasListings) rethrow;
+            debugPrint('Malformed Live TV category retry (${cause.runtimeType})');
+          }
         }
       }
       if (!current()) return false;

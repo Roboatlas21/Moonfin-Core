@@ -1409,22 +1409,23 @@ void main() {
       expect(vm.state, GuideState.ready);
     });
 
-    // Both cases start with healthy c0 and an initially failed c1.
-    // The retry's error type decides whether to preserve c0 or fail the guide.
-    void stubFailedSportsRetry(Object error) {
+    void stubSportsRetry(Map<String, dynamic> Function() retry, {bool hasListings = true}) {
       _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
       when(() => _guide(liveTv, category: GuideFilter.sports))
           .thenAnswer((inv) async {
-        if (_requestedIds(inv).length == 1) throw error;
+        if (_requestedIds(inv).length == 1) {
+          expect(_requestedIds(inv), ['c1']);
+          return retry();
+        }
         return {
-          'Items': [_program('sport-c0', 'c0', isSports: true)],
+          'Items': [if (hasListings) _program('sport-c0', 'c0', isSports: true)],
           'FailedChannelIds': ['c1'],
         };
       });
     }
 
-    test('a malformed targeted retry still reports a guide error', () async {
-      stubFailedSportsRetry(const FormatException('Invalid EPG grid'));
+    test('a malformed targeted retry with no listings still reports a guide error', () async {
+      stubSportsRetry(() => throw const FormatException('Invalid EPG grid'), hasListings: false);
 
       final vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);
@@ -1436,20 +1437,37 @@ void main() {
       expect(vm.error, isA<FormatException>());
     });
 
-    test('temporary retry failure keeps healthy category programs', () async {
-      stubFailedSportsRetry(TimeoutException('Plex grid temporarily unavailable'));
+    final retryFailures = <String, Map<String, dynamic> Function()>{
+      'timeout': () => throw TimeoutException('Plex grid temporarily unavailable'),
+      'malformed grid': () => throw const FormatException('Invalid EPG grid'),
+      'invalid JSON': () => throw DioException(
+        requestOptions: RequestOptions(path: '/guide'),
+        error: const FormatException('Invalid JSON'),
+      ),
+      'malformed Items': () => {'Items': 'invalid'},
+    };
+    for (final failure in retryFailures.entries) {
+      test('a targeted retry with ${failure.key} keeps healthy category programs', () async {
+        var recovered = false;
+        stubSportsRetry(() => recovered
+            ? {'Items': [_program('sport-c1', 'c1', isSports: true)]}
+            : failure.value());
+        final vm = LiveTvGuideViewModel(client);
+        addTearDown(vm.dispose);
+        await vm.load();
+        vm.setFilter(GuideFilter.sports);
+        await pumpEventQueue();
 
-      final vm = LiveTvGuideViewModel(client);
-      addTearDown(vm.dispose);
-      await vm.load();
-      vm.setFilter(GuideFilter.sports);
-      await pumpEventQueue();
-
-      expect(vm.state, GuideState.ready);
-      expect(vm.filteredChannels.map((channel) => channel.id), ['c0']);
-      expect(vm.hasFailedCategoryListings, isTrue);
-      expect(vm.programsForChannel('c0').single.id, 'sport-c0');
-    });
+        expect(vm.state, GuideState.ready);
+        expect(vm.filteredChannels.map((channel) => channel.id), ['c0']);
+        expect(vm.hasFailedCategoryListings, isTrue);
+        recovered = true;
+        await vm.retryFailedCategoryListings();
+        expect(vm.filteredChannels.map((channel) => channel.id), ['c0', 'c1']);
+        expect(vm.programsForChannel('c0').single.id, 'sport-c0');
+        expect(vm.hasFailedCategoryListings, isFalse);
+      });
+    }
 
     test('a category outage stops after one retry and manual Retry resumes the scan', () async {
       _stubChannels(liveTv, [for (var i = 0; i < 600; i++) _channel('c$i', number: '$i')]);
