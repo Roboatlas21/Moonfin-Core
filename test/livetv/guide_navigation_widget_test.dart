@@ -503,15 +503,15 @@ void main() {
   });
 
   for (final layout in [InterfaceLayout.tv, InterfaceLayout.phone]) {
-    testWidgets('failed empty category shows Retry on ${layout.name}', (
+    testWidgets('empty and partly loaded categories can retry on ${layout.name}', (
       tester,
     ) async {
       PlatformDetection.setInterfaceLayout(layout);
       addTearDown(
         () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
       );
-      channelCount = 1;
-      var failed = true;
+      channelCount = 2;
+      final failed = {'ch0', 'ch1'};
       when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer(
         (_) async => const ChannelGroupLineup(
           {},
@@ -525,14 +525,11 @@ void main() {
         if (inv.namedArguments[#isSports] != true) {
           return {'Items': [for (final id in ids) ..._programsFor(id)]};
         }
-        return failed
-            ? {
-                'Items': <dynamic>[],
-                'FailedChannelIds': ['ch0'],
-              }
-            : {
-                'Items': [for (final id in ids) ..._programsFor(id, sports: true)],
-              };
+        return {
+          'Items': [for (final id in ids.where((id) => !failed.contains(id)))
+            ..._programsFor(id, sports: true)],
+          'FailedChannelIds': ids.where(failed.contains).toList(),
+        };
       });
 
       await pumpGuide(
@@ -552,16 +549,32 @@ void main() {
         _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
         await _pumpFrames(tester);
         await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
-        expect(_focusedLabel(), 'GuideEmptyCategoryRetry');
+        expect(_focusedLabel(), 'GuideCategoryRetry');
         await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
         expect(_focusedLabel(), 'GuideWindowBar:0');
       }
 
-      failed = false;
+      failed.remove('ch1');
       await tester.tap(find.text('Retry'));
       await _pumpFrames(tester);
+      expect(vm.filteredChannels.map((c) => c.id), ['ch1']);
+      final partialRetry = find.text('Some listings failed to load. Retry');
+      expect(partialRetry, findsOneWidget);
+      if (layout == InterfaceLayout.tv) {
+        _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
+        await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
+        expect(_focusedLabel(), 'GuideCategoryRetry');
+        await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
+        expect(_focusedLabel(), 'GuideChannel:0');
+        await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
+        expect(_focusedLabel(), 'GuideCategoryRetry');
+      }
+      failed.clear();
+      await tester.tap(partialRetry);
+      await _pumpFrames(tester);
       expect(vm.hasFailedCategoryListings, isFalse);
-      expect(vm.filteredChannels.map((c) => c.id), ['ch0']);
+      expect(vm.filteredChannels.map((c) => c.id), ['ch0', 'ch1']);
+      expect(partialRetry, findsNothing);
       expect(find.text('Failed to load'), findsNothing);
     });
   }

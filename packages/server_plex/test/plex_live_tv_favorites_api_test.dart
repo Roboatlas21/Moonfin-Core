@@ -47,6 +47,12 @@ void main() {
 
     payload = {'MediaContainer': {'size': 0}};
     expect(await read(), isEmpty);
+    payload = {'MediaContainer': {'size': '0', 'FavoriteChannel': []}};
+    expect(await read(), isEmpty);
+    for (final count in [2, '2']) {
+      payload = {'MediaContainer': {'size': count, 'FavoriteChannel': []}};
+      await expectLater(read(), throwsA(isA<FormatException>()));
+    }
     payload = {'MediaContainer': {'FavoriteChannel': [42]}};
     await expectLater(read(), throwsA(isA<FormatException>()));
   });

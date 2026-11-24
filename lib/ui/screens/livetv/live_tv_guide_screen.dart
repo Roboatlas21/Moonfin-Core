@@ -171,9 +171,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   bool get _canOpenRecordings => !isCloudOnlyPlexClient(_client);
   int get _maxWindowBarIndex =>
       _canOpenRecordings ? _kWindowBarRecordings : _kWindowBarDate;
-  final _emptyCategoryRetryFocus = FocusNode(
-    debugLabel: 'GuideEmptyCategoryRetry',
-  );
+  final _categoryRetryFocus = FocusNode(debugLabel: 'GuideCategoryRetry');
   final _guideErrorRetryFocus = FocusNode(debugLabel: 'GuideErrorRetry');
   final _channelScrollController = ScrollController();
   final _programScrollController = ScrollController();
@@ -925,6 +923,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// UP out of the grid or channel column. The mini-player surface has no
   /// controls row, so it keeps going straight to the player.
   void _focusWindowBarFromGrid() {
+    if (!_categoryRetryFocus.hasFocus && _focusCategoryRetry()) return;
     if (widget.miniPlayerMode) {
       _focusMiniPlayer();
       return;
@@ -935,20 +934,24 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// DOWN out of the genre rail lands on the same button UP left behind.
   void _focusWindowBarFromGenres() => _focusWindowBar(_lastWindowBarIndex);
 
+  bool _focusCategoryRetry() {
+    if (!_vm.hasFailedCategoryListings || _categoryRetryFocus.context == null ||
+        !_categoryRetryFocus.canRequestFocus) {
+      return false;
+    }
+    _categoryRetryFocus.requestFocus();
+    return true;
+  }
+
   void _focusLastChannelRow() {
     if (_vm.state == GuideState.error &&
         _guideErrorRetryFocus.context?.mounted == true) {
       _guideErrorRetryFocus.requestFocus();
       return;
     }
+    if (_focusCategoryRetry()) return;
     final channels = _vm.filteredChannels;
-    if (channels.isEmpty) {
-      if (_vm.hasFailedCategoryListings &&
-          _emptyCategoryRetryFocus.context?.mounted == true) {
-        _emptyCategoryRetryFocus.requestFocus();
-      }
-      return;
-    }
+    if (channels.isEmpty) return;
 
     var targetIndex = _lastFocusedRowIndex ?? 0;
     final focusedChannelId = _focusedChannel.value?.id;
@@ -1084,7 +1087,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _focusedProgram.removeListener(_scheduleArtworkLookup);
     _focusedChannel.removeListener(_scheduleArtworkLookup);
     _channelRailFocused.removeListener(_scheduleArtworkLookup);
-    _emptyCategoryRetryFocus.dispose();
+    _categoryRetryFocus.dispose();
     _guideErrorRetryFocus.dispose();
     _channelScrollController.dispose();
     _programScrollController.dispose();
@@ -1403,6 +1406,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         // left region is only channel-column wide and 22-24 px tall, so it
         // can't hold the chevrons and the range text at the narrowest size.
         if (!widget.miniPlayerMode && !compactSearch) _buildGuideWindowBar(),
+        if (_vm.hasFailedCategoryListings && _vm.filteredChannels.isNotEmpty)
+          _buildCategoryRetryButton(partial: true),
         Expanded(child: _buildBody()),
       ],
     );
@@ -1429,6 +1434,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             ),
         ],
         const SizedBox(height: 8),
+        if (_vm.hasFailedCategoryListings && _vm.filteredChannels.isNotEmpty)
+          _buildCategoryRetryButton(partial: true),
         Expanded(child: _buildMobileBody()),
       ],
     );
@@ -2283,26 +2290,36 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             style: TextStyle(color: Colors.white.withAlpha(179)),
           ),
           const SizedBox(height: 16),
-          Focus(
-            canRequestFocus: false,
-            onKeyEvent: (_, event) {
-              if (event.isActionable && event.logicalKey.isUpKey) {
-                _focusWindowBarFromGrid();
-                return KeyEventResult.handled;
-              }
-              return KeyEventResult.ignored;
-            },
-            child: OutlinedButton.icon(
-              focusNode: _emptyCategoryRetryFocus,
-              autofocus: true,
-              onPressed: _vm.retryingCategoryListings
-                  ? null
-                  : () => unawaited(_vm.retryFailedCategoryListings()),
-              icon: const Icon(Icons.refresh),
-              label: Text(l10n.retry),
-            ),
-          ),
+          _buildCategoryRetryButton(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryRetryButton({bool partial = false}) {
+    final l10n = AppLocalizations.of(context);
+    return Focus(
+      canRequestFocus: false,
+      onKeyEvent: (_, event) {
+        if (!event.isActionable) return KeyEventResult.ignored;
+        if (event.logicalKey.isUpKey) {
+          _focusWindowBarFromGrid();
+          return KeyEventResult.handled;
+        }
+        if (partial && event.logicalKey.isDownKey) {
+          _focusChannelRow(0);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: OutlinedButton.icon(
+        focusNode: _categoryRetryFocus,
+        autofocus: !partial,
+        onPressed: _vm.retryingCategoryListings
+            ? null
+            : () => unawaited(_vm.retryFailedCategoryListings()),
+        icon: const Icon(Icons.refresh),
+        label: Text(partial ? l10n.retryMissingGuideListings : l10n.retry),
       ),
     );
   }

@@ -538,7 +538,9 @@ void main() {
 
     server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
     server.failureStatus = () => 503;
-    await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
+    final stale = await api.getChannelGroups();
+    expect(stale.channels, lineup.channels);
+    expect(stale.partial, isTrue);
     server.failWhen = null;
     name = 'Movies';
     final recovered = (await api.getChannels())['Items'] as List;
@@ -981,7 +983,7 @@ void main() {
 
     server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
     server.failureStatus = () => 503;
-    await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
+    expect((await api.getChannelGroups()).partial, isTrue);
     expect((await api.getProgram(programs.single['Id']))['Name'], 'Law Abiding Citizen');
     expect(server.requests.where((r) => r.uri.path == '/grid'), hasLength(1));
 

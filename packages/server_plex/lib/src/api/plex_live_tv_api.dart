@@ -213,9 +213,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return machine;
   }
 
-  // Missing or inaccessible tuners can be removed from the guide. A timeout
-  // or server failure cannot establish whether their channels still exist.
-  static bool _temporaryDvrFailure(Object error) {
+  // A timeout or server failure cannot establish whether channels still exist.
+  static bool _temporaryLineupFailure(Object error) {
     final status = error is DioException ? error.response?.statusCode : null;
     return status == null || status == 408 || status == 429 || status >= 500;
   }
@@ -259,7 +258,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           }).toList();
         } catch (error) {
           if (error is DioException && error.response?.statusCode == 401) rethrow;
-          if (_temporaryDvrFailure(error)) {
+          if (_temporaryLineupFailure(error)) {
             final retained = _lastDvrChannels[dvr] ?? [];
             next[dvr] = retained;
             onUnavailable?.call(retained);
@@ -267,7 +266,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         }
       }
     } catch (error) {
-      if (_temporaryDvrFailure(error)) {
+      if (_temporaryLineupFailure(error)) {
         final retained = _lastDvrChannels.values.expand((rows) => rows).toList();
         onUnavailable?.call(retained);
         return retained;
@@ -370,7 +369,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       return await _freeChannels();
     } catch (error) {
       onUnavailable?.call();
-      if (cloudOnly && (error is! FormatException || _lastFreeLineup == null)) rethrow;
+      if (cloudOnly) {
+        final recoverable = error is FormatException ||
+            (error is DioException && error.type != DioExceptionType.cancel &&
+                error.type != DioExceptionType.badCertificate && _temporaryLineupFailure(error));
+        if (_lastFreeLineup == null || !recoverable) rethrow;
+      }
       // Keep the last lineup visible without caching it as a successful retry.
       return _accessDenied(error) ? const {} : _lastFreeLineup ?? const {};
     }

@@ -171,6 +171,18 @@ void main() {
     expect(cloud.rows.single['id'], 'free123');
   });
 
+  test('an incomplete account list prevents a favorite edit from sending a PUT', () async {
+    final client = _plex(cloudOnly: true);
+    addTearDown(client.dispose);
+    PlexLiveTvFavorites.applyToItem(client, _channel);
+    cloud.responseOverride = {'MediaContainer': {'size': 2, 'FavoriteChannel': []}};
+    await expectLater(
+      ItemMutationRepository(client).setFavorite('channel-plex-free123', isFavorite: true),
+      throwsA(isA<FormatException>()),
+    );
+    expect(cloud.requests.map((request) => request.method), ['GET']);
+  });
+
   test('cloud replaces older local favorites without uploading them', () async {
     final direct = _plex(cloudOnly: true);
     addTearDown(direct.dispose);

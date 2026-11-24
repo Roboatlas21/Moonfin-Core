@@ -42,6 +42,7 @@ void main() {
 
   group('redirectInterceptor', () {
     late List<Uri> requested;
+    late RequestOptions lastRequest;
 
     Dio dioFor(String redirectTo, {required bool sameOriginOnly}) {
       requested = [];
@@ -49,6 +50,7 @@ void main() {
         BaseOptions(baseUrl: 'https://silo.example', followRedirects: false),
       );
       dio.httpClientAdapter = _Adapter((options) {
+        lastRequest = options;
         requested.add(options.uri);
         if (options.uri.path == '/start' || options.uri.path == '/Moonfin/LiveTv/ChannelGroups') {
           return ResponseBody.fromString(
@@ -101,6 +103,15 @@ void main() {
       final dio = dioFor('https://evil.example/steal', sameOriginOnly: true);
       expect(await send(dio), 307);
       expect(requested, hasLength(1));
+    });
+
+    test('a guarded request keeps automatic redirects off on the next hop', () async {
+      final dio = dioFor('/elsewhere', sameOriginOnly: false)..options.followRedirects = true;
+      await dio.post('/start', options: Options(
+        followRedirects: false, extra: {sameOriginRedirectsOnly: true},
+      ));
+      expect(lastRequest.uri.path, '/elsewhere');
+      expect(lastRequest.followRedirects, isFalse);
     });
 
     test('unrestricted, the old behavior follows anywhere', () async {

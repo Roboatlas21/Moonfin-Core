@@ -17,6 +17,7 @@ import '../../auth/services/silo_token_storage.dart';
 import '../offline/connectivity_aware_media_server_client.dart';
 import '../../data/repositories/seerr_repository.dart';
 import 'seerr/seerr_discover_sliders.dart';
+import 'guide_pin_transport.dart';
 import 'incomplete_recordings_service.dart';
 import 'moonbase_endpoint.dart';
 import 'server_messages_service.dart';
@@ -231,8 +232,13 @@ class PluginSyncService extends ChangeNotifier {
   /// Set while sign-in is still working out what the server holds.
   Completer<void>? _signInProfileRead;
 
+  late final Future<Response<Map<String, dynamic>>> Function(RequestOptions) _sendGuidePin;
+
   PluginSyncService(this._prefs, this._store, {@visibleForTesting Dio? dio})
     : _dio = dio ?? Dio(pluginRequestOptions()) {
+    _sendGuidePin = kIsWeb && dio == null
+        ? postBrowserGuidePin
+        : _dio.fetch<Map<String, dynamic>>;
     // An injected Dio brings its own adapter, so only the one built here needs
     // the server interceptors.
     if (dio == null) {
@@ -983,17 +989,21 @@ class PluginSyncService extends ChangeNotifier {
   }) async {
     final ep = await moonbaseEndpoint(client, _dio);
     if (ep == null || !canSend()) return null;
-    final response = await _dio.post<Map<String, dynamic>>(
+    final request = Options(
+      method: 'POST',
+      headers: {...ep.headers, 'Content-Type': 'application/json'},
+      followRedirects: false,
+      extra: {sameOriginRedirectsOnly: true},
+    ).compose(
+      _dio.options,
       '${ep.base}/Moonfin/Settings/Profile/$profile',
       data: {
         'profile': <String, dynamic>{},
         'clientId': 'moonfin-flutter',
         'liveTvSavedFilterChange': change,
       },
-      options: Options(
-        headers: {...ep.headers, 'Content-Type': 'application/json'},
-      ),
     );
+    final response = await _sendGuidePin(request);
     final pins = response.data?['liveTvSavedFilters'] ??
         response.data?['LiveTvSavedFilters'];
     if (pins == null) return null; // Older Moonbase ignored the pin change.

@@ -5,10 +5,13 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/auth/repositories/session_repository.dart';
 import 'package:moonfin/data/offline/connectivity_aware_media_server_client.dart';
+import 'package:moonfin/data/services/guide_pin_transport.dart';
 import 'package:moonfin/data/services/plugin_sync_service.dart';
 import 'package:moonfin/preference/seerr_preferences.dart';
 import 'package:moonfin/preference/user_preferences.dart';
@@ -30,6 +33,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   Map<String, dynamic> resolvedProfile = {};
   Map<String, dynamic>? lastPushedProfile;
   List<String>? savedPins;
+  RequestOptions? lastPinRequest;
   bool supportsPinChanges = true;
   bool failPinChanges = false;
   String? unavailablePin;
@@ -90,6 +94,7 @@ class _RecordingAdapter implements HttpClientAdapter {
       };
       await holdResponse();
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
+      if (options.data?['liveTvSavedFilterChange'] != null) lastPinRequest = options;
       final filter = options.data?['liveTvSavedFilterChange']?['filter'];
       if (filter != null && filter == rejectedPin) return ResponseBody.fromString('', 400);
       if (options.method == 'POST' && (failPinChanges || (filter != null && filter == unavailablePin))) {
@@ -189,6 +194,27 @@ void main() {
 
   tearDown(() async {
     await GetIt.instance.reset();
+  });
+
+  test('guide pin edits on an HTTP server opt into guarded redirects', () async {
+    expect(await togglePin('group:Sports'), ['group:Sports']);
+    final request = adapter.lastPinRequest!;
+    expect(request.uri.scheme, 'http');
+    expect(request.followRedirects, isFalse);
+    expect(request.extra[sameOriginRedirectsOnly], isTrue);
+  });
+
+  test('the browser pin transport sends the edit with redirects disabled', () async {
+    final options = RequestOptions(path: 'https://plugin.test/pins', data: {'action': 'add'});
+    final reply = await http.runWithClient(
+      () => postBrowserGuidePin(options),
+      () => MockClient((request) async {
+        expect(request.followRedirects, isFalse);
+        expect(jsonDecode(request.body), options.data);
+        return http.Response('{"liveTvSavedFilters":["group:Sports"]}', 200);
+      }),
+    );
+    expect(reply.data?['liveTvSavedFilters'], ['group:Sports']);
   });
 
   test('a second tap updates the guide while the first upload is waiting', () async {
