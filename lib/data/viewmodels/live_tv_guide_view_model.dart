@@ -2562,7 +2562,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     bool includeAll = false,
   }) {
     final ids = [
-      if (includeAll) ..._failedProgramIds.difference(_programsLoadedIds),
+      for (final id in _failedProgramIds.difference(_programsLoadedIds))
+        if (includeAll || _failedReplacementIds.contains(id)) id,
       for (final id in _programsLoadedIds)
         if (includeAll ||
             _failedReplacementIds.isEmpty ||

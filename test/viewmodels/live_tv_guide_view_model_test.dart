@@ -1017,6 +1017,33 @@ void main() {
       );
     });
 
+    test('scheduled retry fetches a channel that never loaded', () async {
+      _stubChannels(liveTv, [_channel('healthy'), _channel('missing')]);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {
+        'Items': [_span('airing', 'healthy', at(0), at(30))],
+        'FailedChannelIds': ['missing'],
+      });
+      final vm = LiveTvGuideViewModel(client, now: () => clock);
+      addTearDown(vm.dispose);
+      await vm.load();
+      vm.scheduleBoundaryRefresh();
+      await vm.recordingChanged();
+      expect(vm.loadStateFor('missing'), GuideChannelLoadState.failed);
+      expect(vm.boundaryDueAt, clock.add(LiveTvGuideViewModel.failureBackoff));
+
+      when(() => _guide(liveTv)).thenAnswer((inv) async {
+        requestedChannelIds.add(_requestedIds(inv));
+        return {'Items': [_span('recovered', 'missing', at(0), at(30))]};
+      });
+      clock = vm.boundaryDueAt!;
+      await vm.handleBoundaryElapsed();
+
+      expect(requestedChannelIds, [['missing']]);
+      expect(vm.programsForChannel('missing').single.id, 'recovered');
+      expect(vm.loadStateFor('missing'), GuideChannelLoadState.loaded);
+      expect(vm.programsForChannel('healthy').single.id, 'airing');
+    });
+
     test('a failed refresh backs off and keeps the data', () async {
       seedLapsingSchedule();
       final vm = LiveTvGuideViewModel(client, now: () => clock);
