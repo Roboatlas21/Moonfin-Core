@@ -93,7 +93,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   /// don't ask plex.tv again.
   static const _cloudGridLife = Duration(minutes: 10);
 
-  Future<List>? _dvrs;
+  Future<({List rows, bool incomplete})>? _dvrs;
   Map<_Dvr, _Channels> _lastDvrChannels = {};
   int _dvrLineupRequest = 0;
   Future<String?>? _favoriteMachineId;
@@ -182,12 +182,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       final container = await _dvrContainer('/livetv/dvrs');
       final rows = container['Dvr'] as List? ?? const [];
       final size = container['size'];
-      if (rows.isEmpty && size != null && size != 0 && size != '0') {
+      final incomplete = size != null && int.tryParse('$size') != rows.length;
+      if (rows.isEmpty && incomplete) {
         throw const FormatException('Missing Plex DVR list');
       }
-      return rows;
+      return (rows: rows, incomplete: incomplete);
     });
-    final rows = await read;
+    final (:rows, :incomplete) = await read;
     final dvrs = <_Dvr>[];
     for (final row in rows.whereType<Map>()) {
       final key = row['key'], epg = row['epgIdentifier'];
@@ -196,7 +197,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         dvrs.add((key: '$key', epg: epg));
       }
     }
-    if (dvrs.length != rows.length) {
+    if (incomplete || dvrs.length != rows.length) {
       if (identical(read, _dvrs)) _dvrs = null;
       onIncomplete?.call();
     }
@@ -257,11 +258,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           final lineup = await _dvrContainer('/${dvr.epg}/lineups/dvr/channels');
           final rows = (lineup['Channel'] as List? ?? const []).cast<Map>();
           final size = lineup['size'];
-          if (rows.isEmpty && size != null && size != 0 && size != '0') {
-            throw const FormatException('Missing Plex tuner channels');
-          }
           final machineId = await machineIdFuture;
-          next[dvr] = rows.map((channel) {
+          final channels = rows.map((channel) {
             final id = channel['id'];
             if (id is! int && (id is! String || id.trim().isEmpty)) {
               throw const FormatException('Invalid Plex tuner channel ID');
@@ -273,6 +271,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               favoriteSource: machineId == null ? null : 'server://$machineId/${dvr.epg}',
             );
           }).toList();
+          if (size != null && int.tryParse('$size') != rows.length) {
+            final found = {for (final channel in channels) channel['Id']};
+            final missing = (_lastDvrChannels[dvr] ?? []).where((c) => !found.contains(c['Id'])).toList();
+            onUnavailable?.call(missing);
+            channels.addAll(missing);
+          }
+          next[dvr] = channels;
         } catch (error) {
           final status = error is DioException ? error.response?.statusCode : null;
           if (status == 401) rethrow;
@@ -341,6 +346,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (_accessDenied(error) && _cloudChannels == null) {
         _lastFreeLineup = null;
         _cloudOnNowRows = null;
+        _cloudGrids.clear();
       }
       rethrow;
     }
@@ -350,6 +356,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     if (previous != null && !_sameStationMapping(previous, lineup)) {
       _cloudOnNowRows = null;
     }
+    _cloudGrids.removeWhere((key, _) {
+      final station = lineup[_channelId(plexCloudSource, key.station)];
+      return station == null || (station['PlexGridKey'] ?? key.station.split('-').last) != key.gridKey;
+    });
     return _lastFreeLineup = lineup;
   }
 
@@ -711,6 +721,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime end,
     List<String> channels, {
     required bool reportGuideFailures,
+    required Map<_FreeGridKey, Future<List>> gridReads,
   }) async {
     final lineup = await _freeChannels().catchError((Object error) {
       if (_accessDenied(error)) throw error;
@@ -745,7 +756,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         for (final request in batch)
           () async {
             final id = _channelId(plexCloudSource, request.channel);
-            final gridKey = lineup[id]?['PlexGridKey'] as String? ??
+            final station = _lastFreeLineup?[id];
+            if (lineup.containsKey(id) && station == null) {
+              failedChannelIds.add(id);
+              return null;
+            }
+            final gridKey = station?['PlexGridKey'] as String? ??
                 request.channel.split('-').last;
             final key = (station: request.channel, gridKey: gridKey, day: request.day);
             final itemsFuture = _freeGrid(key);
@@ -774,6 +790,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
                   decoded.add(program);
                 }
               }
+              gridReads[key] = itemsFuture;
               return decoded;
             } catch (error, stack) {
               failedChannelIds.add(id);
@@ -898,6 +915,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       }
     }
 
+    final gridReads = <_FreeGridKey, Future<List>>{};
     final results = await Future.wait([
       if (!cloudOnly && (channelIds == null || channelIds.length > free.length))
         attempt(
@@ -908,7 +926,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         ),
       if (free.isNotEmpty)
         attempt(
-          () => _freeAirings(start, end, free, reportGuideFailures: reportGuideFailures),
+          () => _freeAirings(start, end, free,
+              reportGuideFailures: reportGuideFailures, gridReads: gridReads),
           freeIds,
         ),
     ], eagerError: true);
@@ -920,13 +939,21 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       );
       Error.throwWithStackTrace(failure.error!, failure.stack!);
     }
+    // A lineup refresh can retire a grid while another channel or tuner is still loading.
+    final stale = {
+      for (final entry in gridReads.entries)
+        if (!identical(_cloudGrids[entry.key]?.items, entry.value))
+          _channelId(plexCloudSource, entry.key.station),
+    };
     final programs = [for (final result in results) ...result.items]
+      ..removeWhere((item) => stale.contains(item['ChannelId']))
       ..sort(
         (a, b) => (a['StartDate'] as String).compareTo(b['StartDate'] as String),
       );
     return (
       items: programs,
       failedChannelIds: {
+        ...stale,
         for (final result in results) ...result.failedChannelIds,
       },
     );

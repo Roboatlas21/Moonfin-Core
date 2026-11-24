@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:server_plex/src/api/plex_live_tv_api.dart';
 import 'package:server_plex/src/api/plex_playback_api.dart';
@@ -395,6 +397,13 @@ void main() {
       {'key': '2'}, {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
     ]}};
     expect((await api.getChannelGroups()).unresolvedChannelIds, {missing});
+    server.discoveryReply = {'MediaContainer': {'size': 2, 'Dvr': [
+      {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
+    ]}};
+    final shortened = await api.getChannelGroups();
+    expect(shortened.partial, isTrue);
+    expect(shortened.unresolvedChannelIds, {missing});
+    expect(shortened.groupsByChannelId, contains(missing));
     final mixed = await guide([missing, empty, free]);
     expect(mixed['FailedChannelIds'], [missing]);
     expect((mixed['Items'] as List).map((row) => row['ChannelId']).toSet(), {free});
@@ -455,7 +464,16 @@ void main() {
     expect((await api.getChannelGroups()).channels, healthy.channels);
     server.failWhen = null;
 
-    server.tunerReply = {'MediaContainer': <String, dynamic>{}};
+    server.tunerReply = {'MediaContainer': {'size': '2', 'Channel': [{'id': '5'}]}};
+    final shortened = await api.getChannelGroups();
+    expect(shortened.partial, isTrue);
+    expect(shortened.unresolvedChannelIds, {'channel-2-4'});
+    expect(shortened.groupsByChannelId.keys, containsAll(['channel-2-4', 'channel-2-5']));
+    final cold = await PlexLiveTvApi(dio).getChannelGroups();
+    expect(cold.partial, isTrue);
+    expect(cold.groupsByChannelId, contains('channel-2-5'));
+
+    server.tunerReply = {'MediaContainer': {'size': 0, 'Channel': []}};
     final empty = await api.getChannelGroups();
     expect(empty.partial, isFalse);
     expect(empty.sources, isEmpty);
@@ -1199,6 +1217,39 @@ void main() {
     }
     final grids = server.requests.where((r) => r.uri.path == '/grid');
     expect(grids.map((r) => r.queryParameters['channelGridKey']), ['shared', 'shared']);
+  });
+
+  test('a pending grid cannot publish after its key changes stations', () async {
+    final started = Completer<void>(), release = Completer<void>();
+    var owner = 'west';
+    final server = _FakeServer((r) => {'MediaContainer': switch (r.uri.path) {
+      '/lineups/plex/channels' => {'Channel': [for (final id in ['west', 'north'])
+          {'id': id, 'gridKey': id == owner ? 'shared' : 'other'}]},
+      '/grid' => {'Metadata': [{'title': r.queryParameters['channelGridKey'] == 'shared'
+          ? '$owner show' : 'Other show', 'Media': [
+        {'beginsAt': 1792699200, 'endsAt': 1792706400},
+      ]}]},
+      _ => <String, dynamic>{},
+    }});
+    final dio = Dio()..interceptors.add(InterceptorsWrapper(onRequest: (r, handler) async {
+      if (r.uri.path == '/grid' && !started.isCompleted) {
+        started.complete();
+        await release.future;
+      }
+      handler.next(r);
+    }))..interceptors.add(server);
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    Future<Map> guide() => api.getGuide(startDate: DateTime.utc(2026, 10, 22),
+        endDate: DateTime.utc(2026, 10, 23), channelIds: ['channel-plex-west']);
+    final pending = guide();
+    await started.future;
+    owner = 'north';
+    await api.getChannelGroups();
+    release.complete();
+    final stale = await pending;
+    expect(stale['Items'], isEmpty);
+    expect(stale['FailedChannelIds'], ['channel-plex-west']);
+    expect(((await guide())['Items'] as List).single['Name'], 'Other show');
   });
 
   test('a conflicting grid station during a catalog outage is retryable', () async {
