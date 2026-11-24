@@ -928,12 +928,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           stack: null,
         );
       } catch (error, stack) {
-        // A forbidden tuner grid or Free TV catalog can leave the other source usable.
-        final freeCatalogForbidden = !dvr && reportGuideFailures &&
+        // A 403 from one guide source can leave the other source usable.
+        final catalogForbidden = reportGuideFailures &&
             error is DioException && error.response?.statusCode == 403 &&
-            error.requestOptions.uri.path == '/lineups/plex/channels';
+            (dvr
+                ? error.requestOptions.path == '/livetv/dvrs'
+                : error.requestOptions.uri.path == '/lineups/plex/channels');
         if (_accessDenied(error) && !(dvr && _tunerGridForbidden(error)) &&
-            !freeCatalogForbidden) {
+            !catalogForbidden) {
           rethrow;
         }
         return (

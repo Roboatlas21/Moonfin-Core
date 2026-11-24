@@ -553,6 +553,32 @@ void main() {
     expect(mixed['FailedChannelIds'], unorderedEquals([denied, free]));
   });
 
+  test('denied DVR discovery leaves Free TV listings in a mixed guide', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    const free = 'channel-plex-abc-66635fc0';
+    const dvr = ['channel-2-4', 'channel-2-9'];
+    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
+      channelIds: ids,
+    );
+    server.failWhen = (r) => r.path == '/livetv/dvrs';
+    server.failureStatus = () => 403;
+    final mixed = await guide([free, ...dvr]);
+    expect((mixed['Items'] as List).map((row) => row['ChannelId']).toSet(), {free});
+    expect(mixed['FailedChannelIds'], unorderedEquals(dvr));
+    await expectLater(guide(dvr),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 403)));
+
+    server.failureStatus = () => 401;
+    await expectLater(guide([free, ...dvr]),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)));
+    server.failWhen = null;
+    final recovered = await guide([free, ...dvr]);
+    expect(recovered.containsKey('FailedChannelIds'), isFalse);
+    expect((recovered['Items'] as List).map((row) => row['ChannelId']), containsAll([free, ...dvr]));
+  });
+
   test('a forbidden Free TV grid leaves other guide listings available', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
