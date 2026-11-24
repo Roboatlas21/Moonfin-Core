@@ -1224,6 +1224,38 @@ void main() {
     expect(grids.map((r) => r.queryParameters['channelGridKey']), ['shared', 'shared']);
   });
 
+  test('a later guide batch can expire a cached grid without losing its listings', () async {
+    var now = DateTime.utc(2026, 10, 22, 12);
+    const stations = ['a', 'b', 'c', 'd'];
+    final server = _FakeServer((r) {
+      if (r.uri.path == '/lineups/plex/channels') {
+        return {'MediaContainer': {'Channel': [for (final id in stations) {'id': id}]}};
+      }
+      final station = r.queryParameters['channelGridKey'];
+      if (station == 'c') now = now.add(const Duration(minutes: 2));
+      return {'MediaContainer': {'Metadata': [
+        {'title': 'Show $station', 'Media': [{'beginsAt': 1792699200, 'endsAt': 1792706400}]},
+      ]}};
+    });
+    final api = PlexLiveTvApi(
+      Dio()..interceptors.add(server), cloudOnly: true, gridCacheNow: () => now,
+    );
+    Future<Map> guide(List<String> ids) => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
+      channelIds: [for (final id in ids) 'channel-plex-$id'],
+    );
+    await guide(['a']);
+    now = now.add(const Duration(minutes: 9));
+    final result = await guide(stations);
+    expect((result['Items'] as List).map((item) => item['Name']), unorderedEquals(
+      [for (final id in stations) 'Show $id'],
+    ));
+    expect(result['FailedChannelIds'], isNull);
+    await guide(['a']);
+    expect(server.requests.where((r) => r.uri.path == '/grid')
+        .map((r) => r.queryParameters['channelGridKey']), ['a', 'b', 'c', 'd', 'a']);
+  });
+
   test('a pending grid cannot publish after its key changes stations', () async {
     final started = Completer<void>(), release = Completer<void>();
     var owner = 'west';

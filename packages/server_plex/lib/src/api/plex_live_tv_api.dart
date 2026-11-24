@@ -52,6 +52,7 @@ typedef _Dvr = ({String key, String epg});
 typedef _Channels = List<Map<String, dynamic>>;
 typedef _FreeChannels = Map<String, Map<String, dynamic>>;
 typedef _FreeGridKey = ({String station, String gridKey, String day});
+typedef _GridReads = Map<_FreeGridKey, Future<List>>;
 typedef _CloudGroups = ({
   Map<String, String> genres,
   PromotedChannelGroup? promoted,
@@ -59,6 +60,12 @@ typedef _CloudGroups = ({
 typedef _Airings = ({
   List<Map<String, dynamic>> items,
   Set<String> failedChannelIds,
+});
+typedef _AiringsResult = ({
+  List<Map<String, dynamic>> items,
+  Set<String> failedChannelIds,
+  Object? error,
+  StackTrace? stack,
 });
 
 /// A scheduled recording and the showing it records.
@@ -69,8 +76,13 @@ typedef _Grab = ({Map op, Map<String, dynamic> program});
 class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   final Dio _dio;
   final bool cloudOnly;
+  final DateTime Function() _gridCacheNow;
 
-  PlexLiveTvApi(this._dio, {this.cloudOnly = false});
+  PlexLiveTvApi(
+    this._dio, {
+    this.cloudOnly = false,
+    DateTime Function() gridCacheNow = DateTime.now,
+  }) : _gridCacheNow = gridCacheNow;
 
   static final _cloudOptions = Options(
     headers: {'X-Plex-Provider-Version': '7.2'},
@@ -102,6 +114,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<ChannelGroupLineup>? _lineupRead;
   PromotedChannelGroup? _featuredGroup;
   final _cloudGrids = <_FreeGridKey, ({DateTime at, Future<List> items})>{};
+  final _activeGridReads = <_GridReads, Set<String>>{};
 
   // The Free TV Home hub is independent of channel grids and may be absent on
   // some Plex accounts or regions. Cache its small result, including failures,
@@ -113,7 +126,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<List<Map>>? _cloudOnNowRows;
 
   Future<List> _freeGrid(_FreeGridKey key) {
-    final now = DateTime.now();
+    final now = _gridCacheNow();
     _cloudGrids.removeWhere(
       (_, grid) => now.difference(grid.at) >= _cloudGridLife,
     );
@@ -128,6 +141,19 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     });
     _cloudGrids[key] = (at: now, items: items);
     return items;
+  }
+
+  // Expiry only affects reuse. A catalog change or a contradictory grid also
+  // invalidates the affected listings in guide requests that are still running.
+  void _invalidateGrids(bool Function(_FreeGridKey, Future<List>) invalid) {
+    _cloudGrids.removeWhere((key, grid) => invalid(key, grid.items));
+    for (final read in _activeGridReads.entries) {
+      for (final grid in read.key.entries) {
+        if (invalid(grid.key, grid.value)) {
+          read.value.add(_channelId(plexCloudSource, grid.key.station));
+        }
+      }
+    }
   }
 
   /// Failed requests throw, so the guide can retry instead of caching a blank.
@@ -346,7 +372,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (_accessDenied(error) && _cloudChannels == null) {
         _lastFreeLineup = null;
         _cloudOnNowRows = null;
-        _cloudGrids.clear();
+        _invalidateGrids((_, _) => true);
       }
       rethrow;
     }
@@ -356,7 +382,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     if (previous != null && !_sameStationMapping(previous, lineup)) {
       _cloudOnNowRows = null;
     }
-    _cloudGrids.removeWhere((key, _) {
+    _invalidateGrids((key, _) {
       final station = lineup[_channelId(plexCloudSource, key.station)];
       return station == null || (station['PlexGridKey'] ?? key.station.split('-').last) != key.gridKey;
     });
@@ -721,7 +747,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime end,
     List<String> channels, {
     required bool reportGuideFailures,
-    required Map<_FreeGridKey, Future<List>> gridReads,
+    required _GridReads gridReads,
   }) async {
     final lineup = await _freeChannels().catchError((Object error) {
       if (_accessDenied(error)) throw error;
@@ -765,6 +791,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
                 request.channel.split('-').last;
             final key = (station: request.channel, gridKey: gridKey, day: request.day);
             final itemsFuture = _freeGrid(key);
+            gridReads[key] = itemsFuture;
             try {
               final items = await itemsFuture;
               // Commit a grid's programs only after it decodes completely.
@@ -784,13 +811,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
                   if (station != null && station != request.channel) {
                     failedChannelIds.add(id);
                     if (identical(catalog, _cloudChannels)) _cloudChannels = null;
-                    if (identical(_cloudGrids[key]?.items, itemsFuture)) _cloudGrids.remove(key);
+                    _invalidateGrids((k, items) => k == key && identical(items, itemsFuture));
                     continue;
                   }
                   decoded.add(program);
                 }
               }
-              gridReads[key] = itemsFuture;
               return decoded;
             } catch (error, stack) {
               failedChannelIds.add(id);
@@ -879,12 +905,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       for (final id in channelIds ?? const <String>[])
         if (!freeIds.contains(id)) id,
     };
-    Future<({
-      List<Map<String, dynamic>> items,
-      Set<String> failedChannelIds,
-      Object? error,
-      StackTrace? stack,
-    })> attempt(
+    Future<_AiringsResult> attempt(
       Future<_Airings> Function() load,
       Set<String> failedOnError, {
       bool dvr = false,
@@ -916,7 +937,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
 
     final gridReads = <_FreeGridKey, Future<List>>{};
-    final results = await Future.wait([
+    final stale = <String>{};
+    if (free.isNotEmpty) _activeGridReads[gridReads] = stale;
+    final pending = Future.wait([
       if (!cloudOnly && (channelIds == null || channelIds.length > free.length))
         attempt(
           () => _dvrAirings(start, end, channelIds: channelIds?.toSet(),
@@ -931,6 +954,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           freeIds,
         ),
     ], eagerError: true);
+    final List<_AiringsResult> results;
+    try {
+      results = await pending;
+    } finally {
+      _activeGridReads.remove(gridReads);
+    }
     // Preserve the healthy source while retaining failed channel IDs for Retry.
     if (results.isNotEmpty && results.every((result) => result.error != null)) {
       final failure = results.firstWhere(
@@ -939,12 +968,6 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       );
       Error.throwWithStackTrace(failure.error!, failure.stack!);
     }
-    // A lineup refresh can retire a grid while another channel or tuner is still loading.
-    final stale = {
-      for (final entry in gridReads.entries)
-        if (!identical(_cloudGrids[entry.key]?.items, entry.value))
-          _channelId(plexCloudSource, entry.key.station),
-    };
     final programs = [for (final result in results) ...result.items]
       ..removeWhere((item) => stale.contains(item['ChannelId']))
       ..sort(
