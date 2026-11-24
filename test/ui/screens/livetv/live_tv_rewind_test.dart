@@ -281,11 +281,15 @@ void main() {
       await tester.pump();
     }
 
-    await tester.pumpWidget(const MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      home: AppleTvLiveTvPlayerHostScreen(channels: [ard], startIndex: 0),
-    ));
-    await tester.pump();
+    Future<void> pumpHost(List<GuideChannel> channels) async {
+      await tester.pumpWidget(MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: AppleTvLiveTvPlayerHostScreen(channels: channels, startIndex: 0),
+      ));
+      await tester.pump();
+    }
+
+    await pumpHost([ard]);
     await send({'event': 'openGuide'});
     await tester.pumpAndSettle();
     final guide = find.byType(LiveTvGuideScreen);
@@ -298,6 +302,24 @@ void main() {
     await send({'event': 'messageAction'});
     await send({'event': 'selectChannel', 'channelId': third.id});
     expect(manager.playedChannelIds, [ard.id, zdf.id, zdf.id, third.id]);
+    await pumpHost([ard]);
+    await send({'event': 'openGuide'});
+    await tester.pumpAndSettle();
+    expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, third.id);
+    Navigator.of(tester.element(guide)).pop();
+    await tester.pumpAndSettle();
+    await send({'event': 'selectChannel', 'channelId': zdf.id});
+    expect(manager.playedChannelIds.last, zdf.id);
+    await pumpHost([third, zdf]);
+    await send({'event': 'openGuide'});
+    await tester.pumpAndSettle();
+    expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, zdf.id);
+    Navigator.of(tester.element(guide)).pop();
+    await tester.pumpAndSettle();
+    await pumpHost([ard]);
+    await send({'event': 'openGuide'});
+    await tester.pumpAndSettle();
+    expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, zdf.id);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
   });
@@ -345,6 +367,46 @@ void main() {
     await tester.tap(find.byTooltip(l10n.unfavoriteChannel));
     await tester.pump();
     verify(() => userLibrary.unmarkFavorite('ard')).called(1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  for (final needsRetry in [false, true]) {
+    testWidgets('selecting the starting station shares its tune (retry: $needsRetry)', (tester) async {
+      manager.failedChannel = ard.id;
+      manager.failedTune = Completer<void>();
+      await pumpPlayer(tester);
+      await tester.tap(find.byTooltip(l10n.guide));
+      await tester.pump();
+      tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
+          .onChannelSelected!(ard.id, const [ard]);
+      if (!needsRetry) manager.failedChannel = null;
+      manager.failedTune!.complete();
+      await tester.pump();
+      expect(manager.playedChannelIds, [ard.id]);
+      if (needsRetry) {
+        manager.failedChannel = null;
+        await tester.tap(find.text(l10n.retry));
+        await tester.pump();
+      }
+      await press(tester, LogicalKeyboardKey.channelUp);
+      expect(manager.playedChannelIds, [ard.id, if (needsRetry) ard.id]);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
+
+  testWidgets('surfing after a failed guide tune wraps within the previous group', (tester) async {
+    await pumpPlayer(tester);
+    await tester.tap(find.byTooltip(l10n.guide));
+    await tester.pump();
+    const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
+    manager.failedChannel = third.id;
+    tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
+        .onChannelSelected!(third.id, const [third]);
+    await tester.pump();
+    expect(find.text(l10n.retry), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.channelDown);
+    await press(tester, LogicalKeyboardKey.channelUp);
+    expect(manager.playedChannelIds, [ard.id, third.id, zdf.id, ard.id]);
     await tester.pumpWidget(const SizedBox());
   });
 

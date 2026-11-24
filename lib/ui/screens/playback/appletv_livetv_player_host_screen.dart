@@ -67,7 +67,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     UserPreferences.appleTvClickpadSeekMode,
   );
 
-  late int _currentIndex;
+  late GuideChannel _currentChannel;
   bool _exiting = false;
   bool _switching = false;
   bool _inGuide = false;
@@ -116,12 +116,6 @@ class _AppleTvLiveTvPlayerHostScreenState
   late List<GuideChannel> _syncedChannels;
   List<GuideChannel>? _retryGuideLineup;
 
-  void _syncChannels() => _syncedChannels = [
-    for (final channel in widget.channels) channel.withSyncedUserData(),
-  ];
-
-  GuideChannel get _currentChannel => _syncedChannels[_currentIndex];
-
   bool get _canRecordCurrentProgram =>
       canRecordChannelAiring(_client, _currentChannel.id, _currentProgram);
 
@@ -133,8 +127,8 @@ class _AppleTvLiveTvPlayerHostScreenState
       _screensaverController = GetIt.instance<ScreensaverController>();
     } catch (_) {}
     _screensaverController?.setNativePlayerPresented(true);
-    _currentIndex = widget.startIndex;
-    _syncChannels();
+    _syncedChannels = [for (final c in widget.channels) c.withSyncedUserData()];
+    _currentChannel = _syncedChannels[widget.startIndex];
     userDataSync.addListener(_onChannelUserDataChanged);
     if (PlatformDetection.isIOS) {
       unawaited(_applyOrientationLock());
@@ -231,8 +225,19 @@ class _AppleTvLiveTvPlayerHostScreenState
   void didUpdateWidget(covariant AppleTvLiveTvPlayerHostScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.channels, widget.channels)) {
-      _retryGuideLineup = null;
-      _syncChannels();
+      final sameGroup = GuideChannel.sameStationOrder(
+        oldWidget.channels, widget.channels,
+      );
+      if (!sameGroup) _retryGuideLineup = null;
+      _syncedChannels = GuideChannel.updatePlayerLineup(
+        _syncedChannels, widget.channels, keepGroup: sameGroup,
+      );
+      _currentChannel = _syncedChannels.firstWhere(
+        (channel) => channel.id == _currentChannel.id,
+        orElse: () => _currentChannel,
+      );
+      _warmSchedule();
+      _pushMetadata();
     }
   }
 
@@ -403,17 +408,12 @@ class _AppleTvLiveTvPlayerHostScreenState
     _switching = true;
     try {
       if (!alreadyPlaying) {
-        var target = _syncedChannels.indexWhere((channel) => channel.id == channelId);
-        if (target < 0) {
-          target = _syncedChannels.length;
-          _syncedChannels = [..._syncedChannels, channels[index]];
-        }
-        _currentIndex = target;
+        _currentChannel = channels[index].withSyncedUserData();
         _readSchedule();
         _pushMetadata();
         await _playCurrentChannel();
         if (!mounted || _exiting || lineup == null ||
-            !identical(originalChannels, widget.channels)) {
+            !GuideChannel.sameStationOrder(originalChannels, widget.channels)) {
           return;
         }
         if (!_channelIsUp) {
@@ -423,7 +423,7 @@ class _AppleTvLiveTvPlayerHostScreenState
       }
       if (lineup != null) {
         _syncedChannels = GuideChannel.withSyncedUserDataAll(lineup) ?? lineup;
-        _currentIndex = index;
+        _currentChannel = _syncedChannels[index];
         _logoUrlCache.clear();
         _nowPlayingByChannel.clear();
         _warmSchedule();
@@ -571,7 +571,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   void _readSchedule() {
     final viewModel = _carouselPrewarm?.viewModel;
     if (viewModel == null) return;
-    final currentId = _currentChannel.id;
+    _currentProgram = viewModel.nowNextForChannel(_currentChannel.id).now;
     for (final channel in _syncedChannels) {
       final program = viewModel.nowNextForChannel(channel.id).now;
       if (program != null) {
@@ -580,7 +580,6 @@ class _AppleTvLiveTvPlayerHostScreenState
           GuideChannelLoadState.loading) {
         _nowPlayingByChannel.remove(channel.id);
       }
-      if (channel.id == currentId) _currentProgram = program;
     }
   }
 
@@ -1020,17 +1019,17 @@ class _AppleTvLiveTvPlayerHostScreenState
   void _onChannelUserDataChanged() {
     if (!mounted) return;
     final updated = GuideChannel.withSyncedUserDataAll(_syncedChannels);
-    if (updated == null) return;
+    final playing = _currentChannel.withSyncedUserData();
+    if (updated == null && identical(playing, _currentChannel)) return;
     // The native carousel and channel buttons follow this order, so it sorts
     // the way the guide and the Flutter carousel do.
     if (_carouselPrewarm?.viewModel.sortBy == ChannelSortBy.favoritesFirst) {
-      final currentId = _currentChannel.id;
-      updated.sort(
+      updated?.sort(
         LiveTvGuideViewModel.comparatorFor(ChannelSortBy.favoritesFirst),
       );
-      _currentIndex = updated.indexWhere((c) => c.id == currentId);
     }
-    _syncedChannels = updated;
+    if (updated != null) _syncedChannels = updated;
+    _currentChannel = playing;
     _pushMetadata();
   }
 

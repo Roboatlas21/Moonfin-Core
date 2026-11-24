@@ -63,6 +63,27 @@ class GuideChannel {
     return null;
   }
 
+  static bool sameStationOrder(List<GuideChannel> a, List<GuideChannel> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id) return false;
+    }
+    return true;
+  }
+
+  /// A rebuild of the original group can refresh station data while the player
+  /// is surfing a different group selected in its guide.
+  static List<GuideChannel> updatePlayerLineup(
+    List<GuideChannel> active,
+    List<GuideChannel> incoming, {
+    required bool keepGroup,
+  }) {
+    if (!keepGroup) return [for (final c in incoming) c.withSyncedUserData()];
+    final byId = {for (final c in incoming) c.id: c};
+    return [for (final c in active) (byId[c.id] ?? c).withSyncedUserData()];
+  }
+
   factory GuideChannel.fromRawItem(Map<String, dynamic> raw) => GuideChannel(
     id: raw['Id']?.toString() ?? '',
     name: raw['Name'] as String? ?? '',
