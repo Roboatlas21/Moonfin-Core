@@ -732,6 +732,36 @@ void main() {
   });
 
   for (final cloudOnly in [true, false]) {
+    test('malformed Free TV rows cannot replace the last good lineup (cloudOnly=$cloudOnly)', () async {
+      final (_, fixture) = _server();
+      List<Object?> rows = [{'id': 'news'}];
+      final server = _FakeServer((r) => r.uri.path == '/lineups/plex/channels'
+          ? {'MediaContainer': {'size': rows.length, 'Channel': rows}}
+          : fixture.answer(r));
+      final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: cloudOnly);
+      final healthy = await api.getChannelGroups();
+      expect(healthy.groupsByChannelId, contains('channel-plex-news'));
+
+      for (final malformed in <List<Object?>>[
+        [{}], [null], [{'id': 'replacement'}, {'id': ' '}], [{'id': []}],
+      ]) {
+        rows = malformed;
+        final partial = await api.getChannelGroups();
+        expect(partial.partial, isTrue);
+        expect(partial.channels, healthy.channels);
+        expect((await api.getChannels())['Items'], healthy.channels);
+      }
+
+      rows = [{'id': 42}, {'id': 'locked', 'drm': true}];
+      final recovered = (await api.getChannels())['Items'] as List;
+      final dvrIds = [if (!cloudOnly) 'channel-2-4'];
+      expect(recovered.map((c) => c['Id']), unorderedEquals([...dvrIds, 'channel-plex-42']));
+      rows = [];
+      final empty = await api.getChannelGroups();
+      expect(empty.partial, isFalse);
+      expect(empty.groupsByChannelId.keys, unorderedEquals(dvrIds));
+    });
+
     test('Free TV retains its stations until Plex confirms zero (cloudOnly=$cloudOnly)', () async {
       final rows = [
         {'id': 'news', 'title': 'News'}, {'id': 'film', 'title': 'Film'},

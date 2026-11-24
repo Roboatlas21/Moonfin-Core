@@ -355,14 +355,18 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         if (channels is! List && (channels != null || !zero)) {
           throw const FormatException('Invalid Plex Free TV lineup channels');
         }
-        return {
-          for (final channel in channels is List ? channels : const [])
-            if (channel is Map &&
-                channel['drm'] != true &&
-                channel['id']?.toString().trim().isNotEmpty == true)
-              _channelId(plexCloudSource, channel['id']):
-                  _channel(plexCloudSource, channel),
-        };
+        final lineup = <String, Map<String, dynamic>>{};
+        for (final channel in channels is List ? channels : const []) {
+          if (channel is! Map) throw const FormatException('Invalid Free TV channel');
+          final id = channel['id'];
+          if (id is! int && (id is! String || id.trim().isEmpty)) {
+            throw const FormatException('Invalid Free TV channel ID');
+          }
+          if (channel['drm'] != true) {
+            lineup[_channelId(plexCloudSource, id)] = _channel(plexCloudSource, channel);
+          }
+        }
+        return lineup;
       },
     );
     final _FreeChannels lineup;
