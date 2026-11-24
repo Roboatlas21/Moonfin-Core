@@ -384,6 +384,22 @@ void main() {
     expect(partial.sources, healthy.sources);
     expect((await guide())['FailedChannelIds'], ['channel-2-4']);
 
+    for (final invalid in [
+      {'Channel': [null]},
+      {'Channel': [{'id': '5'}, {'id': ' '}]},
+      {'size': 1},
+    ]) {
+      server.tunerReply = {'MediaContainer': invalid};
+      final malformed = await api.getChannelGroups();
+      expect(malformed.partial, isTrue);
+      expect(malformed.channels, healthy.channels);
+      expect(malformed.unresolvedChannelIds, {'channel-2-4'});
+    }
+    server.failWhen = (r) => r.uri.path.endsWith('/lineups/dvr/channels');
+    server.failureStatus = () => 503;
+    expect((await api.getChannelGroups()).channels, healthy.channels);
+    server.failWhen = null;
+
     server.tunerReply = {'MediaContainer': <String, dynamic>{}};
     final empty = await api.getChannelGroups();
     expect(empty.partial, isFalse);

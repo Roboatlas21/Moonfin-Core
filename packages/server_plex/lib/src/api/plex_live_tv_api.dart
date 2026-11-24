@@ -234,17 +234,24 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       for (final dvr in dvrs) {
         try {
           final lineup = await _dvrContainer('/${dvr.epg}/lineups/dvr/channels');
+          final rows = (lineup['Channel'] as List? ?? const []).cast<Map>();
+          final size = lineup['size'];
+          if (rows.isEmpty && size != null && size != 0 && size != '0') {
+            throw const FormatException('Missing Plex tuner channels');
+          }
           final machineId = await machineIdFuture;
-          next[dvr] = [
-            for (final channel in lineup['Channel'] as List? ?? const [])
-              if (channel is Map)
-                _channel(
-                  dvr.key,
-                  channel,
-                  number: (channel['vcn'] ?? '').toString(),
-                  favoriteSource: machineId == null ? null : 'server://$machineId/${dvr.epg}',
-                ),
-          ];
+          next[dvr] = rows.map((channel) {
+            final id = channel['id'];
+            if (id is! int && (id is! String || id.trim().isEmpty)) {
+              throw const FormatException('Invalid Plex tuner channel ID');
+            }
+            return _channel(
+              dvr.key,
+              channel,
+              number: (channel['vcn'] ?? '').toString(),
+              favoriteSource: machineId == null ? null : 'server://$machineId/${dvr.epg}',
+            );
+          }).toList();
         } catch (error) {
           if (error is DioException && error.response?.statusCode == 401) rethrow;
           if (_temporaryDvrFailure(error)) {

@@ -659,6 +659,29 @@ void main() {
     expect(picked, isNotNull);
     expect(lineup.map((channel) => channel.id), isNot(contains(picked)));
   });
+  testWidgets('Select on a guide card Retry requests the failed listings', (tester) async {
+    channelCount = 2;
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
+    final requests = <List<String>>[];
+    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
+      final ids = (inv.namedArguments[#channelIds] as List).cast<String>();
+      requests.add(ids);
+      if (ids.length == 1) return {'Items': _programsFor(ids.single)};
+      return {'Items': _programsFor('ch1'), 'FailedChannelIds': ['ch0']};
+    });
+    await pumpGuide(tester, surface: const Size(390, 844));
+    final retry = find.descendant(of: find.byType(EpgNowNextCard), matching: find.text('Retry'));
+    final node = Focus.of(tester.element(retry));
+    node.requestFocus();
+    await _pumpFrames(tester);
+    expect(node.hasPrimaryFocus, isTrue);
+    requests.clear();
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
+    expect(requests, [['ch0']]);
+    expect(retry, findsNothing);
+  });
+
   testWidgets('mobile filter picker changes the visible channel group', (
     tester,
   ) async {
