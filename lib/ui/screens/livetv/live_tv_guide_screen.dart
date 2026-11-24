@@ -935,7 +935,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _focusWindowBarFromGenres() => _focusWindowBar(_lastWindowBarIndex);
 
   bool _focusCategoryRetry() {
-    if (!_vm.hasFailedCategoryListings || _categoryRetryFocus.context == null ||
+    if (!_vm.hasFailedCategoryListings || _categoryRetryFocus.context?.mounted != true ||
         !_categoryRetryFocus.canRequestFocus) {
       return false;
     }
