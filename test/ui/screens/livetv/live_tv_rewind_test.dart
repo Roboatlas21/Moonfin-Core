@@ -289,7 +289,7 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('native player adopts the selected guide lineup after Retry', (tester) async {
+  testWidgets('native guide shares the starting tune and adopts the selected lineup after Retry', (tester) async {
     final messenger = tester.binding.defaultBinaryMessenger;
     const events = MethodChannel('moonfin/native_apple_player_events');
     const control = MethodChannel('moonfin/native_apple_player_control');
@@ -316,10 +316,22 @@ void main() {
       await tester.pump();
     }
 
+    manager.failedChannel = ard.id;
+    manager.failedTune = Completer<void>();
     await pumpHost([ard]);
     await send({'event': 'openGuide'});
     await tester.pumpAndSettle();
     final guide = find.byType(LiveTvGuideScreen);
+    tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(ard.id, const [ard]);
+    Navigator.of(tester.element(guide)).pop(ard.id);
+    await tester.pumpAndSettle();
+    manager.failedChannel = null;
+    manager.failedTune!.complete();
+    await tester.pumpAndSettle();
+    expect(manager.playedChannelIds, [ard.id]);
+
+    await send({'event': 'openGuide'});
+    await tester.pumpAndSettle();
     const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
     tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(zdf.id, const [zdf, third]);
     manager.failedChannel = zdf.id;

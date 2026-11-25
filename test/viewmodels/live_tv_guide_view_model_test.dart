@@ -2025,7 +2025,7 @@ void main() {
     });
 
 
-    test('category retry from before a recording change cannot erase its badge', () async {
+    Future<void> checkSupersededCategoryRetry({required bool denied}) async {
       _stubChannels(liveTv, [_channel('c0')]);
       when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
         (_) async => {'Items': [_program('k1', 'c0', isKids: true)]},
@@ -2048,20 +2048,30 @@ void main() {
       final retry = vm.retryFailedCategoryListings();
       await pumpEventQueue();
 
-      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
-        (_) async => {
-          'Items': [recorded(_program('k1', 'c0', isKids: true))],
-        },
-      );
-      await vm.recordingChanged();
+      final newerReply = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer((_) => newerReply.future);
+      final newer = vm.recordingChanged();
+      await pumpEventQueue();
+      if (denied) {
+        final options = RequestOptions();
+        olderRetry.completeError(DioException(requestOptions: options,
+            response: Response(requestOptions: options, statusCode: 403)));
+        await retry;
+      }
+      newerReply.complete({'Items': [recorded(_program('k1', 'c0', isKids: true))]});
+      await newer;
+      if (!denied) {
+        olderRetry.complete({'Items': [_program('k1', 'c0', isKids: true)]});
+        await retry;
+      }
+      expect(vm.state, GuideState.ready);
       expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+    }
 
-      olderRetry.complete({
-        'Items': [_program('k1', 'c0', isKids: true)],
-      });
-      await retry;
-      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
-    });
+    test('a stale category retry cannot erase a recording badge',
+        () => checkSupersededCategoryRetry(denied: false));
+    test('a stale category retry cannot deny a newer recording refresh',
+        () => checkSupersededCategoryRetry(denied: true));
 
     test('a failed recording reload is retried on re-entry until listings recover', () async {
       _stubChannels(liveTv, [_channel('c0')]);

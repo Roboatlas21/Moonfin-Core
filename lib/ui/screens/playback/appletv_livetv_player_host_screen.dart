@@ -74,6 +74,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   bool _inGuide = false;
   bool _recordingFlow = false;
   bool _channelIsUp = false;
+  Future<void>? _startingTune;
 
   /// Holds landscape until the viewer unlocks rotation, like the Flutter player.
   bool _orientationLocked = true;
@@ -177,7 +178,9 @@ class _AppleTvLiveTvPlayerHostScreenState
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _pushSubtitleStyle();
       _pushThemeConfig();
-      _playCurrentChannel();
+      _startingTune = _playCurrentChannel().whenComplete(() {
+        _startingTune = null;
+      });
     });
   }
 
@@ -409,10 +412,12 @@ class _AppleTvLiveTvPlayerHostScreenState
     _switching = true;
     try {
       if (!alreadyPlaying) {
+        final starting = channelId == _currentChannel.id ? _startingTune : null;
+        _startingTune = null;
         _currentChannel = channels[index].withSyncedUserData();
         _readSchedule();
         _pushMetadata();
-        await _playCurrentChannel();
+        await (starting ?? _playCurrentChannel());
         if (!mounted || _exiting || lineup == null ||
             !GuideChannel.sameStationOrder(originalChannels, widget.channels)) {
           return;

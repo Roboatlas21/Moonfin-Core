@@ -854,6 +854,7 @@ void main() {
     int channelCount, {
     int initialIndex = 0,
     double width = _stripWidth,
+    ValueChanged<ChannelCarouselEntry>? onSelected,
   }) async {
     await tester.binding.setSurfaceSize(const Size(_surfaceWidth, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -869,6 +870,7 @@ void main() {
                 channels: _lineup(channelCount),
                 initialIndex: initialIndex,
                 onChannelCentered: centred.add,
+                onChannelSelected: onSelected,
               ),
             ),
           ),
@@ -878,6 +880,18 @@ void main() {
     await tester.pump();
     return centred;
   }
+
+  testWidgets('OK tunes the visibly centered station after the lineup grows', (tester) async {
+    await pumpCarousel(tester, 20, initialIndex: 7);
+    String? tuned;
+    await pumpCarousel(tester, 22, initialIndex: 7, onSelected: (entry) => tuned = entry.channelId);
+    final station = find.byWidgetPredicate(
+      (widget) => widget is ChannelCarouselCard && widget.centered && widget.channelName == 'Channel 7',
+    );
+    expect(tester.getCenter(station).dx, closeTo(_stripCentre, 0.01));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(tuned, 'ch7');
+  });
 
   testWidgets('changed initial index restores the centered channel', (
     tester,

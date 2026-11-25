@@ -1361,6 +1361,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final recordingRevision = liveTvRecordingRevision.value;
     final filter = _filter;
     final failed = _categoryFailedIds.toList();
+    bool current() =>
+        !_disposed &&
+        request == _categoryRequest &&
+        filter == _filter &&
+        session == userDataSync.session &&
+        recordingRevision == liveTvRecordingRevision.value;
     _categoryFetchInFlight = true;
     _notifyListeners();
     try {
@@ -1374,17 +1380,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             .toList();
         if (batch.isEmpty) continue;
         final requested = batch.map((c) => c.id).toSet();
-        final reply = await _fetchPrograms(batch, category: filter).onError<Object>(
+        final reply = await _fetchPrograms(batch, category: filter, current: current).onError<Object>(
           (_, _) => (programs: <String, List<GuideProgram>>{}, failedChannelIds: requested),
           test: _temporaryCategoryFailure,
         );
-        if (_disposed ||
-            request != _categoryRequest ||
-            filter != _filter ||
-            session != userDataSync.session ||
-            recordingRevision != liveTvRecordingRevision.value) {
-          return;
-        }
+        if (!current()) return;
         final recovered = requested.difference(reply.failedChannelIds);
         _categoryPrograms.removeWhere((id, _) => recovered.contains(id));
         _categoryFailedIds.removeAll(requested);
