@@ -65,9 +65,10 @@ class _Cloud extends Interceptor {
   int? getError, putError;
   Map<String, dynamic>? responseOverride;
   Future<void>? holdGet;
+  Future<void>? holdPut;
 
   @override
-  void onRequest(RequestOptions request, RequestInterceptorHandler handler) {
+  void onRequest(RequestOptions request, RequestInterceptorHandler handler) async {
     requests.add(request);
     final error = request.method == 'GET' ? getError : putError;
     if (error != null) {
@@ -93,6 +94,7 @@ class _Cloud extends Interceptor {
     } else {
       rows = [for (final row in request.data as List)
         Map<String, dynamic>.from(row as Map)];
+      if (holdPut != null) await holdPut;
       handler.resolve(Response(requestOptions: request, statusCode: 200));
     }
   }
@@ -329,6 +331,27 @@ void main() {
     expect(userDataSync.favoriteFor(key), isFalse);
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
   });
+
+  for (final pending in ['GET', 'PUT']) {
+    test('session reset stops a favorite save waiting on $pending', () async {
+      final client = _plex();
+      addTearDown(client.dispose);
+      final gate = Completer<void>();
+      if (pending == 'GET') cloud.holdGet = gate.future;
+      if (pending == 'PUT') cloud.holdPut = gate.future;
+      final id = _channel['Id'] as String;
+      PlexLiveTvFavorites.applyToItem(client, _channel);
+      final save = ItemMutationRepository(client).setFavorite(id, isFavorite: true);
+      await pumpEventQueue();
+      expect(cloud.requests.last.method, pending);
+      userDataSync.reset();
+      gate.complete();
+      await save;
+      expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(pending == 'PUT' ? 1 : 0));
+      expect(PlexLiveTvFavorites.favoriteListChanged.value, isNull);
+      expect(_saved(client, id), isFalse);
+    });
+  }
 
   test('a confirmed Plex PUT stays successful when local cache write fails', () async {
     final client = _plex();
