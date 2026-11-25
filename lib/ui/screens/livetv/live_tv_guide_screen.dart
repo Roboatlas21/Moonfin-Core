@@ -1345,7 +1345,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _lastLayoutWindow = window;
     // A pending resize owns the request slot. Its completion will reconcile
     // this latest layout duration, even if it matches the old guide window.
-    if (_vm.guideWindow == window || _layoutWindowInFlight != null || !changed) {
+    if (_layoutWindowInFlight != null || !changed) {
       return;
     }
     _requestGuideWindowUpdate(window);
@@ -1375,8 +1375,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         _layoutWindowInFlight = null;
         if (!mounted) return;
         final desired = _lastLayoutWindow;
-        if (desired != null && desired != window &&
-            _vm.guideWindow != desired) {
+        if (desired != null && desired != window) {
           if (_vm.state == GuideState.ready) {
             _requestGuideWindowUpdate(desired);
           } else {

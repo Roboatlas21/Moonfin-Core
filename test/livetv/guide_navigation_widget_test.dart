@@ -429,6 +429,36 @@ void main() {
     expect(notice, findsNothing);
   });
 
+  for (final timing in ['before', 'after']) {
+    testWidgets('paging uses the original width when restored $timing a resize failure', (tester) async {
+      await pumpGuide(tester);
+      final vm = (tester.state(find.byType(LiveTvGuideScreen)) as dynamic)
+          .debugGuideViewModel as LiveTvGuideViewModel;
+      final size = tester.view.physicalSize;
+      final window = vm.guideWindow;
+      final start = vm.windowStart;
+      final resize = Completer<Map<String, dynamic>>();
+      when(() => _guideRequest(liveTvApi)).thenAnswer((_) => resize.future);
+      tester.view.physicalSize = const Size(1700, 700);
+      await _pumpFrames(tester);
+      if (timing == 'before') {
+        tester.view.physicalSize = size;
+        await _pumpFrames(tester);
+      }
+      resize.completeError(Exception('resize failed'));
+      await _pumpFrames(tester);
+      tester.view.physicalSize = size;
+      await _pumpFrames(tester);
+      expect(vm.guideWindow, window);
+
+      when(() => _guideRequest(liveTvApi)).thenAnswer((_) async => {'Items': []});
+      await tester.tap(find.byIcon(Icons.chevron_right).first);
+      await _pumpFrames(tester);
+      expect(vm.windowStart, isNot(start));
+      expect(vm.guideWindow, window);
+    });
+  }
+
   testWidgets('resize survives a reload before the layout callback runs', (
     tester,
   ) async {
