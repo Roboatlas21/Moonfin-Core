@@ -1116,7 +1116,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       await initial;
       if (!current()) return;
       _listingsStatePage = null;
-      if (_isCategory(_filter)) {
+      if (session != userDataSync.session) {
+        _reloadOnEntry = true;
+        _state = GuideState.ready;
+      } else if (_isCategory(_filter)) {
         await _loadCategoryPrograms();
       } else {
         _state = GuideState.ready;

@@ -1429,6 +1429,31 @@ void main() {
     vm.dispose();
   });
 
+  test('re-entering All reloads the lineup after a session change during the first listings', () async {
+    final now = DateTime(2026, 9, 11, 10);
+    _stubChannels(liveTv, [_channel('old')]);
+    final pending = Completer<Map<String, dynamic>>();
+    when(() => _guide(liveTv)).thenAnswer((_) => pending.future);
+    final vm = LiveTvGuideViewModel(client, now: () => now);
+    addTearDown(vm.dispose);
+    final opening = vm.load();
+    await pumpEventQueue();
+    verify(() => _guide(liveTv)).called(1);
+
+    userDataSync.reset();
+    pending.complete({'Items': [_program('old-show', 'old', start: now)]});
+    await opening;
+    expect(vm.programsForChannel('old'), isEmpty);
+
+    _stubChannels(liveTv, [_channel('new')]);
+    when(() => _guide(liveTv)).thenAnswer((_) async => {
+      'Items': [_program('new-show', 'new', start: now)],
+    });
+    await vm.reloadIfStale();
+    expect(vm.filteredChannels.map((channel) => channel.id), ['new']);
+    expect(vm.programsForChannel('new').single.id, 'new-show');
+  });
+
   group('category filters', () {
     test('a stale session clears category loading and old rows', () async {
       _stubChannels(liveTv, [_channel('c0')]);
