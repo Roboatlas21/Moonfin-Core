@@ -1280,7 +1280,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       !_accessDenied(error) &&
       (error is TimeoutException || isTransientTransportFailure(error));
 
-  Future<bool> _walkCategory() async {
+  Future<bool> _walkCategory({int? recordingRevision}) async {
     final request = _categoryRequest;
     final filter = _filter;
     final session = userDataSync.session;
@@ -1288,7 +1288,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         !_disposed &&
         request == _categoryRequest &&
         filter == _filter &&
-        session == userDataSync.session;
+        session == userDataSync.session &&
+        (recordingRevision == null || recordingRevision == liveTvRecordingRevision.value);
     final startRows = _categoryPrograms.length;
     while (current() &&
         _categoryHighWater < _pageChannels.length &&
@@ -1300,7 +1301,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           .where((c) => !_categoryQueriedIds.contains(c.id))
           .toList();
       var transportFailed = false;
-      final fetched = await _fetchPrograms(batch, category: filter).onError<Object>(
+      final fetched = await _fetchPrograms(batch, category: filter, current: current).onError<Object>(
         (_, _) {
           transportFailed = true;
           return (
@@ -1308,7 +1309,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             failedChannelIds: batch.map((channel) => channel.id).toSet(),
           );
         },
-        test: _temporaryCategoryFailure,
+        test: (error) => !current() || _temporaryCategoryFailure(error),
       );
       if (!current()) return false;
       var failed = fetched.failedChannelIds;
@@ -1317,6 +1318,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           final retry = await _fetchPrograms(
             batch.where((channel) => failed.contains(channel.id)).toList(),
             category: filter,
+            current: current,
           );
           if (!current()) return false;
           fetched.programs.addAll(retry.programs);
@@ -1396,7 +1398,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _notifyListeners();
       }
       if (hasMorePrograms && _categoryPrograms.length < _categoryMinRowsPerPage) {
-        await _walkCategory();
+        await _walkCategory(recordingRevision: recordingRevision);
       }
     } catch (_) {
       // Keep the failed IDs for the next explicit selection. An authorization
@@ -2103,7 +2105,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         move = _pendingWindow;
       }
       if (_isCategory(_filter)) {
-        await _walkCategory();
+        if (!await _walkCategory(recordingRevision: liveTvRecordingRevision.value)) return;
       } else {
         await _loadNextBatch();
       }

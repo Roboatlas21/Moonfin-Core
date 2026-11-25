@@ -2057,6 +2057,46 @@ void main() {
     test('a late window 403 cannot clear a newer category recording refresh',
         () => checkLate403(moveWindow: true));
 
+    for (final retry in [false, true]) {
+      test('a superseded category page 403 preserves recording changes (retry=$retry)', () async {
+        _stubChannels(liveTv, List.generate(201, (i) => _channel('c$i', number: '$i')));
+        when(() => _guide(liveTv, category: GuideFilter.sports))
+            .thenAnswer(_serverFiltered((_) => true));
+        final vm = LiveTvGuideViewModel(client);
+        addTearDown(vm.dispose);
+        await vm.load();
+        vm.setFilter(GuideFilter.sports);
+        await pumpEventQueue();
+        expect(vm.hasMorePrograms, isTrue);
+
+        final older = Completer<Map<String, dynamic>>();
+        var reads = 0;
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+          if (++reads == 1 && retry) return {'Items': [], 'FailedChannelIds': _requestedIds(inv)};
+          return older.future;
+        });
+        final page = vm.loadMorePrograms();
+        await pumpEventQueue();
+        expect(reads, retry ? 2 : 1);
+        final newer = Completer<Map<String, dynamic>>();
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) => newer.future);
+        final refresh = vm.recordingChanged();
+        final options = RequestOptions();
+        final denied = DioException(requestOptions: options,
+            response: Response(requestOptions: options, statusCode: 403));
+        older.completeError(denied);
+        await page;
+        newer.complete({'Items': [recorded(_program('p-c0', 'c0', isSports: true))]});
+        await refresh;
+        expect(vm.state, GuideState.ready);
+        expect(vm.filteredChannels.map((c) => c.id), ['c0']);
+        expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+        expect(vm.hasMorePrograms, isTrue);
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenThrow(denied);
+        await vm.loadMorePrograms();
+        expect(vm.listingsAccessDenied, isTrue);
+      });
+    }
 
     Future<void> checkSupersededCategoryRetry({required bool denied}) async {
       _stubChannels(liveTv, [_channel('c0')]);
