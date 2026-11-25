@@ -69,12 +69,13 @@ const _teletubbies = {
   bool secondDvr = false,
   bool liveDvr = false,
   bool malformedDvrGrid = false,
+  String Function()? machineId,
 }) {
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final server = _FakeServer(
     (options) => switch (options.uri.path) {
       '/identity' => {
-        'MediaContainer': {'machineIdentifier': 'pms-machine-1'},
+        'MediaContainer': {'machineIdentifier': machineId?.call() ?? 'pms-machine-1'},
       },
       '/livetv/dvrs' => {
         'MediaContainer': {
@@ -314,6 +315,30 @@ void main() {
       expect(result['TotalRecordCount'], 3);
     },
   );
+
+  test('full tuner discovery rechecks the machine used for DVR favorites', () async {
+    var machine = 'first';
+    final (dio, server) = _server(secondDvr: true, machineId: () => machine);
+    final api = PlexLiveTvApi(dio);
+    Future<Map> refresh() async => (await api.getChannelGroups()).channels!.first;
+    expect((await refresh())['PlexFavoriteSource'], 'server://first/tv.plex.providers.epg.xmltv:2');
+    machine = 'replacement';
+    server.failWhen = (r) => r.path == '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';
+    final lineup = await api.getChannelGroups();
+    expect(lineup.channels!.first['PlexFavoriteSource'], 'server://replacement/tv.plex.providers.epg.xmltv:2');
+    final retained = lineup.channels!.singleWhere((row) => row['Id'] == 'channel-3-7');
+    expect(retained.containsKey('PlexFavoriteSource'), isFalse);
+    await api.getChannels();
+    expect(server.requests.where((r) => r.path == '/identity'), hasLength(2));
+
+    server.failWhen = (r) => r.path == '/identity';
+    final unverified = await refresh();
+    expect(unverified['Id'], 'channel-2-4');
+    expect(unverified.containsKey('PlexFavoriteSource'), isFalse);
+    server.failWhen = null;
+    expect((await api.getChannels())['Items'].first['PlexFavoriteSource'],
+        'server://replacement/tv.plex.providers.epg.xmltv:2');
+  });
 
   test('a failed DVR preserves healthy DVR channels and programs', () async {
     final (dio, server) = _server(secondDvr: true);

@@ -206,6 +206,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<List<_Dvr>> _dvrList({void Function()? onIncomplete}) async {
     if (cloudOnly) return [];
     final read = _cached(() => _dvrs, (f) => _dvrs = f, () async {
+      // A rediscovered tuner at the same address can belong to another PMS.
+      _favoriteMachineId = null;
       final container = await _dvrContainer('/livetv/dvrs');
       final rows = container['Dvr'] as List? ?? const [];
       final size = container['size'];
@@ -251,7 +253,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       }
     }
 
-    final machine = await (_favoriteMachineId ??= load());
+    final lookup = _favoriteMachineId ??= load();
+    final machine = await lookup;
+    if (!identical(lookup, _favoriteMachineId)) return null;
     if (machine == null) _favoriteMachineId = null;
     return machine;
   }
@@ -278,12 +282,26 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     try {
       var incomplete = false;
       final dvrs = await _dvrList(onIncomplete: () => incomplete = true);
+      final hasDvrRows = dvrs.isNotEmpty || (incomplete && _lastDvrChannels.isNotEmpty);
+      final machineIdFuture = hasDvrRows ? _machineIdForFavorites() : null;
+      Future<_Channels> retainedChannels(_Dvr dvr) async {
+        final rows = _lastDvrChannels[dvr] ?? [];
+        if (rows.isEmpty || machineIdFuture == null) return rows;
+        final machine = await machineIdFuture;
+        final source = machine == null ? null : 'server://$machine/${dvr.epg}';
+        return [
+          for (final row in rows)
+            if (row['PlexFavoriteSource'] == null || row['PlexFavoriteSource'] == source) row
+            else Map.of(row)..remove('PlexFavoriteSource')..remove('PlexFavoriteId'),
+        ];
+      }
       if (incomplete) {
         final found = {for (final dvr in dvrs) dvr.key};
-        next.addEntries(_lastDvrChannels.entries.where((e) => !found.contains(e.key.key)));
+        for (final dvr in _lastDvrChannels.keys.where((dvr) => !found.contains(dvr.key))) {
+          next[dvr] = await retainedChannels(dvr);
+        }
         onUnavailable?.call(next.values.expand((rows) => rows).toList());
       }
-      final machineIdFuture = dvrs.isEmpty ? null : _machineIdForFavorites();
       for (final dvr in dvrs) {
         try {
           final lineup = await _dvrContainer('/${dvr.epg}/lineups/dvr/channels');
@@ -304,7 +322,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           }).toList();
           if (size != null && int.tryParse('$size') != rows.length) {
             final found = {for (final channel in channels) channel['Id']};
-            final missing = (_lastDvrChannels[dvr] ?? []).where((c) => !found.contains(c['Id'])).toList();
+            final missing = (await retainedChannels(dvr)).where((c) => !found.contains(c['Id'])).toList();
             onUnavailable?.call(missing);
             channels.addAll(missing);
           }
@@ -315,7 +333,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           // Discovery still advertised this tuner. Recheck it on the next read.
           if (status == 404 && request == _dvrLineupRequest) _dvrs = null;
           if (status == 404 || _temporaryLineupFailure(error)) {
-            final retained = _lastDvrChannels[dvr] ?? [];
+            final retained = await retainedChannels(dvr);
             next[dvr] = retained;
             onUnavailable?.call(retained);
           }
