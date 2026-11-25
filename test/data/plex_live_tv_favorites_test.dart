@@ -384,6 +384,22 @@ void main() {
     });
   }
 
+  test('a DVR favorite rejects a channel reassigned before the repository saves it', () async {
+    final client = _plex();
+    addTearDown(client.dispose);
+    const id = 'channel-2-4';
+    const row = {
+      'Id': id, 'Type': 'TvChannel', 'PlexFavoriteSource': 'server://pms/epg',
+      'PlexFavoriteId': 'old',
+    };
+    PlexLiveTvFavorites.applyToItem(client, row);
+    final save = ItemMutationRepository(client).setFavorite(id, isFavorite: true);
+    PlexLiveTvFavorites.applyToItem(client, {...row, 'PlexFavoriteId': 'new'});
+
+    await expectLater(save, throwsStateError);
+    expect(cloud.requests, isEmpty);
+  });
+
   test('a queued DVR favorite rejects a replacement provider', () async {
     final client = _plex();
     addTearDown(client.dispose);

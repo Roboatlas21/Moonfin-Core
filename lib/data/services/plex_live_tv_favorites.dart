@@ -348,13 +348,14 @@ class PlexLiveTvFavorites {
     MediaServerClient client,
     String channelId, {
     required bool isFavorite,
+    String? expectedSyncKey,
   }) async {
     if (!isPlexLiveTvChannel(client, channelId)) {
       throw ArgumentError.value(channelId, 'channelId');
     }
     final account = _account(client);
     final free = isPlexFreeTvChannel(client, channelId);
-    final providerAtTap = _catalog(client).channels[channelId];
+    final selectedKey = expectedSyncKey ?? syncKey(client, channelId);
     await _serial(account.id, () async {
       final info = _catalog(client).channels[channelId] ??
           (free
@@ -366,7 +367,7 @@ class PlexLiveTvFavorites {
       if (info == null) {
         throw StateError('Plex DVR channel has no verified EPG provider identity');
       }
-      if (!free && (providerAtTap == null || !_matches(providerAtTap, info))) {
+      if (syncKey(client, channelId) != selectedKey) {
         throw StateError('Plex DVR provider changed while waiting to save favorites');
       }
       final remote = await _read(client, account.token);
@@ -397,7 +398,7 @@ class PlexLiveTvFavorites {
         _checkAccount(client, account.token);
         _lastRefresh.remove(account.id);
         userDataSync.publish(
-          syncKey(client, channelId),
+          selectedKey,
           {'IsFavorite': isFavorite},
         );
       }

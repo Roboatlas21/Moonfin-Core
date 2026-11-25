@@ -461,9 +461,11 @@ void main() {
     });
   }
 
-  testWidgets('Retry stays available when the carousel cannot restore the old station', (tester) async {
+  testWidgets('remote OK retries when the carousel cannot restore the old station', (tester) async {
     await pumpPlayer(tester);
     await hideControls(tester);
+    await press(tester, LogicalKeyboardKey.arrowDown);
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'LiveTvPlayPause');
     await press(tester, LogicalKeyboardKey.arrowUp);
     await tester.pump(const Duration(milliseconds: 100));
     final carousel = tester.widget<ChannelCarousel>(find.byType(ChannelCarousel));
@@ -479,7 +481,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(find.byType(ChannelCarousel), findsNothing);
     manager.failedChannel = null;
-    await tester.tap(find.text(l10n.retry));
+    expect(find.text(l10n.retry), findsOneWidget);
+    await press(tester, LogicalKeyboardKey.enter);
     await tester.pump();
     expect(manager.playedChannelIds, [ard.id, zdf.id, zdf.id]);
     await tester.pumpWidget(const SizedBox());

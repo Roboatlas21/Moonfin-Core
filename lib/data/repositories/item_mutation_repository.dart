@@ -51,6 +51,7 @@ class ItemMutationRepository {
               _client,
               itemId,
               isFavorite: wanted,
+              expectedSyncKey: stateId,
             );
           } else if (wanted) {
             await _client.userLibraryApi.markFavorite(itemId);

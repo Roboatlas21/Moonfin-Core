@@ -1429,7 +1429,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         if (order.isNotEmpty) {
           order[_focusedControlIndex.clamp(0, order.length - 1)].requestFocus();
         }
-      } else if (priorInfoVisible && priorFocus?.canRequestFocus == true) {
+      } else if (!_channelFailed && priorInfoVisible && priorFocus?.canRequestFocus == true) {
         priorFocus!.requestFocus();
       } else {
         _focusPlayerRoot();
