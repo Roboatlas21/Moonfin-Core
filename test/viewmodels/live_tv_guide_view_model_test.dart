@@ -2008,7 +2008,7 @@ void main() {
     });
 
 
-    test('a late 403 cannot clear a newer category recording refresh', () async {
+    Future<void> checkLate403({required bool moveWindow}) async {
       _stubChannels(liveTv, List.generate(10, (i) => _channel('c$i')));
       when(() => _guide(liveTv, category: GuideFilter.kids)).thenAnswer(
         (_) async => {
@@ -2024,7 +2024,9 @@ void main() {
       final pending = Completer<Map<String, dynamic>>();
       when(() => _guide(liveTv, category: GuideFilter.kids))
           .thenAnswer((_) => pending.future);
-      final older = vm.recordingChanged();
+      final older = moveWindow
+          ? vm.setWindowStart(vm.windowEnd)
+          : vm.recordingChanged();
       await pumpEventQueue();
 
       final newerReply = Completer<Map<String, dynamic>>();
@@ -2040,14 +2042,20 @@ void main() {
         requestOptions: options,
         response: Response(requestOptions: options, statusCode: 403),
       ));
-      await older;
+      await pumpEventQueue();
       newerReply.complete({'Items': [recorded(_program('k1', 'c5', isKids: true))]});
       await newer;
+      await older;
       expect(vm.state, GuideState.ready);
       expect(states, isNot(contains(GuideState.loading)));
       expect(vm.filteredChannels.map((c) => c.id), ['c5']);
       expect(vm.programsForChannel('c5').single.hasTimer, isTrue);
-    });
+    }
+
+    test('a late 403 cannot clear a newer category recording refresh',
+        () => checkLate403(moveWindow: false));
+    test('a late window 403 cannot clear a newer category recording refresh',
+        () => checkLate403(moveWindow: true));
 
 
     Future<void> checkSupersededCategoryRetry({required bool denied}) async {

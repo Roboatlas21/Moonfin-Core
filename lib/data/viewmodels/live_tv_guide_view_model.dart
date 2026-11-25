@@ -1823,7 +1823,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           final reply = await _fetchPrograms(
             batch,
             category: category,
-            current: current,
+            current: samePage,
             from: from,
             to: to,
           );
