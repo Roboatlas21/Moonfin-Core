@@ -109,6 +109,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   bool _hadDiscoveredDvr = false;
   Map<_Dvr, _Channels> _lastDvrChannels = {};
   int _dvrLineupRequest = 0;
+  int _publishedDvrRequest = 0;
   Future<String?>? _favoriteMachineId;
   Future<_FreeChannels>? _cloudChannels;
   _FreeChannels? _lastFreeLineup;
@@ -345,12 +346,18 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         onUnavailable?.call(retained);
         return retained;
       }
-      if (request == _dvrLineupRequest) _lastDvrChannels = {};
+      if (request > _publishedDvrRequest) {
+        _lastDvrChannels = {};
+        _publishedDvrRequest = request;
+      }
       if (error is DioException && error.response?.statusCode == 401) rethrow;
       return [];
     }
     // An older channel read can finish after a full guide refresh.
-    if (request == _dvrLineupRequest) _lastDvrChannels = next;
+    if (request > _publishedDvrRequest) {
+      _lastDvrChannels = next;
+      _publishedDvrRequest = request;
+    }
     return next.values.expand((rows) => rows).toList();
   }
 
@@ -465,18 +472,24 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   /// One source failing, like plex.tv being unreachable, still leaves the
   /// other's channels.
-  Future<(_Channels, _Channels)> _channelSources({
+  Future<(_Channels Function(), _Channels)> _channelSources({
     void Function(_Channels)? onDvrUnavailable,
     void Function()? onFreeUnavailable,
   }) async {
     final free = _freeLineupForBrowse(onUnavailable: onFreeUnavailable);
     // Future.wait preserves the original DioException (including 401/403)
     // rather than wrapping failures in ParallelWaitError as record .wait does.
+    final dvr = _dvrChannels(onUnavailable: onDvrUnavailable);
+    final request = _dvrLineupRequest;
     final results = await Future.wait<_Channels>([
-      _dvrChannels(onUnavailable: onDvrUnavailable),
+      dvr,
       free.then((lineup) => lineup.values.toList()),
     ]);
-    return (results[0], results[1]);
+    // Search and Guide can finish in either order, including while Free TV loads.
+    _Channels currentDvr() => request < _publishedDvrRequest
+        ? _lastDvrChannels.values.expand((rows) => rows).toList()
+        : results[0];
+    return (currentDvr, results[1]);
   }
 
   static const _featuredPath = '/lineups/plex/channels/featured';
@@ -558,12 +571,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     _dvrs = null;
     Set<String>? unresolvedDvrIds;
     var freeUnavailable = false;
-    final (dvr, free) = await _channelSources(
+    final (currentDvr, free) = await _channelSources(
       onDvrUnavailable: (rows) => (unresolvedDvrIds ??= {})
           .addAll(rows.map((row) => row['Id'] as String)),
       onFreeUnavailable: () => freeUnavailable = true,
     );
     if (free.isEmpty) {
+      final dvr = currentDvr();
       // Keep DVR channels in their own group when Free TV is unavailable.
       return ChannelGroupLineup(
         {
@@ -582,6 +596,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       metadataUnavailable = true;
       return (genres: const <String, String>{}, promoted: _featuredGroup);
     });
+    final dvr = currentDvr();
     return ChannelGroupLineup(
       {
         for (final channel in dvr)
@@ -1021,8 +1036,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     bool? enableTotalRecordCount,
     String? userId,
   }) async {
-    final (dvr, free) = await _channelSources();
-    final channels = [...dvr, ...free];
+    final (currentDvr, free) = await _channelSources();
+    final channels = [...currentDvr(), ...free];
     final start = (startIndex ?? 0).clamp(0, channels.length);
     final end = limit == null
         ? channels.length

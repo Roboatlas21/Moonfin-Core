@@ -871,6 +871,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         channel.id,
         isFavorite: !channel.isFavorite,
         isChannel: true,
+        expectedChannelKey: channelFavoriteKey(channel.rawData),
       );
     } catch (_) {
       if (mounted) {

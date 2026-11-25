@@ -316,6 +316,38 @@ void main() {
     },
   );
 
+  test('a delayed channel read uses the DVR provider discovered by a newer guide', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final started = Completer<void>();
+    final release = Completer<void>();
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
+      if (request.path.endsWith('/lineups/dvr/channels') && !started.isCompleted) {
+        started.complete();
+        await release.future;
+      }
+      handler.next(request);
+    }));
+    final browse = api.getChannels();
+    await started.future;
+    server.discoveryReply = {'MediaContainer': {'Dvr': [
+      {'key': '2', 'epgIdentifier': 'replacement'},
+    ]}};
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) {
+      if (request.path == '/replacement/lineups/dvr/channels') {
+        handler.resolve(Response(requestOptions: request, data: {'MediaContainer': {
+          'Channel': [{'id': '4', 'title': 'Replacement'}],
+        }}));
+      } else {
+        handler.next(request);
+      }
+    }));
+    final newer = (await api.getChannelGroups()).channels!.first;
+    expect(newer['PlexFavoriteSource'], 'server://pms-machine-1/replacement');
+    release.complete();
+    expect((await browse)['Items'].first, newer);
+  });
+
   test('full tuner discovery rechecks the machine used for DVR favorites', () async {
     var machine = 'first';
     final (dio, server) = _server(secondDvr: true, machineId: () => machine);

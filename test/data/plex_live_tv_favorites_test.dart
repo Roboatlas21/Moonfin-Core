@@ -423,6 +423,26 @@ void main() {
     expect(cloud.requests, isEmpty);
   });
 
+  test('favoriting an old DVR row cannot change its replacement', () async {
+    final client = _plex();
+    addTearDown(client.dispose);
+    const id = 'channel-2-4';
+    Map<String, dynamic> row(String provider) => PlexLiveTvFavorites.applyToItem(client, {
+      'Id': id, 'Type': 'TvChannel', 'PlexFavoriteSource': provider, 'PlexFavoriteId': '4',
+    });
+    final old = row('server://pms/old');
+    final current = row('server://pms/new');
+    final mutations = ItemMutationRepository(client);
+    Future<void> favorite(Map<String, dynamic> selected) => mutations.setFavorite(
+      id, isFavorite: true, isChannel: true, expectedChannelKey: channelFavoriteKey(selected),
+    );
+
+    await expectLater(favorite(old), throwsStateError);
+    expect(cloud.requests, isEmpty);
+    await favorite(current);
+    expect(cloud.rows.single['source'], 'server://pms/new');
+  });
+
   test('a queued DVR favorite rejects a replacement provider', () async {
     final client = _plex();
     addTearDown(client.dispose);

@@ -876,9 +876,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     try {
       await ItemMutationRepository(
         _client,
-      ).setFavorite(channelId, isFavorite: next, isChannel: true);
+      ).setFavorite(channelId, isFavorite: next, isChannel: true,
+          expectedChannelKey: channelFavoriteKey(current.rawData));
     } catch (_) {
-      _applyChannelUpdate(current);
+      if (identical(channelForId(channelId), updated)) _applyChannelUpdate(current);
       rethrow;
     }
   }
