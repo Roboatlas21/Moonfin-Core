@@ -218,14 +218,17 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
       _ownsFocusNode = widget.focusNode == null;
       _requestInitialFocus();
     }
+    final centered = _centredChannelIndex;
     if (oldWidget.channels.length != widget.channels.length) {
       _endHold();
       _seedFromChannels();
       _alignScrollAfterLayout();
       _reportEmptyIfNeeded();
-    } else if ((oldWidget.initialIndex != widget.initialIndex ||
-            oldWidget.selectionRevision != widget.selectionRevision) &&
-        widget.initialIndex != _centredChannelIndex) {
+    } else if (_channelCount > 0 &&
+        widget.initialIndex != centered &&
+        (oldWidget.initialIndex != widget.initialIndex ||
+            oldWidget.selectionRevision != widget.selectionRevision ||
+            oldWidget.channels[centered].channelId != widget.channels[centered].channelId)) {
       _endHold();
       _resetToInitialIndex();
     }

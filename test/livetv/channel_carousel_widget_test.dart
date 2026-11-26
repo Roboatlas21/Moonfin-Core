@@ -852,6 +852,7 @@ void main() {
   Future<List<int>> pumpCarousel(
     WidgetTester tester,
     int channelCount, {
+    List<ChannelCarouselEntry>? channels,
     int initialIndex = 0,
     double width = _stripWidth,
     ValueChanged<ChannelCarouselEntry>? onSelected,
@@ -867,7 +868,7 @@ void main() {
             child: SizedBox(
               width: width,
               child: ChannelCarousel(
-                channels: _lineup(channelCount),
+                channels: channels ?? _lineup(channelCount),
                 initialIndex: initialIndex,
                 onChannelCentered: centred.add,
                 onChannelSelected: onSelected,
@@ -880,6 +881,30 @@ void main() {
     await tester.pump();
     return centred;
   }
+
+  testWidgets('OK stays on the browsed station when Favorites First moves it', (tester) async {
+    String? tuned;
+    Future<List<int>> show(List<ChannelCarouselEntry> channels) => pumpCarousel(
+      tester, channels.length,
+      channels: channels,
+      initialIndex: 1,
+      onSelected: (entry) => tuned = entry.channelId,
+    );
+    final channels = _lineup(4);
+    await show(channels);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await show(_lineup(4));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(tuned, 'ch2');
+
+    tuned = null;
+    await show([channels[0], channels[2], channels[1], channels[3]]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(tuned, 'ch2');
+    final centered = find.byWidgetPredicate((w) => w is ChannelCarouselCard && w.centered);
+    expect(tester.widget<ChannelCarouselCard>(centered).channelName, 'Channel 2');
+    expect(tester.getCenter(centered).dx, closeTo(_stripCentre, 0.01));
+  });
 
   testWidgets('OK tunes the visibly centered station after the lineup grows', (tester) async {
     await pumpCarousel(tester, 20, initialIndex: 7);
