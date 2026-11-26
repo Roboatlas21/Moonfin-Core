@@ -314,6 +314,27 @@ void main() {
     expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:News']);
   });
 
+  test('device reset reloads settings and leaves offline pins for the next sync', () async {
+    service.resetState();
+    await togglePin('group:Sports');
+    adapter.savedPins = ['group:News'];
+    adapter.resolvedProfile = {'use24HourClock': true};
+    await service.refreshAvailability(client);
+
+    expect(await service.resetProfileToDefaults(client, profile: 'desktop'), isTrue);
+    expect(adapter.requests, contains('DELETE /Moonfin/Settings/Profile/desktop'));
+    expect(postCount(), 0);
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:Sports']);
+
+    await service.handleServerEvent(client, {'type': 'settingsUpdated'});
+    expect(adapter.pinActions, ['add']);
+    expect(adapter.savedPins, ['group:News', 'group:Sports']);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), adapter.savedPins);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
+  });
+
   test('turning sync off cancels a reset queued behind a pin upload', () async {
     adapter.responseReady = Completer<void>();
     adapter.responseGate = Completer<void>();

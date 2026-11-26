@@ -1559,6 +1559,7 @@ class PluginSyncService extends ChangeNotifier {
   Future<bool> pullSettingsForProfile(
     MediaServerClient client, {
     required String profile,
+    bool replayPendingPins = true,
   }) async {
     try {
       if (!supportedProfiles.contains(profile)) return false;
@@ -1572,7 +1573,9 @@ class PluginSyncService extends ChangeNotifier {
       // Order the manual pull with pin saves and incoming settings events.
       return await _guidePinSync.synchronized(() async {
         if (!current()) return false;
-        final resolved = await _fetchProfileAndImportGuidePins(client, profile, current: current);
+        final resolved = replayPendingPins
+            ? await _fetchProfileAndImportGuidePins(client, profile, current: current)
+            : await _fetchResolvedProfile(client, profile, allowSync: current);
         if (resolved == null || !current()) return false;
         await _applyServerSettings(client, profile, resolved);
         return true;
@@ -1633,7 +1636,7 @@ class PluginSyncService extends ChangeNotifier {
 
     // Admin defaults, plus the global profile when this was a device one, are
     // what the profile resolves to from here on.
-    await pullSettingsForProfile(client, profile: profile);
+    await pullSettingsForProfile(client, profile: profile, replayPendingPins: false);
 
     return true;
   }
