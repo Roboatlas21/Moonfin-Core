@@ -113,7 +113,9 @@ class _RecordingAdapter implements HttpClientAdapter {
       };
       await holdResponse();
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
-      if (options.data?['liveTvSavedFilterChange'] != null) lastPinRequest = options;
+      final change = options.data?['liveTvSavedFilterChange'];
+      if (change != null) lastPinRequest = options;
+      if (options.data?['profile'] case final Map profile) lastPushedProfile = Map<String, dynamic>.from(profile);
       final filter = options.data?['liveTvSavedFilterChange']?['filter'];
       if (filter != null && filter == rejectedPin) {
         await holdResponse();
@@ -122,6 +124,7 @@ class _RecordingAdapter implements HttpClientAdapter {
       if (options.method == 'POST' && (failPinChanges || (filter != null && filter == unavailablePin))) {
         return ResponseBody.fromString('Temporarily unavailable', 503);
       }
+      if (options.method == 'POST' && supportsPinChanges && change is Map) applyPinChange(change);
       body = {
         if (supportsPinChanges && savedPins != null)
           'liveTvSavedFilters': List<String>.of(savedPins!),
@@ -155,6 +158,12 @@ void main() {
 
   Future<List<String>?> togglePin(String filter) =>
       service.changePinnedGuideFilter(client, filter: filter);
+
+  ({Future<List<String>?> saved, Future<void> local}) editPin(String pin) {
+    final local = Completer<void>();
+    final saved = service.changePinnedGuideFilter(client, filter: pin, onLocalChange: local.complete);
+    return (saved: saved, local: local.future);
+  }
 
   Future<void> settingsUpdated() => service.handleServerEvent(client, {'type': 'settingsUpdated'});
   List<String> getPins() => prefs.get(UserPreferences.liveTvSavedFilters);
@@ -190,24 +199,7 @@ void main() {
     ));
 
     adapter = _RecordingAdapter();
-    final dio = Dio();
-    dio.interceptors.add(InterceptorsWrapper(onRequest: (request, handler) {
-      if (request.method == 'POST' &&
-          request.path.contains('/Settings/Profile/') &&
-          request.data is Map) {
-        final body = request.data as Map;
-        if (body['profile'] case final Map profile) {
-          adapter.lastPushedProfile = Map<String, dynamic>.from(profile);
-        }
-        if (body['liveTvSavedFilterChange'] case final Map change
-            when adapter.supportsPinChanges && !adapter.failPinChanges &&
-                change['filter'] != adapter.unavailablePin && change['filter'] != adapter.rejectedPin) {
-          adapter.applyPinChange(change);
-        }
-      }
-      handler.next(request);
-    }));
-    dio.httpClientAdapter = adapter;
+    final dio = Dio()..httpClientAdapter = adapter;
     service = PluginSyncService(prefs, store, dio: dio);
 
     // Enabled while the plugin still reads unavailable, so this set schedules
@@ -265,12 +257,10 @@ void main() {
     final first = togglePin(filter);
     await adapter.responseReady!.future;
     adapter.rejectedPin = null;
-    final removed = Completer<void>();
-    final remove = service.changePinnedGuideFilter(client, filter: filter, onLocalChange: removed.complete);
-    await removed.future;
-    final added = Completer<void>();
-    final add = service.changePinnedGuideFilter(client, filter: filter, onLocalChange: added.complete);
-    await added.future;
+    final (saved: remove, local: removedChange) = editPin(filter);
+    await removedChange;
+    final (saved: add, local: addedChange) = editPin(filter);
+    await addedChange;
     adapter.responseGate!.complete();
     await Future.wait([first, remove, add]);
     expect(postCount(), 2);
@@ -284,11 +274,8 @@ void main() {
     adapter.pauseResponses();
     final first = togglePin('group:Sports');
     await adapter.responseReady!.future;
-    final local = Completer<void>();
-    final second = service.changePinnedGuideFilter(
-      client, filter: 'group:Sports', onLocalChange: local.complete,
-    );
-    await local.future;
+    final (saved: second, local: localChange) = editPin('group:Sports');
+    await localChange;
     expect(getPins(), isEmpty);
     expect(adapter.pinActions, ['add']);
     adapter.responseGate!.complete();
@@ -302,11 +289,8 @@ void main() {
     adapter.pauseResponses();
     final first = togglePin('group:Sports');
     await adapter.responseReady!.future;
-    final local = Completer<void>();
-    final second = service.changePinnedGuideFilter(
-      client, filter: 'group:News', onLocalChange: local.complete,
-    );
-    await local.future;
+    final (saved: second, local: localChange) = editPin('group:News');
+    await localChange;
     final event = settingsUpdated();
     await prefs.set(UserPreferences.pluginSyncEnabled, false);
     adapter.responseGate!.complete();
@@ -402,65 +386,41 @@ void main() {
     expect(pendingPins(), ['add:group:Sports']);
   });
 
-  test('regular settings updates do not overwrite atomic guide pins', () async {
-    const local = ['group:US | SPORTS, Canada', 'category:sports'];
-    service.resetState();
-    for (final filter in local) {
-      expect(await togglePin(filter), isNull);
-    }
-    expect(await service.refreshAvailability(client), isTrue);
-    await service.pushSettingsForProfile(client, profile: 'desktop');
-    expect(adapter.lastPushedProfile?.containsKey('liveTvSavedFilters'), isFalse);
+  for (final freshProfile in [false, true]) {
+    test('offline guide edits survive a profile push and replay on reconnect (new profile=$freshProfile)', () async {
+      const local = ['group:US | SPORTS, Canada', 'category:sports'];
+      adapter.missingProfileUntilPins = freshProfile;
+      adapter.savedPins = freshProfile ? null : [];
+      service.resetState();
+      expect(await Future.wait(local.map(togglePin)), [null, null]);
+      expect(adapter.requests, isEmpty);
+      expect(pendingPins(), [for (final pin in local) 'add:$pin']);
 
-    expect(await togglePin('group:News'), [...local, 'group:News']);
-    expect(adapter.pinActions, ['add', 'add', 'add']);
-    adapter.savedPins = ['group:News', 'category:movies'];
-    await settingsUpdated();
-    expect(getPins(), adapter.savedPins);
-    // An omitted field leaves cached pins alone. Explicit lists replace them.
-    adapter.savedPins = null;
-    adapter.resolvedProfile = {'liveTvCategoryDisplay': 'groups'};
-    await settingsUpdated();
-    expect(getPins(), ['group:News', 'category:movies']);
-    for (final pins in [
-      ['group:Sports'],
-      ['group:News'],
-      <String>[],
-    ]) {
-      adapter.resolvedProfile = {'liveTvSavedFilters': pins};
+      await service.refreshAvailability(client);
+      await service.pushSettingsForProfile(client, profile: 'desktop');
+      expect(adapter.lastPushedProfile, isNot(contains('liveTvSavedFilters')));
       expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-      expect(getPins(), pins);
-    }
-    expect(adapter.pinActions, ['add', 'add', 'add']);
+      expect(await togglePin('group:News'), [...local, 'group:News']);
+      expect(adapter.pinActions, ['add', 'add', 'add']);
+      expect(adapter.savedPins, getPins());
+      expect(pendingPins(), isEmpty);
 
-    // Even an existing empty server list must accept offline additions.
-    adapter.savedPins = [];
-    service.resetState();
-    expect(await togglePin('group:Local'), isNull);
-    expect(await service.refreshAvailability(client), isTrue);
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(getPins(), ['group:Local']);
-  });
-
-  test('offline pins replay when Moonbase first becomes available', () async {
-    adapter.missingProfileUntilPins = true;
-    service.resetState();
-    expect(await togglePin('group:Sports'), isNull);
-    expect(
-      await Future.wait([togglePin('group:Movies'), togglePin('group:News')]),
-      [null, null],
-    );
-    expect(adapter.requests, isEmpty);
-    expect(pendingPins(), [
-      'add:group:Sports', 'add:group:Movies', 'add:group:News',
-    ]);
-
-    expect(await service.refreshAvailability(client), isTrue);
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.pinActions, ['add', 'add', 'add']);
-    expect(adapter.savedPins, ['group:Sports', 'group:Movies', 'group:News']);
-    expect(pendingPins(), isEmpty);
-  });
+      adapter.savedPins = ['group:News', 'category:movies'];
+      await settingsUpdated();
+      expect(getPins(), adapter.savedPins);
+      adapter.missingProfileUntilPins = false;
+      adapter.savedPins = null;
+      adapter.resolvedProfile = {'liveTvCategoryDisplay': 'groups'};
+      await settingsUpdated();
+      expect(getPins(), ['group:News', 'category:movies']);
+      for (final pins in [['group:Sports'], <String>[]]) {
+        adapter.resolvedProfile = {'liveTvSavedFilters': pins};
+        await service.pullSettingsForProfile(client, profile: 'desktop');
+        expect(getPins(), pins);
+      }
+      expect(adapter.pinActions, ['add', 'add', 'add']);
+    });
+  }
 
   test('legacy and failing Moonbase writes preserve pins until recovery', () async {
     adapter.supportsPinChanges = false;
@@ -490,40 +450,31 @@ void main() {
     expect(pendingPins(), isEmpty);
   });
 
-  test('offline edits preserve unrelated pins added by another device', () async {
-    adapter.savedPins = ['group:Sports', 'group:News'];
+  test('reconnecting replays the last local choice and keeps edits made on another device', () async {
+    adapter.savedPins = ['group:Sports', 'group:Kids'];
     await settingsUpdated();
-    service.resetState();
+    adapter.failPinChanges = true;
     expect(await togglePin('group:Sports'), isNull);
-    expect(await togglePin('group:Movies'), isNull);
-    adapter.savedPins!.add('group:Kids');
-
-    expect(await service.refreshAvailability(client), isTrue);
-    expect(await service.pullSettingsForProfile(client, profile: 'desktop'), isTrue);
-    expect(adapter.pinActions, ['remove', 'add']);
-    expect(adapter.savedPins, ['group:News', 'group:Kids', 'group:Movies']);
-    expect(getPins(), adapter.savedPins);
-    expect(pendingPins(), isEmpty);
-  });
-
-  test('replay keeps the last choice per group and retires confirmed edits', () async {
+    expect(getPins(), ['group:Kids']);
+    expect(pendingPins(), ['remove:group:Sports']);
     service.resetState();
-    await togglePin('group:Sports');
-    await togglePin('group:Sports');
-    await togglePin('group:Sports');
-    await togglePin('group:News');
-    expect(pendingPins(),
-        ['add:group:Sports', 'add:group:News']);
+    for (var tap = 0; tap < 3; tap++) { await togglePin('group:Movies'); }
+    expect(pendingPins(), ['remove:group:Sports', 'add:group:Movies']);
+    adapter.savedPins!.add('group:News');
+    adapter.failPinChanges = false;
+    adapter.unavailablePin = 'group:Movies';
     await service.refreshAvailability(client);
-    adapter.unavailablePin = 'group:News';
     await service.pullSettingsForProfile(client, profile: 'global');
-    expect(pendingPins(), ['add:group:News']);
-    expect(getPins(), ['group:Sports', 'group:News']);
-    adapter.savedPins!.remove('group:Sports'); // Another device unpins it.
+    expect(pendingPins(), ['add:group:Movies']);
+    expect(getPins(), contains('group:Movies'));
+
+    adapter.savedPins!.add('group:Sports'); // Someone else re-pins it after our removal was confirmed.
     adapter.unavailablePin = null;
-    await service.pullSettingsForProfile(client, profile: 'global');
-    expect(adapter.savedPins, ['group:News']);
-    expect(getPins(), adapter.savedPins);
+    await settingsUpdated();
+    expect(adapter.pinActions, ['remove', 'add']);
+    expect(getPins(), ['group:Kids', 'group:News', 'group:Sports', 'group:Movies']);
+    expect(adapter.savedPins, getPins());
+    expect(pendingPins(), isEmpty);
   });
 
   test('removing an over-limit local pin does not queue a server edit', () async {
@@ -550,21 +501,6 @@ void main() {
     expect(pendingPins(), isEmpty);
   });
 
-  test('failed pin POST keeps the intended removal pending', () async {
-    adapter.savedPins = ['group:Sports'];
-    await settingsUpdated();
-    adapter.failPinChanges = true;
-    expect(await togglePin('group:Sports'), isNull);
-    expect(getPins(), isEmpty);
-    expect(pendingPins(),
-        ['remove:group:Sports']);
-
-    adapter.failPinChanges = false;
-    await settingsUpdated();
-    expect(adapter.savedPins, isEmpty);
-    expect(pendingPins(), isEmpty);
-  });
-
   test('queued pin replies cannot overwrite newer settings or another account', () async {
     adapter.savedPins = [];
     adapter.pauseResponses();
@@ -584,11 +520,8 @@ void main() {
     adapter.pauseResponses();
     final stale = togglePin('group:Movies');
     await adapter.responseReady!.future;
-    final local = Completer<void>();
-    final queued = service.changePinnedGuideFilter(
-      client, filter: 'group:Kids', onLocalChange: local.complete,
-    );
-    await local.future;
+    final (saved: queued, local: localChange) = editPin('group:Kids');
+    await localChange;
     final rejected = expectLater(stale, throwsA(isA<StateError>()));
     final queuedRejected = expectLater(queued, throwsA(isA<StateError>()));
     when(() => client.userId).thenReturn('other');
@@ -602,45 +535,33 @@ void main() {
     expect(adapter.pinActions, ['add', 'add']);
   });
 
-  test('settings events wait for the sign-in pin snapshot to apply', () async {
-    adapter.savedPins = ['group:Sports'];
-    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
-    adapter.pauseResponses();
-    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
-    await adapter.responseReady!.future;
-    final event = settingsUpdated();
-    await Future<void>.delayed(Duration.zero);
-    // The event must not fetch and apply a competing profile during sign-in.
-    expect(resolvedCount(), 1);
-    adapter.responseGate!.complete();
-    await signingIn;
-    await event;
-    expect(getPins(), ['group:Sports']);
-  });
-
-  test('pin edits wait for sign-in through the active client wrapper', () async {
-    final active = _MockConnectivityAwareClient();
-    when(() => active.onlineClient).thenReturn(client);
-    await GetIt.instance.unregister<MediaServerClient>();
-    GetIt.instance.registerSingleton<MediaServerClient>(active);
-    adapter.resolvedProfile = {'use24HourClock': true};
-    adapter.savedPins = ['group:Sports'];
-    await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
-    adapter.pauseResponses();
-    final signingIn = service.syncOnLogin(client, serverId: 'srv1');
-    await adapter.responseReady!.future;
-    // No local pins until the sign-in snapshot is applied. Toggling Sports
-    // must remove the server pin, not add it from the empty local cache.
-    final remove = togglePin('group:Sports');
-    expect(adapter.pinActions, isEmpty);
-    adapter.responseGate!.complete();
-    await signingIn;
-    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
-    expect(await remove, isEmpty);
-    expect(adapter.pinActions, ['remove']);
-    expect(getPins(), isEmpty);
-    service.resetState();
-  });
+  for (final edit in [false, true]) {
+    test('a ${edit ? 'pin edit' : 'settings event'} during sign-in waits for the server snapshot', () async {
+      final active = _MockConnectivityAwareClient();
+      when(() => active.onlineClient).thenReturn(client);
+      await GetIt.instance.unregister<MediaServerClient>();
+      GetIt.instance.registerSingleton<MediaServerClient>(active);
+      adapter.resolvedProfile = {'use24HourClock': true};
+      adapter.savedPins = ['group:Sports'];
+      await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
+      adapter.pauseResponses();
+      final signingIn = service.syncOnLogin(client, serverId: 'srv1');
+      await adapter.responseReady!.future;
+      final remove = edit ? togglePin('group:Sports') : null;
+      final event = edit ? null : settingsUpdated();
+      await Future<void>.delayed(Duration.zero);
+      expect(resolvedCount(), 1);
+      expect(adapter.pinActions, isEmpty);
+      adapter.responseGate!.complete();
+      await signingIn;
+      await event;
+      if (edit) expect(await remove, isEmpty);
+      expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+      expect(adapter.pinActions, edit ? ['remove'] : isEmpty);
+      expect(getPins(), edit ? isEmpty : ['group:Sports']);
+      service.resetState();
+    });
+  }
 
   test('only changed, forced, or reset settings push again', () async {
     await service.pushSettingsForProfile(client, profile: 'desktop');

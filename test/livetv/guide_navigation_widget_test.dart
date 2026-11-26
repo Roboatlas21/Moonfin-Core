@@ -381,6 +381,14 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  final picker = find.byType(GuideFilterPicker);
+  const phone = Size(390, 844);
+  Future<void> tapAndPump(WidgetTester tester, Finder target) async {
+    await tester.tap(target);
+    await _pumpFrames(tester);
+  }
+  Finder pickerOption(String name) => find.descendant(of: picker, matching: find.text(name));
+
   LiveTvGuideViewModel guideModel(WidgetTester tester) =>
       (tester.state(find.byType(LiveTvGuideScreen)) as dynamic).debugGuideViewModel as LiveTvGuideViewModel;
 
@@ -420,27 +428,35 @@ void main() {
     ).guideWindow;
   }
 
-  testWidgets('Right retries a failed page without moving remote focus', (tester) async {
-    useTvLayout();
-    await pumpGuide(tester);
-    // Row 4 has one program spanning the visible window.
-    final cell = _nodeLabelled(tester, 'GuideProgramRow4:0');
-    cell.requestFocus();
-    await _pumpFrames(tester);
-    final range = _windowRangeText(tester);
-    final notice = find.textContaining('Couldn’t load');
+  for (final hour in [12, 23]) {
+    testWidgets('Right retries a failed page from $hour:45 without moving remote focus', (tester) async {
+      useTvLayout();
+      await pumpGuide(tester);
+      final today = DateTime.now();
+      _fixtureWindowStart = DateTime(today.year, today.month, today.day + 1, hour, 45);
+      await guideModel(tester).setWindowStart(_fixtureWindowStart);
+      await _pumpFrames(tester);
 
-    guideFailure = Exception('offline');
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
-    expect(_windowRangeText(tester), range);
-    expect(FocusManager.instance.primaryFocus, same(cell));
-    expect(notice, findsOneWidget);
+      // Row 4 has one program spanning the visible window.
+      final cell = _nodeLabelled(tester, 'GuideProgramRow4:0');
+      cell.requestFocus();
+      await _pumpFrames(tester);
+      final range = _windowRangeText(tester);
+      final notice = find.textContaining('Couldn’t load');
 
-    guideFailure = null;
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
-    expect(_windowRangeText(tester), isNot(range));
-    expect(notice, findsNothing);
-  });
+      guideFailure = Exception('offline');
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+      expect(_windowRangeText(tester), range);
+      expect(FocusManager.instance.primaryFocus, same(cell));
+      final message = tester.widget<Text>(notice).data!;
+      expect(message, matches(hour == 12 ? r'Couldn’t load \d{1,2}:\d{2}' : r'Couldn’t load [A-Z][a-z]{2},'));
+
+      guideFailure = null;
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+      expect(_windowRangeText(tester), isNot(range));
+      expect(notice, findsNothing);
+    });
+  }
 
   for (final timing in ['before', 'after']) {
     testWidgets('paging uses the original width when restored $timing a resize failure', (tester) async {
@@ -471,76 +487,49 @@ void main() {
     });
   }
 
-  testWidgets('resize survives a reload before the layout callback runs', (
-    tester,
-  ) async {
-    await pumpGuide(tester);
-    final vm = guideModel(tester);
-    final original = vm.guideWindow;
-    const wider = Size(1700, 700);
-    final expected = resizedGuideWindow(wider);
-    expect(expected, isNot(original));
-
-    final channels = Completer<Map<String, dynamic>>();
-    when(() => _channelsRequest(liveTvApi)).thenAnswer((_) => channels.future);
-
-    // Registered before the frame: the reload starts after layout queues
-    // its resize, but before the resize callback can apply it.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(vm.load(window: original, windowStart: vm.windowStart));
-    });
-    tester.view.physicalSize = wider;
-    await tester.pump();
-    expect(vm.state, GuideState.loading);
-
-    channels.complete({
-      'Items': [for (var i = 0; i < channelCount; i++) _channelRaw(i)],
-    });
-    await _pumpFrames(tester);
-    expect(vm.state, GuideState.ready);
-    expect(vm.guideWindow, expected);
-  });
-
-  testWidgets('resize retries when a reload wins while its request is pending', (
-    tester,
-  ) async {
-    await pumpGuide(tester);
-    final vm = guideModel(tester);
-    final original = vm.guideWindow;
-    const wider = Size(1700, 700);
-    final expected = resizedGuideWindow(wider);
-    expect(expected, isNot(original));
-
-    final heldResize = Completer<Map<String, dynamic>>();
-    var firstResizePending = true;
-    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) {
-      final from = inv.namedArguments[#startDate] as DateTime;
-      final to = inv.namedArguments[#endDate] as DateTime;
-      if (firstResizePending && to.difference(from) == expected) {
-        firstResizePending = false;
-        return heldResize.future;
+  for (final reloadDuringRequest in [false, true]) {
+    testWidgets('a guide reload during resize finishes at the visible width (request pending=$reloadDuringRequest)', (tester) async {
+      await pumpGuide(tester);
+      final vm = guideModel(tester);
+      final original = vm.guideWindow;
+      const wider = Size(1700, 700);
+      final expected = resizedGuideWindow(wider);
+      expect(expected, isNot(original));
+      if (reloadDuringRequest) {
+        final held = Completer<Map<String, dynamic>>();
+        var waiting = false;
+        when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
+          final from = inv.namedArguments[#startDate] as DateTime;
+          final to = inv.namedArguments[#endDate] as DateTime;
+          if (!waiting && to.difference(from) == expected) {
+            waiting = true;
+            return held.future;
+          }
+          final ids = (inv.namedArguments[#channelIds] as List).cast<String>();
+          return {'Items': [for (final id in ids) ..._programsFor(id)]};
+        });
+        tester.view.physicalSize = wider;
+        await _pumpFrames(tester);
+        expect(waiting, isTrue);
+        await vm.load(window: original, windowStart: vm.windowStart);
+        expect(vm.guideWindow, original);
+        held.complete({'Items': []});
+      } else {
+        final channels = Completer<Map<String, dynamic>>();
+        when(() => _channelsRequest(liveTvApi)).thenAnswer((_) => channels.future);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          unawaited(vm.load(window: original, windowStart: vm.windowStart));
+        });
+        tester.view.physicalSize = wider;
+        await tester.pump();
+        expect(vm.state, GuideState.loading);
+        channels.complete({'Items': [for (var i = 0; i < channelCount; i++) _channelRaw(i)]});
       }
-      final ids = (inv.namedArguments[#channelIds] as List).cast<String>();
-      return Future.value({
-        'Items': [for (final id in ids) ..._programsFor(id)],
-      });
+      await _pumpFrames(tester);
+      expect(vm.state, GuideState.ready);
+      expect(vm.guideWindow, expected);
     });
-
-    tester.view.physicalSize = wider;
-    await _pumpFrames(tester);
-    expect(firstResizePending, isFalse);
-    expect(vm.guideWindow, original);
-
-    // The older-size reload finishes while the resize request is still
-    // pending. The callback must notice that the resize never committed.
-    await vm.load(window: original, windowStart: vm.windowStart);
-    expect(vm.state, GuideState.ready);
-    expect(vm.guideWindow, original);
-
-    heldResize.complete({'Items': <dynamic>[]});
-    await _pumpFrames(tester);
-    expect(vm.guideWindow, expected);
-  });
+  }
 
   for (final layout in [InterfaceLayout.tv, InterfaceLayout.phone]) {
     testWidgets('empty and partly loaded categories can retry on ${layout.name}', (
@@ -660,15 +649,8 @@ void main() {
       ),
     );
     await _pumpFrames(tester);
-    await tester.tap(find.byTooltip('Filters'));
-    await _pumpFrames(tester);
-    await tester.tap(
-      find.descendant(
-        of: find.byType(GuideFilterPicker),
-        matching: find.text('Local'),
-      ),
-    );
-    await _pumpFrames(tester);
+    await tapAndPump(tester, find.byTooltip('Filters'));
+    await tapAndPump(tester, pickerOption('Local'));
     // The TV field's internal TextField is read-only outside its keyboard.
     // The TV keyboard commits text through the LocalSearchField controller.
     tester.widget<LocalSearchField>(
@@ -683,19 +665,9 @@ void main() {
     await focusGuideNode(tester, 'GuideChannel:0');
     await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
     expect(lineup.map((channel) => channel.id), ['ch46', 'ch47']);
-    final visible = tester
-        .widgetList<EpgChannelCell>(find.byType(EpgChannelCell).hitTestable())
-        .map((w) => w.name)
-        .toList();
-    final other = visible.firstWhere(
-      (name) => name != 'Channel 46' && name != 'Channel 47',
-    );
-    final node = find
-        .byWidgetPredicate((w) => w is EpgChannelCell && w.name == other)
-        .hitTestable()
-        .first;
-    await tester.tap(node);
-    await _pumpFrames(tester);
+    final outsideLineup = find.byWidgetPredicate((w) =>
+        w is EpgChannelCell && w.name != 'Channel 46' && w.name != 'Channel 47');
+    await tapAndPump(tester, outsideLineup.hitTestable().first);
     expect(picked, isNotNull);
     expect(lineup.map((channel) => channel.id), isNot(contains(picked)));
   });
@@ -710,7 +682,7 @@ void main() {
       if (ids.length == 1) return {'Items': _programsFor(ids.single)};
       return {'Items': _programsFor('ch1'), 'FailedChannelIds': ['ch0']};
     });
-    await pumpGuide(tester, surface: const Size(390, 844));
+    await pumpGuide(tester, surface: phone);
     final retry = find.descendant(of: find.byType(EpgNowNextCard), matching: find.text('Retry'));
     final node = Focus.of(tester.element(retry));
     node.requestFocus();
@@ -735,21 +707,16 @@ void main() {
         'ch1': {'Sports'},
         'ch47': {'US | PRIME'},
       }));
-    await pumpGuide(tester, surface: const Size(390, 844));
+    await pumpGuide(tester, surface: phone);
     await tester.enterText(find.byType(TextField), 'Channel 4');
     await tester.pump(const Duration(milliseconds: 220));
     await _pumpFrames(tester);
     expect(find.byType(EpgNowNextCard), findsWidgets);
 
-    await tester.tap(find.byTooltip('Filters'));
-    await _pumpFrames(tester);
-    final picker = find.byType(GuideFilterPicker);
+    await tapAndPump(tester, find.byTooltip('Filters'));
     expect(picker, findsOneWidget);
     expect(tester.getSize(picker).width, 390);
-    await tester.tap(
-      find.descendant(of: picker, matching: find.text('US | PRIME')),
-    );
-    await _pumpFrames(tester);
+    await tapAndPump(tester, pickerOption('US | PRIME'));
     expect(picker, findsNothing);
     expect(find.text('Channel 47'), findsOneWidget);
   });
@@ -771,7 +738,6 @@ void main() {
     await openGuideRoute(tester);
     await focusGuideNode(tester, 'GuideChannel:0');
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
-    final picker = find.byType(GuideFilterPicker);
     expect(picker, findsOneWidget);
     tester.widget<ListTile>(
       find.widgetWithText(ListTile, 'Sports'),
@@ -824,7 +790,6 @@ void main() {
     await pumpGuide(tester);
     await focusGuideNode(tester, 'GuideChannel:0');
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
-    final picker = find.byType(GuideFilterPicker);
     Finder rows() => find.descendant(
       of: picker,
       matching: find.widgetWithText(ListTile, 'CA| SPORTS'),
@@ -897,13 +862,8 @@ void main() {
     await _holdSelect(tester);
     expect(isFavorite(), isTrue);
     when(() => api.unmarkFavorite('ch0')).thenAnswer((_) async {});
-    await tester.tap(find.byTooltip('Filters'));
-    await _pumpFrames(tester);
-    await tester.tap(find.descendant(
-      of: find.byType(GuideFilterPicker),
-      matching: find.text('Favorites'),
-    ));
-    await _pumpFrames(tester);
+    await tapAndPump(tester, find.byTooltip('Filters'));
+    await tapAndPump(tester, pickerOption('Favorites'));
     expect(isFavorite(), isTrue);
     await focusGuideNode(tester, 'GuideChannel:0');
     await _holdSelect(tester);
@@ -933,101 +893,24 @@ void main() {
     }
   }
 
-  /// Asserts the measured on-device regression: after [presses] DOWN presses
-  /// the horizontal viewport is byte-for-byte where it started and the
-  /// selection is still on the cell holding the anchor. Six presses drifted by
-  /// about an hour. Forty-five collapsed onto the row's first cell.
-  Future<void> expectNoDrift(WidgetTester tester, int presses) async {
+  testWidgets('browsing down the guide and back up keeps the same time in view', (tester) async {
     await pumpGuide(tester);
-    final anchorMinutes = await establishAnchor(tester);
-    final before = _horizontalOffsets(tester);
-    expect(before, isNotEmpty);
-
-    await pressDown(tester, presses);
-
-    expect(_horizontalOffsets(tester), before);
-
-    // Without this the offset check alone would pass on a guide that never
-    // moved at all, which isn't what the regression was about.
-    final focused = _focusedCell();
-    expect(focused, isNotNull, reason: 'focus left the grid');
-    expect(focused!.row, presses);
-    expect(
-      focused.index,
-      _cellIndexForRow(presses, anchorMinutes),
-      reason: 'the selection drifted away from the anchor in time',
-    );
-  }
-
-  testWidgets('six DOWN presses leave the horizontal offset untouched', (
-    tester,
-  ) async {
-    await expectNoDrift(tester, 6);
-  });
-
-  testWidgets('forty-five DOWN presses leave the horizontal offset untouched', (
-    tester,
-  ) async {
-    await expectNoDrift(tester, 45);
-  });
-
-  testWidgets('every row visited selects the cell holding the anchor', (
-    tester,
-  ) async {
-    await pumpGuide(tester);
-    final anchorMinutes = await establishAnchor(tester);
-
-    for (var step = 1; step <= 12; step++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.pumpAndSettle();
-
-      final focused = _focusedCell();
-      expect(focused, isNotNull, reason: 'focus left the grid at step $step');
-      expect(focused!.row, step);
-      expect(
-        focused.index,
-        _cellIndexForRow(step, anchorMinutes),
-        reason: 'row $step drifted away from the anchor',
-      );
-    }
-  });
-
-  testWidgets('focus is never null across a long vertical sequence', (
-    tester,
-  ) async {
-    await pumpGuide(tester);
-    await establishAnchor(tester);
-
-    for (var i = 0; i < 20; i++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.pumpAndSettle();
-      expect(_focusedCell(), isNotNull);
-    }
-    for (var i = 0; i < 20; i++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-      await tester.pumpAndSettle();
-      expect(FocusManager.instance.primaryFocus, isNotNull);
-    }
-  });
-
-  testWidgets('landing on a clipped cell and on an oversized cell does not '
-      'scroll', (tester) async {
-    await pumpGuide(tester);
-    final anchorMinutes = await establishAnchor(tester);
-    final before = _horizontalOffsets(tester);
-
-    // Row 3's hour-long cell around the anchor extends past the viewport's
-    // right edge. Row 4 is a single cell wider than the viewport.
-    for (var step = 1; step <= 4; step++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      await tester.pumpAndSettle();
-      expect(_horizontalOffsets(tester), before, reason: 'row $step scrolled');
+    final anchor = await establishAnchor(tester);
+    final offset = _horizontalOffsets(tester);
+    expect(offset, isNotEmpty);
+    Future<void> move(LogicalKeyboardKey key, int row) async {
+      await _sendKeyAndPump(tester, key);
+      expect(_horizontalOffsets(tester), offset, reason: 'horizontal scroll changed on row $row');
+      expect(_focusedCell(), (row: row, index: _cellIndexForRow(row, anchor)));
     }
 
-    final focused = _focusedCell();
-    expect(focused, isNotNull);
-    expect(focused!.row, 4);
-    expect(focused.index, _cellIndexForRow(4, anchorMinutes));
+    // Includes clipped and oversized programs and the long scroll that used to drift.
+    for (var row = 1; row <= 45; row++) {
+      await move(LogicalKeyboardKey.arrowDown, row);
+    }
+    for (var row = 44; row >= 25; row--) {
+      await move(LogicalKeyboardKey.arrowUp, row);
+    }
   });
 
   /// Pumps a lineup one batch longer than the loader fetches, walks focus to

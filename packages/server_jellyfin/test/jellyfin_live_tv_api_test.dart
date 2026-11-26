@@ -38,82 +38,39 @@ class _Capture extends Interceptor {
 }
 
 void main() {
-  test(
-    'a missing groups endpoint is remembered only for that server and user',
-    () async {
-      final dio = Dio(BaseOptions(baseUrl: 'https://one.test'));
-      var now = DateTime.utc(2026, 11, 18);
-      final statuses = [404, 503, 200, 200, 200];
-      dio.interceptors.add(
-        InterceptorsWrapper(
-          onRequest: (request, handler) {
-            final status = statuses.removeAt(0);
-            final response = Response(
-              requestOptions: request,
-              statusCode: status,
-              data: {'supported': false, 'channels': []},
-            );
-            if (status == 200) {
-              handler.resolve(response);
-            } else {
-              handler.reject(
-                DioException.badResponse(
-                  statusCode: status,
-                  requestOptions: request,
-                  response: response,
-                ),
-              );
-            }
-          },
-        ),
-      );
-      final api = JellyfinLiveTvApi(dio, now: () => now);
-      Future<bool> groupsAvailable(String userId) async =>
-          (await api.getChannelGroups(userId: userId)).endpointAvailable;
-
-      expect(await groupsAvailable('one'), isFalse);
-      expect(await groupsAvailable('one'), isFalse);
-      await expectLater(groupsAvailable('two'), throwsA(isA<DioException>()));
-      expect(await groupsAvailable('two'), isTrue);
-      dio.options.baseUrl = 'https://two.test';
-      expect(await groupsAvailable('one'), isTrue);
-      now = now.add(const Duration(minutes: 5));
-      dio.options.baseUrl = 'https://one.test';
-      expect(await groupsAvailable('one'), isTrue);
-      expect(statuses, isEmpty);
-    },
-  );
-
-  test('an older 404 cannot hide a working groups endpoint', () async {
+  test('the guide retries missing groups per viewer and server, including after a late 404', () async {
     final dio = Dio(BaseOptions(baseUrl: 'https://one.test'));
+    final late404 = Completer<int>();
     final started = Completer<void>();
-    final release = Completer<void>();
-    var requests = 0;
+    final replies = <FutureOr<int>>[404, 503, 200, 200, 200, late404.future, 200, 200];
     dio.interceptors.add(InterceptorsWrapper(onRequest: (request, handler) async {
-      if (++requests == 1) {
-        started.complete();
-        await release.future;
-        handler.reject(DioException.badResponse(
-          statusCode: 404,
-          requestOptions: request,
-          response: Response(requestOptions: request, statusCode: 404),
-        ));
-        return;
-      }
-      handler.resolve(Response(
-        requestOptions: request,
-        statusCode: 200,
-        data: {'supported': true, 'channels': []},
-      ));
+      final next = replies.removeAt(0);
+      if (next == late404.future) started.complete();
+      final status = await next;
+      final response = Response(requestOptions: request, statusCode: status, data: {'supported': true, 'channels': []});
+      if (status == 200) return handler.resolve(response);
+      handler.reject(DioException.badResponse(statusCode: status, requestOptions: request, response: response));
     }));
-    final api = JellyfinLiveTvApi(dio);
-    final older = api.getChannelGroups(userId: 'viewer');
+    var now = DateTime.utc(2026, 11, 18);
+    final api = JellyfinLiveTvApi(dio, now: () => now);
+    Future<bool> available(String viewer) async => (await api.getChannelGroups(userId: viewer)).endpointAvailable;
+    expect(await available('one'), isFalse);
+    expect(await available('one'), isFalse);
+    await expectLater(available('two'), throwsA(isA<DioException>()));
+    expect(await available('two'), isTrue);
+    dio.options.baseUrl = 'https://two.test';
+    expect(await available('one'), isTrue);
+    now = now.add(const Duration(minutes: 5));
+    dio.options.baseUrl = 'https://one.test';
+    expect(await available('one'), isTrue);
+
+    final stale = available('one');
     await started.future;
-    expect((await api.getChannelGroups(userId: 'viewer')).endpointAvailable, isTrue);
-    release.complete();
-    expect((await older).endpointAvailable, isFalse);
-    expect((await api.getChannelGroups(userId: 'viewer')).endpointAvailable, isTrue);
-    expect(requests, 3);
+    expect(await available('one'), isTrue);
+    late404.complete(404);
+    expect(await stale, isFalse);
+    expect(await available('one'), isTrue);
+    expect(replies, isEmpty);
   });
 
   group('JellyfinLiveTvApi.getGuide /LiveTv/Programs transport', () {

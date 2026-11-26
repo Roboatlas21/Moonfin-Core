@@ -39,6 +39,21 @@ void main() {
   late HomeViewModel model;
   late UserPreferences prefs;
 
+  HomeViewModel homeFor(MediaServerClient client) {
+    when(() => client.userId).thenReturn('user');
+    when(() => client.baseUrl).thenReturn('http://server.test');
+    final mediaBar = _MockMediaBar();
+    when(() => mediaBar.load(force: any(named: 'force')))
+        .thenAnswer((_) async {});
+    return HomeViewModel(
+      dataSource: source,
+      prefs: prefs,
+      client: client,
+      mediaBarViewModel: mediaBar,
+      multiServerRepo: _MockMultiServer(),
+    );
+  }
+
   setUp(() async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     SharedPreferences.setMockInitialValues({});
@@ -62,18 +77,8 @@ void main() {
 
     source = _MockDataSource();
     final client = _MockClient();
-    when(() => client.userId).thenReturn('user');
-    when(() => client.baseUrl).thenReturn('http://server.test');
-    final mediaBar = _MockMediaBar();
-    when(() => mediaBar.load(force: any(named: 'force')))
-        .thenAnswer((_) async {});
-    model = HomeViewModel(
-      dataSource: source,
-      prefs: prefs,
-      client: client,
-      mediaBarViewModel: mediaBar,
-      multiServerRepo: _MockMultiServer(),
-    );
+    model = homeFor(client);
+
   });
 
   tearDown(() async {
@@ -242,31 +247,20 @@ void main() {
     },
   );
 
-  test('failed On Now listings do not hide favorite channels', () async {
-    await enableSections({HomeSectionType.liveTv});
-    stubLiveTvRows();
-    when(() => source.loadOnNow('http://server.test'))
-        .thenAnswer((_) async => throw Exception('EPG unavailable'));
-    stubFavoriteChannel();
-
-    await model.load();
-
-    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvFavorites']);
-    verify(() => source.loadFavoritesChannels('http://server.test')).called(1);
-  });
-
-  test('Kids Mode hides every Live TV row without removing saved rows', () async {
+  test('returning from Kids Mode restores live rows even when listings go offline', () async {
     await enableSections({HomeSectionType.liveTv});
     stubLiveTvRows();
     stubFavoriteChannel();
     await model.load();
     final ids = model.rows.map((row) => row.id).toList();
     expect(ids, ['liveTv', 'liveTvOnNow', 'liveTvFavorites']);
-
     await prefs.set(UserPreferences.kidsModeEnabled, true);
     expect(model.rows, isEmpty);
     await prefs.set(UserPreferences.kidsModeEnabled, false);
     expect(model.rows.map((row) => row.id), ids);
+    when(() => source.loadOnNow('http://server.test')).thenThrow(Exception('EPG unavailable'));
+    await model.load();
+    expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvFavorites']);
   });
 
   test(
@@ -313,23 +307,11 @@ void main() {
         serverClient = _MockClient();
       }
       when(() => serverClient.serverType).thenReturn(serverType);
-      when(() => serverClient.userId).thenReturn('user');
-      when(() => serverClient.baseUrl).thenReturn('http://server.test');
-
       var favorites = <AggregatedItem>[];
       when(() => source.loadFavoritesChannels('http://server.test'))
           .thenAnswer((_) async => favoriteChannels(List.of(favorites)));
       model.dispose();
-      final mediaBar = _MockMediaBar();
-      when(() => mediaBar.load(force: any(named: 'force')))
-          .thenAnswer((_) async {});
-      model = HomeViewModel(
-        dataSource: source,
-        prefs: prefs,
-        client: serverClient,
-        mediaBarViewModel: mediaBar,
-        multiServerRepo: _MockMultiServer(),
-      );
+      model = homeFor(serverClient);
       await model.load();
       expect(model.rows.any((r) => r.rowType == HomeRowType.liveTvFavorites), isFalse);
 

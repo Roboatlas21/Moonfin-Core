@@ -232,38 +232,25 @@ void main() {
     expect(movieResults(vm), [('a1', 'a')]);
   });
 
-  test('channel matches survive an outage of all library searches', () async {
+  test('during a library outage channel search still finds stations and updates favorites on the right server', () async {
     for (final api in itemsApis.values) {
-      when(() => itemsSearch(api)).thenThrow(StateError('offline'));
+      when(() => itemsSearch(api)).thenThrow(StateError('library offline'));
     }
-    final channelsApi = clients['a']!.liveTvApi;
-    when(() => channelsApi.getChannels(
-      fields: 'ImageTags',
-      enableTotalRecordCount: false,
-      userId: 'user-a',
-    )).thenAnswer((_) async => {
-      'Items': [{'Id': 'alien-channel', 'Type': 'TvChannel', 'Name': 'Alien News'}],
-    });
-
-    final vm = await search(across: multiServer);
-    expect(vm.state, SearchState.ready);
-    expect(vm.results.single.items.single.id, 'alien-channel');
-    expect(vm.results.single.items.single.name, 'Alien News');
-  });
-
-
-
-  test('channel favorites update existing and subsequent search results', () async {
-    for (final id in clients.keys) {
-      when(() => itemsSearch(itemsApis[id]!)).thenAnswer((_) async => {'Items': []});
+    void publishStation(String id) {
       final channels = clients[id]!.liveTvApi;
-      when(() => channels.getChannels(
-        fields: 'ImageTags', enableTotalRecordCount: false, userId: 'user-$id',
-      )).thenAnswer((_) async => {
-        'Items': [{'Id': 'news', 'Type': 'TvChannel', 'Name': 'Alien News'}],
-      });
+      when(() => channels.getChannels(fields: 'ImageTags', enableTotalRecordCount: false, userId: 'user-$id'))
+          .thenAnswer((_) async => {'Items': [{'Id': 'news', 'Type': 'TvChannel', 'Name': 'Alien News'}]});
     }
-    final vm = await search(query: 'Alien', across: multiServer);
+    publishStation('a');
+    final result = await search(across: multiServer);
+    expect(result.state, SearchState.ready);
+    expect(result.results.single.items.single.name, 'Alien News');
+    publishStation('b');
+    final vm = await search(across: multiServer);
+    Future<void> searchAgain(String term) async {
+      vm.searchImmediate(term);
+      while (vm.state == SearchState.loading) { await pumpEventQueue(); }
+    }
     Map<String, bool> favorites() => {
       for (final item in vm.results.single.items) item.serverId: item.isFavorite,
     };
@@ -274,10 +261,7 @@ void main() {
     await ItemMutationRepository(clients['a']!).setFavorite('news', isFavorite: true, isChannel: true);
     expect(favorites(), {'a': true, 'b': false});
 
-    vm.searchImmediate('News');
-    while (vm.state == SearchState.loading) {
-      await pumpEventQueue();
-    }
+    await searchAgain('News');
     expect(favorites(), {'a': true, 'b': false});
   });
 

@@ -258,25 +258,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
   }
 
-  for (final apple in [false, true]) {
-    testWidgets('Live TV sends the saved account ID to playback (Apple TV: $apple)', (tester) async {
-      final client = GetIt.instance<MediaServerClient>();
-      when(() => client.baseUrl).thenReturn('https://plex.tv');
-      final factory = _Factory();
-      when(() => factory.serverIdOf(client)).thenReturn('plex-cloud-viewer');
-      GetIt.instance.registerSingleton<MediaServerClientFactory>(factory);
-      if (apple) {
-        await tester.pumpWidget(MaterialApp(
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-          home: const AppleTvLiveTvPlayerHostScreen(channels: [ard], startIndex: 0),
-        ));
-        await tester.pump();
-      } else {
-        await pumpPlayer(tester, channels: const [ard]);
-      }
-      expect(manager.playedServerId, 'plex-cloud-viewer');
-      await tester.pumpWidget(const SizedBox());
-    });
+  void useSavedPlexAccount() {
+    final client = GetIt.instance<MediaServerClient>();
+    when(() => client.baseUrl).thenReturn('https://plex.tv');
+    final factory = _Factory();
+    when(() => factory.serverIdOf(client)).thenReturn('plex-cloud-viewer');
+    GetIt.instance.registerSingleton<MediaServerClientFactory>(factory);
   }
 
   Future<void> hideControls(WidgetTester tester) async {
@@ -290,6 +277,7 @@ void main() {
   }
 
   testWidgets('native guide shares the starting tune and adopts the selected lineup after Retry', (tester) async {
+    useSavedPlexAccount();
     final messenger = tester.binding.defaultBinaryMessenger;
     const events = MethodChannel('moonfin/native_apple_player_events');
     const control = MethodChannel('moonfin/native_apple_player_control');
@@ -318,46 +306,46 @@ void main() {
 
     manager.failedChannel = ard.id;
     manager.failedTune = Completer<void>();
-    await pumpHost([ard]);
-    await send({'event': 'openGuide'});
-    await tester.pumpAndSettle();
     final guide = find.byType(LiveTvGuideScreen);
+    Future<void> openGuide() async {
+      await send({'event': 'openGuide'});
+      await tester.pumpAndSettle();
+    }
+    Future<void> leaveGuide([String? id]) async {
+      Navigator.of(tester.element(guide)).pop(id);
+      await tester.pumpAndSettle();
+    }
+    await pumpHost([ard]);
+    expect(manager.playedServerId, 'plex-cloud-viewer');
+    await openGuide();
     tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(ard.id, const [ard]);
-    Navigator.of(tester.element(guide)).pop(ard.id);
-    await tester.pumpAndSettle();
+    await leaveGuide(ard.id);
     manager.failedChannel = null;
     manager.failedTune!.complete();
     await tester.pumpAndSettle();
     expect(manager.playedChannelIds, [ard.id]);
 
-    await send({'event': 'openGuide'});
-    await tester.pumpAndSettle();
+    await openGuide();
     const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
     tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(zdf.id, const [zdf, third]);
     manager.failedChannel = zdf.id;
-    Navigator.of(tester.element(guide)).pop(zdf.id);
-    await tester.pumpAndSettle();
+    await leaveGuide(zdf.id);
     manager.failedChannel = null;
     await send({'event': 'messageAction'});
     await send({'event': 'selectChannel', 'channelId': third.id});
     expect(manager.playedChannelIds, [ard.id, zdf.id, zdf.id, third.id]);
     await pumpHost([ard]);
-    await send({'event': 'openGuide'});
-    await tester.pumpAndSettle();
+    await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, third.id);
-    Navigator.of(tester.element(guide)).pop();
-    await tester.pumpAndSettle();
+    await leaveGuide();
     await send({'event': 'selectChannel', 'channelId': zdf.id});
     expect(manager.playedChannelIds.last, zdf.id);
     await pumpHost([third, zdf]);
-    await send({'event': 'openGuide'});
-    await tester.pumpAndSettle();
+    await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, zdf.id);
-    Navigator.of(tester.element(guide)).pop();
-    await tester.pumpAndSettle();
+    await leaveGuide();
     await pumpHost([ard]);
-    await send({'event': 'openGuide'});
-    await tester.pumpAndSettle();
+    await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, zdf.id);
     await tester.pumpWidget(const SizedBox());
     await tester.pump(const Duration(seconds: 2));
@@ -366,7 +354,8 @@ void main() {
   testWidgets('favorite control toggles the channel and follows tuning', (
     tester,
   ) async {
-    await pumpPlayer(tester);
+    await pumpPlayer(tester, channels: const [ard]);
+    await pumpPlayer(tester, channels: const [zdf, ard]);
     final favorite = find.byTooltip(l10n.favoriteChannel);
     expect(favorite, findsOneWidget);
     expect(tester.widget<Icon>(find.descendant(
@@ -389,23 +378,12 @@ void main() {
     await press(tester, LogicalKeyboardKey.channelUp);
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.byTooltip(l10n.unfavoriteChannel), findsOneWidget);
-    await tester.tap(find.byTooltip(l10n.unfavoriteChannel));
-    await tester.pump();
-    verify(() => userLibrary.unmarkFavorite('ard')).called(1);
-    expect(find.byTooltip(l10n.favoriteChannel), findsOneWidget);
-  });
-
-  testWidgets('lineup changes keep actions on the playing channel', (tester) async {
-    await pumpPlayer(tester, channels: const [ard]);
-    await pumpPlayer(tester, channels: const [zdf, ard]);
-    await tester.tap(find.byTooltip(l10n.favoriteChannel));
-    await tester.pump();
-    verify(() => userLibrary.markFavorite('ard')).called(1);
-
+    // Removing the playing channel from the guide must still unpin that channel.
     await pumpPlayer(tester, channels: const [zdf]);
     await tester.tap(find.byTooltip(l10n.unfavoriteChannel));
     await tester.pump();
     verify(() => userLibrary.unmarkFavorite('ard')).called(1);
+    expect(find.byTooltip(l10n.favoriteChannel), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -418,9 +396,11 @@ void main() {
 
   for (final needsRetry in [false, true]) {
     testWidgets('selecting the starting station shares its tune (retry: $needsRetry)', (tester) async {
+      useSavedPlexAccount();
       manager.failedChannel = ard.id;
       manager.failedTune = Completer<void>();
       await pumpPlayer(tester);
+      expect(manager.playedServerId, 'plex-cloud-viewer');
       await pickFromGuide(tester, ard);
       if (!needsRetry) manager.failedChannel = null;
       manager.failedTune!.complete();

@@ -229,6 +229,7 @@ void main() {
     VoidCallback? onDismiss,
     VoidCallback? onShowControls,
     Duration inactivity = const Duration(seconds: 5),
+    ChannelCarouselPrewarm? prewarm,
   }) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
     addTearDown(
@@ -238,7 +239,8 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
     final channels = _guideChannels(20, numbered: true);
-    final vm = _CarouselGuide(client, channels);
+    final vm = prewarm?.viewModel as _CarouselGuide? ?? _CarouselGuide(client, channels);
+    prewarm?.tuned(channels, 'ch10');
     await tester.pumpWidget(
       MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -252,6 +254,7 @@ void main() {
             onDismiss: onDismiss ?? () {},
             onShowControls: onShowControls ?? () {},
             inactivityDuration: inactivity,
+            prewarm: prewarm,
             viewModelFactory: (_) => vm,
           ),
         ),
@@ -263,20 +266,31 @@ void main() {
   }
 
 
-  testWidgets('open carousel cards follow favorite changes', (tester) async {
+  testWidgets('a cold-open carousel still shows favorite changes when listings fail', (tester) async {
     userDataSync.reset();
     addTearDown(userDataSync.reset);
-    await pumpOverlay(tester);
-    final card = find.byWidgetPredicate(
-      (widget) => widget is ChannelCarouselCard && widget.channelName == 'Channel 10',
-    );
-    expect(tester.widget<ChannelCarouselCard>(card).isFavorite, isFalse);
-    userDataSync.publish('ch10', {'IsFavorite': true});
-    await tester.pump();
-    expect(tester.widget<ChannelCarouselCard>(card).isFavorite, isTrue);
-    userDataSync.publish('ch10', {'IsFavorite': false});
-    await tester.pump();
-    expect(tester.widget<ChannelCarouselCard>(card).isFavorite, isFalse);
+    final client = _CarouselClient();
+    final guide = _CarouselGuide(client, _guideChannels(20))..failTopUp = true;
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => guide);
+    try {
+      await pumpOverlay(tester, prewarm: prewarm);
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(guide.ready, isTrue);
+      expect(guide.requests.length, greaterThan(1));
+      final card = find.byWidgetPredicate(
+        (widget) => widget is ChannelCarouselCard && widget.channelName == 'Channel 10',
+      );
+      expect(tester.widget<ChannelCarouselCard>(card).isFavorite, isFalse);
+      userDataSync.publish('ch10', {'IsFavorite': true});
+      await tester.pump();
+      expect(tester.widget<ChannelCarouselCard>(card).isFavorite, isTrue);
+      userDataSync.publish('ch10', {'IsFavorite': false});
+      await tester.pump();
+      expect(tester.widget<ChannelCarouselCard>(card).isFavorite, isFalse);
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      prewarm.dispose();
+    }
   });
 
   test('the television canvas shows three whole cards and two half ones', () {
@@ -389,48 +403,6 @@ void main() {
     expect(vm.disposed, isTrue);
     expect(vm.listening, isFalse);
   });
-
-  testWidgets('a failed cold-open top-up does not hide the channel strip', (
-    tester,
-  ) async {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
-    addTearDown(
-      () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
-    );
-    await tester.binding.setSurfaceSize(const Size(1000, 600));
-    addTearDown(() => tester.binding.setSurfaceSize(null));
-    final client = _CarouselClient();
-    final channels = _guideChannels(6);
-    final vm = _CarouselGuide(client, channels)..failTopUp = true;
-    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
-    try {
-      prewarm.tuned(channels, 'ch3');
-      await tester.pumpWidget(MaterialApp(
-        theme: AppTheme.buildTheme(ThemeRegistry.active),
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        home: Scaffold(
-          body: ChannelCarouselOverlay(
-            client: client,
-            channels: channels,
-            currentChannelId: 'ch3',
-            prewarm: prewarm,
-            onChannelSelected: (_) {},
-            onDismiss: () {},
-            onShowControls: () {},
-          ),
-        ),
-      ));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 250));
-      expect(vm.ready, isTrue);
-      expect(vm.requests.length, greaterThan(1));
-      expect(find.byType(ChannelCarouselCard), findsWidgets);
-    } finally {
-      await tester.pumpWidget(const SizedBox.shrink());
-      prewarm.dispose();
-    }
-  });
-
 
   testWidgets('carousel retries only failed visible cards, including after a top-up error', (tester) async {
     final client = _CarouselClient();
