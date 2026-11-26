@@ -372,6 +372,27 @@ void main() {
         'server://replacement/tv.plex.providers.epg.xmltv:2');
   });
 
+  test('failed tuner discovery keeps channels and verifies their favorite source', () async {
+    var machine = 'first';
+    final (dio, server) = _server(machineId: () => machine);
+    final api = PlexLiveTvApi(dio);
+    Future<Map> refresh() async => (await api.getChannelGroups()).channels!.first;
+    final original = await refresh();
+    server.failureStatus = () => 503;
+    server.failWhen = (r) => r.path == '/livetv/dvrs';
+    expect(await refresh(), original);
+
+    machine = 'replacement';
+    final cached = await refresh();
+    expect(cached['Id'], 'channel-2-4');
+    expect(cached.containsKey('PlexFavoriteSource'), isFalse);
+    expect(cached.containsKey('PlexFavoriteId'), isFalse);
+    server.failWhen = null;
+    expect((await refresh())['PlexFavoriteSource'], 'server://replacement/tv.plex.providers.epg.xmltv:2');
+    server.failWhen = (r) => r.path == '/livetv/dvrs' || r.path == '/identity';
+    expect((await refresh()).containsKey('PlexFavoriteSource'), isFalse);
+  });
+
   test('a failed DVR preserves healthy DVR channels and programs', () async {
     final (dio, server) = _server(secondDvr: true);
     var badGridRequests = 0;

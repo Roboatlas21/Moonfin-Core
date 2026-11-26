@@ -282,7 +282,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final next = <_Dvr, _Channels>{};
     try {
       var incomplete = false;
-      final dvrs = await _dvrList(onIncomplete: () => incomplete = true);
+      var dvrs = const <_Dvr>[];
+      try {
+        dvrs = await _dvrList(onIncomplete: () => incomplete = true);
+      } catch (error) {
+        if (!_temporaryLineupFailure(error)) rethrow;
+        // All cached tuners are unresolved. Recheck their server before reusing favorites.
+        incomplete = true;
+      }
       final hasDvrRows = dvrs.isNotEmpty || (incomplete && _lastDvrChannels.isNotEmpty);
       final machineIdFuture = hasDvrRows ? _machineIdForFavorites() : null;
       Future<_Channels> retainedChannels(_Dvr dvr) async {
@@ -341,11 +348,6 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         }
       }
     } catch (error) {
-      if (_temporaryLineupFailure(error)) {
-        final retained = _lastDvrChannels.values.expand((rows) => rows).toList();
-        onUnavailable?.call(retained);
-        return retained;
-      }
       if (request > _publishedDvrRequest) {
         _lastDvrChannels = {};
         _publishedDvrRequest = request;
