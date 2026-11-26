@@ -172,55 +172,28 @@ void main() {
     expect(overlay.inactivityDuration, const Duration(minutes: 2));
   });
 
-  testWidgets(
-    'live progress tracks render at a program boundary for focused and unfocused cards',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.buildTheme(ThemeRegistry.active),
-          home: const Scaffold(
-            body: Row(
-              children: [
-                ChannelCarouselCard(
-                  key: ValueKey('focused-boundary-card'),
-                  channelNumber: '1',
-                  channelName: 'Focused',
-                  isFavorite: false,
-                  programTitle: 'New program',
-                  timeLabel: '9:08 PM - 10:00 PM',
-                  genre: null,
-                  isLive: true,
-                  progress: 0,
-                  hasTimer: false,
-                  centered: true,
-                ),
-                ChannelCarouselCard(
-                  key: ValueKey('unfocused-boundary-card'),
-                  channelNumber: '2',
-                  channelName: 'Unfocused',
-                  isFavorite: false,
-                  programTitle: 'New program',
-                  timeLabel: '9:08 PM - 10:00 PM',
-                  genre: null,
-                  isLive: true,
-                  progress: 0,
-                  hasTimer: false,
-                  centered: false,
-                ),
-              ],
-            ),
+  testWidgets('both visible cards show progress at the start of a program', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.buildTheme(ThemeRegistry.active),
+      home: Scaffold(body: Row(children: [
+        for (final focused in [true, false])
+          ChannelCarouselCard(
+            channelName: focused ? 'Focused' : 'Unfocused', channelNumber: focused ? '1' : '2',
+            programTitle: 'New program', timeLabel: '9:08 PM - 10:00 PM', genre: null,
+            isFavorite: false, isLive: true, progress: 0, hasTimer: false, centered: focused,
           ),
-        ),
-      );
+      ])),
+    ));
+    final tracks = tester.widgetList<LinearProgressIndicator>(find.byType(LinearProgressIndicator));
+    expect(tracks.map((track) => track.value), [0, 0]);
+  });
 
-      expect(find.byType(LinearProgressIndicator), findsNWidgets(2));
-      for (final indicator in tester.widgetList<LinearProgressIndicator>(
-        find.byType(LinearProgressIndicator),
-      )) {
-        expect(indicator.value, 0);
-      }
-    },
-  );
+  final selectedCard = find.byWidgetPredicate((widget) => widget is ChannelCarouselCard && widget.centered);
+  String? selectedName(WidgetTester tester) => tester.widget<ChannelCarouselCard>(selectedCard).channelName;
+  void expectCentered(WidgetTester tester, int channel) {
+    expect(selectedName(tester), 'Channel $channel');
+    expect(tester.getCenter(selectedCard).dx, closeTo(_stripCentre, 0.01));
+  }
 
   tearDown(() => HardwareKeyboard.instance.clearState());
 
@@ -530,93 +503,29 @@ void main() {
     },
   );
 
-  testWidgets('overlay does not poll presentation on a 20-second timer', (
-    tester,
-  ) async {
-    final vm = await pumpOverlay(
-      tester,
-      inactivity: const Duration(minutes: 10),
-    );
+  testWidgets('the idle overlay updates on a program change and restores remote browsing', (tester) async {
+    final vm = await pumpOverlay(tester, inactivity: const Duration(minutes: 10));
     await tester.pump(const Duration(milliseconds: 200));
-    final lookupsBeforeElapsedTime = vm.programLookups;
-
+    expect(find.text('Show ch10 (S6:E19)'), findsOneWidget);
+    final reads = vm.programLookups;
     await tester.pump(const Duration(seconds: 21));
+    expect(vm.programLookups, reads);
 
-    expect(vm.programLookups, lookupsBeforeElapsedTime);
-    await tester.pumpWidget(const SizedBox.shrink());
-  });
-
-  testWidgets(
-    'program boundary notification updates the focused card and header',
-    (tester) async {
-      final vm = await pumpOverlay(
-        tester,
-        inactivity: const Duration(minutes: 10),
-      );
-      await tester.pump(const Duration(milliseconds: 200));
-      expect(find.text('Show ch10 (S6:E19)'), findsOneWidget);
-
-      vm.changeProgram();
-      await tester.pump();
-
-      final header = find.byKey(const ValueKey('carousel-program-header'));
-      expect(
-        find.descendant(
-          of: header,
-          matching: find.text('Show ch10 updated (S6:E19)'),
-        ),
-        findsOneWidget,
-      );
-      final selected = find.byWidgetPredicate(
-        (widget) => widget is ChannelCarouselCard && widget.centered,
-      );
-      expect(
-        tester.widget<ChannelCarouselCard>(selected).programTitle,
-        'Show ch10 updated',
-      );
-
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await tester.pumpAndSettle();
-      expect(
-        tester.widget<ChannelCarouselCard>(selected).channelName,
-        'Channel 11',
-      );
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-      await tester.pumpAndSettle();
-      expect(
-        tester.widget<ChannelCarouselCard>(selected).channelName,
-        'Channel 10',
-      );
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
-
-  testWidgets('overlay restores carousel focus after program refresh', (
-    tester,
-  ) async {
-    final vm = await pumpOverlay(tester);
     FocusManager.instance.primaryFocus?.unfocus();
     await tester.pump();
     vm.changeProgram();
     await tester.pump(const Duration(milliseconds: 200));
     await tester.pump();
-
+    final header = find.byKey(const ValueKey('carousel-program-header'));
+    expect(find.descendant(of: header, matching: find.text('Show ch10 updated (S6:E19)')), findsOneWidget);
+    expect(tester.widget<ChannelCarouselCard>(selectedCard).programTitle, 'Show ch10 updated');
     expect(FocusManager.instance.primaryFocus?.debugLabel, 'ChannelCarousel');
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pumpAndSettle();
-    final selected = find.byWidgetPredicate(
-      (widget) => widget is ChannelCarouselCard && widget.centered,
-    );
-    expect(
-      tester.widget<ChannelCarouselCard>(selected).channelName,
-      'Channel 11',
-    );
+    expect(selectedName(tester), 'Channel 11');
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pumpAndSettle();
-    expect(
-      tester.widget<ChannelCarouselCard>(selected).channelName,
-      'Channel 10',
-    );
+    expect(selectedName(tester), 'Channel 10');
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -838,37 +747,11 @@ void main() {
     expect(tuned, 'ch7');
   });
 
-  testWidgets('changed initial index restores the centered channel', (
-    tester,
-  ) async {
+  testWidgets('changing the tuned station recentres the strip', (tester) async {
     await pumpCarousel(tester, 20, initialIndex: 7);
-    Finder selected() => find.byWidgetPredicate(
-      (widget) => widget is ChannelCarouselCard && widget.centered,
-    );
-    expect(
-      tester.widget<ChannelCarouselCard>(selected()).channelName,
-      'Channel 7',
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.buildTheme(ThemeRegistry.active),
-        home: Scaffold(
-          body: Center(
-            child: SizedBox(
-              width: _stripWidth,
-              child: ChannelCarousel(channels: _lineup(20), initialIndex: 3),
-            ),
-          ),
-        ),
-      ),
-    );
-    await tester.pump();
-
-    expect(
-      tester.widget<ChannelCarouselCard>(selected()).channelName,
-      'Channel 3',
-    );
+    expectCentered(tester, 7);
+    await pumpCarousel(tester, 20, initialIndex: 3);
+    expectCentered(tester, 3);
   });
 
   testWidgets('scrolling carousel has a finite range and wraps left at zero', (
@@ -889,37 +772,18 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
     await tester.pumpAndSettle();
     expect(centered, [19]);
-    final selected = find.byWidgetPredicate(
-      (widget) => widget is ChannelCarouselCard && widget.centered,
-    );
-    expect(
-      tester.widget<ChannelCarouselCard>(selected).channelName,
-      'Channel 19',
-    );
-    expect(tester.getCenter(selected).dx, closeTo(_stripCentre, 0.01));
+    expectCentered(tester, 19);
   });
 
-  for (final channelCount in [1, 2, 3, 4, 5]) {
-    testWidgets('$channelCount fitting channels pin a non-middle initial '
-        'selection and wrap to the viewport center', (tester) async {
-      await pumpCarousel(tester, channelCount, initialIndex: channelCount - 1);
-      Finder selected() => find.byWidgetPredicate(
-        (widget) => widget is ChannelCarouselCard && widget.centered,
-      );
-      expect(find.byType(ChannelCarouselCard), findsNWidgets(channelCount));
-      expect(
-        tester.widget<ChannelCarouselCard>(selected()).channelName,
-        'Channel ${channelCount - 1}',
-      );
-      expect(tester.getCenter(selected()).dx, closeTo(_stripCentre, 0.01));
+  for (var count = 1; count <= 5; count++) {
+    testWidgets('$count fitting channels wrap at the centre of the strip', (tester) async {
+      await pumpCarousel(tester, count, initialIndex: count - 1);
+      expect(find.byType(ChannelCarouselCard), findsNWidgets(count));
+      expectCentered(tester, count - 1);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pumpAndSettle();
-      expect(find.byType(ChannelCarouselCard), findsNWidgets(channelCount));
-      expect(
-        tester.widget<ChannelCarouselCard>(selected()).channelName,
-        'Channel 0',
-      );
-      expect(tester.getCenter(selected()).dx, closeTo(_stripCentre, 0.01));
+      expect(find.byType(ChannelCarouselCard), findsNWidgets(count));
+      expectCentered(tester, 0);
     });
   }
 
@@ -944,83 +808,36 @@ void main() {
     },
   );
 
-  testWidgets('a held key whose repeats keep arriving scrolls past 1000 ms', (
-    tester,
-  ) async {
-    final centred = await pumpCarousel(tester, 20);
-
-    // Key-down moves one card, then the 350 ms timer starts the hold cadence.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump();
-
-    // Physical repeats every 100 ms out to 1200 ms, refreshing the watchdog.
-    for (var elapsed = 100; elapsed <= 900; elapsed += 100) {
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
-    }
-    // Key-down at 0 ms plus a move every 110 ms from 350 ms: a hold reads as
-    // fast continuous motion, not one jump every half second.
-    final movesBy900ms = centred.length;
-    expect(movesBy900ms, greaterThanOrEqualTo(6));
-
-    for (var elapsed = 1000; elapsed <= 1200; elapsed += 100) {
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
-    }
-
-    // A watchdog measured from key-down would have cancelled the hold at
-    // 900 ms. Incoming repeats keep it alive.
-    expect(centred.length, greaterThan(movesBy900ms));
-
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pumpAndSettle();
-  });
-
-  testWidgets('scrolling halts within ~900 ms of the last repeat when no '
-      'key-up arrives', (tester) async {
-    final centred = await pumpCarousel(tester, 20);
-
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump();
-
-    // Repeats stop at 400 ms. No key-up ever arrives.
-    for (var elapsed = 100; elapsed <= 400; elapsed += 100) {
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
-    }
-    final movesAtLastRepeat = centred.length;
-
-    // 400 ms + the 900 ms watchdog: the hold keeps running to 1300 ms and
-    // then stops, because only a real repeat can postpone the watchdog.
-    await tester.pump(const Duration(milliseconds: 900));
-    final movesAtWatchdog = centred.length;
-    expect(movesAtWatchdog, greaterThan(movesAtLastRepeat));
-
-    await tester.pump(const Duration(seconds: 2));
-    expect(centred.length, movesAtWatchdog);
-  });
-
-  testWidgets('timer-generated moves do not keep the watchdog alive', (
-    tester,
-  ) async {
-    final centred = await pumpCarousel(tester, 20);
-
-    // Key-down only: the hold's own timers are the sole source of movement.
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-    expect(centred.length, 2, reason: 'key-down move plus the 350 ms move');
-
-    // Timer-driven moves can't postpone the watchdog, so it fires 900 ms
-    // after the key-down and every move after that is cancelled.
-    await tester.pump(const Duration(milliseconds: 490));
-    final movesAtWatchdog = centred.length;
-    await tester.pump(const Duration(seconds: 2));
-    expect(centred.length, movesAtWatchdog);
-
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pumpAndSettle();
-  });
+  for (final repeats in [false, true]) {
+    testWidgets('holding Right stops after the last physical input (repeats: $repeats)', (tester) async {
+      final moves = await pumpCarousel(tester, 20);
+      const key = LogicalKeyboardKey.arrowRight;
+      await tester.sendKeyDownEvent(key);
+      await tester.pump();
+      if (repeats) {
+        var movesAt900ms = 0;
+        for (var elapsed = 100; elapsed <= 1200; elapsed += 100) {
+          await tester.pump(const Duration(milliseconds: 100));
+          await tester.sendKeyRepeatEvent(key);
+          if (elapsed == 900) movesAt900ms = moves.length;
+        }
+        expect(movesAt900ms, greaterThanOrEqualTo(6));
+        expect(moves.length, greaterThan(movesAt900ms));
+        final atLastRepeat = moves.length;
+        await tester.pump(const Duration(milliseconds: 900));
+        expect(moves.length, greaterThan(atLastRepeat));
+      } else {
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(moves, [1, 2]);
+        await tester.pump(const Duration(milliseconds: 490));
+      }
+      final atWatchdog = moves.length;
+      await tester.pump(const Duration(seconds: 2));
+      expect(moves.length, atWatchdog);
+      await tester.sendKeyUpEvent(key);
+      await tester.pumpAndSettle();
+    });
+  }
 
   testWidgets('a short lineup walks one channel at a time and wraps', (
     tester,

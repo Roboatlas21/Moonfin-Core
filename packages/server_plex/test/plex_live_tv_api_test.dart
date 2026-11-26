@@ -892,8 +892,7 @@ void main() {
       (grid, 401, null), ('/livetv/dvrs', 403, null),
     ]) {
       final (dio, server) = _server(liveDvr: true);
-      server.failWhen = (r) => r.uri.path == path;
-      server.failureStatus = () => status;
+      server.fail(path, status);
       final result = PlexLiveTvApi(dio).getRecommendedPrograms(limit: 4);
       if (expected == null) {
         await expectLater(result, _httpError(status!));
@@ -926,150 +925,84 @@ void main() {
     expect(await onNow(), isEmpty);
   });
 
-  test('every showing of a program is a program of its own', () async {
-    final (dio, server) = _server();
-    final result = await PlexLiveTvApi(dio).getGuide(
-      startDate: DateTime.utc(2026, 10, 22),
-      endDate: DateTime.utc(2026, 10, 23),
-      channelIds: ['channel-2-4'],
-    );
-
+  test('recording from the guide targets the selected channel, showing and time', () async {
+    final (dio, server) = _server(secondDvr: true);
+    final api = PlexLiveTvApi(dio);
+    var otherGridReads = 0;
+    server.failWhen = (request) {
+      if (request.uri.path != '/tv.plex.providers.epg.xmltv:3/grid') return false;
+      otherGridReads++;
+      return true;
+    };
+    server.failureStatus = () => 403;
+    final result = await api.testGuide([tuner]);
     final programs = (result['Items'] as List).cast<Map>();
     expect(programs, hasLength(2));
-    expect(
-      programs.first,
-      allOf(
-        containsPair('Id', 'airing-2-1792699380-4'),
-        containsPair('ChannelId', 'channel-2-4'),
-        containsPair('Name', 'Teletubbies'),
-        containsPair('EpisodeTitle', 'Episode 5'),
-        containsPair('IsPremiere', true),
-        containsPair('IndexNumber', 5),
-        containsPair('StartDate', '2026-10-22T20:03:00.000Z'),
-      ),
-    );
-    expect(programs.first['TimerId'], 'once');
-    expect(
-      programs.last,
-      allOf(
-        containsPair('Name', 'SuperKitties'),
-        containsPair('IsMovie', false),
-      ),
-    );
+    final selected = programs.first;
+    final expected = {
+      'Id': 'airing-2-1792699380-4', 'ChannelId': tuner, 'Name': 'Teletubbies',
+      'EpisodeTitle': 'Episode 5', 'IsPremiere': true, 'IndexNumber': 5,
+      'StartDate': '2026-10-22T20:03:00.000Z', 'TimerId': 'once',
+    };
+    for (final field in expected.entries) {
+      expect(selected, containsPair(field.key, field.value));
+    }
+    expect(programs.last['Name'], 'SuperKitties');
+    expect(programs.last['IsMovie'], isFalse);
     expect(programs.last.containsKey('TimerId'), isFalse);
-    final grid = server.requests.singleWhere(
-      (r) => r.uri.path.endsWith('/grid'),
-    );
+    final grid = server.requests.singleWhere((r) => r.uri.path.endsWith('/grid'));
     expect(grid.queryParameters['type'], '1,4');
-  });
 
-  test('DVR guide excludes showings ending at the start or starting at the end', () async {
-    final (dio, _) = _server();
-    final result = await PlexLiveTvApi(dio).getGuide(
-      startDate: DateTime.utc(2026, 10, 22, 21, 4),
-      endDate: DateTime.utc(2026, 10, 22, 23),
-      channelIds: ['channel-2-4', 'channel-2-9'],
+    final bounded = await api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22, 21, 4), endDate: DateTime.utc(2026, 10, 22, 23),
+      channelIds: [tuner, 'channel-2-9'],
     );
-    expect((result['Items'] as List).map((p) => p['Name']), ['SuperKitties']);
-  });
-
-  test('recording one showing holds it to its channel and time', () async {
-    final (dio, server) = _server();
-    await PlexLiveTvApi(dio).createTimer('airing-2-1792699380-4');
-
+    expect((bounded['Items'] as List).map((item) => item['Name']), ['SuperKitties']);
+    await api.createTimer(selected['Id']);
     final post = server.requests.singleWhere((r) => r.method == 'POST');
     expect(post.uri.path, '/media/subscriptions');
     expect(post.uri.query, startsWith('hints%5Btype%5D=4&'));
-    expect(
-      post.uri.queryParameters,
-      allOf(
-        containsPair('type', '4'),
-        containsPair('targetLibrarySectionID', '2'),
-        containsPair('prefs[recordPartials]', 'true'),
-        containsPair('prefs[lineupChannel]', '4'),
-        containsPair('prefs[startTimeslot]', '1792699380'),
-      ),
-    );
+    expect(post.uri.queryParameters, allOf(
+      containsPair('type', '4'), containsPair('targetLibrarySectionID', '2'),
+      containsPair('prefs[recordPartials]', 'true'), containsPair('prefs[lineupChannel]', '4'),
+      containsPair('prefs[startTimeslot]', '1792699380'),
+    ));
+    expect(otherGridReads, 0);
   });
 
-  test('recording a channel does not query unrelated inaccessible DVRs', () async {
-    final (dio, server) = _server(secondDvr: true);
-    server.failWhen = (request) =>
-        request.uri.path == '/tv.plex.providers.epg.xmltv:3/grid';
-    server.failureStatus = () => 403;
-
-    await PlexLiveTvApi(dio).createTimer('airing-2-1792699380-4');
-    expect(server.requests.where((request) => request.uri.path ==
-        '/tv.plex.providers.epg.xmltv:3/grid'), isEmpty);
-    expect(server.requests.where((request) => request.method == 'POST'), hasLength(1));
-  });
-
-  test('a series rule takes repeats or not, and can be changed', () async {
+  test('manage a series rule and cancel individual scheduled showings', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
-
-    await api.createSeriesTimer(
-      'airing-2-1792699380-4',
-      settings: {'RecordNewOnly': false, 'SkipEpisodesInLibrary': true},
-    );
-    final rule = await api.getSeriesTimer('8');
-    await api.updateSeriesTimer('8', {...rule, 'RecordNewOnly': false});
-
+    await api.createSeriesTimer('airing-2-1792699380-4',
+        settings: {'RecordNewOnly': false, 'SkipEpisodesInLibrary': true});
     final post = server.requests.singleWhere((r) => r.method == 'POST');
-    expect(
-      post.uri.queryParameters,
-      allOf(
-        containsPair('type', '2'),
-        containsPair('prefs[onlyNewAirings]', '0'),
-      ),
-    );
-    expect(rule, containsPair('RecordNewOnly', true));
+    expect(post.uri.queryParameters['type'], '2');
+    expect(post.uri.queryParameters['prefs[onlyNewAirings]'], '0');
+    final rule = await api.getSeriesTimer('8');
+    expect(rule['RecordNewOnly'], isTrue);
+    await api.updateSeriesTimer('8', {...rule, 'RecordNewOnly': false});
     final put = server.requests.singleWhere((r) => r.method == 'PUT');
     expect(put.uri.path, '/media/subscriptions/8');
     expect(put.uri.queryParameters, {'prefs[onlyNewAirings]': '0'});
-  });
-
-  test('scheduled showings are timers, and each cancels its own way', () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
 
     final timers = ((await api.getTimers())['Items'] as List).cast<Map>();
-    expect(
-      timers.first,
-      allOf(
-        containsPair('Id', 'once'),
-        containsPair('ProgramId', 'airing-2-1792699380-4'),
-        containsPair('Status', 'New'),
-      ),
-    );
+    expect((timers.first['Id'], timers.first['ProgramId'], timers.first['Status']),
+        ('once', 'airing-2-1792699380-4', 'New'));
     expect(timers.first.containsKey('SeriesTimerId'), isFalse);
-    expect(
-      timers.last,
-      allOf(
-        containsPair('ProgramId', 'airing-2-1792710000-9'),
-        containsPair('SeriesTimerId', '8'),
-        containsPair('Status', 'InProgress'),
-      ),
-    );
-
-    await api.cancelTimer('once');
-    await api.cancelTimer('airing-2-1792710000-9');
-    expect(
-      server.requests.where((r) => r.method == 'DELETE').map((r) => r.uri.path),
-      ['/media/subscriptions/7', '/media/grabbers/operations/weekly'],
-    );
+    expect((timers.last['ProgramId'], timers.last['SeriesTimerId'], timers.last['Status']),
+        ('airing-2-1792710000-9', '8', 'InProgress'));
+    await api.cancelTimer(timers.first['Id']);
+    await api.cancelTimer(timers.last['ProgramId']);
+    expect(server.requests.where((r) => r.method == 'DELETE').map((r) => r.uri.path),
+        ['/media/subscriptions/7', '/media/grabbers/operations/weekly']);
   });
 
   test('a missing Free TV program list is retryable until Plex confirms zero', () async {
     final grid = <String, dynamic>{'size': 1};
-    final server = _FakeServer((r) => r.uri.path == '/grid'
-        ? {'MediaContainer': grid}
-        : {'MediaContainer': {'Channel': [{'id': 'test', 'gridKey': 'test'}]}});
-    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
-    Future<Map<String, dynamic>> guide() => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22, 20), endDate: DateTime.utc(2026, 10, 22, 22),
-      channelIds: ['channel-plex-test'],
-    );
+    final (dio, server) = _server();
+    server.replies['/grid'] = (_) => {'MediaContainer': grid};
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    Future<Map<String, dynamic>> guide() => api.testGuide([free]);
     await expectLater(guide(), throwsFormatException);
     grid.clear();
     await expectLater(guide(), throwsFormatException);

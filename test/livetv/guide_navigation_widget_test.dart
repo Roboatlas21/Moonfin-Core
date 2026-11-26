@@ -943,147 +943,59 @@ void main() {
     await _pumpFrames(tester);
   }
 
-  testWidgets('DOWN onto a loading row holds focus and consumes the key', (
-    tester,
-  ) async {
-    final anchorMinutes = await reachLoadedEdge(tester);
+  for (final action in ['wait', 'move up', 'open details']) {
+    testWidgets('a loading row respects the viewer’s next action: $action', (tester) async {
+      final anchor = await reachLoadedEdge(tester);
+      void expectRow(int row) =>
+          expect(_focusedCell(), (row: row, index: _cellIndexForRow(row, anchor)));
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
+      expectRow(49);
+      switch (action) {
+        case 'move up':
+          await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
+          expectRow(48);
+        case 'open details':
+          await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
+          expect(_alertDialog, findsOneWidget);
+      }
+      await releaseGuideData(tester);
+      if (action == 'open details') {
+        expect(_focusedCell(), isNull);
+        Navigator.of(tester.element(_alertDialog)).pop();
+        await _pumpFrames(tester);
+        expectRow(49);
+      } else {
+        expectRow(action == 'wait' ? 50 : 48);
+      }
+    });
+  }
 
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
-
-    final focused = _focusedCell();
-    expect(focused, isNotNull, reason: 'focus left the grid');
-    expect(focused!.row, 49);
-    expect(focused.index, _cellIndexForRow(49, anchorMinutes));
-  });
-
-  testWidgets('a later UP supersedes the deferred DOWN', (tester) async {
-    final anchorMinutes = await reachLoadedEdge(tester);
-
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
-    expect(_focusedCell()!.row, 49);
-
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
-    expect(_focusedCell()!.row, 48);
-
-    await releaseGuideData(tester);
-
-    final focused = _focusedCell();
-    expect(focused, isNotNull);
-    expect(focused!.row, 48, reason: 'the deferred DOWN fired anyway');
-    expect(focused.index, _cellIndexForRow(48, anchorMinutes));
-  });
-
-  testWidgets('opening a dialog cancels the deferred DOWN', (tester) async {
-    final anchorMinutes = await reachLoadedEdge(tester);
-
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
-    expect(_focusedCell()!.row, 49);
-
-    // Select on the focused program opens the details dialog.
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
-    expect(_alertDialog, findsOneWidget);
-
-    await releaseGuideData(tester);
-    expect(
-      _focusedCell(),
-      isNull,
-      reason: 'the deferred DOWN pulled focus back into the grid',
-    );
-
-    Navigator.of(tester.element(_alertDialog)).pop();
-    await _pumpFrames(tester);
-
-    final focused = _focusedCell();
-    expect(focused, isNotNull);
-    expect(
-      focused!.row,
-      49,
-      reason: 'the deferred DOWN fired after the dialog',
-    );
-    expect(focused.index, _cellIndexForRow(49, anchorMinutes));
-  });
-
-  testWidgets('the deferred DOWN applies when the row data arrives', (
-    tester,
-  ) async {
-    final anchorMinutes = await reachLoadedEdge(tester);
-
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
-    expect(_focusedCell()!.row, 49);
-
-    await releaseGuideData(tester);
-
-    final focused = _focusedCell();
-    expect(focused, isNotNull, reason: 'the deferred DOWN never fired');
-    expect(focused!.row, 50);
-    expect(focused.index, _cellIndexForRow(50, anchorMinutes));
-  });
-
-  testWidgets('UP from row zero climbs the controls row then the genre rail', (
-    tester,
-  ) async {
+  testWidgets('browse from listings through the header, channel column and page controls', (tester) async {
     await pumpGuide(tester);
-
-    _nodeLabelled(tester, 'GuideProgramRow0:0').requestFocus();
-    await tester.pumpAndSettle();
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideWindowBar:0');
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideFilter:0');
-  });
-
-  testWidgets('LEFT from the channel column jumps to the genre rail', (
-    tester,
-  ) async {
-    await pumpGuide(tester);
-
-    _nodeLabelled(tester, 'GuideChannel:5').requestFocus();
-    await tester.pumpAndSettle();
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideFilter:0');
-  });
-
-  testWidgets('the controls row is one horizontal run and descends to the '
-      'channel column', (tester) async {
-    await pumpGuide(tester);
-
-    _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
-    await tester.pumpAndSettle();
-
-    // Every button from the window chevrons through to Recordings.
-    for (var index = 1; index <= 5; index++) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-      await tester.pumpAndSettle();
-      expect(_focusedLabel(), 'GuideWindowBar:$index');
+    Future<void> move(LogicalKeyboardKey key, String label) => expectFocusAfter(tester, key, label);
+    await focusGuideNode(tester, 'GuideProgramRow0:0');
+    await move(LogicalKeyboardKey.arrowUp, 'GuideWindowBar:0');
+    await move(LogicalKeyboardKey.arrowUp, 'GuideFilter:0');
+    await move(LogicalKeyboardKey.arrowDown, 'GuideWindowBar:0');
+    for (final index in [1, 2, 3, 4, 5, 5]) {
+      await move(LogicalKeyboardKey.arrowRight, 'GuideWindowBar:$index');
     }
-    // The right-hand end refuses rather than escaping the row.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideWindowBar:5');
-
     for (var index = 4; index >= 0; index--) {
-      await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-      await tester.pumpAndSettle();
-      expect(_focusedLabel(), 'GuideWindowBar:$index');
+      await move(LogicalKeyboardKey.arrowLeft, 'GuideWindowBar:$index');
     }
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideChannel:0');
-
+    await move(LogicalKeyboardKey.arrowDown, 'GuideChannel:0');
+    await move(LogicalKeyboardKey.arrowDown, 'GuideChannel:1');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+    expect(_focusedLabel(), startsWith('GuideProgramRow1:'));
+    await move(LogicalKeyboardKey.arrowLeft, 'GuideChannel:1');
+    await move(LogicalKeyboardKey.arrowUp, 'GuideChannel:0');
+    await move(LogicalKeyboardKey.arrowLeft, 'GuideFilter:0');
+    await focusGuideNode(tester, 'GuideChannel:0');
     await _sendKeyAndPump(tester, LogicalKeyboardKey.mediaFastForward);
     expect(_focusedLabel(), startsWith('GuideChannel:'));
     final pagedRow = int.parse(_focusedLabel()!.split(':').last);
     expect(pagedRow, greaterThan(0));
-
-    await _sendKeyAndPump(tester, LogicalKeyboardKey.mediaRewind);
-    expect(_focusedLabel(), 'GuideChannel:0');
+    await move(LogicalKeyboardKey.mediaRewind, 'GuideChannel:0');
 
     final anchorMinutes = await establishAnchor(tester);
     final offsets = _horizontalOffsets(tester);
@@ -1123,112 +1035,18 @@ void main() {
     },
   );
 
-  testWidgets('the channel column handles ordinary vertical arrows', (
-    tester,
-  ) async {
-    await pumpGuide(tester);
-
-    final first = _nodeLabelled(tester, 'GuideChannel:0');
-    first.requestFocus();
-    await tester.pumpAndSettle();
-
-    final downResult = first.onKeyEvent!(
-      first,
-      const KeyDownEvent(
-        physicalKey: PhysicalKeyboardKey.arrowDown,
-        logicalKey: LogicalKeyboardKey.arrowDown,
-        timeStamp: Duration.zero,
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(downResult, KeyEventResult.handled);
-    expect(_focusedLabel(), 'GuideChannel:1');
-
-    final second = _nodeLabelled(tester, 'GuideChannel:1');
-    final upResult = second.onKeyEvent!(
-      second,
-      const KeyDownEvent(
-        physicalKey: PhysicalKeyboardKey.arrowUp,
-        logicalKey: LogicalKeyboardKey.arrowUp,
-        timeStamp: Duration.zero,
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(upResult, KeyEventResult.handled);
-    expect(_focusedLabel(), 'GuideChannel:0');
-  });
-
-  testWidgets('RIGHT enters the program row and LEFT returns to its channel', (
-    tester,
-  ) async {
-    await pumpGuide(tester);
-
-    final channel = _nodeLabelled(tester, 'GuideChannel:1');
-    channel.requestFocus();
-    await tester.pumpAndSettle();
-
-    final rightResult = channel.onKeyEvent!(
-      channel,
-      const KeyDownEvent(
-        physicalKey: PhysicalKeyboardKey.arrowRight,
-        logicalKey: LogicalKeyboardKey.arrowRight,
-        timeStamp: Duration.zero,
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(rightResult, KeyEventResult.handled);
-    expect(_focusedLabel(), startsWith('GuideProgramRow1:'));
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideChannel:1');
-  });
-
-  testWidgets(
-    'the mini-player guide fetches no program artwork, having no hero band',
-    (tester) async {
-      when(() => liveTvApi.getProgram(any(), userId: any(named: 'userId')))
-          .thenAnswer(
-            (inv) async => <String, dynamic>{
-              'Id': inv.positionalArguments[0],
-              'ChannelId': 'ch0',
-              'Name': 'anything',
-              'StartDate': DateTime.now().toUtc().toIso8601String(),
-              'EndDate': DateTime.now()
-                  .toUtc()
-                  .add(const Duration(minutes: 30))
-                  .toIso8601String(),
-              'ImageTags': <String, dynamic>{'Primary': 'tag'},
-            },
-          );
-
-      await pumpGuide(tester, miniPlayerMode: true);
-      // Past both the scroll debounce and the on-focus artwork debounce.
-      await tester.pump(const Duration(seconds: 1));
-      await tester.pumpAndSettle();
-
-      verifyNever(
-        () => liveTvApi.getProgram(any(), userId: any(named: 'userId')),
-      );
-    },
-  );
-
-  testWidgets('UP from row zero reaches the mini player in miniPlayerMode', (
-    tester,
-  ) async {
+  testWidgets('moving into the mini player skips hero artwork', (tester) async {
     await pumpGuide(tester, miniPlayerMode: true);
-
-    _nodeLabelled(tester, 'GuideProgramRow0:0').requestFocus();
-    await tester.pumpAndSettle();
-
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
-    await tester.pumpAndSettle();
-
-    expect(_focusedLabel(), 'GuideMiniPlayer');
+    await focusGuideNode(tester, 'GuideProgramRow0:0');
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideMiniPlayer');
+    await tester.pump(const Duration(seconds: 1));
+    verifyNever(() => liveTvApi.getProgram(any(), userId: any(named: 'userId')));
   });
+
+  Future<void> back(WidgetTester tester) async {
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+  }
 
   testWidgets('TV back returns to the tuned channel, then header, then exits', (
     tester,
@@ -1242,135 +1060,58 @@ void main() {
     _nodeLabelled(tester, 'GuideChannel:4').requestFocus();
     await tester.pumpAndSettle();
     clearInteractions(liveTvApi);
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
+    await back(tester);
     expect(_focusedLabel(), 'GuideChannel:3');
     // Already live, so returning to the channel reloads nothing.
-    verifyNever(
-      () => liveTvApi.getChannels(
-        startIndex: any(named: 'startIndex'),
-        limit: any(named: 'limit'),
-        sortBy: any(named: 'sortBy'),
-        sortOrder: any(named: 'sortOrder'),
-        fields: any(named: 'fields'),
-        enableTotalRecordCount: any(named: 'enableTotalRecordCount'),
-        userId: any(named: 'userId'),
-      ),
-    );
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
+    verifyNever(() => _channelsRequest(liveTvApi));
+    await back(tester);
     expect(_focusedLabel(), 'GuideFilter:0');
-
-    // Down from the filters goes through the header, then returns to the
-    // channel row where Back left the grid, not the first channel.
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideWindowBar:0');
-    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideChannel:3');
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowDown, 'GuideWindowBar:0');
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowDown, 'GuideChannel:3');
 
     // Re-entering the rows starts the same sequence again.
     _nodeLabelled(tester, 'GuideChannel:4').requestFocus();
     await tester.pumpAndSettle();
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
+    await back(tester);
     expect(_focusedLabel(), 'GuideChannel:3');
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
+    await back(tester);
     expect(_focusedLabel(), 'GuideFilter:0');
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.byType(LiveTvGuideScreen), findsNothing);
   });
 
-  testWidgets(
-    'a back press is not consumed when the entry channel is filtered out',
-    (tester) async {
-      // ch5 is the only favorite; the entry channel (ch0, the default when no
-      // last-channel preference is set) is not, so switching to the
-      // favorites filter drops the entry channel from filteredChannels.
-      stubFavoriteChannel(5);
+  testWidgets('filtering out the entry channel updates the hero and lets Back exit', (tester) async {
+    stubFavoriteChannel(5);
+    await openGuideRoute(tester);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    String? hero() => tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview)).title;
+    expect(hero(), 'Channel 0');
+    final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+    rail.onSelect(GuideFilter.values.indexOf(GuideFilter.favorites));
+    await tester.pumpAndSettle();
+    expect(_focusedLabel(), 'GuideChannel:0');
+    expect(hero(), 'Channel 5');
+    await back(tester);
+    expect(find.byType(LiveTvGuideScreen), findsNothing);
+  });
 
-      await openGuideRoute(tester);
-      expect(find.byType(LiveTvGuideScreen), findsOneWidget);
-
-      // Switch to the favorites filter, which excludes the entry channel.
-      final filterRail = tester.widget<EpgFilterRail>(
-        find.byType(EpgFilterRail),
-      );
-      filterRail.onSelect(GuideFilter.values.indexOf(GuideFilter.favorites));
-      await tester.pumpAndSettle();
-
-      // Move real focus onto the one remaining (favorited) channel row, so
-      // the guide's tracked focused channel differs from the entry channel.
-      _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
-      await tester.pumpAndSettle();
-
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
-
-      // Back was NOT consumed by the guide's reset-to-entry handling, so the
-      // route popped back to the host screen instead of getting stuck.
-      expect(find.byType(LiveTvGuideScreen), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'a lineup change while covered by another route does not steal focus',
-    (tester) async {
-      // ch5 is the only favorite, so switching to the favorites filter later
-      // drops every other channel (including the one holding the current
-      // selection) from filteredChannels.
-      stubFavoriteChannel(5);
-
-      await openGuideRoute(tester);
-      expect(find.byType(LiveTvGuideScreen), findsOneWidget);
-
-      // Establish a selection in the grid before the guide is covered.
-      await establishAnchor(tester);
-
-      // A fully opaque covering route wraps the guide in an Offstage, which
-      // finders skip by default, so grab the filter callback while the guide
-      // is still on top.
-      final onSelectFavorites = tester
-          .widget<EpgFilterRail>(find.byType(EpgFilterRail))
-          .onSelect;
-
-      // Simulate tuning a channel: push a route on top of the guide (the
-      // guide stays mounted underneath, exactly like the player) and move
-      // focus into it, as the real player does on entry.
-      final playerFocusNode = FocusNode(debugLabel: 'FakePlayer');
-      addTearDown(playerFocusNode.dispose);
-      final guideContext = tester.element(find.byType(LiveTvGuideScreen));
-      Navigator.of(guideContext).push(
-        MaterialPageRoute<void>(
-          builder: (_) => Focus(
-            focusNode: playerFocusNode,
-            autofocus: true,
-            child: const SizedBox(),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(_focusedLabel(), 'FakePlayer');
-
-      // Switch to the favorites filter, which changes filteredChannels while
-      // the guide is covered by the pushed route.
-      onSelectFavorites(GuideFilter.values.indexOf(GuideFilter.favorites));
-      await tester.pumpAndSettle();
-
-      // Focus must still belong to the pushed route, not to a guide cell it
-      // cannot see.
-      expect(
-        _focusedLabel(),
-        'FakePlayer',
-        reason:
-            'the covered guide stole focus after a lineup change instead '
-            'of leaving it with the route on top',
-      );
-    },
-  );
+  testWidgets('a lineup change behind the player leaves focus on the player', (tester) async {
+    stubFavoriteChannel(5);
+    await openGuideRoute(tester);
+    await establishAnchor(tester);
+    final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+    final player = FocusNode(debugLabel: 'Player');
+    addTearDown(player.dispose);
+    Navigator.of(tester.element(find.byType(LiveTvGuideScreen))).push(
+      MaterialPageRoute<void>(builder: (_) => Focus(focusNode: player, autofocus: true, child: const SizedBox())),
+    );
+    await tester.pumpAndSettle();
+    expect(player.hasPrimaryFocus, isTrue);
+    rail.onSelect(GuideFilter.values.indexOf(GuideFilter.favorites));
+    await tester.pumpAndSettle();
+    expect(player.hasPrimaryFocus, isTrue);
+  });
 
   testWidgets(
     'returning from the player focuses the preference channel, not the '
@@ -1420,109 +1161,21 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a back press re-homes to the channel the user has since tuned, not '
-    'the one playing when the guide opened',
-    (tester) async {
+  for (final lastChannel in [null, 'ch2']) {
+    testWidgets('Back from a past guide window restores the tuned channel ($lastChannel)', (tester) async {
       await openGuideRoute(tester);
+      if (lastChannel != null) {
+        await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvLastChannelId, lastChannel);
+      } else {
+        await focusGuideNode(tester, 'GuideChannel:3');
+      }
+      final live = _windowRangeText(tester);
+      await focusGuideNode(tester, 'GuideWindowBar:0');
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
+      expect(_windowRangeText(tester), isNot(live));
+      await back(tester);
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
-
-      // Simulate the player having tuned ch2 while the guide sat underneath;
-      // the guide itself never touches the preference here.
-      await GetIt.instance<UserPreferences>().set(
-        UserPreferences.liveTvLastChannelId,
-        'ch2',
-      );
-
-      // Page the window off live so back has somewhere to reset from.
-      final before = _windowRangeText(tester);
-      _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
-      await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-      final after = _windowRangeText(tester);
-      expect(after, isNot(before), reason: 'window did not page');
-
-      await tester.binding.handlePopRoute();
-      // The reset now schedules its own frames for both deferred
-      // postFrameCallbacks, so ordinary pumping settles it without waiting
-      // on the guide's periodic display-clock timer.
-      await tester.pumpAndSettle();
-
-      // Back re-homed to the last-tuned channel (ch2), not the channel
-      // playing when the guide opened (ch0) -- and did not exit the guide.
-      expect(find.byType(LiveTvGuideScreen), findsOneWidget);
-      expect(_focusedLabel(), 'GuideChannel:2');
-    },
-  );
-
-  testWidgets(
-    'a back press re-homes to row 0 when no channel has ever been tuned',
-    (tester) async {
-      await openGuideRoute(tester);
-      expect(find.byType(LiveTvGuideScreen), findsOneWidget);
-
-      // liveTvLastChannelId is empty (never tuned), so the guide entered on
-      // row 0 by falling back to it in _scheduleInitialChannelFocus. Move
-      // focus onto another channel and page the window off live.
-      _nodeLabelled(tester, 'GuideChannel:3').requestFocus();
-      await tester.pumpAndSettle();
-
-      final before = _windowRangeText(tester);
-      _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
-      await tester.pumpAndSettle();
-      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-      await tester.pumpAndSettle();
-      final after = _windowRangeText(tester);
-      expect(after, isNot(before), reason: 'window did not page');
-
-      await tester.binding.handlePopRoute();
-      // The reset now schedules its own frames for both deferred
-      // postFrameCallbacks, so ordinary pumping settles it without waiting
-      // on the guide's periodic display-clock timer.
-      await tester.pumpAndSettle();
-
-      // Back re-homed to row 0, not exited the guide -- even though no
-      // channel has ever actually been tuned.
-      expect(find.byType(LiveTvGuideScreen), findsOneWidget);
-      expect(_focusedLabel(), 'GuideChannel:0');
-    },
-  );
-
-  testWidgets(
-    'a genre filter that swaps a focused row\'s channel updates the hero '
-    'band',
-    (tester) async {
-      // ch5 is the only favorite; switching to favorites collapses the
-      // lineup to that one channel, so row 0 -- still focused from entry --
-      // now holds ch5 instead of the entry channel ch0.
-      stubFavoriteChannel(5);
-
-      await pumpGuide(tester);
-
-      // Put real focus on row 0 (the entry channel, ch0) and confirm the
-      // hero band describes it before the filter changes anything.
-      _nodeLabelled(tester, 'GuideChannel:0').requestFocus();
-      await tester.pumpAndSettle();
-      expect(
-        tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview)).title,
-        'Channel 0',
-      );
-
-      final filterRail = tester.widget<EpgFilterRail>(
-        find.byType(EpgFilterRail),
-      );
-      filterRail.onSelect(GuideFilter.values.indexOf(GuideFilter.favorites));
-      await tester.pumpAndSettle();
-
-      // Row 0's FocusNode is still the one focused (true -> true fires no
-      // onFocusChange), but it now holds ch5. The hero band must describe
-      // the channel actually in that row, not the pre-filter one.
-      expect(_focusedLabel(), 'GuideChannel:0');
-      expect(
-        tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview)).title,
-        'Channel 5',
-      );
-    },
-  );
+      expect(_focusedLabel(), lastChannel == null ? 'GuideChannel:0' : 'GuideChannel:2');
+    });
+  }
 }

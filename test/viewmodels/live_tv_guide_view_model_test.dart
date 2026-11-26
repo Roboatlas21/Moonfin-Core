@@ -544,10 +544,20 @@ void main() {
     },
   );
 
+  test('leaving the guide stops carousel refresh requests', () async {
+    stubNumberedChannels(1);
+    final vm = LiveTvGuideViewModel(client);
+    await vm.load();
+    vm.dispose();
+    clearInteractions(liveTv);
+    await vm.refreshCarouselPrograms();
+    verifyNever(() => _guide(liveTv));
+  });
+
   group('program-end boundary refresh', () {
     final base = DateTime.now();
     late DateTime clock;
-    late int guideCalls;
+    late LiveTvGuideViewModel vm;
     late List<Map<String, dynamic>> items;
     late List<DateTime> requestedFrom;
     late List<DateTime> requestedTo;
@@ -558,7 +568,7 @@ void main() {
 
     setUp(() {
       clock = base;
-      guideCalls = 0;
+      vm = LiveTvGuideViewModel(client, now: () => clock);
       guideThrows = false;
       items = <Map<String, dynamic>>[];
       requestedFrom = <DateTime>[];
@@ -568,18 +578,15 @@ void main() {
       _stubChannels(liveTv, [_channel('c0')]);
 
       when(() => _guide(liveTv, category: GuideFilter.all)).thenAnswer((invocation) async {
-        guideCalls++;
         requestedFrom.add(invocation.namedArguments[#startDate] as DateTime);
         requestedTo.add(invocation.namedArguments[#endDate] as DateTime);
-        requestedChannelIds.add(
-          List<String>.from(
-            invocation.namedArguments[#channelIds] as List<String>,
-          ),
-        );
+        requestedChannelIds.add(_requestedIds(invocation));
         if (guideThrows) throw StateError('guide unavailable');
         return {'Items': List<Map<String, dynamic>>.from(items)};
       });
     });
+
+    tearDown(() => vm.dispose());
 
     // A retained ended program plus one airing program. The schedule stops at
     // at(30), so a refresh past that boundary genuinely needs extending.
@@ -590,69 +597,29 @@ void main() {
       ];
     }
 
-    test('the boundary is the next future end, not the retained minimum', () {
+    test('an ended showing stays in the guide while a missing next listing gets a delayed retry', () async {
       seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
-      return vm.load().then((_) {
-        vm.scheduleBoundaryRefresh();
-        // at(-60) is retained by the back-slice and must never be selected.
-        expect(vm.boundaryDueAt, at(30));
-        vm.cancelBoundaryRefresh();
-      });
-    });
-
-    test(
-      'a cached future start promotes without a future-guide reload',
-      () async {
-        items = [_span('upcoming', 'c0', at(30), at(60))];
-        final vm = LiveTvGuideViewModel(client, now: () => clock);
-        await vm.load(windowStart: at(90), livePosition: false);
-
-        vm.scheduleBoundaryRefresh();
-        expect(vm.boundaryDueAt, at(30));
-
-        clock = at(31);
-        await vm.handleBoundaryElapsed();
-
-        expect(guideCalls, 1);
-        expect(vm.boundaryDueAt, at(60));
-        vm.cancelBoundaryRefresh();
-      },
-    );
-
-    test('an elapsed boundary refreshes exactly once, not in a loop', () async {
-      seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
       await vm.load();
       vm.scheduleBoundaryRefresh();
-      expect(guideCalls, 1);
-
+      expect(vm.boundaryDueAt, at(30));
       clock = at(31);
       await vm.handleBoundaryElapsed();
       await pumpEventQueue();
-
-      // The server returns the same retained programs. One request, no storm.
-      expect(guideCalls, 2);
+      expect(requestedFrom, hasLength(2));
       expect(vm.programsForChannel('c0').map((p) => p.id), ['ended', 'airing']);
-      // Both past boundaries are processed, so neither can be selected again.
       expect(vm.nextBoundaryAt, isNull);
-      vm.cancelBoundaryRefresh();
+      expect(vm.boundaryDueAt, clock.add(LiveTvGuideViewModel.noNewCoverageRetry));
     });
 
-    test('no newer coverage arms the retry delay', () async {
-      seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
-      await vm.load();
+    test('a cached future start promotes while browsing ahead', () async {
+      items = [_span('upcoming', 'c0', at(30), at(60))];
+      await vm.load(windowStart: at(90), livePosition: false);
       vm.scheduleBoundaryRefresh();
-
+      expect(vm.boundaryDueAt, at(30));
       clock = at(31);
       await vm.handleBoundaryElapsed();
-
-      expect(
-        vm.boundaryDueAt,
-        at(31).add(LiveTvGuideViewModel.noNewCoverageRetry),
-      );
-      vm.cancelBoundaryRefresh();
+      expect(requestedFrom, hasLength(1));
+      expect(vm.boundaryDueAt, at(60));
     });
 
     test('a cached next program promotes with no request', () async {
@@ -661,24 +628,23 @@ void main() {
         _span('airing', 'c0', at(-60), at(30)),
         _span('next', 'c0', at(30), at(90)),
       ];
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
+
       await vm.load();
       vm.scheduleBoundaryRefresh();
-      expect(guideCalls, 1);
+      expect(requestedFrom, hasLength(1));
 
       clock = at(31);
       await vm.handleBoundaryElapsed();
 
-      expect(guideCalls, 1);
+      expect(requestedFrom, hasLength(1));
       expect(vm.boundaryDueAt, at(90));
-      vm.cancelBoundaryRefresh();
     });
 
     test(
       'boundary refresh preserves the viewport and covers live horizon',
       () async {
         seedLapsingSchedule();
-        final vm = LiveTvGuideViewModel(client, now: () => clock);
+
         await vm.load(windowStart: at(-360));
         vm.scheduleBoundaryRefresh();
 
@@ -692,7 +658,6 @@ void main() {
           at(31).add(LiveTvGuideViewModel.rollingRefreshHorizon),
         );
         expect(vm.boundaryDueAt, at(200));
-        vm.cancelBoundaryRefresh();
       },
     );
 
@@ -704,7 +669,7 @@ void main() {
           _span('old-0', 'c0', at(-60), at(30)),
           _span('old-1', 'c1', at(-60), at(30)),
         ];
-        final vm = LiveTvGuideViewModel(client, now: () => clock);
+
         await vm.load();
 
         // The cache ends before the current clock. Staleness is coverage-based.
@@ -715,7 +680,7 @@ void main() {
         ];
         await vm.refreshCarouselPrograms();
 
-        expect(guideCalls, 2);
+        expect(requestedFrom, hasLength(2));
         expect(requestedChannelIds.last, containsAll(<String>['c0', 'c1']));
         expect(
           requestedFrom.last,
@@ -727,39 +692,32 @@ void main() {
         );
         expect(vm.programsForChannel('c0').single.id, 'new-0');
         expect(vm.programsForChannel('c1').single.id, 'new-1');
-        vm.cancelBoundaryRefresh();
       },
     );
 
     test('overlapping rolling refresh calls share one request', () async {
       seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
       await vm.load();
 
       final reply = Completer<Map<String, dynamic>>();
-      when(() => _guide(liveTv)).thenAnswer((_) {
-        guideCalls++;
-        return reply.future;
-      });
+      when(() => _guide(liveTv)).thenAnswer((_) => reply.future);
 
       final first = vm.refreshCarouselPrograms();
       await pumpEventQueue();
       final second = vm.refreshCarouselPrograms();
 
       expect(second, same(first));
-      expect(guideCalls, 2);
+      verify(() => _guide(liveTv, category: GuideFilter.all)).called(2);
       reply.complete({
         'Items': [_span('new', 'c0', at(-10), at(90))],
       });
       await Future.wait([first, second]);
 
       expect(vm.programsForChannel('c0').single.id, 'new');
-      vm.cancelBoundaryRefresh();
     });
 
     test('a superseding replacement rejects a stale rolling reply', () async {
       seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
       await vm.load();
 
       final pending = <Completer<Map<String, dynamic>>>[];
@@ -791,12 +749,10 @@ void main() {
 
       expect(vm.programsForChannel('c0').single.id, 'current');
       expect(vm.boundaryDueAt, at(90));
-      vm.cancelBoundaryRefresh();
     });
 
     test('a failed rolling refresh preserves the existing cache', () async {
       seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
       await vm.load();
 
       guideThrows = true;
@@ -804,19 +760,6 @@ void main() {
 
       expect(vm.programsForChannel('c0').map((p) => p.id), ['ended', 'airing']);
       expect(vm.boundaryDueAt, clock.add(LiveTvGuideViewModel.failureBackoff));
-      vm.cancelBoundaryRefresh();
-    });
-
-    test('a disposed view model ignores a rolling refresh request', () async {
-      seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
-      await vm.load();
-      clearInteractions(liveTv);
-
-      vm.dispose();
-      await vm.refreshCarouselPrograms();
-
-      verifyNever(() => _guide(liveTv, category: GuideFilter.all));
     });
 
     test('scheduled retry fetches a channel that never loaded', () async {
@@ -825,8 +768,7 @@ void main() {
         'Items': [_span('airing', 'healthy', at(0), at(30))],
         'FailedChannelIds': ['missing'],
       });
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
-      addTearDown(vm.dispose);
+
       await vm.load();
       vm.scheduleBoundaryRefresh();
       await vm.recordingChanged();
@@ -848,7 +790,6 @@ void main() {
 
     test('a failed refresh backs off and keeps the data', () async {
       seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
       await vm.load();
       vm.scheduleBoundaryRefresh();
 
@@ -858,12 +799,10 @@ void main() {
 
       expect(vm.programsForChannel('c0').map((p) => p.id), ['ended', 'airing']);
       expect(vm.boundaryDueAt, at(31).add(LiveTvGuideViewModel.failureBackoff));
-      vm.cancelBoundaryRefresh();
     });
 
     test('a boundary passed while suspended refreshes on resume', () async {
       seedLapsingSchedule();
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
       await vm.load();
       vm.scheduleBoundaryRefresh();
 
@@ -872,34 +811,32 @@ void main() {
       vm.scheduleBoundaryRefresh();
       await pumpEventQueue();
 
-      expect(guideCalls, 2);
-      vm.cancelBoundaryRefresh();
+      expect(requestedFrom, hasLength(2));
     });
 
     test('an empty schedule arms no timer', () async {
       items = <Map<String, dynamic>>[];
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
+
       await vm.load();
       vm.scheduleBoundaryRefresh();
 
       expect(vm.boundaryDueAt, isNull);
-      expect(guideCalls, 1);
+      expect(requestedFrom, hasLength(1));
     });
 
     test('an all-expired schedule refreshes immediately once', () async {
       items = [_span('expired', 'c0', at(-90), at(-30))];
-      final vm = LiveTvGuideViewModel(client, now: () => clock);
+
       await vm.load();
 
       vm.scheduleBoundaryRefresh();
       await pumpEventQueue();
 
-      expect(guideCalls, 2);
+      expect(requestedFrom, hasLength(2));
       expect(
         vm.boundaryDueAt,
         clock.add(LiveTvGuideViewModel.noNewCoverageRetry),
       );
-      vm.cancelBoundaryRefresh();
     });
   });
 
@@ -1745,454 +1682,120 @@ void main() {
 
   });
 
-  test(
-    'artworkSourceFor evicts only the oldest entry past the cache cap',
-    () async {
-      when(
-        () => liveTv.getProgram(any(), userId: any(named: 'userId')),
-      ).thenAnswer(
-        (inv) async => _program(inv.positionalArguments[0] as String, 'c0'),
-      );
+  final guideStart = DateTime.utc(2026, 9, 11, 10);
+  GuideProgram listing(String id, {String channel = 'c0', String? name, String? episode,
+      Map<String, dynamic> raw = const {}}) => GuideProgram(
+    id: id, name: name ?? id, channelId: channel, episodeTitle: episode, rawData: raw,
+    startDate: guideStart, endDate: guideStart.add(const Duration(minutes: 30)),
+  );
 
+  Future<Map<String, dynamic>> lookup() => liveTv.getProgram(any(), userId: any(named: 'userId'));
+
+  test('browsing new listings evicts the oldest cached artwork first', () async {
+    when(lookup).thenAnswer((inv) async => _program(inv.positionalArguments.first as String, 'c0'));
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    final cap = LiveTvGuideViewModel.artworkCacheCap;
+    for (var i = 0; i <= cap; i++) {
+      await vm.artworkSourceFor(listing('p$i'));
+    }
+    expect(vm.hasArtworkResult('p0'), isFalse);
+    expect(vm.hasArtworkResult('p1'), isTrue);
+    expect(vm.hasArtworkResult('p$cap'), isTrue);
+  });
+
+  testWidgets('retrying artwork refreshes the guide with the right art for both channels', (tester) async {
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    final first = listing('p1', name: 'Paid Programming');
+    final second = listing('p2', channel: 'c1', name: 'Paid Programming');
+    when(lookup).thenThrow(Exception('offline'));
+    expect(await vm.artworkSourceFor(first), isNull);
+    expect(vm.hasArtworkResult(first.id), isFalse);
+    when(lookup).thenAnswer((inv) async {
+      final id = inv.positionalArguments.first as String;
+      return {..._program(id, id == first.id ? 'c0' : 'c1'), 'Name': first.name, 'ImageTags': {'Primary': 'tag-$id'}};
+    });
+    expect((await vm.artworkSourceFor(first))?.tag, 'tag-p1');
+    expect(vm.hasArtworkResult(first.id), isTrue);
+    expect((await vm.artworkSourceFor(second))?.tag, 'tag-p2');
+    verify(lookup).called(3);
+    var redraws = 0;
+    vm.addListener(() => redraws++);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(redraws, 1);
+  });
+
+  for (final empty in [false, true]) {
+    test('changing filters replaces queued artwork (empty lineup: $empty)', () async {
+      final pending = <String, Completer<Map<String, dynamic>>>{};
+      when(lookup).thenAnswer((inv) {
+        final id = inv.positionalArguments.first as String;
+        return (pending[id] = Completer<Map<String, dynamic>>()).future;
+      });
       final vm = LiveTvGuideViewModel(client);
-      GuideProgram program(String id) => GuideProgram(
-        id: id,
-        channelId: 'c0',
-        name: id,
-        startDate: DateTime.parse('2026-09-11T10:00:00Z'),
-        endDate: DateTime.parse('2026-09-11T10:30:00Z'),
-        rawData: const {},
-      );
-
-      // One past the cap: a clear-everything eviction would leave only the
-      // last entry cached, where the single-entry eviction this guards
-      // leaves every entry but the oldest.
-      final cap = LiveTvGuideViewModel.artworkCacheCap;
-      for (var i = 0; i <= cap; i++) {
-        await vm.artworkSourceFor(program('p$i'));
+      addTearDown(vm.dispose);
+      vm.queueArtworkPrefetch([for (var i = 0; i < 5; i++) listing('p$i')]);
+      expect(pending.keys, ['p0', 'p1', 'p2']);
+      vm.queueArtworkPrefetch([if (!empty) listing('new')], replace: true);
+      for (final id in ['p0', 'p1', 'p2']) {
+        pending[id]!.complete(_program(id, 'c0'));
+        await pumpEventQueue();
       }
+      expect(pending.keys, ['p0', 'p1', 'p2', if (!empty) 'new']);
+      pending['new']?.complete(_program('new', 'c0'));
+      await pumpEventQueue();
+    });
+  }
 
-      expect(vm.hasArtworkResult('p0'), isFalse);
-      expect(vm.hasArtworkResult('p1'), isTrue);
-      expect(vm.hasArtworkResult('p$cap'), isTrue);
-    },
-  );
-
-  test(
-    'a failed artwork lookup does not poison the cache and a later call retries',
-    () async {
-      var callCount = 0;
-      when(
-        () => liveTv.getProgram(any(), userId: any(named: 'userId')),
-      ).thenAnswer((inv) async {
-        callCount++;
-        if (callCount == 1) throw Exception('transient failure');
-        return _program(inv.positionalArguments[0] as String, 'c0');
-      });
-
-      final vm = LiveTvGuideViewModel(client);
-      final program = GuideProgram(
-        id: 'p1',
-        channelId: 'c0',
-        name: 'p1',
-        startDate: DateTime.parse('2026-09-11T10:00:00Z'),
-        endDate: DateTime.parse('2026-09-11T10:30:00Z'),
-        rawData: const {},
-      );
-
-      final first = await vm.artworkSourceFor(program);
-      expect(first, isNull);
-      expect(
-        vm.hasArtworkResult('p1'),
-        isFalse,
-        reason:
-            'a transient lookup failure must not be cached as a permanent '
-            'negative',
-      );
-
-      await vm.artworkSourceFor(program);
-      expect(
-        callCount,
-        2,
-        reason: 'the retry must issue a fresh request, not reuse a cached '
-            'null from the failed attempt',
-      );
-      expect(
-        vm.hasArtworkResult('p1'),
-        isTrue,
-        reason: 'a genuine (non-error) result is still cached',
-      );
-    },
-  );
-
-  test(
-    'same-named programs without an episode title do not share artwork '
-    'across channels',
-    () async {
-      var callCount = 0;
-      when(
-        () => liveTv.getProgram(any(), userId: any(named: 'userId')),
-      ).thenAnswer((inv) async {
-        callCount++;
-        final id = inv.positionalArguments[0] as String;
-        return {
-          'Id': id,
-          'ChannelId': id == 'p1' ? 'c0' : 'c1',
-          'Name': 'Paid Programming',
-          'StartDate': '2026-09-11T10:00:00Z',
-          'EndDate': '2026-09-11T10:30:00Z',
-          'ImageTags': {'Primary': 'tag-$id'},
-        };
-      });
-
-      final vm = LiveTvGuideViewModel(client);
-      GuideProgram filler(String id, String channelId) => GuideProgram(
-        id: id,
-        channelId: channelId,
-        name: 'Paid Programming',
-        startDate: DateTime.parse('2026-09-11T10:00:00Z'),
-        endDate: DateTime.parse('2026-09-11T10:30:00Z'),
-        rawData: const {},
-      );
-
-      final first = await vm.artworkSourceFor(filler('p1', 'c0'));
-      final second = await vm.artworkSourceFor(filler('p2', 'c1'));
-
-      expect(first?.tag, 'tag-p1');
-      expect(
-        second?.tag,
-        'tag-p2',
-        reason: 'a generic name with no episode title recurs across unrelated '
-            'channels, so it must not inherit artwork from another channel',
-      );
-      expect(
-        callCount,
-        2,
-        reason: 'the second channel must resolve its own artwork rather than '
-            'reusing the content-key entry of the first',
-      );
-    },
-  );
-
-  test(
-    'an empty replacing submission clears the pending prefetch queue',
-    () async {
-      final completers = <String, Completer<Map<String, dynamic>>>{};
-      when(
-        () => liveTv.getProgram(any(), userId: any(named: 'userId')),
-      ).thenAnswer((inv) {
-        final id = inv.positionalArguments[0] as String;
-        return completers
-            .putIfAbsent(id, () => Completer<Map<String, dynamic>>())
-            .future;
-      });
-
-      final vm = LiveTvGuideViewModel(client);
-      GuideProgram program(String id) => GuideProgram(
-        id: id,
-        channelId: 'c0',
-        name: id,
-        startDate: DateTime.parse('2026-09-11T10:00:00Z'),
-        endDate: DateTime.parse('2026-09-11T10:30:00Z'),
-        rawData: const {},
-      );
-
-      // Concurrency is 3, so p0-p2 start and p3/p4 sit queued behind them.
-      vm.queueArtworkPrefetch([
-        program('p0'),
-        program('p1'),
-        program('p2'),
-        program('p3'),
-        program('p4'),
-      ]);
-
-      // The guide screen relies on this to drop work for a lineup that a
-      // filter has emptied.
-      vm.queueArtworkPrefetch(const [], replace: true);
-
-      completers['p0']!.complete(_program('p0', 'c0'));
-      await Future<void>.delayed(Duration.zero);
-      completers['p1']!.complete(_program('p1', 'c0'));
-      await Future<void>.delayed(Duration.zero);
-      completers['p2']!.complete(_program('p2', 'c0'));
-      await Future<void>.delayed(Duration.zero);
-
-      expect(
-        completers.containsKey('p3'),
-        isFalse,
-        reason: 'an emptied lineup must not keep fetching its old programs',
-      );
-      expect(completers.containsKey('p4'), isFalse);
-    },
-  );
-
-  test(
-    'replacing the prefetch queue drops previously queued, now-obsolete '
-    'programs',
-    () async {
-      final completers = <String, Completer<Map<String, dynamic>>>{};
-      when(
-        () => liveTv.getProgram(any(), userId: any(named: 'userId')),
-      ).thenAnswer((inv) {
-        final id = inv.positionalArguments[0] as String;
-        return completers
-            .putIfAbsent(id, () => Completer<Map<String, dynamic>>())
-            .future;
-      });
-
-      final vm = LiveTvGuideViewModel(client);
-      GuideProgram program(String id) => GuideProgram(
-        id: id,
-        channelId: 'c0',
-        name: id,
-        startDate: DateTime.parse('2026-09-11T10:00:00Z'),
-        endDate: DateTime.parse('2026-09-11T10:30:00Z'),
-        rawData: const {},
-      );
-
-      // Concurrency is 3: p0-p2 start fetching immediately (blocked on
-      // their completers) and p3/p4 sit queued behind them, never dequeued.
-      vm.queueArtworkPrefetch([
-        program('p0'),
-        program('p1'),
-        program('p2'),
-        program('p3'),
-        program('p4'),
-      ]);
-
-      // Replace the queue with an unrelated program before any of the
-      // active three complete.
-      vm.queueArtworkPrefetch([program('q0')], replace: true);
-
-      completers['p0']!.complete(_program('p0', 'c0'));
-      await Future<void>.delayed(Duration.zero);
-      completers['p1']!.complete(_program('p1', 'c0'));
-      await Future<void>.delayed(Duration.zero);
-      completers['p2']!.complete(_program('p2', 'c0'));
-      await Future<void>.delayed(Duration.zero);
-
-      expect(
-        completers.containsKey('p3'),
-        isFalse,
-        reason: 'p3 was only queued, not in flight, and the replace should '
-            'have dropped it',
-      );
-      expect(
-        completers.containsKey('p4'),
-        isFalse,
-        reason: 'p4 was only queued, not in flight, and the replace should '
-            'have dropped it',
-      );
-      expect(
-        completers.containsKey('q0'),
-        isTrue,
-        reason: 'the replacement program should start once a concurrency '
-            'slot frees up',
-      );
-    },
-  );
-
-  group("artwork prefetch doesn't run away", () {
-    List<GuideProgram> makePrograms(int n) => [
-      for (var i = 0; i < n; i++)
-        GuideProgram(
-          id: 'p$i',
-          // Distinct channels, so the content-key cache can't absorb these
-          // and hide the behaviour under test.
-          channelId: 'c$i',
-          name: 'Show $i',
-          startDate: DateTime.now().add(const Duration(minutes: 5)),
-          endDate: DateTime.now().add(const Duration(minutes: 35)),
-          rawData: const {},
-        ),
-    ];
-
-    test('resubmitting a resolved lineup fetches nothing', () async {
-      var fetches = 0;
-      when(
-        () => liveTv.getProgram(any(), userId: any(named: 'userId')),
-      ).thenAnswer((inv) async {
-        fetches++;
-        final id = inv.positionalArguments[0] as String;
+  for (final offline in [false, true]) {
+    test('redisplaying a 600-channel lineup bounds artwork requests (offline: $offline)', () async {
+      var reads = 0;
+      when(lookup).thenAnswer((inv) async {
+        reads++;
+        if (offline) throw StateError('unavailable');
+        final id = inv.positionalArguments.first as String;
         return _program(id, 'c${id.substring(1)}');
       });
-
       final vm = LiveTvGuideViewModel(client);
-      final programs = makePrograms(600);
-
+      addTearDown(vm.dispose);
+      final programs = [for (var i = 0; i < 600; i++) listing('p$i', channel: 'c$i')];
       vm.queueArtworkPrefetch(programs, replace: true);
       await pumpEventQueue(times: 5000);
-      final settled = fetches;
-      expect(settled, programs.length);
-
-      // The screen resubmits the current window on every notification, and
-      // every resolved fetch notifies. A submission bigger than the cache
-      // used to evict entries that the next pass then re-fetched, so this
-      // fed itself instead of settling.
+      final settled = reads;
+      expect(settled, offline ? lessThan(20) : programs.length);
+      if (offline) expect(vm.artworkLookupsDisabled, isTrue);
       for (var i = 0; i < 3; i++) {
         vm.queueArtworkPrefetch(programs, replace: true);
         await pumpEventQueue(times: 200);
       }
-
-      expect(fetches, settled);
+      expect(reads, settled);
     });
+  }
 
-    test("a server that can't answer getProgram is asked a bounded number "
-        'of times', () async {
-      var fetches = 0;
-      when(
-        () => liveTv.getProgram(any(), userId: any(named: 'userId')),
-      ).thenAnswer((_) async {
-        fetches++;
-        throw StateError('no such route');
-      });
-
-      final vm = LiveTvGuideViewModel(client);
-      final programs = makePrograms(600);
-
-      vm.queueArtworkPrefetch(programs, replace: true);
-      await pumpEventQueue(times: 5000);
-      // A later resubmission must not restart the storm.
-      vm.queueArtworkPrefetch(programs, replace: true);
-      await pumpEventQueue(times: 5000);
-
-      expect(vm.artworkLookupsDisabled, isTrue);
-      expect(
-        fetches,
-        lessThan(20),
-        reason: "failures aren't cached per program, so without the breaker "
-            'every program in the lineup was retried on every resubmission',
-      );
-    });
-
-    test('a program that already carries its art is never fetched', () async {
-      var fetches = 0;
-      when(
-        () => liveTv.getProgram(any(), userId: any(named: 'userId')),
-      ).thenAnswer((inv) async {
-        fetches++;
-        return _program(inv.positionalArguments[0] as String, 'c0');
-      });
-
-      final vm = LiveTvGuideViewModel(client);
-      final carriesOwnArt = GuideProgram(
-        id: 'p1',
-        channelId: 'c1',
-        name: 'Show',
-        startDate: DateTime.now(),
-        endDate: DateTime.now(),
-        rawData: const {
-          'ImageTags': {'Primary': 'tag1'},
-        },
-      );
-
-      final source = await vm.artworkSourceFor(carriesOwnArt);
-
-      expect(source?.itemId, 'p1');
-      expect(fetches, 0, reason: 'its art came with the program already');
-    });
+  test('guide artwork uses its own poster, series poster, or parent thumbnail', () async {
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    final parent = {'ParentThumbItemId': 'parent', 'ParentThumbImageTag': 'thumb'};
+    final series = {'SeriesId': 'series', 'SeriesPrimaryImageTag': 'poster'};
+    for (final (raw, id, tag, thumb) in [
+      (parent, 'parent', 'thumb', true),
+      (series, 'series', 'poster', false),
+      ({...parent, ...series, 'ImageTags': {'Primary': 'own'}}, 'p1', 'own', false),
+    ]) {
+      final source = await vm.artworkSourceFor(listing('p1', raw: raw));
+      expect((source?.itemId, source?.tag, source?.isThumb), (id, tag, thumb));
+    }
+    verifyNever(lookup);
   });
 
-  group('episodeLine', () {
-    GuideProgram program({String? episodeTitle, int? season, int? episode}) =>
-        GuideProgram(
-          id: 'p1',
-          channelId: 'c1',
-          name: 'Show',
-          startDate: DateTime.now(),
-          endDate: DateTime.now(),
-          episodeTitle: episodeTitle,
-          rawData: <String, dynamic>{
-            'ParentIndexNumber': ?season,
-            'IndexNumber': ?episode,
-          },
-        );
-
-    test('carries the title and the numbering together', () {
-      final line = program(
-        episodeTitle: 'The Reckoning',
-        season: 1,
-        episode: 5,
-      ).episodeLine;
-
-      expect(line, 'The Reckoning (S1:E5)');
-    });
-
-    // Listings often name an episode without numbering it.
-    test('keeps the title when there is no numbering', () {
-      expect(
-        program(episodeTitle: 'The Reckoning').episodeLine,
-        'The Reckoning',
-      );
-    });
-
-    test('keeps the numbering when there is no title', () {
-      expect(program(season: 2, episode: 9).episodeLine, '(S2:E9)');
-    });
-
-    test('is empty when the program carries neither', () {
-      expect(program().episodeLine, isEmpty);
-      expect(program(episodeTitle: '   ').episodeLine, isEmpty);
-    });
-
-    test('never renders a null into the line', () {
-      for (final line in [
-        program(episodeTitle: 'Name').episodeLine,
-        program(season: 3, episode: 1).episodeLine,
-        program().episodeLine,
-      ]) {
-        expect(line, isNot(contains('null')));
-      }
-    });
-  });
-
-  group('artwork source picks the right image endpoint', () {
-    GuideProgram withRaw(Map<String, dynamic> raw) => GuideProgram(
-      id: 'p1',
-      channelId: 'c1',
-      name: 'Show',
-      startDate: DateTime.now(),
-      endDate: DateTime.now(),
-      rawData: raw,
-    );
-
-    test('a parent thumb is flagged so callers use the Thumb endpoint', () {
-      final source = withRaw(const {
-        'ParentThumbItemId': 'parent1',
-        'ParentThumbImageTag': 'thumbtag',
-      }).artworkSource;
-
-      expect(source?.itemId, 'parent1');
-      expect(source?.tag, 'thumbtag');
-      expect(
-        source?.isThumb,
-        isTrue,
-        reason: 'ParentThumbImageTag tags the parent Thumb image, so asking '
-            'for its Primary with that tag serves the wrong image or nothing',
-      );
-    });
-
-    test('a series poster stays on the Primary endpoint', () {
-      final source = withRaw(const {
-        'SeriesId': 's1',
-        'SeriesPrimaryImageTag': 'ptag',
-      }).artworkSource;
-
-      expect(source?.itemId, 's1');
-      expect(source?.isThumb, isFalse);
-    });
-
-    test("the program's own art wins over every fallback", () {
-      final source = withRaw(const {
-        'ImageTags': {'Primary': 'own'},
-        'SeriesId': 's1',
-        'SeriesPrimaryImageTag': 'ptag',
-        'ParentThumbItemId': 'parent1',
-        'ParentThumbImageTag': 'thumbtag',
-      }).artworkSource;
-
-      expect(source?.tag, 'own');
-      expect(source?.isThumb, isFalse);
-    });
+  test('episode labels use the title and numbering available in the listing', () {
+    String label(String? title, {int? season, int? episode}) =>
+        listing('p1', episode: title, raw: {'ParentIndexNumber': ?season, 'IndexNumber': ?episode}).episodeLine;
+    expect(label('The Reckoning', season: 1, episode: 5), 'The Reckoning (S1:E5)');
+    expect(label('The Reckoning'), 'The Reckoning');
+    expect(label(null, season: 2, episode: 9), '(S2:E9)');
+    expect(label(null), isEmpty);
+    expect(label('   '), isEmpty);
   });
 }
