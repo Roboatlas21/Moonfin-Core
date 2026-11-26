@@ -278,6 +278,17 @@ const _teletubbies = {
   return (Dio()..interceptors.add(server), server);
 }
 
+Matcher _httpError(int status) =>
+    throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', status));
+
+extension on PlexLiveTvApi {
+  Future<Map<String, dynamic>> testGuide([List<String>? ids]) => getGuide(
+    startDate: DateTime.utc(2026, 10, 22),
+    endDate: DateTime.utc(2026, 10, 23),
+    channelIds: ids,
+  );
+}
+
 void main() {
   test('channel and showing ids come apart again', () {
     expect(plexChannelOf('channel-2-4'), (source: '2', channel: '4'));
@@ -393,43 +404,6 @@ void main() {
     expect((await refresh()).containsKey('PlexFavoriteSource'), isFalse);
   });
 
-  test('a failed DVR preserves healthy DVR channels and programs', () async {
-    final (dio, server) = _server(secondDvr: true);
-    var badGridRequests = 0;
-    server.failWhen = (options) {
-      final failed = options.uri.path.startsWith('/tv.plex.providers.epg.xmltv:3/');
-      if (failed && options.uri.path.endsWith('/grid')) badGridRequests++;
-      return failed;
-    };
-
-    final api = PlexLiveTvApi(dio);
-    final lineup = await api.getChannelGroups();
-    expect(lineup.groupsByChannelId['channel-2-4'], {'source:dvr'});
-    expect(lineup.sources.where((s) => s.groupId == 'source:dvr'), hasLength(1));
-
-    final start = DateTime.utc(2026, 10, 22);
-    final end = DateTime.utc(2026, 10, 23);
-    final partial = await api.getGuide(
-      startDate: start,
-      endDate: end,
-      channelIds: ['channel-2-4', 'channel-3-9'],
-    );
-    expect(partial['FailedChannelIds'], ['channel-3-9']);
-    expect(
-      (partial['Items'] as List).map((p) => p['ChannelId']).toSet(),
-      {'channel-2-4'},
-    );
-
-    final previousRequests = badGridRequests;
-    final healthy = await api.getGuide(
-      startDate: start,
-      endDate: end,
-      channelIds: ['channel-2-4'],
-    );
-    expect(healthy.containsKey('FailedChannelIds'), isFalse);
-    expect(badGridRequests, previousRequests);
-  });
-
   test('DVR discovery preserves sources until Plex confirms an empty list', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
@@ -502,9 +476,7 @@ void main() {
     final (dio, server) = _server(secondDvr: true);
     final api = PlexLiveTvApi(dio);
     const missing = 'channel-2-4', empty = 'channel-3-7', free = 'channel-plex-abc-66635fc0';
-    Future<Map> guide([List<String>? ids]) => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23), channelIds: ids,
-    );
+    final guide = api.testGuide;
     await api.getChannelGroups();
     server.discoveryReply = {'MediaContainer': {'Dvr': [
       {'key': '2'}, {'key': '3', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:3'},
@@ -528,24 +500,6 @@ void main() {
     expect((recovered['Items'] as List).first['ChannelId'], missing);
   });
 
-  test('a malformed tuner reports its channels for retry and preserves Free TV', () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
-    const tuner = 'channel-2-4', free = 'channel-plex-abc-66635fc0';
-    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23), channelIds: ids,
-    );
-    server.tunerReply = {'MediaContainer': {'Metadata': [{'Media': 'invalid'}]}};
-    final mixed = await guide([tuner, free]);
-    expect(mixed['FailedChannelIds'], [tuner]);
-    expect((mixed['Items'] as List).map((p) => p['ChannelId']).toSet(), {free});
-    expect((await guide([tuner]))['FailedChannelIds'], [tuner]);
-    server.tunerReply = null;
-    final recovered = await guide([tuner]);
-    expect(recovered.containsKey('FailedChannelIds'), isFalse);
-    expect((recovered['Items'] as List).first['ChannelId'], tuner);
-  });
-
   test('a missing tuner envelope is retryable and a valid empty one is complete', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
@@ -555,6 +509,11 @@ void main() {
       channelIds: ['channel-2-4', 'channel-plex-abc-66635fc0'],
     );
 
+    server.tunerReply = {'MediaContainer': {'Metadata': [{'Media': 'invalid'}]}};
+    final mixed = await guide();
+    expect(mixed['FailedChannelIds'], ['channel-2-4']);
+    expect((mixed['Items'] as List).map((row) => row['ChannelId']).toSet(), {'channel-plex-abc-66635fc0'});
+    expect((await api.testGuide(['channel-2-4']))['FailedChannelIds'], ['channel-2-4']);
     server.tunerReply = {};
     final partial = await api.getChannelGroups();
     expect(partial.partial, isTrue);
@@ -593,143 +552,78 @@ void main() {
     expect((await guide()).containsKey('FailedChannelIds'), isFalse);
   });
 
-  test('a forbidden tuner grid preserves other grids, but 401 stays fatal', () async {
-    final (dio, server) = _server(secondDvr: true);
-    final api = PlexLiveTvApi(dio);
-    server.failWhen = (r) => r.uri.path == '/tv.plex.providers.epg.xmltv:3/grid';
-    server.failureStatus = () => 403;
-    const denied = 'channel-3-9';
-    const free = 'channel-plex-abc-66635fc0';
-    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22),
-      endDate: DateTime.utc(2026, 10, 23),
-      channelIds: ids,
-    );
-    for (final healthy in ['channel-2-4', free]) {
-      final result = await guide([healthy, denied]);
-      expect(result['FailedChannelIds'], [denied]);
-      expect((result['Items'] as List).map((p) => p['ChannelId']), contains(healthy));
-    }
-    final retry = await guide([denied]);
-    expect(retry['Items'], isEmpty);
-    expect(retry['FailedChannelIds'], [denied]);
-    await expectLater(api.getProgram('airing-3-1792699380-9'), throwsA(isA<DioException>()
-        .having((e) => e.response?.statusCode, 'status', 403)));
-    server.failureStatus = () => 401;
-    await expectLater(guide([free, denied]), throwsA(isA<DioException>()
-        .having((e) => e.response?.statusCode, 'status', 401)));
+  const free = 'channel-plex-abc-66635fc0';
+  const extra = 'channel-plex-news-extra';
+  const tuner = 'channel-2-4';
+  const other = 'channel-3-9';
+  for (final (path, denied, healthy, program) in [
+    ('/tv.plex.providers.epg.xmltv:3/grid', [other], [tuner, free], 'airing-3-1792699380-9'),
+    ('/grid', [free], [tuner, extra], 'airing-plex-1792699200-abc-66635fc0'),
+    ('/livetv/dvrs', [tuner, 'channel-2-9'], [free], null),
+    ('/lineups/plex/channels', [free, extra], [tuner], null),
+  ]) {
+    test('guide scopes a 403 from $path and propagates a 401', () async {
+      final (dio, server) = _server(secondDvr: true);
+      final api = PlexLiveTvApi(dio);
+      bool affected(RequestOptions r) => r.uri.path == path &&
+          (path != '/grid' || r.queryParameters['channelGridKey'] == 'provider-42');
+      var failedReads = 0;
+      server.failWhen = (r) {
+        if (!affected(r)) return false;
+        failedReads++;
+        return true;
+      };
+      server.failureStatus = () => 403;
+      for (final station in healthy) {
+        final partial = await api.testGuide([station, ...denied]);
+        expect(partial['FailedChannelIds'], unorderedEquals(denied));
+        expect((partial['Items'] as List).map((p) => p['ChannelId']).toSet(), {station});
+      }
+      if (path.endsWith(':3/grid')) {
+        final before = failedReads;
+        expect((await api.testGuide([tuner])).containsKey('FailedChannelIds'), isFalse);
+        expect(failedReads, before);
+      }
+      if (program == null) {
+        if (path == '/lineups/plex/channels') {
+          expect(server.requests.where((r) => r.uri.path == '/grid'), isEmpty);
+        }
+        await expectLater(api.testGuide(denied), _httpError(403));
+      } else {
+        final partial = await api.testGuide(denied);
+        expect(partial['Items'], isEmpty);
+        expect(partial['FailedChannelIds'], denied);
+        await expectLater(api.getProgram(program), _httpError(403));
+      }
+      server.failureStatus = () => 401;
+      await expectLater(api.testGuide([...healthy, ...denied]), _httpError(401));
+      server.failWhen = null;
+      final recovered = await api.testGuide([...healthy, ...denied]);
+      expect(recovered.containsKey('FailedChannelIds'), isFalse);
+      expect((recovered['Items'] as List).map((p) => p['ChannelId']), containsAll(healthy));
+      if (path == '/lineups/plex/channels' || path == '/livetv/dvrs') {
+        expect((recovered['Items'] as List).map((p) => p['ChannelId']), containsAll(denied));
+      }
+    });
+  }
 
-    server.failWhen = (r) {
-      final path = r.uri.path;
-      server.failureStatus = () => path == '/grid' ? 503 : 403;
-      return path == '/grid' || path == '/tv.plex.providers.epg.xmltv:3/grid';
-    };
-    final mixed = await PlexLiveTvApi(dio).getGuide(
-      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
-      channelIds: [denied, free],
-    );
-    expect(mixed['FailedChannelIds'], unorderedEquals([denied, free]));
-  });
-
-  test('denied DVR discovery leaves Free TV listings in a mixed guide', () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
-    const free = 'channel-plex-abc-66635fc0';
-    const dvr = ['channel-2-4', 'channel-2-9'];
-    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
-      channelIds: ids,
-    );
-    server.failWhen = (r) => r.path == '/livetv/dvrs';
-    server.failureStatus = () => 403;
-    final mixed = await guide([free, ...dvr]);
-    expect((mixed['Items'] as List).map((row) => row['ChannelId']).toSet(), {free});
-    expect(mixed['FailedChannelIds'], unorderedEquals(dvr));
-    await expectLater(guide(dvr),
-        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 403)));
-
-    server.failureStatus = () => 401;
-    await expectLater(guide([free, ...dvr]),
-        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)));
-    server.failWhen = null;
-    final recovered = await guide([free, ...dvr]);
-    expect(recovered.containsKey('FailedChannelIds'), isFalse);
-    expect((recovered['Items'] as List).map((row) => row['ChannelId']), containsAll([free, ...dvr]));
-  });
-
-  test('a forbidden Free TV grid leaves other guide listings available', () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
-    const denied = 'channel-plex-abc-66635fc0';
-    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
-      channelIds: ids,
-    );
-    server.failWhen = (r) =>
-        r.uri.path == '/grid' && r.queryParameters['channelGridKey'] == 'provider-42';
-    server.failureStatus = () => 403;
-    for (final healthy in ['channel-2-4', 'channel-plex-news-extra']) {
-      final result = await guide([healthy, denied]);
-      expect(result['FailedChannelIds'], [denied]);
-      expect((result['Items'] as List).map((row) => row['ChannelId']), contains(healthy));
-    }
-    expect((await guide([denied]))['FailedChannelIds'], [denied]);
-    await expectLater(api.getProgram('airing-plex-1792699200-abc-66635fc0'),
-        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 403)));
-    server.failureStatus = () => 401;
-    await expectLater(guide([denied, 'channel-2-4']),
-        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)));
-    server.failWhen = null;
-    final recovered = await guide([denied]);
-    expect(recovered.containsKey('FailedChannelIds'), isFalse);
-    expect((recovered['Items'] as List).single['ChannelId'], denied);
-  });
-
-  test('a forbidden Free TV catalog preserves DVR listings in a mixed guide', () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
-    const dvr = 'channel-2-4';
-    const free = ['channel-plex-abc-66635fc0', 'channel-plex-news-extra'];
-    Future<Map<String, dynamic>> guide(List<String> ids) => api.getGuide(
-      startDate: DateTime.utc(2026, 10, 22), endDate: DateTime.utc(2026, 10, 23),
-      channelIds: ids,
-    );
-    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
-    server.failureStatus = () => 403;
-    final partial = await guide([dvr, ...free]);
-    expect((partial['Items'] as List).map((row) => row['ChannelId']).toSet(), {dvr});
-    expect(partial['FailedChannelIds'], unorderedEquals(free));
-    expect(server.requests.where((r) => r.uri.path == '/grid'), isEmpty);
-    await expectLater(guide(free),
-        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 403)));
-    server.failWhen = (r) {
-      final catalog = r.uri.path == '/lineups/plex/channels';
-      server.failureStatus = () => catalog ? 403 : 503;
-      return catalog || r.uri.path.endsWith('/grid');
-    };
-    await expectLater(guide([dvr, ...free]),
-        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 403)));
-    server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
-    server.failureStatus = () => 401;
-    await expectLater(guide([dvr, ...free]),
-        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)));
-    server.failWhen = null;
-    final recovered = await guide(free);
-    expect(recovered.containsKey('FailedChannelIds'), isFalse);
-    expect((recovered['Items'] as List).map((row) => row['ChannelId']).toSet(), free.toSet());
-  });
-
-  test('one inaccessible tuner does not discard the other DVR channels', () async {
-    final (dio, server) = _server(secondDvr: true);
-    server.failWhen = (request) =>
-        request.uri.path == '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';
-    server.failureStatus = () => 403;
-
-    final lineup = await PlexLiveTvApi(dio).getChannelGroups();
-    expect(lineup.groupsByChannelId['channel-2-4'], {'source:dvr'});
-    expect(lineup.channels?.map((row) => row['Id']), contains('channel-2-4'));
-    expect(lineup.partial, isFalse);
-  });
+  for (final catalogDenied in [true, false]) {
+    test('mixed guide failure preserves the scope of a denial (catalog: $catalogDenied)', () async {
+      final (dio, server) = _server(secondDvr: true);
+      server.failWhen = (request) {
+        final path = request.uri.path;
+        final forbidden = path == (catalogDenied ? '/lineups/plex/channels' : '/tv.plex.providers.epg.xmltv:3/grid');
+        server.failureStatus = () => forbidden ? 403 : 503;
+        return forbidden || path.endsWith('/grid');
+      };
+      final result = PlexLiveTvApi(dio).testGuide(catalogDenied ? [tuner, free, extra] : [other, free]);
+      if (catalogDenied) {
+        await expectLater(result, _httpError(403));
+      } else {
+        expect((await result)['FailedChannelIds'], unorderedEquals([other, free]));
+      }
+    });
+  }
 
   test('an expired Plex session does not become an empty DVR lineup', () async {
     final (dio, server) = _server();
@@ -738,7 +632,7 @@ void main() {
 
     await expectLater(
       PlexLiveTvApi(dio).getChannelGroups(),
-      throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 401)),
+      _httpError(401),
     );
   });
 
@@ -766,8 +660,6 @@ void main() {
     expect(server.requests.last.headers['X-Plex-Provider-Version'], '7.2');
   });
 
-
-
   test('full lineup refresh picks up new Free TV channels and genres', () async {
     var name = 'Sports';
     final server = _FakeServer((request) => switch (request.uri.path) {
@@ -792,99 +684,70 @@ void main() {
 
     server.failWhen = (r) => r.uri.path == '/lineups/plex/channels';
     server.failureStatus = () => 503;
-    final stale = await api.getChannelGroups();
-    expect(stale.channels, lineup.channels);
-    expect(stale.partial, isTrue);
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final stale = await api.getChannelGroups();
+      expect(stale.channels, lineup.channels);
+      expect(stale.partial, isTrue);
+      expect(stale.unresolvedChannelIds, isNull);
+    }
     server.failWhen = null;
     name = 'Movies';
     final recovered = (await api.getChannels())['Items'] as List;
     expect(recovered.single['Id'], 'channel-plex-Movies');
   });
 
-  test('an advertised tuner with a 404 stays unresolved until discovery confirms removal', () async {
+  test('tuner errors preserve healthy sources until discovery confirms removal', () async {
     final (dio, server) = _server(secondDvr: true);
-    final api = PlexLiveTvApi(dio);
-    await api.getChannelGroups();
-    server.failWhen = (r) => r.uri.path == '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';
-    server.failureStatus = () => 404;
-    final missing = await api.getChannelGroups();
-    expect(missing.partial, isTrue);
-    expect(missing.unresolvedChannelIds, {'channel-3-7'});
-    expect(missing.groupsByChannelId, contains('channel-3-7'));
-    server.discoveryReply = {'MediaContainer': {'Dvr': [
-      {'key': '2', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:2'},
-    ]}};
-    final channels = (await api.getChannels())['Items'] as List;
-    expect(channels.map((row) => row['Id']), isNot(contains('channel-3-7')));
-    expect((await api.getChannelGroups()).partial, isFalse);
-  });
-
-  test('a tuner outage retains only its last lineup until access is denied', () async {
-    final (dio, server) = _server(secondDvr: true);
-    const second = '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';
     final api = PlexLiveTvApi(dio);
     final healthy = await api.getChannelGroups();
     server.tunerReply = {'MediaContainer': {'Channel': [{'id': '5', 'title': 'New station'}]}};
-    server.failWhen = (r) => r.uri.path == second;
-    server.failureStatus = () => 503;
-    final outage = await api.getChannelGroups();
-    expect(outage.partial, isTrue);
-    expect(outage.sources, healthy.sources);
-    expect(outage.groupsByChannelId['channel-plex-abc-66635fc0'], contains('source:plexFreeTv'));
-    expect(outage.groupsByChannelId.containsKey('channel-2-4'), isFalse);
-    expect(outage.groupsByChannelId['channel-2-5'], {'source:dvr'});
-    expect(outage.groupsByChannelId['channel-3-7'], {'source:dvr'});
-    expect(outage.unresolvedChannelIds, {'channel-3-7'});
-    expect(outage.channels?.map((row) => row['Id']), contains('channel-3-7'));
-    expect((await api.getChannels())['Items'], outage.channels);
-
+    server.failWhen = (r) => r.uri.path.endsWith(':3/lineups/dvr/channels');
+    for (final status in [503, 404]) {
+      server.failureStatus = () => status;
+      final partial = await api.getChannelGroups();
+      expect(partial.partial, isTrue);
+      expect(partial.sources, healthy.sources);
+      expect(partial.unresolvedChannelIds, {'channel-3-7'});
+      expect(partial.groupsByChannelId.keys, containsAll(['channel-2-5', 'channel-3-7', free]));
+      expect(partial.groupsByChannelId, isNot(contains(tuner)));
+      expect((await api.getChannels())['Items'], partial.channels);
+    }
+    server.discoveryReply = {'MediaContainer': {'Dvr': [
+      {'key': '2', 'epgIdentifier': 'tv.plex.providers.epg.xmltv:2'},
+    ]}};
+    expect((await api.getChannels())['Items'].map((c) => c['Id']), isNot(contains('channel-3-7')));
+    server.discoveryReply = null;
     server.failWhen = null;
     expect((await api.getChannelGroups()).partial, isFalse);
-    server.failWhen = (r) => r.uri.path == second;
+    server.failWhen = (r) => r.uri.path.endsWith(':3/lineups/dvr/channels');
     server.failureStatus = () => 403;
-    expect((await api.getChannelGroups()).groupsByChannelId.containsKey('channel-3-7'), isFalse);
+    final denied = await api.getChannelGroups();
+    expect(denied.partial, isFalse);
+    expect(denied.groupsByChannelId['channel-2-5'], {'source:dvr'});
+    expect(denied.groupsByChannelId, isNot(contains('channel-3-7')));
     server.failureStatus = () => 503;
     expect((await api.getChannelGroups()).unresolvedChannelIds, isEmpty);
   });
 
-  test('a Free TV outage preserves the last lineup alongside the DVR', () async {
-    final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
-    final healthy = await api.getChannelGroups();
-    bool isFreeLineup(RequestOptions r) => r.uri.path == '/lineups/plex/channels';
-    server.failWhen = isFreeLineup;
-    for (var i = 0; i < 2; i++) {
-      final stale = await api.getChannelGroups();
-      expect(stale.channels, healthy.channels);
-      expect(stale.partial, isTrue);
-      expect(stale.unresolvedChannelIds, isNull);
-    }
-    expect((await api.getChannels())['Items'], healthy.channels);
-    server.failWhen = null;
-    server.requests.clear();
-    await api.getChannels();
-    expect(server.requests.where(isFreeLineup), hasLength(1));
-    server.failWhen = isFreeLineup;
-    server.failureStatus = () => 403;
-    final denied = await api.getChannelGroups();
-    expect(denied.channels!.length, lessThan(healthy.channels!.length));
-  });
-
   for (final cloudOnly in [true, false]) {
-    test('malformed Free TV rows cannot replace the last good lineup (cloudOnly=$cloudOnly)', () async {
+    test('Free TV keeps the last complete lineup until zero is confirmed (cloudOnly=$cloudOnly)', () async {
       final (_, fixture) = _server();
-      List<Object?> rows = [{'id': 'news'}];
+      List<Object?> rows = [{'id': 'news'}, {'id': 'film'}, {'id': 'locked', 'drm': true}];
+      var size = rows.length;
       final server = _FakeServer((r) => r.uri.path == '/lineups/plex/channels'
-          ? {'MediaContainer': {'size': rows.length, 'Channel': rows}}
+          ? {'MediaContainer': {'size': size, 'Channel': rows}}
           : fixture.answer(r));
       final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: cloudOnly);
       final healthy = await api.getChannelGroups();
-      expect(healthy.groupsByChannelId, contains('channel-plex-news'));
+      final dvrIds = [if (!cloudOnly) 'channel-2-4'];
+      expect(healthy.groupsByChannelId.keys, unorderedEquals([...dvrIds, 'channel-plex-news', 'channel-plex-film']));
 
-      for (final malformed in <List<Object?>>[
-        [{}], [null], [{'id': 'replacement'}, {'id': ' '}], [{'id': []}],
+      for (final (reported, stations) in <(int, List<Object?>)>[
+        (3, [{'id': 'news'}]), (3, []), (1, [{}]), (1, [null]), (1, [{'id': []}]),
+        (2, [{'id': 'replacement'}, {'id': ' '}]),
       ]) {
-        rows = malformed;
+        size = reported;
+        rows = stations;
         final partial = await api.getChannelGroups();
         expect(partial.partial, isTrue);
         expect(partial.channels, healthy.channels);
@@ -892,35 +755,15 @@ void main() {
       }
 
       rows = [{'id': 42}, {'id': 'locked', 'drm': true}];
+      size = rows.length;
       final recovered = (await api.getChannels())['Items'] as List;
-      final dvrIds = [if (!cloudOnly) 'channel-2-4'];
       expect(recovered.map((c) => c['Id']), unorderedEquals([...dvrIds, 'channel-plex-42']));
       rows = [];
+      size = 0;
       final empty = await api.getChannelGroups();
       expect(empty.partial, isFalse);
       expect(empty.groupsByChannelId.keys, unorderedEquals(dvrIds));
-    });
-
-    test('Free TV retains its stations until Plex confirms zero (cloudOnly=$cloudOnly)', () async {
-      final rows = [
-        {'id': 'news', 'title': 'News'}, {'id': 'film', 'title': 'Film'},
-        {'id': 'locked', 'drm': true},
-      ];
-      var size = rows.length;
-      final server = _FakeServer((r) => {'MediaContainer': r.uri.path == '/lineups/plex/channels'
-          ? {'Channel': rows, 'size': size} : <String, dynamic>{}});
-      final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: cloudOnly);
-      final healthy = await api.getChannelGroups();
-      expect(healthy.channels, hasLength(2));
-      for (final count in [1, 0]) {
-        rows.length = count;
-        final incomplete = await api.getChannelGroups();
-        expect(incomplete.partial, isTrue);
-        expect(incomplete.channels, healthy.channels);
-      }
-      size = 0;
-      expect((await api.getChannels())['Items'], isEmpty);
-      expect((await api.getChannelGroups()).partial, isFalse);
+      expect((await api.getChannels())['Items'].length, dvrIds.length);
     });
   }
 
@@ -976,10 +819,6 @@ void main() {
     });
     expect(lineup.sources.map((source) => source.groupId), ['source:dvr']);
   });
-
-
-
-
 
   test('Plex On Now uses a cached hub after the DVR lineup', () async {
     const hubPath = '/hubs/sections/home/whatsOnNow';
@@ -1102,42 +941,26 @@ void main() {
     expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(3));
   });
 
-  test('an unavailable Plex hub does not discard DVR On Now', () async {
-    final (dio, server) = _server(liveDvr: true);
-    server.failWhen = (request) =>
-        request.uri.path == '/hubs/sections/home/whatsOnNow';
-    server.failureStatus = () => 404;
-    // Request room for the Free TV hub so its failure is actually exercised.
-    final programs = (await PlexLiveTvApi(dio)
-        .getRecommendedPrograms(limit: 4))['Items'] as List;
-    expect(programs.map((item) => item['ChannelId']), [
-      'channel-2-4',
-    ]);
-  });
-
-  test('Plex On Now falls back for an unavailable tuner and preserves authorization errors', () async {
-    final (dio, server) = _server();
-    int? status;
-    server.failWhen = (request) =>
-        request.uri.path == '/tv.plex.providers.epg.xmltv:2/grid';
-    server.failureStatus = () => status;
-    for (final failure in [null, 403, 503]) {
-      status = failure;
-      final programs = (await PlexLiveTvApi(dio)
-          .getRecommendedPrograms(limit: 3))['Items'] as List;
-      expect(programs.map((item) => item['ChannelId']), ['channel-plex-abc-66635fc0']);
-    }
-
-    for (final (path, denied) in [
-      ('/tv.plex.providers.epg.xmltv:2/grid', 401), ('/livetv/dvrs', 403),
+  test('On Now retains programs from healthy sources and propagates session errors', () async {
+    const grid = '/tv.plex.providers.epg.xmltv:2/grid';
+    for (final (path, status, expected) in <(String, int?, String?)>[
+      ('/hubs/sections/home/whatsOnNow', 404, tuner),
+      (grid, null, free), (grid, 403, free), (grid, 503, free),
+      (grid, 401, null), ('/livetv/dvrs', 403, null),
     ]) {
-      status = denied;
+      final (dio, server) = _server(liveDvr: true);
       server.failWhen = (r) => r.uri.path == path;
-      await expectLater(
-        PlexLiveTvApi(dio).getRecommendedPrograms(limit: 3),
-        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', denied)),
-      );
+      server.failureStatus = () => status;
+      final result = PlexLiveTvApi(dio).getRecommendedPrograms(limit: 4);
+      if (expected == null) {
+        await expectLater(result, _httpError(status!));
+      } else {
+        expect(((await result)['Items'] as List).map((p) => p['ChannelId']), [expected]);
+      }
     }
+    final (dio, _) = _server(malformedDvrGrid: true);
+    final result = await PlexLiveTvApi(dio).getRecommendedPrograms();
+    expect((result['Items'] as List).map((p) => p['ChannelId']), [free]);
   });
 
   test('On Now preserves the tuner outage when Free TV has no programmes', () async {
@@ -1172,14 +995,6 @@ void main() {
     await expectLater(onNow(), throwsFormatException);
     server.tunerReply = {'MediaContainer': {'Metadata': []}};
     expect(await onNow(), isEmpty);
-  });
-
-  test('Plex On Now uses Free TV when the DVR grid metadata is malformed', () async {
-    final (dio, _) = _server(malformedDvrGrid: true);
-    final programs = (await PlexLiveTvApi(dio)
-        .getRecommendedPrograms(limit: 3))['Items'] as List;
-    expect(programs.map((item) => item['ChannelId']),
-        ['channel-plex-abc-66635fc0']);
   });
 
   test('every showing of a program is a program of its own', () async {

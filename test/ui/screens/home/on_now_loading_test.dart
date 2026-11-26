@@ -1,4 +1,4 @@
-
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
@@ -128,70 +128,88 @@ void main() {
     return model.rows.single;
   }
 
-  for (final channelCheckFails in [true, false]) {
-    test(
-      'a failed ${channelCheckFails ? 'channel check' : 'program request'} '
-      'preserves the visible row during refresh',
-      () async {
-        final existing = await loadPopulatedRow();
-        if (channelCheckFails) {
-          when(() => source.hasLiveTvChannels())
-              .thenThrow(Exception('unavailable'));
-        } else {
-          when(() => source.loadOnNow('http://server.test'))
-              .thenThrow(Exception('EPG unavailable'));
-        }
-        await model.load(preserveExisting: true);
-        expect(model.rows.single, same(existing));
-        expect(model.isLoading, isFalse);
-      },
-    );
-  }
+  test(
+    'a failed channel check preserves the visible row during refresh',
+    () async {
+      final existing = await loadPopulatedRow();
+      when(() => source.hasLiveTvChannels())
+          .thenThrow(Exception('unavailable'));
 
-  for (final noChannels in [true, false]) {
-    test(
-      noChannels
-          ? 'confirmed absence of channels removes the visible row during refresh'
-          : 'a successful empty EPG response removes the visible row during refresh',
-      () async {
-        await loadPopulatedRow();
-        if (noChannels) {
-          when(() => source.hasLiveTvChannels()).thenAnswer((_) async => false);
-        } else {
-          when(() => source.loadOnNow('http://server.test')).thenAnswer(
-            (_) async => const HomeRow(
-              id: 'liveTvOnNow',
-              title: 'On Now',
-              rowType: HomeRowType.liveTvOnNow,
-            ),
-          );
-        }
-        await model.load(preserveExisting: true);
-        expect(model.rows, isEmpty);
-      },
-    );
-  }
+      await model.load(preserveExisting: true);
 
-  for (final channelCheckFails in [false, true]) {
-    test(
-      channelCheckFails
-          ? 'a failed channel check skips program loading without leaving a placeholder'
-          : 'no Live TV channels skips program loading and clears the placeholder',
-      () async {
-        if (channelCheckFails) {
-          when(() => source.hasLiveTvChannels())
-              .thenThrow(Exception('unavailable'));
-        } else {
-          when(() => source.hasLiveTvChannels()).thenAnswer((_) async => false);
-        }
-        await model.load();
-        verify(() => source.hasLiveTvChannels()).called(1);
-        verifyNever(() => source.loadOnNow(any()));
-        expect(model.rows, isEmpty);
-        expect(model.isLoading, isFalse);
-      },
-    );
-  }
+      expect(model.rows.single, same(existing));
+      expect(model.isLoading, isFalse);
+    },
+  );
+
+  test(
+    'a failed program request preserves the visible row during refresh',
+    () async {
+      final existing = await loadPopulatedRow();
+      when(() => source.loadOnNow('http://server.test'))
+          .thenThrow(Exception('EPG unavailable'));
+
+      await model.load(preserveExisting: true);
+
+      expect(model.rows.single, same(existing));
+      expect(model.isLoading, isFalse);
+    },
+  );
+
+  test(
+    'confirmed absence of channels removes the visible row during refresh',
+    () async {
+      await loadPopulatedRow();
+      when(() => source.hasLiveTvChannels()).thenAnswer((_) async => false);
+
+      await model.load(preserveExisting: true);
+
+      expect(model.rows, isEmpty);
+    },
+  );
+
+  test(
+    'a successful empty EPG response removes the visible row during refresh',
+    () async {
+      await loadPopulatedRow();
+      when(() => source.loadOnNow('http://server.test')).thenAnswer(
+        (_) async => const HomeRow(
+          id: 'liveTvOnNow',
+          title: 'On Now',
+          rowType: HomeRowType.liveTvOnNow,
+        ),
+      );
+
+      await model.load(preserveExisting: true);
+
+      expect(model.rows, isEmpty);
+    },
+  );
+
+  test(
+    'no Live TV channels skips program loading and clears the placeholder',
+    () async {
+      when(() => source.hasLiveTvChannels()).thenAnswer((_) async => false);
+
+      await model.load();
+
+      verify(() => source.hasLiveTvChannels()).called(1);
+      verifyNever(() => source.loadOnNow(any()));
+      expect(model.rows, isEmpty);
+      expect(model.isLoading, isFalse);
+    },
+  );
+
+  test('a failed channel check skips program loading without leaving a placeholder', () async {
+    when(() => source.hasLiveTvChannels()).thenThrow(Exception('unavailable'));
+
+    await model.load();
+
+    verify(() => source.hasLiveTvChannels()).called(1);
+    verifyNever(() => source.loadOnNow(any()));
+    expect(model.rows, isEmpty);
+    expect(model.isLoading, isFalse);
+  });
 
   Future<void> enableSections(Set<HomeSectionType> types) =>
       prefs.setHomeSectionsConfig([
@@ -199,28 +217,30 @@ void main() {
           config.copyWith(enabled: types.contains(config.type)),
       ]);
 
-  for (final standaloneOnNow in [true, false]) {
-    test(
-      standaloneOnNow
-          ? 'Live TV leaves On Now to the standalone section when both are on'
-          : 'Live TV keeps its own On Now row when the standalone section is off',
-      () async {
-        await enableSections({
-          HomeSectionType.liveTv,
-          if (standaloneOnNow) HomeSectionType.onNow,
-        });
-        stubLiveTvRows();
-        await model.load();
-        expect(
-          model.rows.map((row) => row.id),
-          standaloneOnNow ? ['liveTv', 'onNow'] : ['liveTv', 'liveTvOnNow'],
-        );
-        if (standaloneOnNow) {
-          verify(() => source.loadOnNow('http://server.test')).called(1);
-        }
-      },
-    );
-  }
+  test(
+    'Live TV leaves On Now to the standalone section when both are on',
+    () async {
+      await enableSections({HomeSectionType.liveTv, HomeSectionType.onNow});
+      stubLiveTvRows();
+
+      await model.load();
+
+      expect(model.rows.map((row) => row.id), ['liveTv', 'onNow']);
+      verify(() => source.loadOnNow('http://server.test')).called(1);
+    },
+  );
+
+  test(
+    'Live TV keeps its own On Now row when the standalone section is off',
+    () async {
+      await enableSections({HomeSectionType.liveTv});
+      stubLiveTvRows();
+
+      await model.load();
+
+      expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvOnNow']);
+    },
+  );
 
   test('failed On Now listings do not hide favorite channels', () async {
     await enableSections({HomeSectionType.liveTv});
@@ -274,8 +294,6 @@ void main() {
       expect(model.isLoading, isFalse);
     },
   );
-
-
 
   for (final (serverType, cloudOnly) in [
     (ServerType.jellyfin, false),
@@ -341,5 +359,77 @@ void main() {
     });
   }
 
+  group('returning to Home', () {
+    HomeRow airing(List<String> ids) => HomeRow(
+      id: 'liveTvOnNow',
+      title: 'On Now',
+      rowType: HomeRowType.liveTvOnNow,
+      items: [
+        for (final id in ids)
+          AggregatedItem(
+            id: id,
+            serverId: 'http://server.test',
+            rawData: {'Type': 'Program'},
+          ),
+      ],
+    );
 
+    test('refreshes On Now in place', () async {
+      await loadPopulatedRow();
+      when(() => source.loadOnNow('http://server.test'))
+          .thenAnswer((_) async => airing(['next']));
+
+      await model.refreshResumeAndNextUp();
+
+      expect(model.rows.single.id, 'onNow');
+      expect(model.rows.single.items.map((item) => item.id), ['next']);
+    });
+
+    test('a second return while the first is out waits on it', () async {
+      await loadPopulatedRow();
+      final answer = Completer<HomeRow>();
+      when(() => source.loadOnNow('http://server.test'))
+          .thenAnswer((_) => answer.future);
+      clearInteractions(source);
+
+      final first = model.refreshResumeAndNextUp();
+      var secondDone = false;
+      final second = model.refreshResumeAndNextUp().then(
+        (_) => secondDone = true,
+      );
+      await pumpEventQueue();
+      expect(secondDone, isFalse);
+
+      answer.complete(airing(['next']));
+      await Future.wait([first, second]);
+
+      verify(() => source.loadOnNow('http://server.test')).called(1);
+      expect(model.rows.single.items.map((item) => item.id), ['next']);
+    });
+
+    test('brings On Now back once programs are airing', () async {
+      when(() => source.hasLiveTvChannels()).thenAnswer((_) async => true);
+      when(() => source.loadOnNow('http://server.test'))
+          .thenAnswer((_) async => airing(const []));
+      await model.load();
+      expect(model.rows, isEmpty);
+
+      when(() => source.loadOnNow('http://server.test'))
+          .thenAnswer((_) async => airing(['program']));
+      await model.refreshResumeAndNextUp();
+
+      expect(model.rows.map((row) => row.id), ['onNow']);
+    });
+
+    test('asks nothing for Live TV without channels', () async {
+      await enableSections({HomeSectionType.liveTv});
+      when(() => source.hasLiveTvChannels()).thenAnswer((_) async => false);
+      await model.load();
+      expect(model.rows, isEmpty);
+
+      await model.refreshResumeAndNextUp();
+
+      verifyNever(() => source.loadOnNow(any()));
+    });
+  });
 }

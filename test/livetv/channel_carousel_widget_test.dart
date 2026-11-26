@@ -432,87 +432,35 @@ void main() {
   });
 
 
-  testWidgets('carousel retries the currently browsed, not tuned, channels', (
-    tester,
-  ) async {
+  testWidgets('carousel retries only failed visible cards, including after a top-up error', (tester) async {
     final client = _CarouselClient();
     final channels = _guideChannels(20);
-    final vm = _CarouselGuide(client, channels)
-      ..failedChannels.addAll(['ch10', 'ch14']);
+    final vm = _CarouselGuide(client, channels)..failedChannels.addAll(['ch10', 'ch14']);
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
+    int retries(String id) => vm.requests.where((ids) => ids.length == 1 && ids.single == id).length;
+    Future<void> advance(Duration delay) async {
+      await tester.pump(delay);
+      await tester.pump();
+    }
+
     try {
       prewarm.tuned(channels, 'ch0');
-      await tester.pump(ChannelCarouselPrewarm.settleDelay);
-      await tester.pump();
+      await advance(ChannelCarouselPrewarm.settleDelay);
       await prewarm.ensureVisibleChannels(['ch10']);
-      await tester.pump(const Duration(seconds: 2));
-      // Browsing again replaces the pending retry for the previous card.
-      await prewarm.ensureVisibleChannels(['ch14']);
-      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
-      await tester.pump();
-      expect(vm.requests.last, ['ch14']);
-      expect(vm.requests.where((ids) =>
-          ids.length == 1 && ids.single == 'ch10'), isEmpty);
-    } finally {
-      prewarm.dispose();
-    }
-  });
-
-  testWidgets('failed visible cards retry again after cooldown', (tester) async {
-    final client = _CarouselClient();
-    final channels = _guideChannels(4);
-    final vm = _CarouselGuide(client, channels)..failedChannels.add('ch1');
-    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
-    try {
-      prewarm.tuned(channels, 'ch1');
-      await tester.pump(ChannelCarouselPrewarm.settleDelay);
-      await tester.pump();
-      await prewarm.ensureVisibleChannels(['ch1']);
-      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
-      await tester.pump();
-      final first = vm.requests.where((ids) =>
-          ids.length == 1 && ids.single == 'ch1').length;
-      expect(first, greaterThan(0));
-
-      await tester.pump(const Duration(seconds: 30));
-      await tester.pump();
-      expect(
-        vm.requests.where((ids) =>
-            ids.length == 1 && ids.single == 'ch1').length,
-        greaterThan(first),
-      );
-    } finally {
-      prewarm.dispose();
-    }
-  });
-
-  testWidgets('failed-channel retry is armed even when top-up throws', (
-    tester,
-  ) async {
-    final client = _CarouselClient();
-    final channels = _guideChannels(4);
-    final vm = _CarouselGuide(client, channels)
-      ..failedChannels.add('ch1');
-    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
-    try {
-      prewarm.tuned(channels, 'ch1');
-      await tester.pump(ChannelCarouselPrewarm.settleDelay);
-      await tester.pump();
+      await advance(const Duration(seconds: 2));
       vm.failTopUp = true;
-      await expectLater(
-        prewarm.ensureVisibleChannels(['ch1', 'ch2']),
-        throwsA(isA<StateError>()),
-      );
+      await expectLater(prewarm.ensureVisibleChannels(['ch14', 'ch15']), throwsStateError);
       vm.failTopUp = false;
-      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
-      await tester.pump();
-      expect(vm.requests.last, ['ch1']);
+      await advance(ChannelCarouselPrewarm.failedListingsRetryDelay);
+      expect(retries('ch10'), 0);
+      expect(vm.requests.last, ['ch14']);
+      final first = retries('ch14');
+      await advance(const Duration(seconds: 30));
+      expect(retries('ch14'), greaterThan(first));
     } finally {
       prewarm.dispose();
     }
   });
-
-
 
   testWidgets('prewarm catches up on a recording changed during its first load', (
     tester,

@@ -7,7 +7,6 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/auth/models/user.dart';
 import 'package:moonfin/auth/repositories/user_repository.dart';
-import 'package:moonfin/auth/store/authentication_store.dart';
 import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/repositories/item_mutation_repository.dart';
 import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
@@ -26,7 +25,6 @@ const _channel = <String, dynamic>{
 };
 const _source = 'provider://tv.plex.provider.epg';
 
-
 class _FailingPlexPreferences extends UserPreferences {
   _FailingPlexPreferences(super.store);
 
@@ -39,12 +37,15 @@ class _FailingPlexPreferences extends UserPreferences {
   }
 }
 
-PlexMediaServerClient _plex({bool cloudOnly = false, String userId = 'plex-user'}) =>
-    PlexMediaServerClient(
+PlexMediaServerClient _plex({bool cloudOnly = false, String userId = 'plex-user'}) {
+  final client = PlexMediaServerClient(
       baseUrl: cloudOnly ? 'https://plex.tv' : 'https://pms.example',
       deviceInfo: _device, cloudOnly: cloudOnly,
     )..userId = userId
      ..accessToken = cloudOnly ? 'cloud-token' : 'pms-token';
+  addTearDown(client.dispose);
+  return client;
+}
 
 bool _saved(MediaServerClient client, String id) =>
     (PlexLiveTvFavorites.applyToItem(client, {
@@ -137,8 +138,7 @@ void main() {
   test('Cloud and PMS use the same account favorites without touching DVR entries', () async {
     final direct = _plex(cloudOnly: true);
     final pms = _plex();
-    addTearDown(direct.dispose);
-    addTearDown(pms.dispose);
+
     cloud.rows = [
       {'source': _source, 'id': 'free123', 'title': 'Free Channel'},
       {'source': 'server://other/dvr', 'id': 'channel7', 'thumb': 'keep'},
@@ -163,7 +163,6 @@ void main() {
       'accessToken': 'legacy-owner-token',
     }));
     final pms = _plex();
-    addTearDown(pms.dispose);
 
     await ItemMutationRepository(pms).setFavorite('channel-plex-free123', isFavorite: true);
 
@@ -175,7 +174,6 @@ void main() {
 
   test('an incomplete account list prevents a favorite edit from sending a PUT', () async {
     final client = _plex(cloudOnly: true);
-    addTearDown(client.dispose);
     PlexLiveTvFavorites.applyToItem(client, _channel);
     cloud.responseOverride = {'MediaContainer': {'size': 2, 'FavoriteChannel': []}};
     await expectLater(
@@ -187,7 +185,6 @@ void main() {
 
   test('cloud replaces older local favorites without uploading them', () async {
     final direct = _plex(cloudOnly: true);
-    addTearDown(direct.dispose);
     await prefs.set(Preference<List<String>>(
       key: 'plex_live_tv_favorite_keys_plex-user', defaultValue: [],
     ), ['provider://tv.plex.provider.epg\u0000free123']);
@@ -213,10 +210,8 @@ void main() {
     expect(cloud.rows.single['id'], 'different');
   });
 
-
   test('DVR favorites match their provider without touching other PMS entries', () async {
     final pms = _plex();
-    addTearDown(pms.dispose);
     const source = 'server://pms-machine-1/tv.plex.providers.epg.xmltv:2';
     const otherSource = 'server://another-pms/tv.plex.providers.epg.xmltv:2';
     const channel = <String, dynamic>{
@@ -245,15 +240,10 @@ void main() {
     expect(cloud.rows.last['thumb'], 'http://pms.example/cbc.png');
   });
 
-
-
-
-
   test('different PMS channels with identical IDs remain independent', () async {
     final first = _plex();
     final second = _plex()..baseUrl = 'https://second-pms.example';
-    addTearDown(first.dispose);
-    addTearDown(second.dispose);
+
     const dvr = <String, dynamic>{
       'Id': 'channel-2-4',
       'Type': 'TvChannel',
@@ -286,27 +276,10 @@ void main() {
     expect(userDataSync.apply(homeB).isFavorite, isTrue);
   });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   test('a second PMS applies another PMS cache without a second cloud GET', () async {
     final first = _plex();
     final second = _plex()..baseUrl = 'https://second-pms.example';
-    addTearDown(first.dispose);
-    addTearDown(second.dispose);
+
     const dvr = <String, dynamic>{
       'Id': 'channel-2-4',
       'Type': 'TvChannel',
@@ -335,7 +308,6 @@ void main() {
   for (final pending in ['GET', 'PUT']) {
     test('session reset stops a favorite save waiting on $pending', () async {
       final client = _plex();
-      addTearDown(client.dispose);
       final gate = Completer<void>();
       if (pending == 'GET') cloud.holdGet = gate.future;
       if (pending == 'PUT') cloud.holdPut = gate.future;
@@ -355,7 +327,6 @@ void main() {
 
   test('a confirmed Plex PUT stays successful when local cache write fails', () async {
     final client = _plex();
-    addTearDown(client.dispose);
     PlexLiveTvFavorites.applyToItem(client, _channel);
     await GetIt.instance.unregister<UserPreferences>();
     final store = PreferenceStore();
@@ -407,106 +378,61 @@ void main() {
     });
   }
 
-  test('a DVR favorite rejects a channel reassigned before the repository saves it', () async {
-    final client = _plex();
-    addTearDown(client.dispose);
+  group('DVR favorite identity', () {
     const id = 'channel-2-4';
-    const row = {
-      'Id': id, 'Type': 'TvChannel', 'PlexFavoriteSource': 'server://pms/epg',
-      'PlexFavoriteId': 'old',
-    };
-    PlexLiveTvFavorites.applyToItem(client, row);
-    final save = ItemMutationRepository(client).setFavorite(id, isFavorite: true);
-    PlexLiveTvFavorites.applyToItem(client, {...row, 'PlexFavoriteId': 'new'});
-
-    await expectLater(save, throwsStateError);
-    expect(cloud.requests, isEmpty);
-  });
-
-  test('favoriting an old DVR row cannot change its replacement', () async {
-    final client = _plex();
-    addTearDown(client.dispose);
-    const id = 'channel-2-4';
-    Map<String, dynamic> row(String provider) => PlexLiveTvFavorites.applyToItem(client, {
-      'Id': id, 'Type': 'TvChannel', 'PlexFavoriteSource': provider, 'PlexFavoriteId': '4',
+    late PlexMediaServerClient client;
+    late ItemMutationRepository mutations;
+    setUp(() {
+      client = _plex();
+      mutations = ItemMutationRepository(client);
     });
-    final old = row('server://pms/old');
-    final current = row('server://pms/new');
-    final mutations = ItemMutationRepository(client);
-    Future<void> favorite(Map<String, dynamic> selected) => mutations.setFavorite(
-      id, isFavorite: true, isChannel: true, expectedChannelKey: channelFavoriteKey(selected),
-    );
+    Map<String, dynamic> publish(String? provider, {String favoriteId = '4'}) =>
+        PlexLiveTvFavorites.applyToItem(client, {
+          'Id': id, 'Type': 'TvChannel',
+          if (provider != null) ...{'PlexFavoriteSource': provider, 'PlexFavoriteId': favoriteId},
+        });
+    Future<void> favorite() => PlexLiveTvFavorites.setFavorite(client, id, isFavorite: true);
 
-    await expectLater(favorite(old), throwsStateError);
-    expect(cloud.requests, isEmpty);
-    await favorite(current);
-    expect(cloud.rows.single['source'], 'server://pms/new');
-  });
-
-  test('a queued DVR favorite rejects a replacement provider', () async {
-    final client = _plex();
-    addTearDown(client.dispose);
-    const id = 'channel-2-4';
-    void publish(String source) => PlexLiveTvFavorites.applyToItem(client, {
-      'Id': id, 'Type': 'TvChannel', 'PlexFavoriteSource': source, 'PlexFavoriteId': '4',
+    test('reassignment is checked at queue time and against the selected row', () async {
+      final old = publish('server://old/epg');
+      final queued = mutations.setFavorite(id, isFavorite: true);
+      publish('server://old/epg', favoriteId: 'replacement');
+      await expectLater(queued, throwsStateError);
+      final current = publish('server://new/epg');
+      Future<void> select(Map<String, dynamic> row) => mutations.setFavorite(
+        id, isFavorite: true, isChannel: true, expectedChannelKey: channelFavoriteKey(row),
+      );
+      await expectLater(select(old), throwsStateError);
+      expect(cloud.requests, isEmpty);
+      await select(current);
+      expect(cloud.rows.single['source'], 'server://new/epg');
     });
-    publish('server://old/epg');
-    final gate = Completer<void>();
-    cloud.holdGet = gate.future;
-    final refresh = PlexLiveTvFavorites.refresh(client);
-    await pumpEventQueue();
-    expect(cloud.requests.single.method, 'GET');
 
-    final save = PlexLiveTvFavorites.setFavorite(client, id, isFavorite: true);
-    final rejected = expectLater(save, throwsStateError);
-    publish('server://new/epg');
-    gate.complete();
-    await refresh;
-    await rejected;
-    expect(cloud.requests, hasLength(1));
+    for (final replacement in ['server://new/epg', null]) {
+      test('a pending favorite cannot cross a provider change to $replacement', () async {
+        publish('server://old/epg');
+        expect(PlexLiveTvFavorites.syncKey(client, id), contains('old/epg'));
+        final gate = Completer<void>();
+        cloud.holdGet = gate.future;
+        final refresh = replacement == null ? null : PlexLiveTvFavorites.refresh(client);
+        final rejected = expectLater(favorite(), throwsStateError);
+        await pumpEventQueue();
+        expect(cloud.requests.single.method, 'GET');
+        final updated = publish(replacement);
+        gate.complete();
+        await refresh;
+        await rejected;
+        if (replacement == null) {
+          expect(updated['PlexFavoriteSyncKey'], isNot(contains('old/epg')));
+          await expectLater(favorite(), throwsStateError);
+        }
+        expect(cloud.requests.map((r) => r.method), ['GET']);
+      });
+    }
   });
-
-  test('an unverified DVR row invalidates its previous provider', () async {
-    final client = _plex();
-    addTearDown(client.dispose);
-    const known = <String, dynamic>{
-      'Id': 'channel-2-4',
-      'Type': 'TvChannel',
-      'PlexFavoriteSource': 'server://old-pms/epg',
-      'PlexFavoriteId': '4',
-    };
-    PlexLiveTvFavorites.applyToItem(client, known);
-    expect(PlexLiveTvFavorites.syncKey(client, 'channel-2-4'),
-        contains('old-pms'));
-
-    final gate = Completer<void>();
-    cloud.holdGet = gate.future;
-    final pending = PlexLiveTvFavorites.setFavorite(client, 'channel-2-4', isFavorite: true);
-    await pumpEventQueue();
-    expect(cloud.requests.last.method, 'GET');
-    final unverified = PlexLiveTvFavorites.applyToItem(client, {
-      'Id': 'channel-2-4',
-      'Type': 'TvChannel',
-      'Name': 'DVR channel',
-    });
-    gate.complete();
-    await expectLater(pending, throwsStateError);
-    expect(unverified['PlexFavoriteSyncKey'] as String,
-        isNot(contains('old-pms')));
-    await expectLater(
-      PlexLiveTvFavorites.setFavorite(client, 'channel-2-4', isFavorite: true),
-      throwsA(isA<StateError>()),
-    );
-    expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
-  });
-
-
-
-
 
   test('serializes separate channel updates and rejects a different Home user', () async {
     final pms = _plex();
-    addTearDown(pms.dispose);
     PlexLiveTvFavorites.applyToItem(pms, _channel);
     PlexLiveTvFavorites.applyToItem(pms, {..._channel, 'Id': 'channel-plex-extra'});
     await PlexLiveTvFavorites.refresh(pms);

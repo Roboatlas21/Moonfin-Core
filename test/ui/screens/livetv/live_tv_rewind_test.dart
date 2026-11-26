@@ -409,15 +409,19 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  Future<void> pickFromGuide(WidgetTester tester, GuideChannel station) async {
+    await tester.tap(find.byTooltip(l10n.guide));
+    await tester.pump();
+    tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
+        .onChannelSelected!(station.id, [station]);
+  }
+
   for (final needsRetry in [false, true]) {
     testWidgets('selecting the starting station shares its tune (retry: $needsRetry)', (tester) async {
       manager.failedChannel = ard.id;
       manager.failedTune = Completer<void>();
       await pumpPlayer(tester);
-      await tester.tap(find.byTooltip(l10n.guide));
-      await tester.pump();
-      tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
-          .onChannelSelected!(ard.id, const [ard]);
+      await pickFromGuide(tester, ard);
       if (!needsRetry) manager.failedChannel = null;
       manager.failedTune!.complete();
       await tester.pump();
@@ -435,12 +439,9 @@ void main() {
 
   testWidgets('surfing after a failed guide tune wraps within the previous group', (tester) async {
     await pumpPlayer(tester);
-    await tester.tap(find.byTooltip(l10n.guide));
-    await tester.pump();
     const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
     manager.failedChannel = third.id;
-    tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
-        .onChannelSelected!(third.id, const [third]);
+    await pickFromGuide(tester, third);
     await tester.pump();
     expect(find.text(l10n.retry), findsOneWidget);
     await press(tester, LogicalKeyboardKey.channelDown);
@@ -452,11 +453,8 @@ void main() {
   for (final attempt in ['success', 'failure', 'retry']) {
     testWidgets('filtered lineup follows a successful guide tune ($attempt)', (tester) async {
       await pumpPlayer(tester, channels: const [ard]);
-      await tester.tap(find.byTooltip(l10n.guide));
-      await tester.pump();
       if (attempt != 'success') manager.failedChannel = zdf.id;
-      tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
-          .onChannelSelected!(zdf.id, const [zdf]);
+      await pickFromGuide(tester, zdf);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       if (attempt == 'retry') {
