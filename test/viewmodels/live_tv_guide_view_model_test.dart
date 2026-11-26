@@ -2057,8 +2057,8 @@ void main() {
     test('a late window 403 cannot clear a newer category recording refresh',
         () => checkLate403(moveWindow: true));
 
-    for (final retry in [false, true]) {
-      test('a superseded category page 403 preserves recording changes (retry=$retry)', () async {
+    for (final lookup in ['category page', 'category page retry', 'single channel']) {
+      test('a superseded $lookup 403 preserves recording changes', () async {
         _stubChannels(liveTv, List.generate(201, (i) => _channel('c$i', number: '$i')));
         when(() => _guide(liveTv, category: GuideFilter.sports))
             .thenAnswer(_serverFiltered((_) => true));
@@ -2070,22 +2070,27 @@ void main() {
         expect(vm.hasMorePrograms, isTrue);
 
         final older = Completer<Map<String, dynamic>>();
+        final options = RequestOptions();
+        final denied = DioException(requestOptions: options,
+            response: Response(requestOptions: options, statusCode: 403));
+        Future<void> read() => lookup == 'single channel'
+            ? expectLater(vm.ensureCategoryChannel('c200'), throwsA(same(denied)))
+            : vm.loadMorePrograms();
+
+        final retry = lookup == 'category page retry';
         var reads = 0;
         when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
           if (++reads == 1 && retry) return {'Items': [], 'FailedChannelIds': _requestedIds(inv)};
           return older.future;
         });
-        final page = vm.loadMorePrograms();
+        final pending = read();
         await pumpEventQueue();
         expect(reads, retry ? 2 : 1);
         final newer = Completer<Map<String, dynamic>>();
         when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) => newer.future);
         final refresh = vm.recordingChanged();
-        final options = RequestOptions();
-        final denied = DioException(requestOptions: options,
-            response: Response(requestOptions: options, statusCode: 403));
         older.completeError(denied);
-        await page;
+        await pending;
         newer.complete({'Items': [recorded(_program('p-c0', 'c0', isSports: true))]});
         await refresh;
         expect(vm.state, GuideState.ready);
@@ -2093,7 +2098,7 @@ void main() {
         expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
         expect(vm.hasMorePrograms, isTrue);
         when(() => _guide(liveTv, category: GuideFilter.sports)).thenThrow(denied);
-        await vm.loadMorePrograms();
+        await read();
         expect(vm.listingsAccessDenied, isTrue);
       });
     }

@@ -1254,14 +1254,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
     final request = _categoryRequest;
     final session = userDataSync.session;
-    final reply = await _fetchPrograms([channel], category: category);
-    if (_disposed ||
-        request != _categoryRequest ||
-        session != userDataSync.session ||
-        category != _filter ||
-        !_pageChannels.any((c) => c.id == channelId)) {
-      return false;
-    }
+    final recordingRevision = liveTvRecordingRevision.value;
+    bool current() =>
+        !_disposed &&
+        request == _categoryRequest &&
+        session == userDataSync.session &&
+        category == _filter &&
+        recordingRevision == liveTvRecordingRevision.value &&
+        _pageChannels.any((c) => c.id == channelId);
+    final reply = await _fetchPrograms([channel], category: category, current: current);
+    if (!current()) return false;
     if (reply.failedChannelIds.contains(channelId)) return false;
     _categoryQueriedIds.add(channelId);
     _advanceCategoryCursor();
