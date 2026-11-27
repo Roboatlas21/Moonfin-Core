@@ -285,7 +285,24 @@ void main() {
     const events = MethodChannel('moonfin/native_apple_player_events');
     const control = MethodChannel('moonfin/native_apple_player_control');
     messenger.setMockMethodCallHandler(events, (_) async => null);
-    messenger.setMockMethodCallHandler(control, (_) async => null);
+    Map<dynamic, dynamic> metadata = {};
+    messenger.setMockMethodCallHandler(control, (call) async {
+      if (call.method == 'setUiMetadata') metadata = call.arguments as Map;
+      return null;
+    });
+    final api = GetIt.instance<MediaServerClient>().liveTvApi;
+    final now = DateTime.now().toUtc();
+    when(() => api.getGuide(
+      channelIds: any(named: 'channelIds'), startDate: any(named: 'startDate'),
+      endDate: any(named: 'endDate'), userId: any(named: 'userId'),
+      fields: 'Overview', enableTotalRecordCount: false, enableImages: false, enableUserData: false,
+    )).thenAnswer((inv) async => {'Items': [
+      for (final id in inv.namedArguments[#channelIds] as List<String>) {
+        'Id': 'program-$id', 'Name': 'Now on $id', 'ChannelId': id,
+        'StartDate': now.subtract(const Duration(minutes: 10)).toIso8601String(),
+        'EndDate': now.add(const Duration(hours: 1)).toIso8601String(),
+      },
+    ]});
     final native = NativeApplePlayerBackend(GetIt.instance<UserPreferences>());
     GetIt.instance.registerSingleton<NativeApplePlayerBackend>(native);
     addTearDown(() {
@@ -359,6 +376,9 @@ void main() {
     expect(tester.widget<LiveTvGuideScreen>(guide).initialFilter, sports);
     await leaveGuide();
     await pumpHost([ard]);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(metadata['topSubtitle'], 'Now on zdf');
     await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, zdf.id);
     await tester.pumpWidget(const SizedBox());
@@ -435,6 +455,38 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   }
+
+  testWidgets('a favorite update during a guide tune changes the next surfing station', (tester) async {
+    const third = GuideChannel(
+      id: 'third', name: 'Third', rawData: {'ChannelFavoriteSyncKey': 'channel:http://server\u0000third'},
+    );
+    await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvChannelSortBy, ChannelSortBy.favoritesFirst);
+    await pumpPlayer(tester, channels: const [ard, third, zdf]);
+    manager.failedChannel = third.id;
+    final gate = manager.failedTune = Completer<void>();
+    await tester.tap(find.byTooltip(l10n.guide));
+    await tester.pump();
+    final guide = tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen));
+    guide.onChannelSelected!(third.id, (channels: const [ard, third, zdf], filter: (GuideFilter.all, null)));
+    await tester.pump();
+    expect(manager.playedChannelIds, [ard.id, third.id]);
+    final refreshed = GuideChannel(id: third.id, name: 'Third HD', rawData: third.rawData);
+    await pumpPlayer(tester, channels: [ard, refreshed, zdf]);
+    userDataSync.publish(channelFavoriteKey(third.rawData)!, {'IsFavorite': true});
+    manager.failedChannel = null;
+    gate.complete();
+    await tester.pump();
+    await tester.tap(find.byTooltip(l10n.guide));
+    await tester.pump();
+    final reopened = tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen));
+    expect(reopened.currentChannel!.name, refreshed.name);
+    expect(reopened.currentChannel!.isFavorite, isTrue);
+    reopened.onClose!();
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.channelUp);
+    expect(manager.playedChannelIds, [ard.id, third.id, ard.id]);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('surfing after a failed guide tune wraps within the previous group', (tester) async {
     await pumpPlayer(tester);

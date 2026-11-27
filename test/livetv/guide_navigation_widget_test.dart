@@ -333,12 +333,14 @@ void main() {
     );
   }
 
-  void useTvLayout() {
-    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+  void useLayout(InterfaceLayout layout) {
+    PlatformDetection.setInterfaceLayout(layout);
     addTearDown(
       () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
     );
   }
+
+  void useTvLayout() => useLayout(InterfaceLayout.tv);
 
   /// Open the guide through a host route so Back and focus restoration are real.
   Future<void> openGuideRoute(WidgetTester tester) async {
@@ -385,6 +387,35 @@ void main() {
     await _sendKeyAndPump(tester, key);
     expect(_focusedLabel(), label);
   }
+
+  testWidgets('replacing filter nodes restores focus to the selected chip', (tester) async {
+    useTvLayout();
+    const labels = ['All', 'Favorites', 'Sports', 'News'];
+    List<FocusNode> makeNodes() => [for (final label in labels) FocusNode(debugLabel: label)];
+    final original = makeNodes();
+    final replacement = makeNodes();
+    addTearDown(() {
+      for (final node in [...original, ...replacement]) {
+        node.dispose();
+      }
+    });
+    Future<void> show(List<FocusNode> nodes) async {
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SizedBox(
+        width: 160,
+        child: EpgFilterRail(
+          labels: labels, selectedIndex: 2, onSelect: (_) {}, apple: false,
+          focusNodeFor: (index) => nodes[index],
+        ),
+      ))));
+      await _pumpFrames(tester);
+    }
+    await show(original);
+    original.first.requestFocus();
+    await _pumpFrames(tester);
+    expect(original.first.hasFocus, isTrue);
+    await show(replacement);
+    expect(replacement[2].hasFocus, isTrue);
+  });
 
   testWidgets('TV guide error Retry is reachable from the window bar', (
     tester,
@@ -786,6 +817,17 @@ void main() {
     expect(retry, findsNothing);
   });
 
+  testWidgets('channel search fits a narrow desktop guide', (tester) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.desktop);
+    addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
+    await pumpGuide(tester, surface: const Size(240, 600));
+    final search = find.byType(TextField);
+    await tester.enterText(search, 'Channel 5');
+    await _pumpFrames(tester);
+    expect(guideModel(tester).filteredChannels.first.name, 'Channel 5');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('mobile filter picker changes the visible channel group', (
     tester,
   ) async {
@@ -808,6 +850,11 @@ void main() {
     await tapAndPump(tester, find.byTooltip('Filters'));
     expect(picker, findsOneWidget);
     expect(tester.getSize(picker).width, 390);
+    Navigator.of(tester.element(picker)).pop();
+    await _pumpFrames(tester);
+    expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, isEmpty);
+    expect(guideModel(tester).filteredChannels.length, channelCount);
+    await tapAndPump(tester, find.byTooltip('Filters'));
     await tapAndPump(tester, pickerOption('US | PRIME'));
     expect(picker, findsNothing);
     expect(find.text('Channel 47'), findsOneWidget);
@@ -1157,22 +1204,30 @@ void main() {
     expect(find.byType(LiveTvGuideScreen), findsNothing);
   });
 
-  testWidgets('filtering out the entry channel updates the hero and lets Back exit', (tester) async {
-    stubFavoriteChannel(5);
-    await openGuideRoute(tester);
-    await focusGuideNode(tester, 'GuideChannel:0');
-    String? hero() => tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview)).title;
-    expect(hero(), 'Channel 0');
-    final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
-    rail.onSelect(rail.labels.indexOf('Favorites'));
-    await tester.pumpAndSettle();
-    expect(_focusedLabel(), 'GuideChannel:0');
-    expect(hero(), 'Channel 5');
-    await back(tester);
-    expect(find.byType(LiveTvGuideScreen), findsNothing);
-  });
+  for (final layout in [InterfaceLayout.desktop, InterfaceLayout.tv]) {
+    testWidgets('filtering out the entry channel updates the hero and lets Back exit on ${layout.name}', (tester) async {
+      useLayout(layout);
+      stubFavoriteChannel(5);
+      await openGuideRoute(tester);
+      await focusGuideNode(tester, 'GuideChannel:0');
+      String? hero() => tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview)).title;
+      expect(hero(), 'Channel 0');
+      final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+      rail.onSelect(rail.labels.indexOf('Favorites'));
+      await tester.pumpAndSettle();
+      expect(_focusedLabel(), 'GuideChannel:0');
+      expect(hero(), 'Channel 5');
+      await back(tester);
+      if (layout == InterfaceLayout.tv) {
+        expect(_focusedLabel(), startsWith('GuideFilter:'));
+        await back(tester);
+      }
+      expect(find.byType(LiveTvGuideScreen), findsNothing);
+    });
+  }
 
   testWidgets('a lineup change behind the player leaves focus on the player', (tester) async {
+    useTvLayout();
     stubFavoriteChannel(5);
     await openGuideRoute(tester);
     await establishAnchor(tester);
@@ -1237,21 +1292,29 @@ void main() {
     },
   );
 
-  for (final lastChannel in [null, 'ch2']) {
-    testWidgets('Back from a past guide window restores the tuned channel ($lastChannel)', (tester) async {
-      await openGuideRoute(tester);
-      if (lastChannel != null) {
-        await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvLastChannelId, lastChannel);
-      } else {
-        await focusGuideNode(tester, 'GuideChannel:3');
-      }
-      final live = _windowRangeText(tester);
-      await focusGuideNode(tester, 'GuideWindowBar:0');
-      await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
-      expect(_windowRangeText(tester), isNot(live));
-      await back(tester);
-      expect(find.byType(LiveTvGuideScreen), findsOneWidget);
-      expect(_focusedLabel(), lastChannel == null ? 'GuideChannel:0' : 'GuideChannel:2');
-    });
+  for (final layout in [InterfaceLayout.desktop, InterfaceLayout.tv]) {
+    for (final lastChannel in [null, 'ch2']) {
+      testWidgets('Back from a past guide window restores the tuned channel on ${layout.name} ($lastChannel)', (tester) async {
+        useLayout(layout);
+        await openGuideRoute(tester);
+        if (lastChannel != null) {
+          await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvLastChannelId, lastChannel);
+        } else {
+          await focusGuideNode(tester, 'GuideChannel:3');
+        }
+        final live = _windowRangeText(tester);
+        await focusGuideNode(tester, 'GuideWindowBar:0');
+        await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
+        expect(_windowRangeText(tester), isNot(live));
+        if (layout == InterfaceLayout.tv) {
+          // Back from the TV header exits. Return to the grid to re-home it.
+          await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
+          expect(_focusedLabel(), startsWith('GuideChannel:'));
+        }
+        await back(tester);
+        expect(find.byType(LiveTvGuideScreen), findsOneWidget);
+        expect(_focusedLabel(), lastChannel == null ? 'GuideChannel:0' : 'GuideChannel:2');
+      });
+    }
   }
 }

@@ -111,8 +111,15 @@ class ChannelCarouselPrewarm {
   /// After the viewer stops changing channels, load nearby guide listings.
   void tuned(List<GuideChannel> channels, String channelId) {
     if (_disposed) return;
+    final pendingIds = _failedListingsTimer != null && _visibleChannelIds == null
+        ? _retryNeighborhood
+        : null;
     _tunedChannelId = channelId;
     viewModel.usePlaybackLineup(channels);
+    if (pendingIds != null && !listEquals(pendingIds, _retryNeighborhood)) {
+      _failedListingsTimer?.cancel();
+      _failedListingsTimer = null;
+    }
     _timer?.cancel();
     if (channels.isNotEmpty) _timer = Timer(settleDelay, _requestWarm);
   }
@@ -285,7 +292,9 @@ class ChannelCarouselPrewarm {
 
   void _scheduleFailedVisibleRetry() {
     if (_disposed || !isWarm || viewModel.listingsAccessDenied ||
-        _failedListingsTimer != null) return;
+        _failedListingsTimer != null) {
+      return;
+    }
     final now = _now();
     final failed = [
       for (final id in _retryNeighborhood)

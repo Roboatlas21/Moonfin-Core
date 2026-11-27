@@ -200,7 +200,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       _vm.availableGroups.isNotEmpty &&
       _categoryDisplay != LiveTvCategoryDisplay.programmes;
   bool get _sidePanel =>
-      PlatformDetection.isTV || PlatformDetection.useDesktopUi;
+      PlatformDetection.isTV ||
+      (PlatformDetection.useDesktopUi && _isLandscapeSize(MediaQuery.sizeOf(context)));
   double get _panelWidth => (MediaQuery.sizeOf(context).width * 0.34)
       .clamp(300.0, 480.0)
       .clamp(0.0, MediaQuery.sizeOf(context).width);
@@ -1316,11 +1317,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
   }
 
-  bool _isLandscapeSize(Size size) =>
-      widget.miniPlayerMode ||
-      PlatformDetection.isTV ||
-      PlatformDetection.useDesktopUi ||
-      size.width >= size.height;
+  bool _isLandscapeSize(Size size) {
+    if (widget.miniPlayerMode || PlatformDetection.isTV) return true;
+    if (PlatformDetection.useDesktopUi) return size.width >= 600;
+    return size.width >= size.height;
+  }
 
   void _scheduleGuideWindowUpdate(Duration window) {
     if (_vm.state != GuideState.ready) return;
@@ -1356,8 +1357,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         }
       } finally {
         _layoutWindowInFlight = null;
-        if (!mounted) return;
-        final desired = _lastLayoutWindow;
+        final desired = mounted ? _lastLayoutWindow : null;
         if (desired != null && desired != window) {
           if (_vm.state == GuideState.ready) {
             _requestGuideWindowUpdate(desired);
@@ -1377,6 +1377,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         }
       }
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   Widget _buildLandscape({required bool compactSearch}) {
@@ -1644,7 +1645,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     var index = rows.indexWhere((channel) => channel.id == pending.channelId);
     if (index < 0 && _vm.state == GuideState.loading) return;
 
-    if (index < 0 && _vm.state == GuideState.ready && _vm.hasMorePrograms) {
+    if (index < 0 && _vm.state == GuideState.ready &&
+        (_vm.hasMorePrograms || _vm.hasFailedCategoryListings)) {
       _suppressPickerRestorePrefetch = true;
       // The category is ready after its first page, but the original channel
       // may be farther down. Check only that channel, not the entire lineup.
@@ -1656,7 +1658,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       } finally {
         _checkingPickerRestore = false;
       }
-      if (!mounted || _pendingPickerRestore != pending) return;
+      if (!mounted) return;
+      if (_pendingPickerRestore != pending) {
+        if (_pendingPickerRestore != null) await _restorePendingPickerFocus();
+        return;
+      }
       if (!canRestore()) {
         _pendingPickerRestore = null;
         _suppressPickerRestorePrefetch = false;
@@ -1750,7 +1756,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                   (_vm.state == GuideState.ready &&
                       _vm.filter != GuideFilter.all &&
                       _vm.filter != GuideFilter.favorites &&
-                      _vm.hasMorePrograms))) {
+                      (_vm.hasMorePrograms || _vm.hasFailedCategoryListings)))) {
             // A category's first page can be ready before the original channel
             // is checked, even when the picker was open through the reload.
             _pendingPickerRestore = (
@@ -1894,11 +1900,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (event.logicalKey.isLeftKey && PlatformDetection.isTV) {
       if (index < 0) {
         unawaited(_openFilterPicker());
-      } else {
-        (index == 0 ? _browseFocus : _shortcutNode(choices[index - 1]))
-            .requestFocus();
+        return KeyEventResult.handled;
       }
-      return KeyEventResult.handled;
+      return _focusShortcutOrBrowse(index == 0 ? null : choices[index - 1]);
     }
     if (event.logicalKey.isDownKey && _sidePanel) {
       _pendingPickerRestore = null;
@@ -1906,6 +1910,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  KeyEventResult _focusShortcutOrBrowse(GuideFilterChoice? choice) {
+    final shortcut = _shortcutNodes[choice];
+    final target = shortcut?.context?.mounted == true ? shortcut! : _browseFocus;
+    if (!_mayTakeFocus || target.context?.mounted != true) return KeyEventResult.ignored;
+    target.requestFocus();
+    return KeyEventResult.handled;
   }
 
   Widget _shortcutStrip(
@@ -1966,11 +1978,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Widget _buildBrowseControls({bool compact = false}) {
     final l10n = AppLocalizations.of(context);
     final group = _vm.selectedGroup;
-    final filterLabel = group != null
-        ? group
-        : (_vm.filter == GuideFilter.all
-              ? l10n.filters
-              : _filterLabel(_vm.filter, l10n));
+    final filterLabel = group ??
+        (_vm.filter == GuideFilter.all ? l10n.filters : _filterLabel(_vm.filter, l10n));
     final shortcuts = PlatformDetection.isTV
         ? _shortcuts
         : const <GuideFilterChoice>[];
@@ -2081,13 +2090,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         if (!event.isActionable) return KeyEventResult.ignored;
         if (event.logicalKey.isLeftKey) {
           if (_usesPicker) {
-            (PlatformDetection.isTV
-                    ? _shortcutNode(_shortcuts.last)
-                    : _browseFocus)
-                .requestFocus();
-          } else {
-            _focusFilterRail();
+            return _focusShortcutOrBrowse(_shortcuts.lastOrNull);
           }
+          _focusFilterRail();
           return KeyEventResult.handled;
         }
         if (event.logicalKey.isDownKey) {
@@ -2555,23 +2560,26 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           Expanded(
             child: _usesPicker
                 ? _buildBrowseControls(compact: true)
-                : Row(
-                    children: [
-                      Expanded(
-                        child: _buildFilterRail(
-                          padding: EdgeInsets.zero,
-                          onNavigateDown: _focusWindowBarFromGenres,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      SizedBox(
-                        width: (MediaQuery.sizeOf(context).width * 0.28).clamp(
-                          190.0,
-                          320.0,
-                        ),
-                        child: _buildChannelSearchField(compact: true),
-                      ),
-                    ],
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      final preferred = (MediaQuery.sizeOf(context).width * 0.28)
+                          .clamp(190.0, 320.0);
+                      return Row(
+                        spacing: 8,
+                        children: [
+                          Expanded(
+                            child: _buildFilterRail(
+                              padding: EdgeInsets.zero,
+                              onNavigateDown: _focusWindowBarFromGenres,
+                            ),
+                          ),
+                          SizedBox(
+                            width: min(preferred, constraints.maxWidth * 0.55),
+                            child: _buildChannelSearchField(compact: true),
+                          ),
+                        ],
+                      );
+                    },
                   ),
           ),
         ],

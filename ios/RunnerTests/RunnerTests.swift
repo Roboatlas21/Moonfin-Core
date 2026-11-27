@@ -80,6 +80,13 @@ final class RunnerTests: XCTestCase {
         let theme = ChannelCarouselTheme(accent: .white, surface: .black, surfaceVariant: .black,
             onSurface: .white, rangeTrack: .gray, rangeProgress: .white, isGlass: false)
         let carousel = ChannelCarouselOverlayViewController(entries: channels, startIndex: 1, theme: theme)
+        var visible: [String] = []
+        carousel.onVisibleChannelsChanged = { visible = $0 }
+        carousel.loadViewIfNeeded()
+        carousel.view.frame = CGRect(x: 0, y: 0, width: 1280, height: 720)
+        carousel.view.layoutIfNeeded()
+        carousel.viewDidAppear(false)
+        defer { carousel.viewDidDisappear(false) }
 
         carousel.update(entries: [channels[2], channels[0], channels[3], channels[1]], theme: theme)
         XCTAssertEqual(carousel.centeredChannel?.channelId, "B")
@@ -87,10 +94,13 @@ final class RunnerTests: XCTestCase {
         XCTAssertEqual(carousel.centeredChannel?.channelId, "B")
         carousel.update(entries: [channels[2], channels[3]], theme: theme)
         XCTAssertEqual(carousel.centeredChannel?.channelId, "C")
+        XCTAssertEqual(Set(visible), Set(["C", "D"]))
         carousel.update(entries: [], theme: theme)
         XCTAssertNil(carousel.centeredChannel)
+        XCTAssertTrue(visible.isEmpty)
         carousel.update(entries: channels, theme: theme)
         XCTAssertEqual(carousel.centeredChannel?.channelId, "A")
+        XCTAssertEqual(Set(visible), Set(["A", "B", "C", "D"]))
     }
 
     @MainActor

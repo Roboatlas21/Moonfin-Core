@@ -313,7 +313,10 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     private func rebuildCards() {
         for card in cards { card.removeFromSuperview() }
         cards.removeAll()
-        guard count > 0 else { return }
+        guard count > 0 else {
+            clearVisibleChannelTracking()
+            return
+        }
         for offset in -halfSpan...halfSpan {
             let card = ChannelCarouselCardView(theme: theme)
             card.frame = CGRect(

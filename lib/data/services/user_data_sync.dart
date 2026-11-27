@@ -47,11 +47,27 @@ class UserDataSync extends ChangeNotifier {
 
   final Map<String, Map<String, dynamic>> _userData = {};
   final Map<String, int> _itemRevisions = {};
+  final _activeFavoriteReads = <({int start, bool Function(String) includes})>[];
   final Map<String, bool> _pendingFavorites = {};
   final Map<String, bool> _confirmedFavorites = {};
   int _revision = 0;
   int get revision => _revision;
   int revisionFor(String itemId) => _itemRevisions[itemId] ?? 0;
+
+  /// Keep newer channel observations available until overlapping reads settle.
+  Future<T> withChannelFavoriteRead<T>(
+    Future<T> Function(int revision) read, {
+    required bool Function(String key) includes,
+  }) async {
+    final pending = (start: revision, includes: includes);
+    _activeFavoriteReads.add(pending);
+    try {
+      return await read(pending.start);
+    } finally {
+      _activeFavoriteReads.remove(pending);
+      _evictOverflow();
+    }
+  }
 
   /// Bumped by [reset], so work queued for one user can tell it is stale.
   int get session => _session;
@@ -219,29 +235,33 @@ class UserDataSync extends ChangeNotifier {
         min(start + _refreshChunkSize, ids.length),
       );
       try {
-        final readRevision = revision;
-        final data = await client.itemsApi.getItems(
-          ids: chunk,
-          fields: 'UserData',
-          recursive: true,
-          limit: chunk.length,
-          enableTotalRecordCount: false,
-        );
-        final changes = <String, Map<String, dynamic>>{};
-        for (final raw in (data['Items'] as List? ?? const [])) {
-          if (raw is! Map) continue;
-          final id = raw['Id']?.toString();
-          final userData = raw['UserData'];
-          if (id == null || id.isEmpty || userData is! Map) continue;
-          changes[id] = Map<String, dynamic>.from(userData);
-          if (raw['Type'] == 'TvChannel' && userData['IsFavorite'] is bool) {
-            final key = serverChannelKeyFor(client, id);
-            if (session == readSession && revisionFor(key) <= readRevision) {
-              changes[key] = {'IsFavorite': userData['IsFavorite']};
+        if (session != readSession) return;
+        late final keys = {for (final id in chunk) serverChannelKeyFor(client, id)};
+        await withChannelFavoriteRead((readRevision) async {
+          final data = await client.itemsApi.getItems(
+            ids: chunk,
+            fields: 'UserData',
+            recursive: true,
+            limit: chunk.length,
+            enableTotalRecordCount: false,
+          );
+          if (session != readSession) return;
+          final changes = <String, Map<String, dynamic>>{};
+          for (final raw in (data['Items'] as List? ?? const [])) {
+            if (raw is! Map) continue;
+            final id = raw['Id']?.toString();
+            final userData = raw['UserData'];
+            if (id == null || id.isEmpty || userData is! Map) continue;
+            changes[id] = Map<String, dynamic>.from(userData);
+            if (raw['Type'] == 'TvChannel' && userData['IsFavorite'] is bool) {
+              final key = serverChannelKeyFor(client, id);
+              if (revisionFor(key) <= readRevision) {
+                changes[key] = {'IsFavorite': userData['IsFavorite']};
+              }
             }
           }
-        }
-        publishAll(changes, replace: true);
+          publishAll(changes, replace: true);
+        }, includes: (key) => keys.contains(key));
       } catch (_) {
         // A dropped connection or a library the user lost access to. The next
         // visit asks again.
@@ -287,6 +307,7 @@ class UserDataSync extends ChangeNotifier {
     _socketSubscription?.cancel();
     _socketSubscription = null;
     _session++;
+    _activeFavoriteReads.clear();
     if (_userData.isEmpty && _pendingFavorites.isEmpty) return;
     _userData.clear();
     _itemRevisions.clear();
@@ -301,7 +322,12 @@ class UserDataSync extends ChangeNotifier {
     // Insertion ordered, so the front is what has gone longest without a
     // change. Anything still on screen is refreshed on the next visit.
     final excess = _userData.length - _maxTrackedItems;
-    for (final key in _userData.keys.take(excess).toList()) {
+    final removable = _userData.keys.where((key) {
+      if (favoriteChangePending(key)) return false;
+      return !key.startsWith('channel:') ||
+          !_activeFavoriteReads.any((read) => revisionFor(key) > read.start && read.includes(key));
+    });
+    for (final key in removable.take(excess).toList()) {
       _userData.remove(key);
       _itemRevisions.remove(key);
     }

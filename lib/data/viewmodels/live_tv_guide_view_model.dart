@@ -52,11 +52,17 @@ class GuideChannel {
 
   /// [channels] with synced user data applied, or null when none changed.
   static List<GuideChannel>? withSyncedUserDataAll(
-    List<GuideChannel> channels,
-  ) {
+    List<GuideChannel> channels, {
+    bool favoritesFirst = false,
+  }) {
     final updated = [for (final c in channels) c.withSyncedUserData()];
     for (var i = 0; i < updated.length; i++) {
-      if (!identical(updated[i], channels[i])) return updated;
+      if (!identical(updated[i], channels[i])) {
+        if (favoritesFirst) {
+          updated.sort(LiveTvGuideViewModel.comparatorFor(ChannelSortBy.favoritesFirst));
+        }
+        return updated;
+      }
     }
     return null;
   }
@@ -259,6 +265,29 @@ typedef GuidePlaybackLineup = ({
   List<GuideChannel> channels,
   GuideFilterChoice filter,
 });
+
+extension GuidePlaybackLineupUpdates on GuidePlaybackLineup {
+  /// Merge only parent records refreshed since selection. The guide may have
+  /// newer data of its own, and may have selected a different group.
+  GuidePlaybackLineup afterPlayerUpdate(
+    List<GuideChannel> before,
+    List<GuideChannel> after, {
+    required bool favoritesFirst,
+  }) {
+    final refreshed = <String, GuideChannel>{
+      if (!identical(before, after))
+        for (var i = 0; i < after.length; i++)
+          if (!identical(before.elementAtOrNull(i), after[i])) after[i].id: after[i],
+    };
+    final updated = [
+      for (final station in channels) (refreshed[station.id] ?? station).withSyncedUserData(),
+    ];
+    if (favoritesFirst) {
+      updated.sort(LiveTvGuideViewModel.comparatorFor(ChannelSortBy.favoritesFirst));
+    }
+    return (channels: updated, filter: filter);
+  }
+}
 
 enum GuideState { loading, ready, error }
 
@@ -1079,7 +1108,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _error = e;
       _state = GuideState.error;
     } finally {
-      if (identical(_openingLineup, opening)) _openingLineup = null;
+      if (opening != null && identical(_openingLineup, opening)) {
+        _openingLineup = null;
+        if (current() && session != userDataSync.session) _discardChannelLineup();
+      }
       if (opening != null && !opening.isCompleted) {
         opening.complete(false);
       }
@@ -1201,7 +1233,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final category = _filter;
     if (!_isCategory(category) || _categoryLoadedFor != category) return false;
     if (_categoryPrograms.containsKey(channelId)) return true;
-    if (_categoryQueriedIds.contains(channelId)) return false;
+    if (_categoryQueriedIds.contains(channelId) && !_categoryFailedIds.contains(channelId)) return false;
     final channel = _pageChannels.where((c) => c.id == channelId).firstOrNull;
     if (channel == null) return false;
 
@@ -1548,8 +1580,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _atLivePosition = true;
   }
 
-  Future<bool> _fetchChannels(int lineupRequest) async {
-    final revision = userDataSync.revision;
+  Future<bool> _fetchChannels(int lineupRequest) {
+    late final prefix = serverChannelKeyFor(_client, '');
+    return userDataSync.withChannelFavoriteRead(
+      (revision) => _readLineup(lineupRequest, revision),
+      includes: (key) => key.startsWith(prefix),
+    );
+  }
+
+  Future<bool> _readLineup(int lineupRequest, int revision) async {
     final session = userDataSync.session;
     final api = _client.liveTvApi;
     final account = api is ChannelGroupApi
@@ -1590,7 +1629,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           // Emby's group request already fetched the channel lineup.
           // Retrying through getChannels would repeat a failed request.
           if (error is DioException && _accessDenied(error) && current()) {
-            _discardDeniedChannelLineup(error);
+            _discardChannelLineup(error);
           }
           rethrow;
         }
@@ -1646,14 +1685,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           request == _lineupRequest &&
           session == userDataSync.session &&
           (account == null || account == (_client.baseUrl, _client.userId))) {
-        _discardDeniedChannelLineup(error);
+        _discardChannelLineup(error);
       }
       return null;
     }
   }
 
-  void _discardDeniedChannelLineup(DioException error) {
-    // A denied channel request must discard the previous user's lineup too.
+  void _discardChannelLineup([DioException? error]) {
     _loadGeneration++;
     cancelBoundaryRefresh();
     _channels = const [];
@@ -1663,7 +1701,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _rebuildGroupChoices(complete: true);
     _resetPrograms();
     _error = error;
-    _state = GuideState.error;
+    _state = error == null ? GuideState.ready : GuideState.error;
     _reloadOnEntry = true;
     _notifyListeners();
   }
@@ -2211,7 +2249,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// This view model isn't a lifecycle observer: the surface that owns it must
   /// call this again on app resume, because timers don't fire while suspended.
   void scheduleBoundaryRefresh() {
-    if (_disposed) return;
+    if (_disposed || listingsAccessDenied) return;
     _boundarySchedulingEnabled = true;
     _boundaryTimer?.cancel();
     _boundaryTimer = null;
@@ -2250,7 +2288,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// Gives an empty or exhausted schedule its quarter-hour fallback refresh.
   /// A real boundary or retry timer already in flight remains authoritative.
   Future<void> refreshAtQuarterHour() async {
-    if (_disposed || _boundaryDueAt != null || _boundaryRefreshInFlight) return;
+    if (_disposed || listingsAccessDenied || _boundaryDueAt != null || _boundaryRefreshInFlight) return;
     await handleBoundaryElapsed(forceRefresh: true);
   }
 
@@ -2331,7 +2369,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       // The next program is already cached, so the cells promote in place.
       _boundaryRefreshInFlight = false;
       _notifyListeners();
-      scheduleBoundaryRefresh();
+      _rearmBoundaryIfEnabled();
       return;
     }
 
@@ -2345,17 +2383,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
     } catch (error) {
       _boundaryRefreshInFlight = false;
-      if (!_accessDenied(error)) _armRetry(failureBackoff);
+      if (_boundarySchedulingEnabled && !_accessDenied(error)) _armRetry(failureBackoff);
       return;
     }
 
+    _boundaryRefreshInFlight = false;
+    if (!_boundarySchedulingEnabled) return;
     final after = _coverageEnd();
     if (after == null || (before != null && !after.isAfter(before))) {
-      _boundaryRefreshInFlight = false;
       _armRetry(noNewCoverageRetry);
       return;
     }
-    _boundaryRefreshInFlight = false;
     scheduleBoundaryRefresh();
   }
 
@@ -2419,8 +2457,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     bool includeAll = false,
   }) {
     final ids = [
-      for (final id in _failedProgramIds.difference(_programsLoadedIds))
-        if (includeAll || _failedReplacementIds.contains(id)) id,
+      for (final id in {..._failedReplacementIds, if (includeAll) ..._failedProgramIds})
+        if (!_programsLoadedIds.contains(id)) id,
       for (final id in _programsLoadedIds)
         if (includeAll ||
             _failedReplacementIds.isEmpty ||

@@ -762,6 +762,38 @@ void main() {
       expect(vm.boundaryDueAt, at(31).add(LiveTvGuideViewModel.failureBackoff));
     });
 
+    test('a failed replacement outside the loaded page gets a scheduled retry', () async {
+      _stubChannels(liveTv, [_channel('healthy'), _channel('missing')]);
+      await vm.load(initialChannelIds: ['healthy']);
+      vm.scheduleBoundaryRefresh();
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': [], 'FailedChannelIds': ['missing']});
+      expect(await vm.replacePrograms(channelIds: ['missing'], from: at(0), to: at(90)), isFalse);
+      clock = vm.boundaryDueAt!;
+      final retry = <List<String>>[];
+      when(() => _guide(liveTv)).thenAnswer((inv) async {
+        retry.add(_requestedIds(inv));
+        return {'Items': [_span('recovered', 'missing', at(0), at(30))]};
+      });
+      await vm.handleBoundaryElapsed();
+      expect(retry, [['missing']]);
+      expect(vm.programsForChannel('missing').single.id, 'recovered');
+    });
+
+    test('a canceled boundary refresh cannot rearm after its response', () async {
+      seedLapsingSchedule();
+      await vm.load();
+      vm.scheduleBoundaryRefresh();
+      clock = at(31);
+      final reply = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv)).thenAnswer((_) => reply.future);
+      final refresh = vm.handleBoundaryElapsed();
+      await pumpEventQueue();
+      vm.cancelBoundaryRefresh();
+      reply.complete({'Items': [_span('later', 'c0', at(30), at(90))]});
+      await refresh;
+      expect(vm.boundaryDueAt, isNull);
+    });
+
     test('a boundary passed while suspended refreshes on resume', () async {
       seedLapsingSchedule();
       await vm.load();
@@ -1071,7 +1103,7 @@ void main() {
     vm.dispose();
   });
 
-  test('a lineup from before a user switch is dropped', () async {
+  test('a lineup from before a user switch is dropped and reloaded on entry', () async {
     final reply = Completer<Map<String, dynamic>>();
     when(() => _channelsRequest(liveTv)).thenAnswer((_) => reply.future);
     final vm = LiveTvGuideViewModel(client);
@@ -1090,6 +1122,10 @@ void main() {
     await loading;
 
     expect(userDataSync.favoriteFor(serverChannelKey(client.baseUrl, 'c1')), isNull);
+    expect(vm.state, GuideState.ready);
+    _stubChannels(liveTv, [_channel('new')]);
+    await vm.reloadIfStale();
+    expect(vm.filteredChannels.map((channel) => channel.id), ['new']);
     vm.dispose();
   });
 
@@ -1119,6 +1155,26 @@ void main() {
   });
 
   group('category filters', () {
+    test('targeted focus retries a failed category channel and skips known nonmatches', () async {
+      stubNumberedChannels(3);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {
+        'Items': [_program('p0', 'c0', isSports: true)],
+        'FailedChannelIds': ['c1'],
+      });
+      final vm = await loadFilter(GuideFilter.sports);
+      expect(vm.hasFailedCategoryListings, isTrue);
+
+      final requested = <List<String>>[];
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        requested.add(_requestedIds(inv));
+        return {'Items': [_program('recovered', 'c1', isSports: true)]};
+      });
+      expect(await vm.ensureCategoryChannel('c2'), isFalse);
+      expect(await vm.ensureCategoryChannel('c1'), isTrue);
+      expect(requested, [['c1']]);
+      expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
+      expect(vm.hasFailedCategoryListings, isFalse);
+    });
     test('search during the first Sports request keeps the playback lineup', () async {
       _stubChannels(liveTv, [
         _channel('FOX', number: '1'),

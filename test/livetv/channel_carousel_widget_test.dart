@@ -395,6 +395,26 @@ void main() {
     expect(vm.listening, isFalse);
   });
 
+  testWidgets('retuning a closed carousel gives its new station a fresh retry deadline', (tester) async {
+    final client = _CarouselClient();
+    final channels = _guideChannels(20);
+    final vm = _CarouselGuide(client, channels)..failedChannels.addAll(['ch0', 'ch10']);
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm, now: tester.binding.clock.now);
+    Future<void> warmAndRetry(String station) async {
+      prewarm.tuned(channels, station);
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
+      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+    }
+    try {
+      await warmAndRetry('ch0');
+      expect(vm.requests.last, ['ch0']);
+      await warmAndRetry('ch10');
+      expect(vm.requests.last, ['ch10']);
+    } finally {
+      prewarm.dispose();
+    }
+  });
+
   testWidgets('carousel retries only failed visible cards, including after a top-up error', (tester) async {
     final client = _CarouselClient();
     final channels = _guideChannels(20);
@@ -743,6 +763,11 @@ void main() {
     await show(channels);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await show(_lineup(4));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    expect(tuned, 'ch2');
+
+    tuned = null;
+    await show([channels[0], channels[1], channels[3], channels[2]]);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     expect(tuned, 'ch2');
 

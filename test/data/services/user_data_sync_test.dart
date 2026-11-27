@@ -322,6 +322,9 @@ void main() {
       final refreshing = sync.refreshFromServer(fake.client, ['news', 'sports']);
       sync.requestFavorite(key, true);
       sync.confirmFavorite(key, true);
+      // The channel is the oldest cache entry. Pressure from a library refresh
+      // must not evict its newer favorite while this earlier read is pending.
+      sync.publishAll({for (var i = 0; i < 2100; i++) 'ep$i': {'Played': true}});
       reply.complete({'Items': [
         for (final id in ['news', 'sports'])
           {'Id': id, 'Type': 'TvChannel', 'UserData': {'IsFavorite': false}},

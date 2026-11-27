@@ -239,6 +239,10 @@ class _AppleTvLiveTvPlayerHostScreenState
     if (!sameGroup) {
       _guideFilter = widget.guideFilter;
       _retryGuideLineup = null;
+    } else if (!identical(oldWidget.channels, widget.channels)) {
+      _retryGuideLineup = _retryGuideLineup?.afterPlayerUpdate(
+        oldWidget.channels, widget.channels, favoritesFirst: _favoritesFirst,
+      );
     }
     if (!sameGroup || !identical(oldWidget.channels, widget.channels)) {
       _syncedChannels = GuideChannel.updatePlayerLineup(
@@ -433,14 +437,14 @@ class _AppleTvLiveTvPlayerHostScreenState
           return;
         }
         if (!_channelIsUp) {
-          _retryGuideLineup = lineup;
+          _retryGuideLineup = lineup.afterPlayerUpdate(originalChannels, widget.channels, favoritesFirst: _favoritesFirst);
           return;
         }
       }
       if (lineup != null) {
         _guideFilter = lineup.filter;
-        _syncedChannels = GuideChannel.withSyncedUserDataAll(channels) ?? channels;
-        _currentChannel = _syncedChannels[index];
+        _syncedChannels = lineup.afterPlayerUpdate(originalChannels, widget.channels, favoritesFirst: _favoritesFirst).channels;
+        _currentChannel = _syncedChannels.firstWhere((channel) => channel.id == channelId);
         _logoUrlCache.clear();
         _nowPlayingByChannel.clear();
         _warmSchedule();
@@ -563,14 +567,16 @@ class _AppleTvLiveTvPlayerHostScreenState
   );
 
   void _warmSchedule() {
-    if (_syncedChannels.isEmpty) return;
     var prewarm = _carouselPrewarm;
     if (prewarm == null) {
       prewarm = ChannelCarouselPrewarm(_client);
       prewarm.viewModel.addListener(_onScheduleChanged);
       _carouselPrewarm = prewarm;
     }
-    prewarm.tuned(_syncedChannels, _currentChannel.id);
+    final lineup = _syncedChannels.any((c) => c.id == _currentChannel.id)
+        ? _syncedChannels
+        : [_currentChannel, ..._syncedChannels];
+    prewarm.tuned(lineup, _currentChannel.id);
   }
 
   /// Send schedule updates for the tuned station and the visible carousel cards.
@@ -587,7 +593,7 @@ class _AppleTvLiveTvPlayerHostScreenState
       }
       final visible = [
         for (final id in {_currentChannel.id, ..._visibleChannelIds})
-          if (_channelsById[id] case final channel?) channel,
+          ?_channelsById[id],
       ];
       _readSchedule(visible);
       _pushMetadata(updatedChannels: visible);
@@ -665,7 +671,7 @@ class _AppleTvLiveTvPlayerHostScreenState
     AppLocalizations l10n,
     DateTime now,
   ) {
-    if (program == null) {
+    if (program == null || now.isBefore(program.startDate) || !now.isBefore(program.endDate)) {
       return {
         'programName': '',
         'episodeTitle': '',
@@ -1047,18 +1053,14 @@ class _AppleTvLiveTvPlayerHostScreenState
     Future<void>.delayed(const Duration(milliseconds: 300), _pushMetadata);
   }
 
+  bool get _favoritesFirst =>
+      _prefs.get(UserPreferences.liveTvChannelSortBy) == ChannelSortBy.favoritesFirst;
+
   void _onChannelUserDataChanged() {
     if (!mounted) return;
-    final updated = GuideChannel.withSyncedUserDataAll(_syncedChannels);
+    final updated = GuideChannel.withSyncedUserDataAll(_syncedChannels, favoritesFirst: _favoritesFirst);
     final playing = _currentChannel.withSyncedUserData();
     if (updated == null && identical(playing, _currentChannel)) return;
-    // The native carousel and channel buttons follow this order, so it sorts
-    // the way the guide and the Flutter carousel do.
-    if (_carouselPrewarm?.viewModel.sortBy == ChannelSortBy.favoritesFirst) {
-      updated?.sort(
-        LiveTvGuideViewModel.comparatorFor(ChannelSortBy.favoritesFirst),
-      );
-    }
     if (updated != null) _syncedChannels = updated;
     _currentChannel = playing;
     _pushMetadata();

@@ -94,11 +94,8 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
 
     void add(GuideFilterChoice choice) {
       final (filter, group) = choice;
-      final label = group != null
-          ? group
-          : (filter == GuideFilter.all
-                ? l10n.guideAllChannels
-                : widget.filterLabel(filter));
+      final label = group ??
+          (filter == GuideFilter.all ? l10n.guideAllChannels : widget.filterLabel(filter));
       if (!label.toLowerCase().contains(_query)) return;
       rows.add((
         id: choice,

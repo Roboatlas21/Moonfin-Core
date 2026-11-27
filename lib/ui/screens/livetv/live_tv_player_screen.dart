@@ -840,6 +840,10 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     if (!sameGroup) {
       _guideFilter = widget.guideFilter;
       _retryGuideLineup = null;
+    } else if (!identical(oldWidget.channels, widget.channels)) {
+      _retryGuideLineup = _retryGuideLineup?.afterPlayerUpdate(
+        oldWidget.channels, widget.channels, favoritesFirst: _favoritesFirst,
+      );
     }
     if (!sameGroup || !identical(oldWidget.channels, widget.channels)) {
       _syncedChannels = GuideChannel.updatePlayerLineup(
@@ -852,17 +856,14 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     }
   }
 
+  bool get _favoritesFirst =>
+      _prefs.get(UserPreferences.liveTvChannelSortBy) == ChannelSortBy.favoritesFirst;
+
   void _onChannelUserDataChanged() {
     if (!mounted) return;
-    final updated = GuideChannel.withSyncedUserDataAll(_syncedChannels);
+    final updated = GuideChannel.withSyncedUserDataAll(_syncedChannels, favoritesFirst: _favoritesFirst);
     final playing = _currentChannel.withSyncedUserData();
     if (updated == null && identical(playing, _currentChannel)) return;
-    if (_prefs.get(UserPreferences.liveTvChannelSortBy) ==
-        ChannelSortBy.favoritesFirst) {
-      updated?.sort(
-        LiveTvGuideViewModel.comparatorFor(ChannelSortBy.favoritesFirst),
-      );
-    }
     setState(() {
       if (updated != null) _syncedChannels = updated;
       _currentChannel = playing;
@@ -1889,8 +1890,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     final channels = lineup.channels;
     final index = channels.indexWhere((channel) => channel.id == channelId);
     if (index < 0) return;
+    final originalChannels = widget.channels;
     if (_currentChannel.id != channelId || !_channelIsUp) {
-      final originalChannels = widget.channels;
       final originalFilter = widget.guideFilter;
       final succeeded = await _switchChannel(channels[index].withSyncedUserData());
       if (!mounted || _isStopping || originalFilter != widget.guideFilter ||
@@ -1898,15 +1899,15 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         return;
       }
       if (!succeeded) {
-        _retryGuideLineup = lineup;
+        _retryGuideLineup = lineup.afterPlayerUpdate(originalChannels, widget.channels, favoritesFirst: _favoritesFirst);
         return;
       }
     }
     setState(() {
       _retryGuideLineup = null;
       _guideFilter = lineup.filter;
-      _syncedChannels = GuideChannel.withSyncedUserDataAll(channels) ?? channels;
-      _currentChannel = _syncedChannels[index];
+      _syncedChannels = lineup.afterPlayerUpdate(originalChannels, widget.channels, favoritesFirst: _favoritesFirst).channels;
+      _currentChannel = _syncedChannels.firstWhere((channel) => channel.id == channelId);
     });
     _warmChannelCarousel();
   }
