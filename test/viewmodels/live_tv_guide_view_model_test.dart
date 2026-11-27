@@ -1106,6 +1106,45 @@ void main() {
   });
 
   group('category filters', () {
+    test('search during the first Sports request keeps the playback lineup', () async {
+      _stubChannels(liveTv, [
+        _channel('FOX', number: '1'),
+        _channel('ESPN', number: '2'),
+        _channel('News', number: '3'),
+      ]);
+      final vm = await loadFilter(GuideFilter.all);
+      final pending = Completer<void>();
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        await pending.future;
+        return _serverFiltered((id) => id != 'News')(inv);
+      });
+
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+      vm.setChannelQuery('ES');
+      vm.setChannelQuery('FOX');
+      pending.complete();
+      await pumpEventQueue();
+
+      expect(vm.filteredChannels.single.id, 'FOX');
+      expect(vm.surfingChannels.map((c) => c.id), ['FOX', 'ESPN']);
+      verify(() => _guide(liveTv, category: GuideFilter.sports)).called(1);
+    });
+
+    test('a search beyond the first Sports page keeps that page for surfing', () async {
+      stubNumberedChannels(201);
+      final vm = await loadFilter(GuideFilter.all);
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer(_serverFiltered((_) => true));
+
+      vm.setChannelQuery('c200');
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
+
+      expect(vm.filteredChannels.single.id, 'c200');
+      expect(vm.surfingChannels.map((c) => c.id), [for (var i = 0; i <= 200; i++) 'c$i']);
+    });
+
     test('search keeps category stations for surfing until their listings change', () async {
       stubNumberedChannels(3);
       var matching = {'c0', 'c1'};

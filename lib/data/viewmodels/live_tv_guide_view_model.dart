@@ -617,7 +617,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _windowRequest++;
     _channelQuery = query;
     _updatePageRows();
-    _resetPageCursor();
+    final openingCategory = _categoryFetchInFlight && _categoryLoadedFor != _filter;
+    _resetPageCursor(advancePage: !openingCategory);
+    if (openingCategory) {
+      // The opening category request loads the playback lineup. It will
+      // check the latest search once that first page is available.
+      _notifyListeners();
+      return;
+    }
     if (_isCategory(_filter)) {
       unawaited(_loadCategoryPrograms(searchChanged: true));
     } else {
@@ -1134,7 +1141,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadCategoryPrograms({bool searchChanged = false}) async {
-    if (searchChanged && _categoryLoadedFor == _filter) {
+    final keepListings = searchChanged && _categoryLoadedFor == _filter;
+    if (keepListings) {
       // A text edit doesn't change which programs match in this time window.
       // Cancel the old walk and retry failed rows in the new search.
       _categoryRequest++;
@@ -1147,22 +1155,25 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     final request = _categoryRequest;
     final session = userDataSync.session;
+    bool current() => !_disposed &&
+        request == _categoryRequest && session == userDataSync.session;
     _categoryFetchInFlight = true;
     _listingsStatePage = null;
     _error = null;
     _state = GuideState.loading;
     _notifyListeners();
     try {
-      if (!await _walkCategory()) return;
-      if (request != _categoryRequest || session != userDataSync.session) {
-        return;
-      }
+      final initialLineup = keepListings ? null : _channelRows('');
+      if (!await _walkCategory(initialLineup: initialLineup) || !current()) return;
       _categoryLoadedFor = _filter;
+      // Search can reach a station beyond the first page of the lineup.
+      if (!keepListings && _channelQuery.isNotEmpty &&
+          hasMorePrograms && programsHighWater < _categoryMinRowsPerPage) {
+        if (!await _walkCategory() || !current()) return;
+      }
       _state = GuideState.ready;
     } catch (e) {
-      if (request != _categoryRequest || session != userDataSync.session) {
-        return;
-      }
+      if (!current()) return;
       _listingsStatePage = _pageGeneration;
       _error = e;
       _state = GuideState.error;
@@ -1225,7 +1236,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       !_accessDenied(error) &&
       (error is TimeoutException || isTransientTransportFailure(error));
 
-  Future<bool> _walkCategory({int? recordingRevision}) async {
+  Future<bool> _walkCategory({
+    int? recordingRevision,
+    List<GuideChannel>? initialLineup,
+  }) async {
     final request = _categoryRequest;
     final filter = _filter;
     final session = userDataSync.session;
@@ -1236,13 +1250,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         session == userDataSync.session &&
         (recordingRevision == null || recordingRevision == liveTvRecordingRevision.value);
     final startRows = _categoryPrograms.length;
+    var lineupOffset = 0;
     while (current() &&
-        _categoryHighWater < _pageChannels.length &&
         _categoryPrograms.length - startRows < _categoryMinRowsPerPage) {
+      final rows = initialLineup ?? _pageChannels;
+      final start = initialLineup == null ? _categoryHighWater : lineupOffset;
+      if (start >= rows.length) break;
       final size = _batchSizeFor(filter);
-      final end = min(_categoryHighWater + size, _pageChannels.length);
-      final batch = _pageChannels
-          .sublist(_categoryHighWater, end)
+      final end = min(start + size, rows.length);
+      lineupOffset = end;
+      final batch = rows
+          .sublist(start, end)
           .where((c) => !_categoryQueriedIds.contains(c.id))
           .toList();
       var transportFailed = false;
