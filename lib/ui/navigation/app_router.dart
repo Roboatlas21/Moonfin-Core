@@ -653,6 +653,8 @@ final appRouter = GoRouter(
                 : const <String, dynamic>{};
             final channels = extra['channels'] as List<GuideChannel>?;
             final startIndex = extra['startIndex'] as int? ?? 0;
+            final guideFilter =
+                extra['guideFilter'] as GuideFilterChoice? ?? (GuideFilter.all, null);
             // Decided before branching so the channel loader below reads the
             // same answer this route latched.
             final useNativePlayer = useNativeApplePlayerForRoute(state.pageKey);
@@ -662,10 +664,12 @@ final appRouter = GoRouter(
                   ? AppleTvLiveTvPlayerHostScreen(
                       channels: channels,
                       startIndex: startIndex,
+                      guideFilter: guideFilter,
                     )
                   : LiveTvPlayerScreen(
                       channels: channels,
                       startIndex: startIndex,
+                      guideFilter: guideFilter,
                     );
             } else {
               // Entered by channel id (favorites, search, deep links). The

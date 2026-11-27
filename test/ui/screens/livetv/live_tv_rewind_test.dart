@@ -243,6 +243,7 @@ void main() {
   );
   Future<void> pumpPlayer(WidgetTester tester, {
     List<GuideChannel> channels = const [ard, zdf],
+    GuideFilterChoice guideFilter = (GuideFilter.all, null),
   }) async {
     tester.view.physicalSize = const Size(1920, 1080);
     tester.view.devicePixelRatio = 1;
@@ -251,7 +252,9 @@ void main() {
       MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: const [Locale('en')],
-        home: LiveTvPlayerScreen(channels: channels, startIndex: 0),
+        home: LiveTvPlayerScreen(
+          channels: channels, startIndex: 0, guideFilter: guideFilter,
+        ),
       ),
     );
     await tester.pump();
@@ -296,10 +299,14 @@ void main() {
       await tester.pump();
     }
 
+    const sports = (GuideFilter.all, 'Sports');
+    const favorites = (GuideFilter.favorites, null);
     Future<void> pumpHost(List<GuideChannel> channels) async {
       await tester.pumpWidget(MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
-        home: AppleTvLiveTvPlayerHostScreen(channels: channels, startIndex: 0),
+        home: AppleTvLiveTvPlayerHostScreen(
+          channels: channels, startIndex: 0, guideFilter: sports,
+        ),
       ));
       await tester.pump();
     }
@@ -318,7 +325,10 @@ void main() {
     await pumpHost([ard]);
     expect(manager.playedServerId, 'plex-cloud-viewer');
     await openGuide();
-    tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(ard.id, const [ard]);
+    expect(tester.widget<LiveTvGuideScreen>(guide).initialFilter, sports);
+    tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(
+      ard.id, (channels: const [ard], filter: sports),
+    );
     await leaveGuide(ard.id);
     manager.failedChannel = null;
     manager.failedTune!.complete();
@@ -327,7 +337,9 @@ void main() {
 
     await openGuide();
     const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
-    tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(zdf.id, const [zdf, third]);
+    tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(
+      zdf.id, (channels: const [zdf, third], filter: favorites),
+    );
     manager.failedChannel = zdf.id;
     await leaveGuide(zdf.id);
     manager.failedChannel = null;
@@ -337,12 +349,14 @@ void main() {
     await pumpHost([ard]);
     await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, third.id);
+    expect(tester.widget<LiveTvGuideScreen>(guide).initialFilter, favorites);
     await leaveGuide();
     await send({'event': 'selectChannel', 'channelId': zdf.id});
     expect(manager.playedChannelIds.last, zdf.id);
     await pumpHost([third, zdf]);
     await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, zdf.id);
+    expect(tester.widget<LiveTvGuideScreen>(guide).initialFilter, sports);
     await leaveGuide();
     await pumpHost([ard]);
     await openGuide();
@@ -387,11 +401,16 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  Future<void> pickFromGuide(WidgetTester tester, GuideChannel station) async {
+  Future<void> pickFromGuide(
+    WidgetTester tester, GuideChannel station, {
+    GuideFilterChoice expectedFilter = (GuideFilter.all, null),
+    GuideFilterChoice selectedFilter = (GuideFilter.all, null),
+  }) async {
     await tester.tap(find.byTooltip(l10n.guide));
     await tester.pump();
-    tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen))
-        .onChannelSelected!(station.id, [station]);
+    final guide = tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen));
+    expect(guide.initialFilter, expectedFilter);
+    guide.onChannelSelected!(station.id, (channels: [station], filter: selectedFilter));
   }
 
   for (final needsRetry in [false, true]) {
@@ -432,9 +451,11 @@ void main() {
 
   for (final attempt in ['success', 'failure', 'retry']) {
     testWidgets('filtered lineup follows a successful guide tune ($attempt)', (tester) async {
-      await pumpPlayer(tester, channels: const [ard]);
+      const sports = (GuideFilter.all, 'Sports');
+      const favorites = (GuideFilter.favorites, null);
+      await pumpPlayer(tester, channels: const [ard], guideFilter: sports);
       if (attempt != 'success') manager.failedChannel = zdf.id;
-      await pickFromGuide(tester, zdf);
+      await pickFromGuide(tester, zdf, expectedFilter: sports, selectedFilter: favorites);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       if (attempt == 'retry') {
@@ -447,6 +468,10 @@ void main() {
       expect(manager.playedChannelIds, [
         'ard', 'zdf', if (attempt == 'retry') 'zdf', if (attempt == 'failure') 'ard',
       ]);
+      await tester.tap(find.byTooltip(l10n.guide));
+      await tester.pump();
+      final guide = tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen));
+      expect(guide.initialFilter, attempt == 'failure' ? sports : favorites);
       await tester.pumpWidget(const SizedBox());
     });
   }

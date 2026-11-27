@@ -58,11 +58,13 @@ const _kGuideResizeDuration = Duration(milliseconds: 250);
 class LiveTvPlayerScreen extends StatefulWidget {
   final List<GuideChannel> channels;
   final int startIndex;
+  final GuideFilterChoice guideFilter;
 
   const LiveTvPlayerScreen({
     super.key,
     required this.channels,
     required this.startIndex,
+    this.guideFilter = (GuideFilter.all, null),
   });
 
   @override
@@ -72,7 +74,8 @@ class LiveTvPlayerScreen extends StatefulWidget {
 class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     with WidgetsBindingObserver, ImmersiveSystemUi {
   late List<GuideChannel> _syncedChannels;
-  List<GuideChannel>? _retryGuideLineup;
+  late GuideFilterChoice _guideFilter = widget.guideFilter;
+  GuidePlaybackLineup? _retryGuideLineup;
   final _manager = GetIt.instance<PlaybackManager>();
   // media_kit isn't registered on platforms that run a different backend, so
   // ask the container rather than listing them.
@@ -832,11 +835,13 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   @override
   void didUpdateWidget(covariant LiveTvPlayerScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.channels, widget.channels)) {
-      final sameGroup = GuideChannel.sameStationOrder(
-        oldWidget.channels, widget.channels,
-      );
-      if (!sameGroup) _retryGuideLineup = null;
+    final sameGroup = widget.guideFilter == oldWidget.guideFilter &&
+        GuideChannel.sameStationOrder(oldWidget.channels, widget.channels);
+    if (!sameGroup) {
+      _guideFilter = widget.guideFilter;
+      _retryGuideLineup = null;
+    }
+    if (!sameGroup || !identical(oldWidget.channels, widget.channels)) {
       _syncedChannels = GuideChannel.updatePlayerLineup(
         _syncedChannels, widget.channels, keepGroup: sameGroup,
       );
@@ -1877,16 +1882,18 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
 
   Future<void> _onGuideChannelSelected(
     String channelId,
-    List<GuideChannel> lineup,
+    GuidePlaybackLineup lineup,
   ) async {
     _closeGuideOverlay();
     if (_isSwitching) return;
-    final index = lineup.indexWhere((channel) => channel.id == channelId);
+    final channels = lineup.channels;
+    final index = channels.indexWhere((channel) => channel.id == channelId);
     if (index < 0) return;
     if (_currentChannel.id != channelId || !_channelIsUp) {
       final originalChannels = widget.channels;
-      final succeeded = await _switchChannel(lineup[index].withSyncedUserData());
-      if (!mounted || _isStopping ||
+      final originalFilter = widget.guideFilter;
+      final succeeded = await _switchChannel(channels[index].withSyncedUserData());
+      if (!mounted || _isStopping || originalFilter != widget.guideFilter ||
           !GuideChannel.sameStationOrder(originalChannels, widget.channels)) {
         return;
       }
@@ -1897,7 +1904,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     }
     setState(() {
       _retryGuideLineup = null;
-      _syncedChannels = GuideChannel.withSyncedUserDataAll(lineup) ?? lineup;
+      _guideFilter = lineup.filter;
+      _syncedChannels = GuideChannel.withSyncedUserDataAll(channels) ?? channels;
       _currentChannel = _syncedChannels[index];
     });
     _warmChannelCarousel();
@@ -2353,6 +2361,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
         embedded: true,
         miniPlayerMode: true,
         currentChannel: _currentChannel,
+        initialFilter: _guideFilter,
         onChannelSelected: _onGuideChannelSelected,
         onClose: _closeGuideOverlay,
         onOpenRecordings: _openRecordings,

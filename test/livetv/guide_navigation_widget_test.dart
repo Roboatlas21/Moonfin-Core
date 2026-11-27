@@ -278,6 +278,9 @@ void main() {
   Future<void> pumpGuide(
     WidgetTester tester, {
     bool miniPlayerMode = false,
+    bool? embedded,
+    GuideChannel? currentChannel,
+    GuideFilterChoice initialFilter = (GuideFilter.all, null),
     Size surface = const Size(900, 700),
     List<NavigatorObserver> observers = const [],
     LiveTvGuideBackController? backController,
@@ -298,12 +301,14 @@ void main() {
         home: _hosted(
           LiveTvGuideScreen(
             miniPlayerMode: miniPlayerMode,
-            embedded: miniPlayerMode,
+            embedded: embedded ?? miniPlayerMode,
+            currentChannel: currentChannel,
+            initialFilter: initialFilter,
             onChannelSelected: miniPlayerMode ? (_, _) {} : null,
             onClose: miniPlayerMode ? () {} : null,
             backController: backController,
           ),
-          embedded: miniPlayerMode,
+          embedded: embedded ?? miniPlayerMode,
         ),
       ),
     );
@@ -577,7 +582,7 @@ void main() {
     });
   }
 
-  testWidgets('a searched channel starts playback in its group until a mini-guide selection', (
+  testWidgets('a searched channel keeps its group when the playback guide opens', (
     tester,
   ) async {
     useTvLayout();
@@ -609,8 +614,13 @@ void main() {
                 miniPlayerMode: true,
                 embedded: true,
                 currentChannel: current,
+                initialFilter:
+                    (s.extra as Map)['guideFilter'] as GuideFilterChoice,
                 onChannelSelected: (id, currentLineup) {
-                  expect(currentLineup.map((c) => c.id), contains(id));
+                  expect(currentLineup.filter, (GuideFilter.all, 'Local'));
+                  expect(currentLineup.channels.map((c) => c.id), [
+                    'ch1', 'ch46', 'ch47',
+                  ]);
                   picked = id;
                 },
                 onClose: () {},
@@ -645,13 +655,56 @@ void main() {
     await focusGuideNode(tester, 'GuideChannel:0');
     await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
     expect(lineup.map((channel) => channel.id), ['ch1', 'ch46', 'ch47']);
-    final groupNames = lineup.map((channel) => channel.name).toSet();
-    final outsideLineup = find.byWidgetPredicate((w) =>
-        w is EpgChannelCell && !groupNames.contains(w.name));
-    await tapAndPump(tester, outsideLineup.hitTestable().first);
-    expect(picked, isNotNull);
-    expect(lineup.map((channel) => channel.id), isNot(contains(picked)));
+    final playbackGuide = find.byWidgetPredicate(
+      (widget) => widget is LiveTvGuideScreen && widget.miniPlayerMode,
+    );
+    expect(
+      tester.widgetList<EpgChannelCell>(
+        find.descendant(of: playbackGuide, matching: find.byType(EpgChannelCell)),
+      ).map((channel) => channel.name),
+      ['Channel 1', 'Channel 46', 'Channel 47'],
+    );
+    expect(_focusedLabel(), 'GuideChannel:2');
+    expect(picked, isNull);
+    await tapAndPump(tester, find.byWidgetPredicate((w) => w is EpgChannelCell && w.name == 'Channel 46'));
+    expect(picked, 'ch46');
   });
+
+  for (final layout in [InterfaceLayout.phone, InterfaceLayout.tv]) {
+    testWidgets('the ${layout.name} playback guide reopens in Sports', (
+      tester,
+    ) async {
+      PlatformDetection.setInterfaceLayout(layout);
+      addTearDown(
+        () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
+      );
+      channelCount = 4;
+      stubGroups(const ChannelGroupLineup({
+        'ch1': {'Sports'},
+        'ch2': {'Sports'},
+        'ch3': {'News'},
+      }));
+      await GetIt.instance<UserPreferences>().set(
+        UserPreferences.liveTvCategoryDisplay,
+        LiveTvCategoryDisplay.both,
+      );
+      await pumpGuide(
+        tester,
+        miniPlayerMode: true,
+        embedded: layout == InterfaceLayout.phone,
+        currentChannel: GuideChannel.fromRawItem(_channelRaw(2)),
+        initialFilter: (GuideFilter.all, 'Sports'),
+        surface: layout == InterfaceLayout.phone
+            ? const Size(900, 430)
+            : const Size(960, 640),
+      );
+      final vm = guideModel(tester);
+      expect(vm.selectedGroup, 'Sports');
+      expect(vm.filteredChannels.map((c) => c.id), ['ch1', 'ch2']);
+      expect(_focusedLabel(), 'GuideChannel:1');
+    });
+  }
+
   testWidgets('Select on a guide card Retry requests the failed listings', (tester) async {
     channelCount = 2;
     final prefs = GetIt.instance<UserPreferences>();
@@ -859,6 +912,52 @@ void main() {
     }
     releaseDeferredGuide.clear();
     await _pumpFrames(tester);
+  }
+
+  for (final moveToSearch in [false, true]) {
+    final destination = moveToSearch ? 'channel search' : 'the program grid';
+    testWidgets('a delayed guide page keeps focus in $destination', (tester) async {
+      useTvLayout();
+      channelCount = 3;
+      await GetIt.instance<UserPreferences>().set(
+        UserPreferences.liveTvCategoryDisplay,
+        LiveTvCategoryDisplay.groups,
+      );
+      stubGroups(const ChannelGroupLineup({'ch0': {'Sports'}}));
+      await pumpGuide(tester);
+      final vm = guideModel(tester);
+      final start = vm.windowStart;
+      final target = start.add(const Duration(minutes: 30));
+      final lastCell = _cellIndexForRow(0, vm.guideWindow.inMinutes - 1);
+      await focusGuideNode(tester, 'GuideProgramRow0:$lastCell');
+
+      deferredChannelId = 'ch0';
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+      expect(releaseDeferredGuide, isNotEmpty);
+      expect(vm.pendingWindowStart, target);
+      expect(vm.windowStart, start);
+
+      if (moveToSearch) {
+        await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideWindowBar:0');
+        await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideBrowse');
+        await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+        if (_focusedLabel() == 'GuideShortcut:category:favorites') {
+          await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+        }
+        expect(_focusedLabel(), 'GuideSearch');
+        expect(vm.pendingWindowStart, target);
+      }
+
+      deferredChannelId = null;
+      await releaseGuideData(tester);
+      expect(vm.windowStart, target);
+      expect(vm.pendingWindowStart, isNull);
+      if (moveToSearch) {
+        expect(_focusedLabel(), 'GuideSearch');
+      } else {
+        expect(_focusedCell()?.row, 0);
+      }
+    });
   }
 
   for (final action in ['wait', 'move up', 'open details']) {

@@ -255,6 +255,10 @@ enum GuideFilter {
 }
 
 typedef GuideFilterChoice = (GuideFilter, String?);
+typedef GuidePlaybackLineup = ({
+  List<GuideChannel> channels,
+  GuideFilterChoice filter,
+});
 
 enum GuideState { loading, ready, error }
 
@@ -405,8 +409,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   LiveTvGuideViewModel(
     this._client, {
     ChannelSortBy? initialSortBy,
+    GuideFilterChoice initialFilter = (GuideFilter.all, null),
     DateTime Function()? now,
   }) : _sortBy = initialSortBy ?? _savedSortBy(),
+       _filter = initialFilter.$1,
+       _selectedGroup = initialFilter.$2,
        _now = now ?? DateTime.now,
        _guideDate = (now ?? DateTime.now)(),
        _windowStart = (now ?? DateTime.now)(),
@@ -646,7 +653,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  GuideFilter _filter = GuideFilter.all;
+  GuideFilter _filter;
   GuideFilter get filter => _filter;
 
   /// The filters the guide offers
@@ -1528,12 +1535,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         ? (_client.baseUrl, _client.userId)
         : null;
     if (account != _groupAccount) {
+      // Keep the launching guide's group on the first load. A later account
+      // change must discard it along with that account's group membership.
+      if (_groupAccount != null) _selectedGroup = null;
       _groupAccount = account;
       _programmeCategories = null;
       _channelGroups = {};
       _availableGroups = const [];
       _groupCounts = const {};
-      _selectedGroup = null;
       _updatePageRows();
     }
     bool current() {

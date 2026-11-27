@@ -92,6 +92,7 @@ class LiveTvGuideBackController {
 class LiveTvGuideScreen extends StatefulWidget {
   final bool miniPlayerMode;
   final GuideChannel? currentChannel;
+  final GuideFilterChoice initialFilter;
   final ValueListenable<int?>? appleTvTextureId;
 
   /// When true the guide is embedded inside another screen's widget tree (the
@@ -102,9 +103,8 @@ class LiveTvGuideScreen extends StatefulWidget {
   /// of [Navigator] pops.
   final bool embedded;
 
-  /// Pass the player the channels the viewer can see, including any changes
-  /// since playback started.
-  final void Function(String, List<GuideChannel>)? onChannelSelected;
+  /// Called with the current surfing lineup and filter when the viewer tunes.
+  final void Function(String, GuidePlaybackLineup)? onChannelSelected;
 
   /// Called when the user dismisses the embedded guide (activates the
   /// mini-player frame) instead of `Navigator.pop()`.
@@ -123,6 +123,7 @@ class LiveTvGuideScreen extends StatefulWidget {
     super.key,
     this.miniPlayerMode = false,
     this.currentChannel,
+    this.initialFilter = (GuideFilter.all, null),
     this.appleTvTextureId,
     this.embedded = false,
     this.onChannelSelected,
@@ -285,6 +286,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _vm = LiveTvGuideViewModel(
       _client,
       initialSortBy: _prefs.get(UserPreferences.liveTvChannelSortBy),
+      initialFilter: widget.initialFilter,
     );
     _prefs.addListener(_onCategoryDisplayChanged);
     _vm.addListener(_onChanged);
@@ -3206,7 +3208,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       clearProgramId: cell.program == null,
     );
     _selection = updated;
-    if (focusGrid) _focusSelectedCell(updated, cells);
+    if (focusGrid && _gridHasFocus) _focusSelectedCell(updated, cells);
   }
 
   void _clearWindowFailure() {
@@ -3576,8 +3578,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Future<void> _watchChannel(String channelId) async {
     unawaited(_prefs.set(UserPreferences.liveTvLastChannelId, channelId));
     final channels = _vm.surfingChannels;
+    final filter = (_vm.filter, _vm.selectedGroup);
     if (widget.embedded || widget.miniPlayerMode) {
-      widget.onChannelSelected?.call(channelId, channels);
+      widget.onChannelSelected?.call(
+        channelId,
+        (channels: channels, filter: filter),
+      );
       if (widget.embedded) return;
       Navigator.of(context).pop(channelId);
       return;
@@ -3594,7 +3600,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (!mounted) return;
     await context.push(
       external ? Destinations.externalPlayer : Destinations.liveTvPlayer,
-      extra: external ? null : {'channels': channels, 'startIndex': index},
+      extra: external
+          ? null
+          : {'channels': channels, 'startIndex': index, 'guideFilter': filter},
     );
     if (!mounted) return;
     await _vm.reloadIfStale(

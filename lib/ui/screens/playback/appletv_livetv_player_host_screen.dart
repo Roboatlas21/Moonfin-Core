@@ -38,11 +38,13 @@ import 'osd_buttons.dart';
 class AppleTvLiveTvPlayerHostScreen extends StatefulWidget {
   final List<GuideChannel> channels;
   final int startIndex;
+  final GuideFilterChoice guideFilter;
 
   const AppleTvLiveTvPlayerHostScreen({
     super.key,
     required this.channels,
     required this.startIndex,
+    this.guideFilter = (GuideFilter.all, null),
   });
 
   @override
@@ -119,7 +121,8 @@ class _AppleTvLiveTvPlayerHostScreenState
   }
 
   late List<GuideChannel> _syncedChannels;
-  List<GuideChannel>? _retryGuideLineup;
+  late GuideFilterChoice _guideFilter = widget.guideFilter;
+  GuidePlaybackLineup? _retryGuideLineup;
 
   bool get _canRecordCurrentProgram =>
       canRecordAiring(_currentProgram);
@@ -231,11 +234,13 @@ class _AppleTvLiveTvPlayerHostScreenState
   @override
   void didUpdateWidget(covariant AppleTvLiveTvPlayerHostScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.channels, widget.channels)) {
-      final sameGroup = GuideChannel.sameStationOrder(
-        oldWidget.channels, widget.channels,
-      );
-      if (!sameGroup) _retryGuideLineup = null;
+    final sameGroup = widget.guideFilter == oldWidget.guideFilter &&
+        GuideChannel.sameStationOrder(oldWidget.channels, widget.channels);
+    if (!sameGroup) {
+      _guideFilter = widget.guideFilter;
+      _retryGuideLineup = null;
+    }
+    if (!sameGroup || !identical(oldWidget.channels, widget.channels)) {
       _syncedChannels = GuideChannel.updatePlayerLineup(
         _syncedChannels, widget.channels, keepGroup: sameGroup,
       );
@@ -403,14 +408,15 @@ class _AppleTvLiveTvPlayerHostScreenState
 
   Future<void> _switchChannel(
     String channelId, {
-    List<GuideChannel>? lineup,
+    GuidePlaybackLineup? lineup,
   }) async {
     if (_switching) return;
-    final channels = lineup ?? _syncedChannels;
+    final channels = lineup?.channels ?? _syncedChannels;
     final index = channels.indexWhere((c) => c.id == channelId);
     if (index < 0) return;
     final alreadyPlaying = _currentChannel.id == channelId && _channelIsUp;
     final originalChannels = widget.channels;
+    final originalFilter = widget.guideFilter;
     _retryGuideLineup = null;
     _switching = true;
     try {
@@ -422,6 +428,7 @@ class _AppleTvLiveTvPlayerHostScreenState
         _pushMetadata();
         await (starting ?? _playCurrentChannel());
         if (!mounted || _exiting || lineup == null ||
+            originalFilter != widget.guideFilter ||
             !GuideChannel.sameStationOrder(originalChannels, widget.channels)) {
           return;
         }
@@ -431,7 +438,8 @@ class _AppleTvLiveTvPlayerHostScreenState
         }
       }
       if (lineup != null) {
-        _syncedChannels = GuideChannel.withSyncedUserDataAll(lineup) ?? lineup;
+        _guideFilter = lineup.filter;
+        _syncedChannels = GuideChannel.withSyncedUserDataAll(channels) ?? channels;
         _currentChannel = _syncedChannels[index];
         _logoUrlCache.clear();
         _nowPlayingByChannel.clear();
@@ -459,15 +467,16 @@ class _AppleTvLiveTvPlayerHostScreenState
     }
 
     String? selectedId;
-    List<GuideChannel>? lineup;
+    GuidePlaybackLineup? lineup;
     try {
       selectedId = await Navigator.of(context).push<String>(
         MaterialPageRoute(
           builder: (_) => LiveTvGuideScreen(
             miniPlayerMode: true,
             currentChannel: _currentChannel,
+            initialFilter: _guideFilter,
             appleTvTextureId: _guideTexture,
-            onChannelSelected: (_, channels) => lineup = channels,
+            onChannelSelected: (_, selection) => lineup = selection,
           ),
         ),
       );
