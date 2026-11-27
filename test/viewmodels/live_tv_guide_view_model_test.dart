@@ -209,6 +209,77 @@ void main() {
       when(() => client.baseUrl).thenReturn('fixture');
       when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
     });
+    for (final selected in ChannelGroupSource.values) {
+      test('keeps ${selected.name} during a DVR outage and clears it after removal', () async {
+        final dvr = ChannelGroupSource.dvr.groupId;
+        final free = ChannelGroupSource.plexFreeTv.groupId;
+        when(() => client.serverType).thenReturn(ServerType.plex);
+        var lineup = ChannelGroupLineup(
+          {'one': {dvr}, 'two': {free, 'Sports', 'Comedy'}}, channels: [_channel('one'), _channel('two')],
+          sources: ChannelGroupSource.values,
+          promoted: PromotedChannelGroup('Featured', () async => {'two'}),
+        );
+        when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
+        await vm.load();
+        expect(vm.availableGroups, [dvr, free, 'Featured', 'Comedy', 'Sports']);
+        expect(vm.filters, isNot(contains(anyOf(GuideFilter.sports, GuideFilter.kids, GuideFilter.news))));
+        vm.setGroup(selected.groupId);
+        lineup = ChannelGroupLineup(
+          {'two': {free, 'News'}}, channels: [_channel('two')], sources: ChannelGroupSource.values,
+          partial: true, unresolvedChannelIds: const {},
+        );
+        await vm.load();
+        expect(vm.selectedGroup, selected.groupId);
+        expect(vm.filteredChannels.map((row) => row.id),
+            selected == ChannelGroupSource.dvr ? isEmpty : ['two']);
+        lineup = ChannelGroupLineup(
+          {}, channels: [_channel('two')], partial: true, unresolvedChannelIds: const {'two'},
+        );
+        await vm.load();
+        expect(vm.selectedGroup, isNull);
+        expect(vm.availableGroups, ['News']);
+      });
+    }
+
+    test('Next follows a Featured lineup change while listings are pending', () async {
+      var featured = 'one';
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {},
+          channels: [_channel('one'), _channel('two')],
+          promoted: PromotedChannelGroup('Featured', () async => {featured}),
+        ),
+      );
+      await vm.load();
+      vm.setGroup('Featured');
+      await pumpEventQueue();
+      expect(vm.filteredChannels.single.id, 'one');
+
+      final next = vm.windowEnd;
+      final oldReply = Completer<Map<String, dynamic>>();
+      final requests = <String>[];
+      when(() => _guide(api)).thenAnswer((inv) async {
+        final id = _requestedIds(inv).single;
+        requests.add(id);
+        if (id == 'one') return oldReply.future;
+        final start = inv.namedArguments[#startDate] as DateTime;
+        return {'Items': [_program('new', id, start: start)]};
+      });
+      final move = vm.setWindowStart(next, paging: true);
+      await pumpEventQueue();
+      expect(requests, ['one']);
+
+      featured = 'two';
+      await vm.refreshPromotedGroup(force: true);
+      oldReply.complete({'FailedChannelIds': ['one']});
+
+      expect(await move, isTrue);
+      expect(requests, ['one', 'two']);
+      expect(vm.windowStart, next);
+      expect(vm.programsForChannel('two').single.startDate, next);
+    });
+
     test('missing group metadata restores program categories', () async {
       final vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);

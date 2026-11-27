@@ -125,7 +125,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   GuidePlaybackLineup? _retryGuideLineup;
 
   bool get _canRecordCurrentProgram =>
-      canRecordAiring(_currentProgram);
+      canRecordChannelAiring(_client, _currentChannel.id, _currentProgram);
 
   @override
   void initState() {

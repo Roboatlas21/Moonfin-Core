@@ -1188,7 +1188,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   bool get _canRecordCurrentProgram =>
-      canRecordAiring(_currentProgram);
+      canRecordChannelAiring(_client, _currentChannel.id, _currentProgram);
 
   Future<void> _showRecordingDialog() async {
     if (_recordingActionInProgress || _isSwitching || _isStopping) return;
