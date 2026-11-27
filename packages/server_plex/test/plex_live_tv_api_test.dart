@@ -128,6 +128,9 @@ const _teletubbies = {
           ],
         },
       },
+      '/tv.plex.providers.epg.xmltv:3/grid' => {
+        'MediaContainer': {'Metadata': []},
+      },
       '/tv.plex.providers.epg.xmltv:2/grid' => {
         'MediaContainer': {
           'Metadata': malformedDvrGrid ? <String, dynamic>{} : liveDvr ? [
@@ -311,6 +314,77 @@ void main() {
   const extra = 'channel-plex-news-extra';
   const tuner = 'channel-2-4';
   const other = 'channel-3-9';
+
+  for (final denied in [false, true]) {
+    test('a guide load uses the latest catalog after a concurrent browse (denied: $denied)', () async {
+      final (dio, server) = _server();
+      final api = PlexLiveTvApi(dio);
+      final warm = await api.getChannelGroups();
+      expect(warm.channels, hasLength(3));
+      final entered = Completer<void>(), release = Completer<void>();
+      dio.interceptors.insert(
+        0,
+        InterceptorsWrapper(
+          onRequest: (r, h) async {
+            if (r.uri.path == '/') {
+              entered.complete();
+              await release.future;
+            }
+            h.next(r);
+          },
+        ),
+      );
+      server.fail('/lineups/plex/channels', 503);
+      final guide = api.getChannelGroups();
+      await entered.future.timeout(const Duration(seconds: 3));
+      if (denied) {
+        server.fail('/lineups/plex/channels', 403);
+      } else {
+        server.failWhen = null;
+      }
+      final expected = [tuner, if (!denied) ...[free, extra]];
+      expect((await api.getChannels())['Items'], hasLength(expected.length));
+      release.complete();
+      final published = await guide;
+      expect(published.channels!.map((c) => c['Id']), unorderedEquals(expected));
+      expect(published.partial, denied);
+    });
+  }
+
+  test('missing tuner lists retain channels and mark guide rows for retry', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    expect((await api.getChannelGroups()).channels, hasLength(3));
+    server.tunerReply = {'MediaContainer': <String, dynamic>{}};
+    final lineup = await api.getChannelGroups();
+    expect(lineup.channels!.any((c) => c['Id'] == tuner), isTrue);
+    expect(lineup.partial, isTrue);
+    final guide = await api.testGuide([tuner]);
+    expect(guide['Items'], isEmpty);
+    expect(guide['FailedChannelIds'], [tuner]);
+  });
+
+  test('partial Featured counts preserve the last verified membership', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final featured = (await api.getChannelGroups()).promoted!;
+    final instant = DateTime.now();
+    const path = '/lineups/plex/channels/featured';
+    server.replies[path] = (_) => _channels([
+      {'id': 'abc-66635fc0'},
+      {'id': 'news-extra'},
+    ], size: 2);
+    await featured.refresh(() => instant);
+    expect(featured.channelIds, {free, extra});
+    server.replies[path] = (_) => _channels([
+      {'id': 'abc-66635fc0'},
+    ], size: 2);
+    await expectLater(
+      featured.refresh(() => instant.add(const Duration(hours: 1))),
+      throwsA(isA<FormatException>()),
+    );
+    expect(featured.channelIds, {free, extra});
+  });
 
   test('channel and showing ids come apart again', () {
     expect(plexChannelOf('channel-2-4'), (source: '2', channel: '4'));

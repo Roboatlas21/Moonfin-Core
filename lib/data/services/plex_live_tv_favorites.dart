@@ -38,6 +38,14 @@ class PlexLiveTvFavorites {
   // A short-lived successful read is shared by Home and search.
   static const _browseRefreshAge = Duration(seconds: 30);
   static final _lastRefresh = <String, DateTime>{};
+  // A verified cloud list is authoritative while its disk write is failing.
+  static final _unpersisted = <String, ({int session, Set<String> keys})>{};
+
+  static Iterable<String>? _cachedKeys(String userId) {
+    final pending = _unpersisted[userId];
+    if (pending != null && pending.session == userDataSync.session) return pending.keys;
+    return GetIt.instance.maybeGet<UserPreferences>()?.get(_preference(userId));
+  }
 
   /// A cached account list changed, including when it came from another PMS.
   /// Home can rebuild favorite-channel row membership without polling.
@@ -68,6 +76,7 @@ class PlexLiveTvFavorites {
     _pending.clear();
     _known = Expando<_PlexFavoriteCatalog>('Plex favorite channels');
     _lastRefresh.clear();
+    _unpersisted.clear();
     favoriteListChanged.value = null;
     _favoriteListRevision = 0;
     _clientIds = Expando<int>('Plex favorite clients');
@@ -207,18 +216,26 @@ class PlexLiveTvFavorites {
     final userId = client.userId!;
     final pref = _preference(userId);
     final prefs = GetIt.instance<UserPreferences>();
-    final previous = prefs.get(pref).toSet();
+    final previous = _cachedKeys(userId)?.toSet();
     // Cache the full Plex favorites list, even if only some channels are loaded.
     final favorites = rows.map(_key).toSet();
-    await prefs.set(pref, favorites.toList()..sort());
-    _checkAccount(client, token, session: session);
-    _publishCached(client, token);
-    _lastRefresh[userId] = DateTime.now();
-    if (!setEquals(previous, favorites)) {
-      favoriteListChanged.value = (
-        userId: userId,
-        revision: ++_favoriteListRevision,
-      );
+    var persisted = false;
+    try {
+      await prefs.set(pref, favorites.toList()..sort());
+      persisted = true;
+    } finally {
+      _checkAccount(client, token, session: session);
+      if (persisted) {
+        _unpersisted.remove(userId);
+        _lastRefresh[userId] = DateTime.now();
+      } else {
+        _unpersisted[userId] = (session: userDataSync.session, keys: favorites);
+        _lastRefresh.remove(userId);
+      }
+      _publishCached(client, token);
+      if (!setEquals(previous, favorites)) {
+        favoriteListChanged.value = (userId: userId, revision: ++_favoriteListRevision);
+      }
     }
   }
 
@@ -240,8 +257,7 @@ class PlexLiveTvFavorites {
   static bool _publishCached(MediaServerClient client, String token) {
     _checkAccount(client, token);
     final userId = client.userId!;
-    final favorites = GetIt.instance<UserPreferences>()
-        .get(_preference(userId)).toSet();
+    final favorites = _cachedKeys(userId)!.toSet();
     final changes = {
       for (final entry in _catalog(client).channels.entries)
         syncKey(client, entry.key): <String, dynamic>{
@@ -260,7 +276,9 @@ class PlexLiveTvFavorites {
     required bool ifStale,
   }) async {
     final account = _account(client);
+    final session = userDataSync.session;
     return _serial(account.id, () async {
+      _checkAccount(client, account.token, session: session);
       final last = _lastRefresh[account.id];
       if (ifStale &&
           last != null &&
@@ -269,7 +287,7 @@ class PlexLiveTvFavorites {
       }
       final remote = await _read(client, account.token);
       _checkAccount(client, account.token);
-      await _cache(client, account.token, remote);
+      await _cache(client, account.token, remote, session: session);
       return true;
     });
   }
@@ -309,7 +327,7 @@ class PlexLiveTvFavorites {
     if (userId == null || syncKey(client, id) != syncId) return null;
     final info = _catalog(client).channels[id];
     if (info == null) return null;
-    return GetIt.instance.maybeGet<UserPreferences>()?.get(_preference(userId)).contains(_key(info));
+    return _cachedKeys(userId)?.contains(_key(info));
   }
 
   static Map<String, dynamic> applyToItem(
@@ -339,7 +357,7 @@ class PlexLiveTvFavorites {
       return {...item, 'PlexFavoriteSyncKey': syncKey(client, channelId)};
     }
     _catalog(client).channels[channelId] = info;
-    final favorites = GetIt.instance<UserPreferences>().get(_preference(userId));
+    final favorites = _cachedKeys(userId)!;
     final userData = item['UserData'];
     return {
       ...item,

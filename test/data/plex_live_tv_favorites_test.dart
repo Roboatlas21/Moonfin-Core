@@ -317,6 +317,7 @@ void main() {
       isTrue,
     );
     // A failed cache write shouldn't make the cloud data look fresh.
+    expect(_saved(client, 'channel-plex-free123'), isTrue);
     expect(await PlexLiveTvFavorites.refreshForBrowse(client), isFalse);
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
   });

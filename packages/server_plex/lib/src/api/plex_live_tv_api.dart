@@ -312,6 +312,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           final lineup = await _dvrContainer('/${dvr.epg}/lineups/dvr/channels');
           final rows = (lineup['Channel'] as List? ?? const []).cast<Map>();
           final size = lineup['size'];
+          if (lineup['Channel'] == null && size == null) {
+            throw const FormatException('Missing Plex tuner channel list');
+          }
           final machineId = await machineIdFuture;
           final channels = rows.map((channel) {
             final id = channel['id'];
@@ -467,9 +470,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   /// other's channels.
   Future<(_Channels Function(), _Channels)> _channelSources({
     void Function(_Channels)? onDvrUnavailable,
-    void Function()? onFreeUnavailable,
   }) async {
-    final free = _freeLineupForBrowse(onUnavailable: onFreeUnavailable);
+    final free = _freeLineupForBrowse();
     // Future.wait preserves the original DioException (including 401/403)
     // rather than wrapping failures in ParallelWaitError as record .wait does.
     final dvr = _dvrChannels(onUnavailable: onDvrUnavailable);
@@ -494,6 +496,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     );
     final container = response.data?['MediaContainer'];
     if (container case {'Channel': final List channels}) {
+      final size = container['size'];
+      if (size != null && int.tryParse(size.toString()) != channels.length) {
+        throw const FormatException('Incomplete Plex Featured lineup');
+      }
       return {
         for (final channel in channels.whereType<Map>())
           if (channel['drm'] != true && channel['id'] != null)
@@ -503,7 +509,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     // Treat a missing list with a zero count as empty, but reject malformed lists.
     if (container is Map &&
         container['Channel'] == null &&
-        container['size'] == 0) {
+        (container['size'] == 0 || container['size'] == '0')) {
       return {};
     }
     throw const FormatException('Invalid Plex Featured lineup');
@@ -572,9 +578,19 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         if (rows.isEmpty) unknownDvrIds = true;
         unresolvedDvrIds.addAll(rows.map((row) => row['Id'] as String));
       },
-      onFreeUnavailable: () => freeUnavailable = true,
     );
-    if (free.isEmpty) {
+    // Join a newer catalog read if one exists. Once access is revoked,
+    // _freeChannels also clears the last verified lineup.
+    Future<_FreeChannels> currentFreeLineup() async {
+      if (_cloudChannels == null) {
+        freeUnavailable = true;
+        return _lastFreeLineup ?? const {};
+      }
+      freeUnavailable = false;
+      return _freeLineupForBrowse(onUnavailable: () => freeUnavailable = true);
+    }
+
+    if (free.isEmpty && (await currentFreeLineup()).isEmpty) {
       final dvr = currentDvr();
       // Keep DVR channels in their own group when Free TV is unavailable.
       return ChannelGroupLineup(
@@ -590,14 +606,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
     // Keep existing groups if the provider metadata is temporarily unavailable.
     var metadataUnavailable = false;
-    final catalogRead = _cloudChannels;
     final catalog = await _providerGroups().onError<Object>((_, _) {
       metadataUnavailable = true;
       return (genres: const <String, String>{}, promoted: _featuredGroup);
     });
+    // A browse request can replace or revoke the Free TV catalog while the
+    // provider metadata is loading. Join that read before publishing the rows.
+    final currentFree = (await currentFreeLineup()).values;
     final dvr = currentDvr();
-    final currentFree = identical(catalogRead, _cloudChannels) ? free : const <Map<String, dynamic>>[];
-    if (currentFree.isEmpty) freeUnavailable = true;
     return ChannelGroupLineup(
       {
         for (final channel in dvr)
@@ -667,7 +683,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         final fromDvr = <({_Dvr dvr, Map item, Map media})>[];
         final items = grid['Metadata'];
         final size = grid['size'];
-        if (items != null && items is! List) {
+        if ((items == null && size == null) || (items != null && items is! List)) {
           throw const FormatException('Invalid Plex DVR grid metadata');
         }
         final rows = (items as List?) ?? const [];

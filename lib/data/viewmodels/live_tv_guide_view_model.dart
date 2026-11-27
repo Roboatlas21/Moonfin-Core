@@ -599,12 +599,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   ChannelGroupSource? sourceForGroup(String group) =>
       _sources.where((source) => source.groupId == group).firstOrNull;
   PromotedChannelGroup? _promoted;
+  String? get _promotedGroupId => _promoted == null ? null : PromotedChannelGroup.groupId;
+  String groupLabel(String id) => id == _promotedGroupId ? _promoted!.name : id;
   Set<String>? _promotedIds;
   Object? _promotedError;
   Timer? _promotedTimer;
   bool _guideVisible = true;
   bool get isPromotedGroupSelected =>
-      _promoted != null && _selectedGroup == _promoted!.name;
+      _promoted != null && _selectedGroup == _promotedGroupId;
   bool get _awaitingGroupIds => isPromotedGroupSelected && _promotedIds == null;
   Set<String>? _programmeCategories;
   Iterable<GuideFilter> get availableProgrammeCategories => filters.where(
@@ -615,7 +617,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   bool get supportsGroupPicker => _client.liveTvApi is ChannelGroupApi;
   Map<String, int> _groupCounts = const {};
   int? channelCountForGroup(String group) =>
-      group == _promoted?.name && _promotedIds == null
+      group == _promotedGroupId && _promotedIds == null
       ? null
       : _groupCounts[group] ?? 0;
   List<String> _availableGroups = const [];
@@ -630,7 +632,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   List<String> groupsForChannel(String channelId) {
     final groups = {
       ...?_channelGroups[channelId],
-      if (_promotedIds?.contains(channelId) == true) _promoted!.name,
+      if (_promotedIds?.contains(channelId) == true) PromotedChannelGroup.groupId,
     };
     final selected = _selectedGroup;
     final others = groups.where((group) => group != selected).toList()
@@ -651,7 +653,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final group = _selectedGroup;
     if (group != null) {
       rows = rows.where(
-        (channel) => group == _promoted?.name
+        (channel) => group == _promotedGroupId
             ? _promotedIds?.contains(channel.id) == true
             : _channelGroups[channel.id]?.contains(group) == true,
       );
@@ -1800,7 +1802,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   void _rebuildGroupChoices({required bool complete}) {
-    final promoted = _promoted?.name;
+    final promoted = _promotedGroupId;
     final counts = <String, int>{
       for (final source in _sources) source.groupId: 0,
       ?promoted: 0,
@@ -2022,7 +2024,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _channelGroups = updated;
     // An unresolved channel in this user's lineup may still belong to the
     // selected group, even when the playback guide has no cached membership.
-    _rebuildGroupChoices(complete: !hasUnresolvedChannels);
+    // Source groups are explicitly advertised, independently of genre membership.
+    _rebuildGroupChoices(complete: !hasUnresolvedChannels || removedSources.contains(_selectedGroup));
   }
 
   void _setGroupSources(
@@ -2055,7 +2058,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_disposed ||
         !_guideVisible ||
         group == null ||
-        group.name != _selectedGroup) {
+        !isPromotedGroupSelected) {
       return;
     }
     final remaining = group.expiresAt?.difference(_now()) ?? Duration.zero;
@@ -2082,11 +2085,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
       _promotedError = failure;
     }
-    final selected = _selectedGroup == group.name;
+    final selected = isPromotedGroupSelected;
     final changed = !setEquals(_promotedIds, group.channelIds);
     if (changed) {
       _promotedIds = group.channelIds;
-      _rebuildGroupChoices(complete: true);
+      // Only a lineup refresh can establish that another group disappeared.
+      _rebuildGroupChoices(complete: false);
       if (selected) {
         // Refresh the page without canceling a pending time-window move.
         _resetPageCursor();

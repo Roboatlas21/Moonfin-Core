@@ -1148,6 +1148,10 @@ class HomeViewModel extends ChangeNotifier {
     while (_isLoading) {
       await _loadDone;
     }
+    if (!_disposed && !_prefs.get(UserPreferences.kidsModeEnabled) &&
+        _rows.any((row) => row.rowType == HomeRowType.liveTv)) {
+      unawaited(PlexLiveTvFavorites.refreshForBrowse(_client));
+    }
     await Future.wait([_refreshResumeRows(), _refreshOnNowRows()]);
     // Returning from the guide can add or remove favorite channels on any
     // supported server. Rebuild only that row, keeping the rest of Home intact.

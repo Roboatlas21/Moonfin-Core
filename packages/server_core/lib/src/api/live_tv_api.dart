@@ -22,6 +22,7 @@ enum ChannelGroupSource {
 class PromotedChannelGroup {
   PromotedChannelGroup(this.name, this._fetchIds);
 
+  static const groupId = 'promoted:featured';
   static const lifetime = Duration(minutes: 10);
   final String name;
   final Future<Set<String>> Function() _fetchIds;

@@ -209,6 +209,12 @@ void main() {
       when(() => client.baseUrl).thenReturn('fixture');
       when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
     });
+    LiveTvGuideViewModel createGuide() {
+      final model = LiveTvGuideViewModel(client);
+      addTearDown(model.dispose);
+      return model;
+    }
+
     for (final selected in ChannelGroupSource.values) {
       test('keeps ${selected.name} during a DVR outage and clears it after removal', () async {
         final dvr = ChannelGroupSource.dvr.groupId;
@@ -220,8 +226,9 @@ void main() {
           promoted: PromotedChannelGroup('Featured', () async => {'two'}),
         );
         when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
+        final vm = createGuide();
         await vm.load();
-        expect(vm.availableGroups, [dvr, free, 'Featured', 'Comedy', 'Sports']);
+        expect(vm.availableGroups, [dvr, free, PromotedChannelGroup.groupId, 'Comedy', 'Sports']);
         expect(vm.filters, isNot(contains(anyOf(GuideFilter.sports, GuideFilter.kids, GuideFilter.news))));
         vm.setGroup(selected.groupId);
         lineup = ChannelGroupLineup(
@@ -241,6 +248,61 @@ void main() {
       });
     }
 
+    test('promoted and genre groups with the same title keep separate membership', () async {
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      final promoted = PromotedChannelGroup('Featured', () async => {'one'});
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => ChannelGroupLineup(
+          {
+            'two': {'Featured'},
+          },
+          channels: [_channel('one'), _channel('two')],
+          promoted: promoted,
+        ),
+      );
+      final vm = createGuide();
+      await vm.load();
+      vm.setGroup(PromotedChannelGroup.groupId);
+      await pumpEventQueue();
+      expect(vm.availableGroups, [PromotedChannelGroup.groupId, 'Featured']);
+      expect(vm.groupLabel(PromotedChannelGroup.groupId), 'Featured');
+      expect(vm.channelCountForGroup(PromotedChannelGroup.groupId), 1);
+      expect(vm.filteredChannels.map((c) => c.id), ['one']);
+      vm.setGroup('Featured');
+      expect(vm.channelCountForGroup('Featured'), 1);
+      expect(vm.filteredChannels.map((c) => c.id), ['two']);
+    });
+
+    test('completing Featured preserves an unresolved News selection', () async {
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      final membership = Completer<Set<String>>();
+      final promoted = PromotedChannelGroup('Featured', () => membership.future);
+      var lineup = ChannelGroupLineup(
+        {
+          'one': {'News'},
+        },
+        channels: [_channel('one')],
+        promoted: promoted,
+      );
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
+      final vm = createGuide();
+      await vm.load();
+      vm.setGroup(PromotedChannelGroup.groupId);
+      await pumpEventQueue();
+      vm.setGroup('News');
+      lineup = ChannelGroupLineup(
+        {},
+        channels: [_channel('two')],
+        promoted: promoted,
+        partial: true,
+      );
+      await vm.load();
+      expect(vm.selectedGroup, 'News');
+      membership.complete({'two'});
+      await pumpEventQueue();
+      expect(vm.selectedGroup, 'News');
+    });
+
     test('Next follows a Featured lineup change while listings are pending', () async {
       var featured = 'one';
       when(() => client.serverType).thenReturn(ServerType.plex);
@@ -251,8 +313,9 @@ void main() {
           promoted: PromotedChannelGroup('Featured', () async => {featured}),
         ),
       );
+      final vm = createGuide();
       await vm.load();
-      vm.setGroup('Featured');
+      vm.setGroup(PromotedChannelGroup.groupId);
       await pumpEventQueue();
       expect(vm.filteredChannels.single.id, 'one');
 
@@ -281,8 +344,7 @@ void main() {
     });
 
     test('missing group metadata restores program categories', () async {
-      final vm = LiveTvGuideViewModel(client);
-      addTearDown(vm.dispose);
+      final vm = createGuide();
       _stubChannels(api, [_channel('one')]);
       when(() => api.getChannelGroups(userId: 'user')).thenThrow(
         TimeoutException('group metadata unavailable'),
