@@ -1209,11 +1209,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (reply.failedChannelIds.contains(channelId)) return false;
     _categoryQueriedIds.add(channelId);
     _advanceCategoryCursor();
+    final recovered = _categoryFailedIds.remove(channelId);
     final matches = reply.programs[channelId];
-    if (matches == null) return false;
-    _categoryPrograms[channelId] = matches;
-    _notifyListeners();
-    return true;
+    if (matches != null) _categoryPrograms[channelId] = matches;
+    if (matches != null || recovered) _notifyListeners();
+    return matches != null;
   }
 
   static int _batchSizeFor(GuideFilter? category) =>
@@ -1284,10 +1284,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         }
       }
       if (!current()) return false;
-      _categoryFailedIds.addAll(failed);
+      final queried = batch.map((channel) => channel.id);
+      _categoryFailedIds
+        ..removeAll(queried)
+        ..addAll(failed);
       // Track category failures separately from All Channels. Mark the batch
       // as visited so failed channels don't block pagination; Retry handles them.
-      _categoryQueriedIds.addAll(batch.map((c) => c.id));
+      _categoryQueriedIds.addAll(queried);
       _advanceCategoryCursor();
       // Two transport failures on the same batch are enough for this walk.
       if (transportFailed) break;
@@ -1866,9 +1869,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final unresolved = lineup.unresolvedChannelIds;
     final partial = lineup.partial;
     final updated = <String, Set<String>>{};
+    var hasUnresolvedChannels = false;
     for (final channel in _channels) {
       final id = channel.id;
       final unknown = partial && (unresolved?.contains(id) ?? true);
+      if (unknown) hasUnresolvedChannels = true;
       final known = lineup.groupsByChannelId[id];
       final previous = _channelGroups[id];
       final groups = unknown && previous != null
@@ -1877,9 +1882,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       if (groups != null) updated[id] = groups;
     }
     _channelGroups = updated;
-    // Keep existing groups for channels the plugin couldn't check.
-    // If the response doesn't identify missing channels, keep the selected group.
-    _rebuildGroupChoices(complete: !partial || unresolved != null);
+    // An unresolved channel in this user's lineup may still belong to the
+    // selected group, even when the playback guide has no cached membership.
+    _rebuildGroupChoices(complete: !hasUnresolvedChannels);
   }
 
   void _resetPrograms() {

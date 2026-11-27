@@ -203,16 +203,15 @@ void main() {
 
   group('group membership on guide reload', () {
     late _GroupedLiveTvApi api;
-    late LiveTvGuideViewModel vm;
     setUp(() {
       api = _GroupedLiveTvApi();
       when(() => client.liveTvApi).thenReturn(api);
       when(() => client.baseUrl).thenReturn('fixture');
       when(() => _guide(api)).thenAnswer((_) async => {'Items': []});
-      vm = LiveTvGuideViewModel(client);
-      addTearDown(vm.dispose);
     });
     test('missing group metadata restores program categories', () async {
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
       _stubChannels(api, [_channel('one')]);
       when(() => api.getChannelGroups(userId: 'user')).thenThrow(
         TimeoutException('group metadata unavailable'),
@@ -220,6 +219,26 @@ void main() {
       await vm.load();
       expect(vm.availableProgrammeCategories, contains(GuideFilter.sports));
       expect(vm.playbackChannels.single.id, 'one');
+    });
+
+    test('the playback group survives unresolved membership until the server confirms it', () async {
+      _stubChannels(api, [_channel('fox'), _channel('news')]);
+      const news = {'news': {'News'}};
+      var lineup = const ChannelGroupLineup(news, partial: true, unresolvedChannelIds: {'fox'});
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
+      final vm = LiveTvGuideViewModel(client, initialFilter: (GuideFilter.all, 'Sports'));
+      addTearDown(vm.dispose);
+
+      await vm.load();
+      expect(vm.selectedGroup, 'Sports');
+      expect(vm.filteredChannels, isEmpty);
+      lineup = const ChannelGroupLineup({...news, 'fox': {'Sports'}});
+      await vm.load();
+      expect(vm.filteredChannels.map((channel) => channel.id), ['fox']);
+      lineup = const ChannelGroupLineup(news);
+      await vm.load();
+      expect(vm.selectedGroup, isNull);
+      expect(vm.filteredChannels.map((channel) => channel.id), unorderedEquals(['fox', 'news']));
     });
   });
 
@@ -1359,7 +1378,10 @@ void main() {
     test('a Premiere window move stops after two consecutive timeouts', () async {
       stubNumberedChannels(500);
       when(() => _guide(liveTv, category: GuideFilter.premiere)).thenAnswer((inv) async => {
-        'Items': [if (_requestedIds(inv).contains('c499')) _program('old', 'c499', isPremiere: true)],
+        'Items': [
+          for (final id in ['c498', 'c499'])
+            if (_requestedIds(inv).contains(id)) _program('old', id, isPremiere: true),
+        ],
       });
       final vm = await loadFilter(GuideFilter.premiere);
       final from = vm.windowStart;
@@ -1386,6 +1408,25 @@ void main() {
       expect(vm.programsForChannel('c0').single.id, 'new');
       expect(vm.hasFailedCategoryListings, isTrue);
       expect(vm.hasMorePrograms, isTrue);
+
+      final requested = <String>[];
+      when(() => _guide(liveTv, category: GuideFilter.premiere)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        requested.addAll(ids);
+        return {'Items': [
+          if (ids.contains('c499')) _program('recovered', 'c499', start: next, isPremiere: true),
+        ]};
+      });
+      expect(await vm.ensureCategoryChannel('c498'), isFalse);
+      expect(requested, ['c498']); // The server confirmed there are no premieres here.
+      await vm.loadMorePrograms();
+      expect(vm.programsForChannel('c499').single.id, 'recovered');
+
+      requested.clear();
+      await vm.retryFailedCategoryListings();
+      expect(requested, contains('c50'));
+      expect(requested, isNot(contains('c498')));
+      expect(requested, isNot(contains('c499')));
     });
 
     test('switching chips drops a stale in-flight category response', () async {
