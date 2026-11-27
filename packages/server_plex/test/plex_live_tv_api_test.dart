@@ -1094,6 +1094,52 @@ void main() {
 
 
 
+  for (final publishFirst in [true, false]) {
+    test('an old grid preserves a catalog refresh (publish first: $publishFirst)', () async {
+      const catalog = '/lineups/plex/channels';
+      final (dio, server) = _server();
+      final api = PlexLiveTvApi(dio);
+      await api.getChannels();
+      server.replies[catalog] = (_) => _channels([{'id': 'abc-66635fc0', 'gridKey': 'replacement'}]);
+      server.replies['/grid'] = (r) => _schedule('News', [
+        if (r.queryParameters['date'] == '2026-10-22') {..._airing, 'channelIdentifier': 'news-extra'},
+      ]);
+
+      final firstGrid = Completer<void Function()>(), lastGrid = Completer<void Function()>();
+      final catalogRead = Completer<void Function()>();
+      dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (r, handler) {
+        final gate = switch ((r.uri.path, r.queryParameters['date'])) {
+          ('/grid', '2026-10-19') => firstGrid,
+          ('/grid', '2026-10-22') => lastGrid,
+          (catalog, _) => catalogRead,
+          _ => null,
+        };
+        if (gate == null || gate.isCompleted) return handler.next(r);
+        gate.complete(() => handler.next(r));
+      }));
+
+      // Four days put the last grid in a second batch, after the refresh starts.
+      final guide = api.getGuide(channelIds: [free],
+          startDate: DateTime.utc(2026, 10, 19), endDate: DateTime.utc(2026, 10, 23));
+      final releaseFirst = await firstGrid.future;
+      final refresh = api.getChannelGroups();
+      final publish = await catalogRead.future;
+      releaseFirst();
+      final releaseLast = await lastGrid.future;
+      if (publishFirst) {
+        publish();
+        await refresh;
+      }
+      releaseLast();
+      expect((await guide)['FailedChannelIds'], [free]);
+      if (!publishFirst) publish();
+      final lineup = await refresh;
+      expect(lineup.partial, isFalse);
+      expect((await api.getChannels())['Items'], lineup.channels);
+      expect(server.reads(catalog), 2);
+    });
+  }
+
   test('a conflicting grid station during a catalog outage is retryable', () async {
     const channel = free;
     final (dio, server) = _server();

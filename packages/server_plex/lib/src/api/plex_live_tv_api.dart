@@ -119,6 +119,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<String?>? _favoriteMachineId;
   Future<_FreeChannels>? _cloudChannels;
   Future<_FreeChannels>? _latestFreeRead;
+  // The read that supplied the grid keys in _lastFreeLineup.
+  Future<_FreeChannels>? _publishedFreeRead;
   _FreeChannels? _lastFreeLineup;
   Future<ChannelGroupLineup>? _lineupRead;
   PromotedChannelGroup? _featuredGroup;
@@ -421,11 +423,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     late final Future<_FreeChannels> read;
     read = _fetchFreeChannels().then((lineup) {
       if (!identical(read, _latestFreeRead)) return _latestFreeRead!;
+      _publishedFreeRead = read;
       return _publishFreeChannels(lineup);
     }, onError: (Object error, StackTrace stack) {
       if (!identical(read, _latestFreeRead)) return _latestFreeRead!;
       _cloudChannels = null;
       if (_accessDenied(error)) {
+        _publishedFreeRead = null;
         _lastFreeLineup = null;
         _cloudOnNowRows = null;
         _invalidateGrids((_, _) => true);
@@ -852,7 +856,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         for (final request in batch)
           () async {
             final id = _channelId(plexCloudSource, request.channel);
-            final catalog = _cloudChannels;
+            final catalog = _publishedFreeRead;
             final station = _lastFreeLineup?[id];
             if (station == null) {
               failedChannelIds.add(id);
