@@ -1067,6 +1067,24 @@ void main() {
     await focusGuideNode(tester, 'GuideChannel:0');
     await _holdSelect(tester);
     expect(find.byType(EpgChannelCell), findsNothing);
+    expect(_focusedLabel(), 'GuideBrowse');
+  });
+
+  testWidgets('removing the last favorite in the mini Guide focuses the player', (tester) async {
+    useTvLayout();
+    userDataSync.reset();
+    addTearDown(userDataSync.reset);
+    channelCount = 1;
+    stubFavoriteChannel(0);
+    final api = _MockUserLibrary();
+    when(() => client.userLibraryApi).thenReturn(api);
+    when(() => api.unmarkFavorite('ch0')).thenAnswer((_) async {});
+    await pumpGuide(tester, miniPlayerMode: true, initialFilter: (GuideFilter.favorites, null));
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await _holdSelect(tester);
+    verify(() => api.unmarkFavorite('ch0')).called(1);
+    expect(find.byType(EpgChannelCell), findsNothing);
+    expect(_focusedLabel(), 'GuideMiniPlayer');
   });
 
   /// Focuses a row-0 cell two hours into the window and then steps right once,

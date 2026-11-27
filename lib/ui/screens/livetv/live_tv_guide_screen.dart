@@ -2838,7 +2838,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       if (removingFocused) {
         final remaining = _vm.filteredChannels;
         if (remaining.isEmpty) {
-          _focusFilterRail();
+          _focusGuideHeader();
         } else {
           _focusChannelRow(min(index, remaining.length - 1), animate: false);
         }
