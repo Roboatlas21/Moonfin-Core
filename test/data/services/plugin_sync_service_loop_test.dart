@@ -26,13 +26,13 @@ class _MockSessionRepository extends Mock implements SessionRepository {}
 
 class _TestPreferences extends UserPreferences {
   _TestPreferences(super.store);
-  String? failWrite;
+  final failWrites = <String>[];
 
   @override
   Future<void> set<T>(Preference<T> pref, T value) async {
     await super.set(pref, value);
-    if (pref.key == failWrite) {
-      failWrite = null;
+    if (pref.key == failWrites.firstOrNull) {
+      failWrites.removeAt(0);
       throw StateError('Simulated preference write failure');
     }
   }
@@ -49,6 +49,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   List<String>? savedPins;
   RequestOptions? lastPinRequest;
   bool supportsPinChanges = true;
+  bool serverSyncEnabled = true;
   bool failPinChanges = false;
   String? unavailablePin;
   String? rejectedPin;
@@ -56,6 +57,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   bool confirmsEmptyPins = false;
   Completer<void>? responseReady;
   Completer<void>? responseGate;
+  String? pausedPath;
   final List<String> pinActions = [];
 
   void applyPinChange(Map<dynamic, dynamic> change) {
@@ -71,7 +73,8 @@ class _RecordingAdapter implements HttpClientAdapter {
     if (action == 'remove') pins.remove(filter);
   }
 
-  void pauseResponses() {
+  void pauseResponses({String? path}) {
+    pausedPath = path;
     responseReady = Completer<void>();
     responseGate = Completer<void>();
   }
@@ -94,9 +97,17 @@ class _RecordingAdapter implements HttpClientAdapter {
     final path = options.uri.path;
     requests.add('${options.method} $path');
 
+    Future<ResponseBody> respond(ResponseBody response) async {
+      final pause = pausedPath == null
+          ? path.contains('/Moonfin/Settings/Resolved/') || options.method == 'POST'
+          : path == pausedPath;
+      if (pause) await holdResponse();
+      return response;
+    }
+
     Map<String, dynamic>? body;
     if (path.endsWith('/Moonfin/Ping')) {
-      body = {'installed': true, 'settingsSyncEnabled': true};
+      body = {'installed': true, 'settingsSyncEnabled': serverSyncEnabled};
     } else if (path.contains('/Moonfin/Settings/Resolved/')) {
       if (missingProfileUntilPins && savedPins == null) {
         return ResponseBody.fromString(
@@ -111,37 +122,34 @@ class _RecordingAdapter implements HttpClientAdapter {
         ...resolvedProfile,
         if (savedPins != null) 'liveTvSavedFilters': List<String>.of(savedPins!),
       };
-      await holdResponse();
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
       final change = options.data?['liveTvSavedFilterChange'];
       if (change != null) lastPinRequest = options;
       if (options.data?['profile'] case final Map profile) lastPushedProfile = Map<String, dynamic>.from(profile);
       final filter = options.data?['liveTvSavedFilterChange']?['filter'];
       if (filter != null && filter == rejectedPin) {
-        await holdResponse();
-        return ResponseBody.fromString('', 400);
+        return respond(ResponseBody.fromString('', 400));
       }
       if (options.method == 'POST' && (failPinChanges || (filter != null && filter == unavailablePin))) {
-        return ResponseBody.fromString('Temporarily unavailable', 503);
+        return respond(ResponseBody.fromString('Temporarily unavailable', 503));
       }
       if (options.method == 'POST' && supportsPinChanges && change is Map) applyPinChange(change);
       body = {
         if (supportsPinChanges && savedPins != null)
           'liveTvSavedFilters': List<String>.of(savedPins!),
       };
-      if (options.method == 'POST') await holdResponse();
     }
 
     if (body == null) {
-      return ResponseBody.fromString('', 404);
+      return respond(ResponseBody.fromString('', 404));
     }
-    return ResponseBody.fromString(
+    return respond(ResponseBody.fromString(
       jsonEncode(body),
       200,
       headers: {
         Headers.contentTypeHeader: [Headers.jsonContentType],
       },
-    );
+    ));
   }
 
   @override
@@ -239,7 +247,7 @@ void main() {
     test('a failed write to ${pref.key} preserves only earlier pin edits', () async {
       adapter.failPinChanges = true;
       await togglePin('group:News');
-      prefs.failWrite = prefs.getEffectivePreference(pref).key;
+      prefs.failWrites.add(prefs.getEffectivePreference(pref).key);
       await expectLater(togglePin('group:Sports'), throwsStateError);
       expect(getPins(), ['group:News']);
       expect(pendingPins(), ['add:group:News']);
@@ -249,6 +257,93 @@ void main() {
       expect(adapter.pinActions, ['add']);
     });
   }
+
+  test('a failed journal rollback still restores the visible pins', () async {
+    prefs.failWrites.addAll([
+      prefs.getEffectivePreference(UserPreferences.liveTvSavedFilters).key,
+      prefs.getEffectivePreference(UserPreferences.liveTvSavedFilterChanges).key,
+    ]);
+    await expectLater(togglePin('group:News'), throwsStateError);
+    expect(getPins(), isEmpty);
+    expect(pendingPins(), isEmpty);
+  });
+
+  test('a rejection after disabling sync keeps the local choice pending', () async {
+    adapter.rejectedPin = 'group:News';
+    adapter.pauseResponses();
+    final saving = togglePin('group:News');
+    await adapter.responseReady!.future;
+    await service.setSyncEnabled(false);
+    adapter.responseGate!.complete();
+    await saving;
+    expect(getPins(), ['group:News']);
+    expect(pendingPins(), ['add:group:News']);
+    await prefs.set(UserPreferences.pluginSyncEnabled, true);
+    await service.retryPendingGuidePins(client);
+    expect(getPins(), isEmpty);
+    expect(pendingPins(), isEmpty);
+  });
+
+  test('a final rejection keeps remote pins from the preceding successful reply', () async {
+    service.resetState();
+    await togglePin('group:News');
+    await togglePin('group:Rejected');
+    adapter.savedPins = ['group:Sports'];
+    adapter.rejectedPin = 'group:Rejected';
+    await service.retryPendingGuidePins(client, serverId: 'srv1');
+    expect(getPins(), ['group:Sports', 'group:News']);
+    expect(pendingPins(), isEmpty);
+  });
+
+  test('a queued tap keeps remote pins from an earlier tap when rejected', () async {
+    adapter.savedPins = ['group:Sports'];
+    adapter.pauseResponses();
+    final saving = togglePin('group:News');
+    await adapter.responseReady!.future;
+    adapter.rejectedPin = 'group:Rejected';
+    final edit = editPin('group:Rejected');
+    await edit.local;
+    final rejection = expectLater(edit.saved, throwsA(isA<DioException>()));
+    adapter.responseGate!.complete();
+    await saving;
+    await rejection;
+    expect(getPins(), adapter.savedPins);
+    expect(pendingPins(), isEmpty);
+  });
+
+  test('enabling sync before the first profile GET uploads the restored settings', () async {
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    await prefs.set(UserPreferences.pluginSyncEnabled, false);
+    adapter.resolvedProfile = {'liveTvCategoryDisplay': 'groups'};
+    adapter.pauseResponses(path: '/Moonfin/Seerr/Config');
+    final login = service.syncOnLogin(client, serverId: 'srv1');
+    await adapter.responseReady!.future;
+    final enabling = service.setSyncEnabled(true);
+    await Future<void>.delayed(Duration.zero);
+    adapter.responseGate!.complete();
+    await Future.wait([login, enabling]);
+    final profile = service.syncProfile;
+    expect(adapter.requests, containsAllInOrder([
+      'GET /Moonfin/Settings/Resolved/$profile', 'POST /Moonfin/Settings/Profile/$profile',
+    ]));
+    expect(adapter.lastPushedProfile?['liveTvCategoryDisplay'], 'groups');
+  });
+
+  test('network regain during a failed sign-in replay retries on Emby', () async {
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    service.resetState();
+    await togglePin('group:News');
+    adapter.failPinChanges = true;
+    adapter.pauseResponses(path: '/Moonfin/Settings/Profile/${service.syncProfile}');
+    final login = service.syncOnLogin(client, serverId: 'srv1');
+    await adapter.responseReady!.future;
+    final reconnect = service.retryPendingGuidePins(client, serverId: 'srv1');
+    adapter.failPinChanges = false;
+    adapter.responseGate!.complete();
+    await Future.wait([login, reconnect]);
+    expect(adapter.pinActions, ['add']);
+    expect(pendingPins(), isEmpty);
+  });
 
   test('rejecting the first add preserves a later add of the same pin', () async {
     const filter = 'group:Sports';
@@ -266,6 +361,86 @@ void main() {
     expect(postCount(), 2);
     expect(adapter.savedPins, [filter]);
     expect(getPins(), [filter]);
+    expect(pendingPins(), isEmpty);
+  });
+
+  test('queued edits keep the last pin order after an unpin and re-pin', () async {
+    adapter.pauseResponses();
+    final saving = togglePin('group:Sports');
+    await adapter.responseReady!.future;
+    final edits = <Future<List<String>?>>[saving];
+    for (final pin in ['group:News', 'group:Kids', 'group:News', 'group:News']) {
+      final edit = editPin(pin);
+      await edit.local;
+      edits.add(edit.saved);
+    }
+    const expected = ['group:Sports', 'group:Kids', 'group:News'];
+    expect(getPins(), expected);
+    adapter.responseGate!.complete();
+    await Future.wait(edits);
+    expect(adapter.savedPins, expected);
+    expect(getPins(), expected);
+    expect(pendingPins(), isEmpty);
+  });
+
+  test('a session reset invalidates a held reply even if the client is reused', () async {
+    adapter.pauseResponses();
+    final saving = togglePin('group:Sports');
+    await adapter.responseReady!.future;
+    service.resetState();
+    await service.refreshAvailability(client);
+    final stale = expectLater(saving, throwsStateError);
+    adapter.responseGate!.complete();
+    await stale;
+    expect(pendingPins(), ['add:group:Sports']);
+    adapter.savedPins!.add('group:News');
+    await service.retryPendingGuidePins(client, serverId: 'srv1');
+    expect(getPins(), adapter.savedPins);
+    expect(pendingPins(), isEmpty);
+  });
+
+  test('a settings event discards a held read after selecting another profile', () async {
+    adapter.resolvedProfile = {'liveTvCategoryDisplay': 'groups'};
+    adapter.pauseResponses();
+    final event = settingsUpdated();
+    await adapter.responseReady!.future;
+    final display = prefs.get(UserPreferences.liveTvCategoryDisplay);
+    await service.setSyncProfile('global');
+    adapter.responseGate!.complete();
+    await event;
+    expect(prefs.get(UserPreferences.liveTvCategoryDisplay), display);
+  });
+
+  test('network regain rechecks server opt-in after an offline start', () async {
+    service.resetState();
+    await togglePin('group:News');
+    adapter.savedPins = ['group:Sports'];
+    adapter.serverSyncEnabled = false;
+    await service.retryPendingGuidePins(client, serverId: 'srv1');
+    expect(adapter.pinActions, isEmpty);
+    expect(pendingPins(), ['add:group:News']);
+    adapter.serverSyncEnabled = true;
+    await service.retryPendingGuidePins(client, serverId: 'srv1');
+    expect(adapter.pinActions, ['add']);
+    expect(getPins(), ['group:Sports', 'group:News']);
+    expect(pendingPins(), isEmpty);
+  });
+
+  test('overlapping reconnects share account pins across device profiles', () async {
+    service.resetState();
+    await togglePin('group:News');
+    await togglePin('group:Kids');
+    await service.refreshAvailability(client);
+    adapter.savedPins = ['group:Sports'];
+    adapter.pauseResponses();
+    final reconnect = service.retryPendingGuidePins(client, serverId: 'srv1');
+    await adapter.responseReady!.future;
+    final stream = service.retryPendingGuidePins(client);
+    await service.setSyncProfile('global');
+    adapter.responseGate!.complete();
+    await Future.wait([reconnect, stream]);
+    expect(adapter.pinActions, ['add', 'add']);
+    expect(getPins(), ['group:Sports', 'group:News', 'group:Kids']);
     expect(pendingPins(), isEmpty);
   });
 

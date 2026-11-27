@@ -100,21 +100,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
 
   double get _rowHeight => MediaQuery.textScalerOf(context).scale(20) + 36;
 
-  Future<void> _toggle(_RowId id) async {
-    final (choice, savedCopy) = id;
-    final restore = PlatformDetection.isTV && _nodes[id]?.hasFocus == true;
-    var target = id;
-    if (restore && savedCopy) {
-      final saved = _saved;
-      final index = saved.indexOf(choice);
-      if (index < 0) return;
-      if (saved.length == 1) {
-        target = (choice, false);
-      } else {
-        final neighbor = index == saved.length - 1 ? index - 1 : index + 1;
-        target = (saved[neighbor], true);
-      }
-    }
+  Future<void> _toggle(GuideFilterChoice choice) async {
     try {
       await widget.vm.toggleSavedFilter(choice);
       if (mounted && _saveErrorVisible) {
@@ -124,16 +110,35 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
     } catch (error) {
       debugPrint('Could not save guide favorites (${error.runtimeType})');
       _showSaveError();
+    }
+  }
+
+  // A local edit or another device can remove the focused saved copy.
+  // Move with the list rebuild, even while a local upload is still waiting.
+  void _restoreRemovedPinFocus(Set<GuideFilterChoice> saved) {
+    final id = _focusedRow.value;
+    if (!PlatformDetection.isTV ||
+        _query.isNotEmpty ||
+        id == null ||
+        !id.$2 ||
+        saved.contains(id.$1) ||
+        _nodes[id]?.hasFocus != true) {
       return;
     }
-    if (!mounted || !restore || _query.isNotEmpty) return;
+    final previous = _visibleRows.where((row) => row.id?.$2 == true).toList();
+    final index = previous.indexWhere((row) => row.id == id);
+    if (index < 0) return;
+    final target = saved.isEmpty
+        ? (id.$1, false)
+        : (saved.elementAt(index.clamp(0, saved.length - 1)), true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || ModalRoute.isCurrentOf(context) != true) return;
+      if (!mounted || _query.isNotEmpty || ModalRoute.isCurrentOf(context) != true) {
+        return;
+      }
       final focused = _focusedRow.value;
       if (_searchFocus.hasFocus || (focused != null && focused != id)) return;
       _focusRow(target);
     });
-    WidgetsBinding.instance.scheduleFrame();
   }
 
   void _showSaveError() {
@@ -286,7 +291,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
               event,
               stillFocused: () => stillFocused(id),
               onTap: () => Navigator.of(context).pop(id.$1),
-              onHold: () => unawaited(_toggle(id)),
+              onHold: () => unawaited(_toggle(id.$1)),
             );
           }
         }
@@ -344,6 +349,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                     listenable: Listenable.merge([widget.vm, _prefs]),
                     builder: (context, _) {
                       final saved = _saved.toSet();
+                      _restoreRemovedPinFocus(saved);
                       final rows = _visibleRows = _rows(l10n, saved);
                       final rowHeight = _rowHeight;
                       final indices = {
@@ -438,7 +444,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                             ),
                             onTap: () => Navigator.of(context).pop(choice),
                             onLongPress: choice.canFavorite
-                                ? () => _toggle(id)
+                                ? () => _toggle(choice)
                                 : null,
                           );
                         },

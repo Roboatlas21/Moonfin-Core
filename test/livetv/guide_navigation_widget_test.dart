@@ -9,10 +9,12 @@ import 'package:go_router/go_router.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playback_core/playback_core.dart';
+import 'package:moonfin/auth/repositories/session_repository.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/data/services/plugin_sync_service.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
+import 'package:moonfin/preference/seerr_preferences.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 import 'package:moonfin/ui/navigation/destinations.dart';
@@ -44,6 +46,8 @@ class _DialogBackObserver extends WidgetsBindingObserver {
 }
 
 class _MockMediaServerClient extends Mock implements MediaServerClient {}
+
+class _MockSession extends Mock implements SessionRepository {}
 
 class _MockLiveTvApi extends Mock implements LiveTvApi, ChannelGroupApi {}
 
@@ -969,13 +973,101 @@ void main() {
     expect(find.text("Couldn't save filter. Try again."), findsOneWidget);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), previous);
     expect(picker, findsOneWidget);
-    prefs.save = null;
-    await prefs.set(UserPreferences.liveTvSavedFilters, <String>[]);
+  });
+
+  testWidgets('an open picker follows pin edits from another device', (tester) async {
+    useTvLayout();
+    final prefs = GetIt.instance<UserPreferences>();
+    final store = GetIt.instance<PreferenceStore>();
+    await prefs.set(UserPreferences.lastServerId, 'srv');
+    await prefs.set(UserPreferences.lastUserId, 'user');
+    await prefs.set(UserPreferences.pluginSyncEnabled, true);
+    await prefs.set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.both,
+    );
+    GetIt.instance.registerSingleton<SeerrPreferences>(
+      SeerrPreferences(store, _MockSession()),
+    );
+    when(() => client.baseUrl).thenReturn('http://plugin.test');
+    when(() => client.accessToken).thenReturn('token');
+    when(() => client.deviceInfo).thenReturn(const DeviceInfo(
+      id: 'device', name: 'test', appName: 'moonfin', appVersion: '0',
+    ));
+    var remotePins = <String>[];
+    final rejectRemoval = Completer<void>();
+    final dio = Dio();
+    dio.interceptors.add(InterceptorsWrapper(
+      onRequest: (request, handler) async {
+        if (request.data is Map && request.data['liveTvSavedFilterChange'] != null) {
+          await rejectRemoval.future;
+          return handler.reject(DioException.badResponse(
+            statusCode: 400,
+            requestOptions: request,
+            response: Response(requestOptions: request, statusCode: 400),
+          ));
+        }
+        handler.resolve(Response(
+          requestOptions: request,
+          statusCode: 200,
+          data: request.path.contains('/Settings/Resolved/')
+              ? {'LiveTvSavedFilters': remotePins}
+              : <String, dynamic>{},
+        ));
+      },
+    ));
+    final sync = PluginSyncService(prefs, store, dio: dio);
+    await GetIt.instance.unregister<PluginSyncService>();
+    GetIt.instance.registerSingleton<PluginSyncService>(
+      sync,
+      dispose: (service) => service.dispose(),
+    );
+    // Dio schedules requests on the event queue. Drive them with the widget clock.
+    final available = sync.refreshAvailability(client);
     await _pumpFrames(tester);
-    expect(rows(), findsOneWidget);
-    await prefs.set(UserPreferences.liveTvSavedFilters, previous);
+    expect(await available, isTrue);
+    stubGroups(const ChannelGroupLineup({'ch1': {'CA| SPORTS', 'UK| SPORTS'}}));
+    await pumpGuide(tester);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+    Finder groupRows(String name) => find.descendant(
+      of: picker,
+      matching: find.widgetWithText(ListTile, name),
+    );
+    final rows = groupRows('CA| SPORTS');
+    final original = tester.widget<ListTile>(rows).focusNode!;
+    original.requestFocus();
     await _pumpFrames(tester);
-    expect(rows(), findsNWidgets(2));
+    Future<void> receive(List<String> pins) async {
+      remotePins = pins;
+      final update = sync.handleServerEvent(client, {'type': 'settingsUpdated'});
+      await _pumpFrames(tester);
+      await update;
+    }
+    for (final added in [true, false]) {
+      await receive([if (added) 'group:CA| SPORTS']);
+      expect(rows, findsNWidgets(added ? 2 : 1));
+      expect(original.hasFocus, isTrue);
+      expect(
+        find.descendant(of: picker, matching: find.byIcon(Icons.favorite)),
+        added ? findsNWidgets(2) : findsNothing,
+      );
+    }
+    await receive(['group:CA| SPORTS', 'group:UK| SPORTS']);
+    tester.widget<ListTile>(rows.first).focusNode!.requestFocus();
+    await _pumpFrames(tester);
+    final neighbor = groupRows('UK| SPORTS').first;
+    await _holdSelect(tester);
+    expect(rows, findsOneWidget);
+    expect(tester.widget<ListTile>(neighbor).focusNode!.hasFocus, isTrue);
+    original.requestFocus();
+    await _pumpFrames(tester);
+    rejectRemoval.complete();
+    await _pumpFrames(tester);
+    expect(rows, findsNWidgets(2));
+    expect(original.hasFocus, isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await GetIt.instance.unregister<PluginSyncService>();
   });
 
   test(

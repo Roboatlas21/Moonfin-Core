@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:playback_core/playback_core.dart';
+import 'package:server_core/server_core.dart';
 
 import 'package:moonfin/auth/repositories/server_repository.dart';
 import 'package:moonfin/auth/repositories/session_repository.dart';
@@ -26,12 +27,25 @@ class _FakeServerRepository extends Fake implements ServerRepository {}
 
 class _FakeUserRepository extends Fake implements UserRepository {}
 
-class _FakePluginSyncService extends Fake implements PluginSyncService {}
+class _FakeClient extends Fake implements MediaServerClient {}
+
+class _FakePluginSyncService extends Fake implements PluginSyncService {
+  final retries = <(MediaServerClient, String?)>[];
+
+  @override
+  Future<void> retryPendingGuidePins(MediaServerClient client, {String? serverId}) async {
+    retries.add((client, serverId));
+  }
+}
 
 class _FakeResolution extends Fake implements StreamResolutionResult {}
 
 class _CountingSocketHandler extends Fake implements SocketHandler {
   int disconnects = 0;
+  int retries = 0;
+
+  @override
+  void retryNow() => retries++;
 
   @override
   Future<void> disconnect() async => disconnects++;
@@ -50,11 +64,13 @@ void main() {
 
   late _FakeManager manager;
   late _CountingSocketHandler socket;
+  late _FakePluginSyncService sync;
   late SessionRepository repository;
 
   setUp(() {
     manager = _FakeManager();
     socket = _CountingSocketHandler();
+    sync = _FakePluginSyncService();
     GetIt.instance.registerSingleton<PlaybackManager>(manager);
     repository = SessionRepository(
       _FakeAuthStore(),
@@ -64,13 +80,31 @@ void main() {
       socket,
       _FakeServerRepository(),
       _FakeUserRepository(),
-      _FakePluginSyncService(),
+      sync,
     );
   });
 
   tearDown(() {
     debugDefaultTargetPlatformOverride = null;
     return GetIt.instance.reset();
+  });
+
+  test('regaining the network retries active session pins even with a suspended socket', () {
+    fakeAsync((async) {
+      final client = _FakeClient();
+      GetIt.instance.registerSingleton<MediaServerClient>(client);
+      repository.onNetworkRegained();
+      expect(sync.retries, isEmpty);
+      repository.setActiveSessionForTest('srv1', 'viewer');
+      repository.onNetworkRegained();
+      expect(socket.retries, 2);
+      repository.onAppBackgrounded();
+      async.elapse(const Duration(seconds: 61));
+      expect(socket.disconnects, 1);
+      repository.onNetworkRegained();
+      expect(socket.retries, 2);
+      expect(sync.retries, [(client, 'srv1'), (client, 'srv1')]);
+    });
   });
 
   test('a paused stream keeps the socket open in the background', () {
