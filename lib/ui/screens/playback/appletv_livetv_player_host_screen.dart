@@ -119,7 +119,7 @@ class _AppleTvLiveTvPlayerHostScreenState
   List<GuideChannel>? _retryGuideLineup;
 
   bool get _canRecordCurrentProgram =>
-      canRecordAiring(_currentProgram);
+      canRecordChannelAiring(_client, _currentChannel.id, _currentProgram);
 
   @override
   void initState() {
@@ -1046,7 +1046,8 @@ class _AppleTvLiveTvPlayerHostScreenState
     try {
       await ItemMutationRepository(
         _client,
-      ).setFavorite(channel.id, isFavorite: !channel.isFavorite, isChannel: true);
+      ).setFavorite(channel.id, isFavorite: !channel.isFavorite, isChannel: true,
+          expectedChannelKey: channelFavoriteKey(channel.rawData));
     } catch (_) {
       final backend = _backend;
       if (!mounted || backend == null) return;

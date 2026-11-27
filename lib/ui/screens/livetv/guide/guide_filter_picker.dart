@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:moonfin_design/moonfin_design.dart';
+import 'package:server_core/server_core.dart' show ChannelGroupSource;
 
 import '../../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../../l10n/app_localizations.dart';
@@ -14,6 +15,15 @@ export '../../../../data/viewmodels/live_tv_guide_view_model.dart'
 
 typedef _RowId = GuideFilterChoice;
 
+String guideGroupLabel(
+  LiveTvGuideViewModel vm,
+  String group,
+  AppLocalizations l10n,
+) => switch (vm.sourceForGroup(group)) {
+  ChannelGroupSource.dvr => l10n.guideDvrChannels,
+  ChannelGroupSource.plexFreeTv => l10n.guidePlexFreeTv,
+  null => group,
+};
 
 class GuideFilterPicker extends StatefulWidget {
   const GuideFilterPicker({
@@ -95,7 +105,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
     void add(GuideFilterChoice choice) {
       final (filter, group) = choice;
       final label = group != null
-          ? group
+          ? guideGroupLabel(widget.vm, group, l10n)
           : (filter == GuideFilter.all
                 ? l10n.guideAllChannels
                 : widget.filterLabel(filter));

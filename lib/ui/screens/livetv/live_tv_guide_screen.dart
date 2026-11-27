@@ -187,6 +187,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final _channelSearch = TextEditingController();
   Timer? _channelSearchDebounce;
   bool _pickerOpen = false;
+  bool _routeVisible = true;
   GuideFilter? _pendingPickerFocus;
   ({String channelId, int row, GuideFilter filter, String? group})?
   _pendingPickerRestore;
@@ -333,8 +334,24 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     });
   }
 
+  void _syncGuideVisibility(AppLifecycleState? state) {
+    _vm.setGuideVisible(
+      _routeVisible && (state == null || state == AppLifecycleState.resumed),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _routeVisible =
+        (ModalRoute.isCurrentOf(context) ?? true) &&
+        TickerMode.valuesOf(context).enabled;
+    _syncGuideVisibility(WidgetsBinding.instance.lifecycleState);
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _syncGuideVisibility(state);
     if (state != AppLifecycleState.resumed) return;
     final now = DateTime.now();
     _scheduleReanchor();
@@ -1961,7 +1978,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final l10n = AppLocalizations.of(context);
     final group = _vm.selectedGroup;
     final filterLabel = group != null
-        ? group
+        ? guideGroupLabel(_vm, group, l10n)
         : (_vm.filter == GuideFilter.all
               ? l10n.guideAllChannels
               : _filterLabel(_vm.filter, l10n));
@@ -3620,6 +3637,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _cancelPendingVerticalMove();
     final pageContext = context;
     final channel = _vm.channelForId(program.channelId);
+    final canRecord = _vm.canRecordChannel(program.channelId);
     final isFavoriteChannel = channel?.isFavorite ?? false;
     final hasTimer = program.hasTimer;
     final hasSeriesTimer = program.hasSeriesTimer;
@@ -3639,7 +3657,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final episodeLine = program.episodeLine;
     final chipLabels = [
       for (final group in _vm.groupsForChannel(program.channelId))
-        group,
+        guideGroupLabel(_vm, group, l10n),
       if (program.isMovie) l10n.movie,
       if (program.isSeries) l10n.series,
       if (program.isSports) l10n.sports,
@@ -3719,7 +3737,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           ),
           actions: [
             // That airing is over. Single-episode recording no longer applies.
-            if (!isEnded)
+            if (canRecord && !isEnded)
               adaptiveDialogAction(
                 autofocus: isRecordingNow,
                 focusNode: isRecordingNow ? defaultActionFocusNode : null,
@@ -3780,7 +3798,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                   hasTimer ? l10n.cancelRecordingAction : l10n.record,
                 ),
               ),
-            if (hasSeriesTimer)
+            if (canRecord && hasSeriesTimer)
               adaptiveDialogAction(
                 onPressed: () async {
                   if (dialogActionInProgress) return;
@@ -3818,7 +3836,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                 },
                 child: Text(l10n.seriesRecordingSettings),
               ),
-            if (program.isSeries)
+            if (canRecord && program.isSeries)
               adaptiveDialogAction(
                 onPressed: () async {
                   if (dialogActionInProgress) return;

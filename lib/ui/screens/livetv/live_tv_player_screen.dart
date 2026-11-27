@@ -870,7 +870,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       await ItemMutationRepository(_client).setFavorite(
         channel.id,
         isFavorite: !channel.isFavorite,
-        isChannel: true
+        isChannel: true,
+        expectedChannelKey: channelFavoriteKey(channel.rawData),
       );
     } catch (_) {
       if (mounted) {
@@ -1182,7 +1183,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   }
 
   bool get _canRecordCurrentProgram =>
-      canRecordAiring(_currentProgram);
+      canRecordChannelAiring(_client, _currentChannel.id, _currentProgram);
 
   Future<void> _showRecordingDialog() async {
     if (_recordingActionInProgress || _isSwitching || _isStopping) return;
