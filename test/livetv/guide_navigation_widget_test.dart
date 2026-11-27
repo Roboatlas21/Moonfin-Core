@@ -637,8 +637,12 @@ void main() {
     });
   }
 
-  for (final layout in [InterfaceLayout.tv, InterfaceLayout.phone]) {
-    testWidgets('empty and partly loaded categories can retry on ${layout.name}', (
+  for (final (layout, moveFocus) in [
+    (InterfaceLayout.tv, false),
+    (InterfaceLayout.tv, true),
+    (InterfaceLayout.phone, false),
+  ]) {
+    testWidgets('empty and partly loaded categories can retry on ${layout.name} (move focus: $moveFocus)', (
       tester,
     ) async {
       PlatformDetection.setInterfaceLayout(layout);
@@ -647,6 +651,7 @@ void main() {
       );
       channelCount = 2;
       final failed = {'ch0', 'ch1'};
+      Completer<void>? retry;
       stubGroups(const ChannelGroupLineup(
           {},
           programmeCategories: {'sports'},
@@ -658,6 +663,7 @@ void main() {
         if (inv.namedArguments[#isSports] != true) {
           return {'Items': [for (final id in ids) ..._programsFor(id)]};
         }
+        if (retry != null) await retry.future;
         return {
           'Items': [for (final id in ids.where((id) => !failed.contains(id)))
             ..._programsFor(id, sports: true)],
@@ -696,10 +702,24 @@ void main() {
         await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideCategoryRetry');
       }
       failed.clear();
-      await tester.tap(partialRetry);
+      if (layout == InterfaceLayout.tv) {
+        retry = Completer<void>();
+        await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
+        expect(vm.retryingCategoryListings, isTrue);
+        expect(_focusedLabel(), 'GuideCategoryRetry');
+        if (moveFocus) {
+          await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideWindowBar:0');
+        }
+        retry.complete();
+      } else {
+        await tester.tap(partialRetry);
+      }
       await _pumpFrames(tester);
       expect(vm.hasFailedCategoryListings, isFalse);
       expect(vm.filteredChannels.map((c) => c.id), ['ch0', 'ch1']);
+      if (layout == InterfaceLayout.tv) {
+        expect(_focusedLabel(), moveFocus ? 'GuideWindowBar:0' : 'GuideChannel:0');
+      }
       expect(partialRetry, findsNothing);
       expect(find.text('Failed to load'), findsNothing);
     });
@@ -985,23 +1005,29 @@ void main() {
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
     expect(picker, findsNothing);
 
-    for (final sendsPopRoute in [false, true]) {
+    for (final apiLevel in [32, 33]) {
       await focusGuideNode(tester, 'GuideBrowse');
       await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
       expect(picker, findsOneWidget);
 
       DialogBackSuppressor.newBackPress();
-      await tester.sendKeyEvent(
+      await tester.sendKeyDownEvent(
+        LogicalKeyboardKey.goBack,
+        physicalKey: PhysicalKeyboardKey.escape,
+      );
+      final handledKeyUp = await tester.sendKeyUpEvent(
         LogicalKeyboardKey.goBack,
         physicalKey: PhysicalKeyboardKey.escape,
       );
       await _pumpFrames(tester);
       expect(picker, findsNothing);
+      final popsBefore = observer.suppressed;
+      final sendsPopRoute = apiLevel >= 33 || !handledKeyUp;
       if (sendsPopRoute) {
         await tester.binding.handlePopRoute();
         await _pumpFrames(tester);
       }
-      expect(observer.suppressed, sendsPopRoute ? 1 : 0);
+      expect(observer.suppressed, popsBefore + (sendsPopRoute ? 1 : 0));
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
     }
   });

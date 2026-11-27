@@ -477,8 +477,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // The lazy-load prefix follows list order, so walk it again from the top.
     // Already-fetched channels are skipped in _loadNextBatch.
     _programsHighWater = 0;
-    if (_isCategory(_filter) && _categoryLoadedFor != _filter) {
-      unawaited(_loadCategoryPrograms());
+    final categoryLoaded = _categoryLoadedFor == _filter;
+    final sortingDuringSearch = _categoryFetchInFlight && _state == GuideState.loading;
+    if (_isCategory(_filter) && (!categoryLoaded || sortingDuringSearch)) {
+      unawaited(_loadCategoryPrograms(keepListings: categoryLoaded));
       return;
     }
     _categoryHighWater = 0;
@@ -658,7 +660,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
     if (_isCategory(_filter)) {
-      unawaited(_loadCategoryPrograms(searchChanged: true));
+      unawaited(_loadCategoryPrograms(keepListings: _categoryLoadedFor == _filter));
     } else {
       _resetCategory();
       _notifyListeners();
@@ -1175,11 +1177,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadCategoryPrograms({bool searchChanged = false}) async {
-    final keepListings = searchChanged && _categoryLoadedFor == _filter;
+  Future<void> _loadCategoryPrograms({bool keepListings = false}) async {
     if (keepListings) {
-      // A text edit doesn't change which programs match in this time window.
-      // Cancel the old walk and retry failed rows in the new search.
+      // Searching and sorting can reuse listings for channels already checked.
       _categoryRequest++;
       _categoryQueriedIds.removeAll(_categoryFailedIds);
       _categoryFailedIds.clear();

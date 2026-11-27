@@ -1443,6 +1443,26 @@ void main() {
       expect(vm.hasMorePrograms, isFalse);
     });
 
+    test('sorting during a category search finishes the replacement request', () async {
+      stubNumberedChannels(201);
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer(_serverFiltered((_) => true));
+      final vm = await loadFilter(GuideFilter.sports);
+      final search = pendingGuide(GuideFilter.sports);
+      vm.setChannelQuery('c200');
+      expect(vm.state, GuideState.loading);
+
+      final sorted = pendingGuide(GuideFilter.sports);
+      vm.setSortBy(ChannelSortBy.name);
+      sorted.complete({'Items': [_program('sorted', 'c200', isSports: true)]});
+      await pumpEventQueue();
+      expect(vm.state, GuideState.ready);
+      expect(vm.filteredChannels.map((c) => c.id), ['c200']);
+      search.complete({'Items': []});
+      await pumpEventQueue();
+      expect(vm.programsForChannel('c200').single.id, 'sorted');
+    });
+
     test('scrolling a category pulls the next batch of channels', () async {
       stubNumberedChannels(500);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(

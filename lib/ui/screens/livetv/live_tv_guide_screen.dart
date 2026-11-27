@@ -429,6 +429,18 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final previousIds = _visibleChannelIds;
     final lineupChanged = !listEquals(channelIds, previousIds);
     _visibleChannelIds = channelIds;
+    // Transfer remote focus before the rebuild removes the Retry button.
+    if (PlatformDetection.isTV &&
+        _categoryRetryFocus.hasFocus &&
+        _vm.state == GuideState.ready &&
+        !_vm.hasFailedCategoryListings &&
+        !_pickerOpen) {
+      if (channelIds.isEmpty) {
+        _focusWindowBarFromGrid();
+      } else {
+        _focusChannelRow(0, animate: false);
+      }
+    }
     setState(_initializeMiniPlayerMode);
     if (lineupChanged) {
       _refreshFocusedChannelAfterLineupChange(previousIds);
@@ -2278,7 +2290,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       child: OutlinedButton.icon(
         focusNode: _categoryRetryFocus,
         autofocus: !partial,
-        onPressed: _vm.retryingCategoryListings
+        // The view model ignores duplicate retries. Leave the TV button focusable.
+        onPressed: _vm.retryingCategoryListings && !PlatformDetection.isTV
             ? null
             : () => unawaited(_vm.retryFailedCategoryListings()),
         icon: const Icon(Icons.refresh),
