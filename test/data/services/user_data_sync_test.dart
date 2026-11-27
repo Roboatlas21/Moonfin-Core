@@ -334,6 +334,36 @@ void main() {
       expect(sync.favoriteFor(serverChannelKeyFor(fake.client, 'sports')), isFalse);
     });
 
+    for (final newerFinishesFirst in [false, true]) {
+      test('latest channel favorite read wins (newer finishes first: $newerFinishesFirst)', () async {
+        final fake = clientReturning([]);
+        when(() => fake.client.baseUrl).thenReturn('http://media.test');
+        const ids = ['news'];
+        final key = serverChannelKeyFor(fake.client, ids.single);
+        sync.publish(key, {'IsFavorite': true});
+        final replies = <Completer<Map<String, dynamic>>>[];
+        when(() => fake.itemsApi.getItems(
+          ids: ids, fields: 'UserData', recursive: true, limit: 1, enableTotalRecordCount: false,
+        )).thenAnswer((_) {
+          final reply = Completer<Map<String, dynamic>>();
+          replies.add(reply);
+          return reply.future;
+        });
+        final reads = [
+          sync.refreshFromServer(fake.client, ids),
+          sync.refreshFromServer(fake.client, ids),
+        ];
+        expect(replies, hasLength(2));
+        for (final index in newerFinishesFirst ? [1, 0] : [0, 1]) {
+          replies[index].complete({'Items': [
+            {'Id': ids.single, 'Type': 'TvChannel', 'UserData': {'IsFavorite': index == 1}},
+          ]});
+          await reads[index];
+          expect(sync.favoriteFor(key), newerFinishesFirst || index == 1);
+        }
+      });
+    }
+
     test('a repeated socket favorite supersedes an earlier read', () async {
       final fake = clientReturning([]);
       const server = 'http://media.test';

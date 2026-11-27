@@ -1712,10 +1712,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     for (final item in channels) {
       final id = channelFavoriteKey(item) ?? item['Id']?.toString();
       final data = item['UserData'];
-      if (id != null &&
-          data is Map &&
-          !userDataSync.favoriteChangePending(id) &&
-          userDataSync.revisionFor(id) <= revision) {
+      if (id != null && data is Map && data['IsFavorite'] is bool) {
         fresh[id] = Map<String, dynamic>.from(data);
       }
     }
@@ -1723,7 +1720,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // would re-sort it and fetch programs for rows about to be replaced.
     _publishingFetchedUserData = true;
     try {
-      userDataSync.publishAll(fresh, replace: true);
+      userDataSync.publishAll(fresh, replace: true, channelReadRevision: revision);
     } finally {
       _publishingFetchedUserData = false;
     }

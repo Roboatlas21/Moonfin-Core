@@ -10,6 +10,8 @@ import 'media_server_client_factory.dart';
 
 String serverChannelKey(String serverId, String channelId) => 'channel:$serverId\u0000$channelId';
 
+bool _isServerChannelKey(String key) => key.startsWith('channel:') && key.contains('\u0000');
+
 String serverChannelKeyFor(MediaServerClient client, String channelId) {
   final factory = GetIt.instance.maybeGet<MediaServerClientFactory>();
   return serverChannelKey(factory?.serverIdOf(client) ?? client.baseUrl, channelId);
@@ -54,12 +56,12 @@ class UserDataSync extends ChangeNotifier {
   int get revision => _revision;
   int revisionFor(String itemId) => _itemRevisions[itemId] ?? 0;
 
-  /// Keep newer channel observations available until overlapping reads settle.
+  /// Order overlapping reads by when they start and retain newer observations until they settle.
   Future<T> withChannelFavoriteRead<T>(
     Future<T> Function(int revision) read, {
     required bool Function(String key) includes,
   }) async {
-    final pending = (start: revision, includes: includes);
+    final pending = (start: ++_revision, includes: includes);
     _activeFavoriteReads.add(pending);
     try {
       return await read(pending.start);
@@ -126,11 +128,20 @@ class UserDataSync extends ChangeNotifier {
   void publishAll(
     Map<String, Map<String, dynamic>> changes, {
     bool replace = false,
+    int? channelReadRevision,
   }) {
     if (changes.isEmpty) return;
     var changed = false;
     changes.forEach((itemId, patch) {
       if (itemId.isEmpty || patch.isEmpty) return;
+      final readAt = channelReadRevision != null && _isServerChannelKey(itemId)
+          ? channelReadRevision
+          : null;
+      if (readAt != null) {
+        if (favoriteChangePending(itemId) || revisionFor(itemId) > readAt) return;
+        // An unchanged reply also supersedes reads that started earlier.
+        _itemRevisions[itemId] = readAt;
+      }
       final existing = _userData[itemId];
       // The server leaves out a percentage it has cleared, and a missing key
       // would keep the old progress bar on the item it is merged into. Only a
@@ -149,7 +160,7 @@ class UserDataSync extends ChangeNotifier {
       }
       if (existing != null && mapEquals(existing, merged)) return;
       _userData[itemId] = merged;
-      _itemRevisions[itemId] = ++_revision;
+      if (readAt == null) _itemRevisions[itemId] = ++_revision;
       changed = true;
     });
     if (!changed) return;
@@ -255,12 +266,10 @@ class UserDataSync extends ChangeNotifier {
             changes[id] = Map<String, dynamic>.from(userData);
             if (raw['Type'] == 'TvChannel' && userData['IsFavorite'] is bool) {
               final key = serverChannelKeyFor(client, id);
-              if (revisionFor(key) <= readRevision) {
-                changes[key] = {'IsFavorite': userData['IsFavorite']};
-              }
+              changes[key] = {'IsFavorite': userData['IsFavorite']};
             }
           }
-          publishAll(changes, replace: true);
+          publishAll(changes, replace: true, channelReadRevision: readRevision);
         }, includes: (key) => keys.contains(key));
       } catch (_) {
         // A dropped connection or a library the user lost access to. The next
@@ -324,7 +333,7 @@ class UserDataSync extends ChangeNotifier {
     final excess = _userData.length - _maxTrackedItems;
     final removable = _userData.keys.where((key) {
       if (favoriteChangePending(key)) return false;
-      return !key.startsWith('channel:') ||
+      return !_isServerChannelKey(key) ||
           !_activeFavoriteReads.any((read) => revisionFor(key) > read.start && read.includes(key));
     });
     for (final key in removable.take(excess).toList()) {
