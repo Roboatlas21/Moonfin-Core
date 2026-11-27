@@ -861,6 +861,27 @@ void main() {
     expect(retry, findsNothing);
   });
 
+  testWidgets('Now/Next keeps the focused station through two lineup changes', (tester) async {
+    channelCount = 140;
+    await GetIt.instance<UserPreferences>().set(UserPreferences.epgMobileView, EpgMobileView.list);
+    await pumpGuide(tester, surface: phone);
+    final vm = guideModel(tester);
+    vm.setChannelQuery('Channel 2');
+    await _pumpFrames(tester);
+    expect(vm.filteredChannels.first.id, 'ch2');
+    await focusGuideNode(tester, 'GuideChannel:0');
+
+    vm.setChannelQuery('');
+    await tester.pump(); // Reveal the station in number order before focus is restored.
+    expect(vm.filteredChannels[2].id, 'ch2');
+    vm.setSortBy(ChannelSortBy.name);
+    final index = vm.filteredChannels.indexWhere((c) => c.id == 'ch2');
+    expect(index, greaterThan(20));
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideChannel:$index');
+    expect(find.text('Channel 2').hitTestable(), findsOneWidget);
+  });
+
   testWidgets('channel search fits a narrow desktop guide', (tester) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.desktop);
     addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));

@@ -630,14 +630,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         _pendingChannelRebindId = null;
         return;
       }
-      if (_nowNextScrollController.hasClients) {
-        if (_scrollTowardNowNextCard(index)) {
-          _scheduleChannelFocusRebind(channelId);
-          return;
-        }
-      } else {
-        _scrollToRow(index, animate: false);
-      }
+      if (!_nowNextScrollController.hasClients) _scrollToRow(index, animate: false);
       // The destination may be offscreen until the list rebuilds.
       binding.addPostFrameCallback((_) {
         if (!_mayTakeFocus ||
@@ -655,6 +648,17 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         final latest = _vm.filteredChannels.indexWhere(
           (channel) => channel.id == channelId,
         );
+        if (latest >= 0 && _nowNextScrollController.hasClients) {
+          // Variable-height cards can move again while a frame is pending.
+          if (_scrollTowardNowNextCard(latest)) {
+            _scheduleChannelFocusRebind(channelId);
+            return;
+          }
+          if (_channelFocusNodes[latest]?.context?.mounted != true) {
+            _pendingChannelRebindId = null;
+            return;
+          }
+        }
         _pendingChannelRebindId = null;
         if (latest >= 0) _focusChannelRow(latest, animate: false);
       });

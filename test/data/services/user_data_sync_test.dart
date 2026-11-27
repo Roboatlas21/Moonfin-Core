@@ -339,15 +339,12 @@ void main() {
       const server = 'http://media.test';
       when(() => fake.client.baseUrl).thenReturn(server);
       final reply = Completer<Map<String, dynamic>>();
-      when(
-        () => fake.itemsApi.getItems(
-          ids: any(named: 'ids'),
-          fields: 'UserData',
-          recursive: true,
-          limit: 1,
-          enableTotalRecordCount: false,
-        ),
-      ).thenAnswer((_) => reply.future);
+      const ids = ['news', 'sports'];
+      Future<Map<String, dynamic>> request() => fake.itemsApi.getItems(
+        ids: ids, fields: 'UserData', recursive: true, limit: ids.length,
+        enableTotalRecordCount: false,
+      );
+      when(request).thenAnswer((_) => reply.future);
       final events = StreamController<ServerWebSocketMessage>();
       addTearDown(events.close);
       sync.bindTo(events.stream, userId: 'viewer', serverId: server);
@@ -361,20 +358,19 @@ void main() {
       await pumpEventQueue();
       final key = serverChannelKey(server, 'news');
       expect(sync.favoriteFor(key), isTrue);
-      final reading = sync.refreshFromServer(fake.client, ['news']);
+      final reading = sync.refreshFromServer(fake.client, ids);
+      verify(request).called(1);
       events.add(event);
       await pumpEventQueue();
       reply.complete({
         'Items': [
-          {
-            'Id': 'news',
-            'Type': 'TvChannel',
-            'UserData': {'IsFavorite': false},
-          },
+          for (final id in ids)
+            {'Id': id, 'Type': 'TvChannel', 'UserData': {'IsFavorite': false}},
         ],
       });
       await reading;
       expect(sync.favoriteFor(key), isTrue);
+      expect(sync.favoriteFor(serverChannelKey(server, 'sports')), isFalse);
     });
 
     test('publishes the user data the server returned', () async {

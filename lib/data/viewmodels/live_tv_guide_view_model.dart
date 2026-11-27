@@ -2148,6 +2148,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             }
           } finally {
             if (current()) {
+              _advanceProgramsCursor();
               _retryingFailedProgramIds.removeAll(batch.map((c) => c.id));
               _notifyListeners();
             }
@@ -2343,7 +2344,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (_disposed) return;
     _boundaryTimer?.cancel();
     _boundaryDueAt = dueAt;
-    _boundaryTimer = Timer(delay, () => unawaited(handleBoundaryElapsed()));
+    _boundaryTimer = Timer(delay, () {
+      // An in-flight refresh checks the deadline before scheduling its next retry.
+      _boundaryTimer = null;
+      _boundaryDueAt = null;
+      unawaited(handleBoundaryElapsed());
+    });
   }
 
   void _armRetry(Duration delay) => _arm(delay, _now().add(delay));

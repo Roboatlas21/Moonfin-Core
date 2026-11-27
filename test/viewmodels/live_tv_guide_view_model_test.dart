@@ -213,6 +213,12 @@ void main() {
       final vm = LiveTvGuideViewModel(client);
       addTearDown(vm.dispose);
       _stubChannels(api, [_channel('one')]);
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer(
+        (_) async => const ChannelGroupLineup({}, programmeCategories: {}),
+      );
+      await vm.load();
+      expect(vm.availableProgrammeCategories, isNot(contains(GuideFilter.sports)));
+
       when(() => api.getChannelGroups(userId: 'user')).thenThrow(
         TimeoutException('group metadata unavailable'),
       );
@@ -779,6 +785,36 @@ void main() {
       expect(vm.programsForChannel('missing').single.id, 'recovered');
     });
 
+    testWidgets('a retry that expires during a superseded refresh still recovers listings', (tester) async {
+      seedLapsingSchedule();
+      await vm.load();
+      vm.scheduleBoundaryRefresh();
+      clock = at(31);
+      final pending = Completer<Map<String, dynamic>>();
+      when(() => _guide(liveTv)).thenAnswer((_) => pending.future);
+      clearInteractions(liveTv);
+      final stale = vm.handleBoundaryElapsed();
+      await tester.pump();
+      verify(() => _guide(liveTv)).called(1);
+
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': [], 'FailedChannelIds': ['c0']});
+      expect(await vm.replacePrograms(channelIds: ['c0'], from: at(0), to: at(90)), isFalse);
+      const backoff = LiveTvGuideViewModel.failureBackoff;
+      expect(vm.boundaryDueAt, clock.add(backoff));
+      clock = clock.add(backoff);
+      await tester.pump(backoff);
+      pending.complete({'Items': []});
+      await stale;
+
+      when(() => _guide(liveTv)).thenAnswer((_) async => {
+        'Items': [_span('recovered', 'c0', at(30), at(90))],
+      });
+      clock = clock.add(backoff);
+      await tester.pump(backoff);
+      vm.cancelBoundaryRefresh();
+      expect(vm.programsForChannel('c0').single.id, 'recovered');
+    });
+
     test('a canceled boundary refresh cannot rearm after its response', () async {
       seedLapsingSchedule();
       await vm.load();
@@ -786,8 +822,10 @@ void main() {
       clock = at(31);
       final reply = Completer<Map<String, dynamic>>();
       when(() => _guide(liveTv)).thenAnswer((_) => reply.future);
+      clearInteractions(liveTv);
       final refresh = vm.handleBoundaryElapsed();
       await pumpEventQueue();
+      verify(() => _guide(liveTv)).called(1);
       vm.cancelBoundaryRefresh();
       reply.complete({'Items': [_span('later', 'c0', at(30), at(90))]});
       await refresh;
@@ -1067,6 +1105,26 @@ void main() {
     expect(vm.programsHighWater, 2);
   });
 
+  test('paging fetches the next missing station immediately after a row retry', () async {
+    stubNumberedChannels(101);
+    final vm = await loadFilter(GuideFilter.all);
+    final rest = vm.playbackChannels.skip(50).map((c) => c.id).toList();
+    when(() => _guide(liveTv)).thenAnswer((inv) async => {
+      'Items': [], 'FailedChannelIds': _requestedIds(inv),
+    });
+    await vm.ensureProgramsForChannels(rest.take(50).toList());
+    expect(vm.hasProgramsFor(rest.first), isFalse);
+    when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+    await vm.retryFailedPrograms();
+    expect(vm.hasProgramsFor(rest.first), isTrue);
+    expect(vm.hasProgramsFor(rest.last), isFalse);
+
+    clearInteractions(liveTv);
+    await vm.loadMorePrograms();
+    expect(verify(() => _guide(liveTv, captureChannelIds: true)).captured, [[rest.last]]);
+    expect(vm.hasProgramsFor(rest.last), isTrue);
+  });
+
   test('a lazy batch waits on a request already out and retries it', () async {
     stubNumberedChannels(120);
     final vm = LiveTvGuideViewModel(client);
@@ -1255,6 +1313,8 @@ void main() {
             .thenAnswer((_) async => {'Items': [_program('fresh', 'c0', isKids: true)]});
         await vm.reloadIfStale(windowStart: start);
         verify(() => _channelsRequest(liveTv)).called(1);
+        expect(vm.filter, GuideFilter.kids);
+        expect(vm.programsForChannel('c0').single.id, 'fresh');
       });
     }
 
