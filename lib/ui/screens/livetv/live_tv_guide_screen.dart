@@ -972,7 +972,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           if (await _vm.setDate(picked)) {
             if (mounted) _anchorToWindowStart();
           } else if (mounted &&
-              _vm.failedWindowMoveRevision != failureRevision) {
+              (_vm.listingsAccessDenied ||
+                  _vm.failedWindowMoveRevision != failureRevision)) {
             _showWindowFailure(picked);
           }
         } catch (_) {

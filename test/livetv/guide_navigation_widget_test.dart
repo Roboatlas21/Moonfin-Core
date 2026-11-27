@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -469,6 +470,26 @@ void main() {
       expect(vm.guideWindow, window);
     });
   }
+
+  testWidgets('choosing a date shows a notice when listings access is denied', (tester) async {
+    final request = RequestOptions();
+    when(() => _guideRequest(liveTvApi)).thenThrow(DioException(
+      requestOptions: request,
+      response: Response(requestOptions: request, statusCode: 403),
+    ));
+    await pumpGuide(tester, surface: phone);
+    final vm = guideModel(tester);
+    expect(vm.listingsAccessDenied, isTrue);
+    expect(vm.filteredChannels, isNotEmpty);
+    final start = vm.guideDate;
+    final target = DateUtils.addDaysToDate(start, start.day == 1 ? 1 : -1);
+    await tapAndPump(tester, find.byIcon(Icons.calendar_today));
+    final calendar = find.byType(CalendarDatePicker);
+    await tapAndPump(tester, find.descendant(of: calendar, matching: find.text('${target.day}')));
+    await tapAndPump(tester, find.text('OK'));
+    expect(vm.guideDate, start);
+    expect(find.textContaining(' ${target.day} listings.'), findsOneWidget);
+  });
 
   for (final reloadDuringRequest in [false, true]) {
     testWidgets('a guide reload during resize finishes at the visible width (request pending=$reloadDuringRequest)', (tester) async {
