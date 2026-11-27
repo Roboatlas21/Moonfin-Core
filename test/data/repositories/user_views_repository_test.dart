@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/repositories/user_views_repository.dart';
+import 'package:moonfin/data/services/connectivity_service.dart';
 import 'package:server_core/server_core.dart';
 
 class _MockClient extends Mock implements MediaServerClient {}
@@ -9,9 +12,20 @@ class _MockUsersApi extends Mock implements UsersApi {}
 
 class _MockViewsApi extends Mock implements UserViewsApi {}
 
+class _TestConnectivity extends ConnectivityService {
+  @override
+  bool canReachServer = false;
+
+  void reportReachable(bool value) {
+    canReachServer = value;
+    notifyListeners();
+  }
+}
+
 void main() {
   late _MockUsersApi users;
   late _MockViewsApi views;
+  late _TestConnectivity connectivity;
   late UserViewsRepository repo;
 
   setUp(() {
@@ -20,7 +34,13 @@ void main() {
     final client = _MockClient();
     when(() => client.usersApi).thenReturn(users);
     when(() => client.userViewsApi).thenReturn(views);
-    repo = UserViewsRepository(client);
+    connectivity = _TestConnectivity();
+    repo = UserViewsRepository(client, connectivity: connectivity);
+  });
+
+  tearDown(() {
+    repo.dispose();
+    connectivity.dispose();
   });
 
   // Answers on the next event loop turn, so callers that ask together are all
@@ -116,6 +136,56 @@ void main() {
 
       verify(() => views.getUserViews(includeHidden: true)).called(2);
     });
+  });
+
+  test('reconnect reloads the toolbar and Library Visibility lists', () async {
+    final online = {
+      'Items': [
+        {'Id': 'movies', 'Name': 'Movies'},
+        {'Id': 'hidden', 'Name': 'Hidden'},
+      ],
+    };
+    when(() => users.getUserConfiguration()).thenAnswer(
+      (_) async => const UserConfiguration(myMediaExcludes: ['hidden']),
+    );
+    when(() => views.getUserViews(includeHidden: true)).thenAnswer(
+      (_) async => connectivity.canReachServer ? online : {'Items': []},
+    );
+    expect(await repo.getAllViewsIncludingHidden(), isEmpty);
+    var reloads = 0;
+    repo.addListener(() => reloads++);
+
+    connectivity.reportReachable(true);
+    connectivity.reportReachable(true);
+
+    expect(reloads, 1);
+    expect((await repo.getUserViews()).single.id, 'movies');
+    expect((await repo.getAllViewsIncludingHidden()).map((v) => v.id), [
+      'movies',
+      'hidden',
+    ]);
+    verify(() => views.getUserViews(includeHidden: true)).called(2);
+  });
+
+  test('a late offline response cannot replace the online libraries', () async {
+    final offline = Completer<Map<String, dynamic>>();
+    when(() => views.getUserViews(includeHidden: true)).thenAnswer(
+      (_) => connectivity.canReachServer
+          ? later({
+              'Items': [
+                {'Id': 'movies', 'Name': 'Movies'},
+              ],
+            })
+          : offline.future,
+    );
+    final pending = repo.getAllViewsIncludingHidden();
+    connectivity.reportReachable(true);
+    expect((await repo.getAllViewsIncludingHidden()).single.id, 'movies');
+
+    offline.complete({'Items': []});
+    expect((await pending).single.id, 'movies');
+    expect((await repo.getAllViewsIncludingHidden()).single.id, 'movies');
+    verify(() => views.getUserViews(includeHidden: true)).called(2);
   });
 
   test(

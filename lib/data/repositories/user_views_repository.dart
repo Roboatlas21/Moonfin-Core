@@ -4,6 +4,7 @@ import 'package:server_core/server_core.dart';
 
 import '../../preference/user_preferences.dart';
 import '../models/aggregated_library.dart';
+import '../services/connectivity_service.dart';
 
 /// The user's own views. Anything hidden from My Media is left out unless
 /// [includeHidden] is set, which callers that apply their own exclude
@@ -79,53 +80,83 @@ Map<String, dynamic> _filterExcludedViews(
 
 class UserViewsRepository extends ChangeNotifier {
   final MediaServerClient _client;
+  final ConnectivityService? _connectivity;
+  bool _canReachServer;
   UserConfiguration? _cachedConfig;
 
   // Concurrent callers share one in-flight request, so home mounting with
   // several rows and the nav chrome all asking at once costs one round trip
   // instead of a socket each.
-  Future<List<AggregatedLibrary>>? _inFlightViews;
-  Future<Map<String, dynamic>>? _inFlightHiddenResponse;
+  Map<bool, Future<Map<String, dynamic>>> _inFlightViews = {};
   Future<UserConfiguration>? _inFlightConfig;
 
-  UserViewsRepository(this._client);
+  UserViewsRepository(this._client, {ConnectivityService? connectivity})
+    : _connectivity = connectivity,
+      _canReachServer = connectivity?.canReachServer ?? true {
+    _connectivity?.addListener(_onConnectivityChanged);
+  }
 
-  Future<List<AggregatedLibrary>> getAllViews() =>
-      _inFlightViews ??= loadUserViews(
-        _client,
-      ).whenComplete(() => _inFlightViews = null);
+  void _onConnectivityChanged() {
+    final reachable = _connectivity!.canReachServer;
+    if (reachable == _canReachServer) return;
+    _canReachServer = reachable;
+    invalidateViews();
+  }
+
+  @override
+  void dispose() {
+    _connectivity?.removeListener(_onConnectivityChanged);
+    super.dispose();
+  }
+
+  Future<List<AggregatedLibrary>> getAllViews() async =>
+      _parseUserViews(await _viewsResponse(includeHidden: false));
 
   // Kept for the session, since every screen's nav chrome asks for the views
   // when it mounts. [invalidateViews] and a configuration change drop it.
   Map<String, dynamic>? _hiddenResponseCache;
 
-  Future<Map<String, dynamic>> _hiddenResponse() {
+  Future<Map<String, dynamic>> _viewsResponse({required bool includeHidden}) {
     final cached = _hiddenResponseCache;
-    if (cached != null) return Future.value(cached);
-    return _inFlightHiddenResponse ??= _client.userViewsApi
-        .getUserViews(includeHidden: true)
-        .then((response) => _hiddenResponseCache = response)
-        .whenComplete(() => _inFlightHiddenResponse = null);
+    if (includeHidden && cached != null) return Future.value(cached);
+    final pending = _inFlightViews;
+    return pending.putIfAbsent(
+      includeHidden,
+      () => _client.userViewsApi
+          .getUserViews(includeHidden: includeHidden)
+          .then<Map<String, dynamic>>((response) {
+            // A request from the previous catalog can finish after the switch.
+            if (!identical(pending, _inFlightViews)) {
+              return _viewsResponse(includeHidden: includeHidden);
+            }
+            if (includeHidden) _hiddenResponseCache = response;
+            return response;
+          })
+          .whenComplete(() {
+            pending.remove(includeHidden);
+          }),
+    );
   }
 
   /// Has the next read ask the server again, and tells the nav chrome to
   /// reload its libraries.
   void invalidateViews() {
     _hiddenResponseCache = null;
+    _inFlightViews = {};
     notifyListeners();
   }
 
   Future<List<AggregatedLibrary>> getAllViewsIncludingHidden() async =>
-      _parseUserViews(await _hiddenResponse());
+      _parseUserViews(await _viewsResponse(includeHidden: true));
 
   /// The raw views response with anything hidden from My Media removed, for
   /// callers that build rows straight from the server shape.
   Future<Map<String, dynamic>> getVisibleViewsResponse() async {
     final (response, excludes) = await (
-      _hiddenResponse(),
+      _viewsResponse(includeHidden: true),
       _excludesFrom(cachedUserConfiguration()),
     ).wait;
-    if (excludes == null) return _client.userViewsApi.getUserViews();
+    if (excludes == null) return _viewsResponse(includeHidden: false);
     return _filterExcludedViews(response, excludes);
   }
 

@@ -30,6 +30,7 @@ class _LibraryVisibilityScreenState extends State<LibraryVisibilityScreen> {
   UserConfiguration? _config;
   bool _isLoading = true;
   bool _loadFailed = false;
+  int _loadId = 0;
   Future<void> _saveQueue = Future.value();
   int _lastQueuedOpId = 0;
 
@@ -38,13 +39,19 @@ class _LibraryVisibilityScreenState extends State<LibraryVisibilityScreen> {
   @override
   void initState() {
     super.initState();
+    _viewsRepo.addListener(_reloadIfEmpty);
     _load();
   }
 
   @override
   void dispose() {
+    _viewsRepo.removeListener(_reloadIfEmpty);
     _firstLibraryFocusNode?.dispose();
     super.dispose();
+  }
+
+  void _reloadIfEmpty() {
+    if (_libraries?.isNotEmpty != true || _loadFailed) _load();
   }
 
   void _retry() {
@@ -56,16 +63,18 @@ class _LibraryVisibilityScreenState extends State<LibraryVisibilityScreen> {
   }
 
   Future<void> _load() async {
+    final loadId = ++_loadId;
     try {
       final results = await Future.wait([
         _viewsRepo.getAllViewsIncludingHidden(),
         _viewsRepo.getUserConfiguration(),
       ]);
-      if (!mounted) return;
+      if (!mounted || loadId != _loadId) return;
       setState(() {
         _libraries = results[0] as List<AggregatedLibrary>;
         _config = results[1] as UserConfiguration;
         _isLoading = false;
+        _loadFailed = false;
 
         _firstLibraryFocusNode?.dispose();
         if (_libraries != null && _libraries!.isNotEmpty) {
@@ -73,7 +82,7 @@ class _LibraryVisibilityScreenState extends State<LibraryVisibilityScreen> {
         }
       });
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || loadId != _loadId) return;
       // Saying nothing here reads as a server with no libraries, which is the
       // one thing it never means.
       setState(() {

@@ -329,7 +329,7 @@ void _registerUserScopedSingletons() {
     ),
   );
   _getIt.registerLazySingleton(
-    () => UserViewsRepository(_getIt()),
+    () => UserViewsRepository(_getIt(), connectivity: _getIt()),
     dispose: (repository) => repository.dispose(),
   );
   _getIt.registerLazySingleton(
