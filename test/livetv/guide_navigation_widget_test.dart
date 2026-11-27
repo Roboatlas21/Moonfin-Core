@@ -766,6 +766,7 @@ void main() {
     await _pumpFrames(tester);
     expect(vm.hasFailedCategoryListings, isTrue);
     final last = _cellIndexForRow(0, vm.guideWindow.inMinutes - 1);
+    final nextStart = vm.windowStart.add(const Duration(minutes: 30));
     await focusGuideNode(tester, 'GuideProgramRow0:$last');
     hold = true;
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
@@ -774,6 +775,7 @@ void main() {
     expect(_focusedLabel(), 'GuideCategoryRetry');
     release.complete();
     await _pumpFrames(tester);
+    expect(vm.windowStart, nextStart);
     expect(vm.hasFailedCategoryListings, isTrue);
     expect(_focusedLabel(), 'GuideCategoryRetry');
   });
@@ -1433,11 +1435,38 @@ void main() {
     });
   }
 
+  testWidgets('the TV preview follows the focused row when its station disappears during a rebind', (tester) async {
+    useTvLayout();
+    userDataSync.reset();
+    addTearDown(userDataSync.reset);
+    stubFavoriteChannel(5);
+    await openGuideRoute(tester);
+    final vm = guideModel(tester);
+    void favorite(String id, bool value) {
+      userDataSync.publish(channelFavoriteKey(vm.channelForId(id)!.rawData)!, {'IsFavorite': value});
+    }
+    favorite('ch8', true);
+    vm.setFilter(GuideFilter.favorites);
+    await _pumpFrames(tester);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    String? preview() => tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview)).title;
+    expect(preview(), 'Channel 5');
+
+    favorite('ch1', true);
+    expect(vm.filteredChannels.map((c) => c.id), ['ch1', 'ch5', 'ch8']);
+    favorite('ch5', false);
+    await _pumpFrames(tester);
+    expect(vm.filteredChannels.map((c) => c.id), ['ch1', 'ch8']);
+    expect(_focusedLabel(), 'GuideChannel:0');
+    expect(preview(), 'Channel 1');
+  });
+
   testWidgets('a lineup change behind the player leaves focus on the player', (tester) async {
     useTvLayout();
     stubFavoriteChannel(5);
     await openGuideRoute(tester);
     await establishAnchor(tester);
+    final vm = guideModel(tester);
     final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
     final player = FocusNode(debugLabel: 'Player');
     addTearDown(player.dispose);
@@ -1448,6 +1477,7 @@ void main() {
     expect(player.hasPrimaryFocus, isTrue);
     rail.onSelect(rail.labels.indexOf('Favorites'));
     await tester.pumpAndSettle();
+    expect(vm.filteredChannels.map((c) => c.id), ['ch5']);
     expect(player.hasPrimaryFocus, isTrue);
   });
 

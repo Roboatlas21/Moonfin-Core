@@ -326,6 +326,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   final Set<String> _failedProgramIds = <String>{};
   // Already-loaded rows keep their programs if a later refresh fails.
   final Set<String> _failedReplacementIds = <String>{};
+  bool _retryRollingRange = false;
   final Set<String> _retryingFailedProgramIds = <String>{};
   ({int page, Future<void> task})? _failedProgramsRetry;
 
@@ -567,6 +568,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programsLoadedIds.retainAll(ids);
     _failedProgramIds.retainAll(ids);
     _failedReplacementIds.retainAll(ids);
+    if (_failedReplacementIds.isEmpty) _retryRollingRange = false;
     _resetPageCursor();
   }
 
@@ -1953,6 +1955,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programsLoadedIds.clear();
     _failedProgramIds.clear();
     _failedReplacementIds.clear();
+    _retryRollingRange = false;
     _retryingFailedProgramIds.clear();
     _programsHighWater = 0;
     _processedBoundaries.clear();
@@ -2200,6 +2203,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _failedProgramIds.removeAll(replacements.programs.keys);
     _failedReplacementIds.removeAll(channelIds);
     _failedReplacementIds.addAll(replacements.failedChannelIds);
+    if (_failedReplacementIds.isEmpty) _retryRollingRange = false;
     _notifyListeners();
     if (replacements.failedChannelIds.isNotEmpty &&
         _boundarySchedulingEnabled) {
@@ -2450,6 +2454,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programsByChannel.addAll(replacements.programs);
     _failedReplacementIds.removeAll(ids);
     _failedReplacementIds.addAll(replacements.failedChannelIds);
+    _retryRollingRange = replacements.failedChannelIds.isNotEmpty;
     _processedBoundaries.removeWhere((boundary) => !boundary.isAfter(now));
     _notifyListeners();
     if (_failedReplacementIds.isNotEmpty) {
@@ -2459,8 +2464,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  /// Replaces every cached channel over a range that spans the guide viewport,
-  /// in batches, so no surface's coverage can shrink to a rolling horizon.
+  /// Guide refreshes span the viewport. Failed carousel replacements retry
+  /// around the current time even when the player has been open for hours.
   Future<bool> _refreshLoadedChannels(
     DateTime now, {
     bool includeAll = false,
@@ -2476,6 +2481,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
                 !_programsByChannel[id]!.any((p) => p.endDate.isAfter(now))))
           id,
     ];
+    if (_retryRollingRange && !includeAll && _failedReplacementIds.isNotEmpty) {
+      return replacePrograms(
+        channelIds: ids,
+        from: now.subtract(rollingRefreshLookback),
+        to: now.add(rollingRefreshHorizon),
+      );
+    }
     final from = _windowStart.isBefore(now) ? _windowStart : now;
     final rolling = now.add(_guideWindow);
     final to = rolling.isAfter(_windowEnd) ? rolling : _windowEnd;

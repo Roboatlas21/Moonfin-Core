@@ -729,6 +729,31 @@ void main() {
       expect(vm.boundaryDueAt, clock.add(LiveTvGuideViewModel.failureBackoff));
     });
 
+    test('an overnight carousel retry uses the rolling range for the failed station', () async {
+      _stubChannels(liveTv, [_channel('c0'), _channel('c1')]);
+      await vm.load(windowStart: base);
+      clock = at(720);
+      when(() => _guide(liveTv, category: GuideFilter.all)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        requestedChannelIds.add(ids);
+        requestedFrom.add(inv.namedArguments[#startDate] as DateTime);
+        requestedTo.add(inv.namedArguments[#endDate] as DateTime);
+        return {
+          'Items': [for (final id in ids) _span(id, id, at(720), at(810))],
+          if (ids.contains('c0')) 'FailedChannelIds': ['c1'],
+        };
+      });
+      await vm.refreshCarouselPrograms();
+      expect(requestedChannelIds.last, ['c0', 'c1']);
+      clock = vm.boundaryDueAt!;
+      await vm.handleBoundaryElapsed();
+
+      expect(requestedChannelIds.last, ['c1']);
+      expect(requestedFrom.last, clock.subtract(LiveTvGuideViewModel.rollingRefreshLookback));
+      expect(requestedTo.last, clock.add(LiveTvGuideViewModel.rollingRefreshHorizon));
+      expect(vm.programsForChannel('c1').single.id, 'c1');
+    });
+
     test('scheduled retry fetches a channel that never loaded', () async {
       _stubChannels(liveTv, [_channel('healthy'), _channel('missing')]);
       when(() => _guide(liveTv)).thenAnswer((_) async => {

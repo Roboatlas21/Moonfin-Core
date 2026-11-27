@@ -589,12 +589,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// before the focused channel. Rebind by ID rather than selecting a different
   /// channel when its old index is reused.
   void _refreshFocusedChannelAfterLineupChange(List<String> previousIds) {
-    if (_pendingChannelRebindId != null) return;
+    final pending = _pendingChannelRebindId;
     final channels = _vm.filteredChannels;
     for (final entry in _channelFocusNodes.entries) {
       if (!entry.value.hasFocus) continue;
       final index = entry.key;
-      final previousId = index < previousIds.length ? previousIds[index] : null;
+      final previousId = pending ?? previousIds.elementAtOrNull(index);
       if (previousId != null &&
           _pendingPickerRestore == null &&
           !_pickerOpen &&
@@ -603,6 +603,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           (channel) => channel.id == previousId,
         );
         if (newIndex >= 0 && newIndex != index) {
+          if (pending != null) return; // The scheduled rebind follows this ID.
           _channelRailFocused.value = true;
           _focusedProgram.value = null;
           _focusedChannel.value = channels[newIndex];
@@ -610,6 +611,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           return;
         }
       }
+      _pendingChannelRebindId = null;
       if (index >= channels.length) return;
       final channel = channels[index];
       if (_focusedChannel.value?.id == channel.id) return;
