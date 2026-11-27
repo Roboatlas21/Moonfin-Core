@@ -27,9 +27,13 @@ class _MockSessionRepository extends Mock implements SessionRepository {}
 class _TestPreferences extends UserPreferences {
   _TestPreferences(super.store);
   final failWrites = <String>[];
+  Future<void> Function()? beforePinClear;
 
   @override
   Future<void> set<T>(Preference<T> pref, T value) async {
+    if (pref == UserPreferences.liveTvSavedFilters && value is List<String> && value.isEmpty) {
+      await beforePinClear?.call();
+    }
     await super.set(pref, value);
     if (pref.key == failWrites.firstOrNull) {
       failWrites.removeAt(0);
@@ -243,6 +247,23 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 1400));
       expect(adapter.pinActions, ['add']);
       expect(postCount(), editClock ? 2 : 1);
+      if (editClock) expect(adapter.lastPushedProfile?['use24HourClock'], isTrue);
+    });
+  }
+
+  for (final editClock in [false, true]) {
+    test('confirmed-empty pin clear with ${editClock ? 'a concurrent clock edit' : 'no other edit'}', () async {
+      await prefs.set(UserPreferences.liveTvSavedFilters, ['group:News']);
+      adapter.missingProfileUntilPins = true;
+      adapter.confirmsEmptyPins = true;
+      if (editClock) {
+        prefs.beforePinClear = () => prefs.set(UserPreferences.use24HourClock, true);
+      }
+
+      await settingsUpdated();
+      expect(getPins(), isEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 1400));
+      expect(postCount(), editClock ? 1 : 0);
       if (editClock) expect(adapter.lastPushedProfile?['use24HourClock'], isTrue);
     });
   }

@@ -1877,12 +1877,7 @@ class PluginSyncService extends ChangeNotifier {
               _prefs.get(UserPreferences.liveTvSavedFilters).isEmpty) {
             return;
           }
-          _isSyncingFromServer = true;
-          try {
-            await _prefs.set(UserPreferences.liveTvSavedFilters, <String>[]);
-          } finally {
-            _isSyncingFromServer = false;
-          }
+          await _prefs.set(UserPreferences.liveTvSavedFilters, <String>[]);
         });
       }
     } catch (_) {}
