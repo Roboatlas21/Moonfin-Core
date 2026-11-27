@@ -51,6 +51,10 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
   @override
   void didUpdateWidget(EpgFilterRail oldWidget) {
     super.didUpdateWidget(oldWidget);
+    FocusNode? chipToReveal;
+    if (widget.selectedIndex >= 0 && oldWidget.selectedIndex != widget.selectedIndex) {
+      chipToReveal = widget.focusNodeFor(widget.selectedIndex);
+    }
     if (!listEquals(oldWidget.labels, widget.labels) ||
         _focusListeners.keys.indexed.any((entry) => entry.$2 != widget.focusNodeFor(entry.$1))) {
       final focused = FocusManager.instance.primaryFocus;
@@ -58,7 +62,9 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
       _detachFocusListeners();
       _attachFocusListeners();
       _chipKeys.removeWhere((node, _) => !_focusListeners.containsKey(node));
-      if (hadFocus && !_focusListeners.containsKey(focused)) {
+      if (focused != null && _focusListeners.containsKey(focused)) {
+        chipToReveal = focused;
+      } else if (hadFocus) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || widget.selectedIndex < 0 || widget.selectedIndex >= widget.labels.length) return;
           final node = widget.focusNodeFor(widget.selectedIndex);
@@ -66,10 +72,7 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
         });
       }
     }
-    if (widget.selectedIndex >= 0 &&
-        oldWidget.selectedIndex != widget.selectedIndex) {
-      _revealChip(widget.selectedIndex);
-    }
+    if (chipToReveal != null) _revealChip(chipToReveal);
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateClippedEdges());
   }
 
@@ -82,10 +85,9 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
 
   void _attachFocusListeners() {
     for (var i = 0; i < widget.labels.length; i++) {
-      final index = i;
-      final node = widget.focusNodeFor(index);
+      final node = widget.focusNodeFor(i);
       void listener() {
-        if (node.hasFocus) _revealChip(index);
+        if (node.hasFocus) _revealChip(node);
       }
 
       node.addListener(listener);
@@ -105,8 +107,7 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
 
   // Scroll after the frame: focus can change mid-build, and scrolling then
   // would fire during layout.
-  void _revealChip(int index) {
-    final node = widget.focusNodeFor(index);
+  void _revealChip(FocusNode node) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final chipContext = _chipKeys[node]?.currentContext;

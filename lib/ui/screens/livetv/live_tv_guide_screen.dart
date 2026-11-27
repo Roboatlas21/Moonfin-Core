@@ -255,7 +255,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// The single deferred vertical move, or null when nothing is pending.
   _PendingVerticalMove? _pendingVerticalMove;
 
-  DateTime? _failedPageTarget;
+  ({DateTime target, bool dateOnly})? _failedPageTarget;
   Timer? _windowNoticeTimer;
 
   /// One-shot timer to the next half hour. Rescheduled when it fires.
@@ -976,10 +976,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           } else if (mounted &&
               (_vm.listingsAccessDenied ||
                   _vm.failedWindowMoveRevision != failureRevision)) {
-            _showWindowFailure(picked);
+            _showWindowFailure(picked, dateOnly: true);
           }
         } catch (_) {
-          if (mounted) _showWindowFailure(picked);
+          if (mounted) _showWindowFailure(picked, dateOnly: true);
         }
       }
     } finally {
@@ -1277,7 +1277,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           fit: StackFit.expand,
           children: [
             body,
-            if (_failedPageTarget case final target?)
+            if (_failedPageTarget case (:final target, :final dateOnly))
               IgnorePointer(
                 child: Align(
                   alignment: const Alignment(0, 0.96),
@@ -1287,9 +1287,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                       child: Chip(
                         label: Text(
                           AppLocalizations.of(context).guideWindowLoadFailed(
-                            DateUtils.isSameDay(target, _vm.windowStart)
-                                ? _formatTime(target)
-                                : MaterialLocalizations.of(context).formatMediumDate(target),
+                            dateOnly || !DateUtils.isSameDay(target, _vm.windowStart)
+                                ? MaterialLocalizations.of(context).formatMediumDate(target)
+                                : _formatTime(target),
                           ),
                         ),
                       ),
@@ -3227,9 +3227,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     setState(() => _failedPageTarget = null);
   }
 
-  void _showWindowFailure(DateTime target) {
+  void _showWindowFailure(DateTime target, {bool dateOnly = false}) {
     if (!_mayTakeFocus) return;
-    setState(() => _failedPageTarget = target);
+    setState(() => _failedPageTarget = (target: target, dateOnly: dateOnly));
     _windowNoticeTimer?.cancel();
     _windowNoticeTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _failedPageTarget = null);

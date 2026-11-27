@@ -1846,7 +1846,7 @@ void main() {
         final id = inv.positionalArguments.first as String;
         return (pending[id] = Completer<Map<String, dynamic>>()).future;
       });
-      final vm = LiveTvGuideViewModel(client);
+      final vm = LiveTvGuideViewModel(client, now: () => guideStart);
       addTearDown(vm.dispose);
       vm.queueArtworkPrefetch([for (var i = 0; i < 5; i++) listing('p$i')]);
       expect(pending.keys, ['p0', 'p1', 'p2']);
@@ -1870,7 +1870,7 @@ void main() {
         final id = inv.positionalArguments.first as String;
         return _program(id, 'c${id.substring(1)}');
       });
-      final vm = LiveTvGuideViewModel(client);
+      final vm = LiveTvGuideViewModel(client, now: () => guideStart);
       addTearDown(vm.dispose);
       final programs = [for (var i = 0; i < 600; i++) listing('p$i', channel: 'c$i')];
       vm.queueArtworkPrefetch(programs, replace: true);

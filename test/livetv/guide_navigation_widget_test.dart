@@ -417,6 +417,33 @@ void main() {
     expect(replacement[2].hasFocus, isTrue);
   });
 
+  testWidgets('Favorites stays in view when categories move its focused chip', (tester) async {
+    useTvLayout();
+    final nodes = <String, FocusNode>{};
+    addTearDown(() {
+      for (final node in nodes.values) {
+        node.dispose();
+      }
+    });
+    Future<void> show(List<String> labels) async {
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SizedBox(
+        width: 160,
+        child: EpgFilterRail(
+          labels: labels, selectedIndex: 0, onSelect: (_) {}, apple: false,
+          focusNodeFor: (i) => nodes.putIfAbsent(labels[i], () => FocusNode(debugLabel: labels[i])),
+        ),
+      ))));
+      await tester.pumpAndSettle();
+    }
+
+    await show(['All', 'Favorites']);
+    nodes['Favorites']!.requestFocus();
+    await tester.pumpAndSettle();
+    await show(['All', 'Movies', 'Series', 'Sports', 'News', 'Kids', 'Premiere', 'Favorites']);
+    expect(nodes['Favorites']!.hasPrimaryFocus, isTrue);
+    expect(find.text('Favorites').hitTestable(), findsOneWidget);
+  });
+
   testWidgets('TV guide error Retry is reachable from the window bar', (
     tester,
   ) async {
@@ -520,6 +547,23 @@ void main() {
     await tapAndPump(tester, find.text('OK'));
     expect(vm.guideDate, start);
     expect(find.textContaining(' ${target.day} listings.'), findsOneWidget);
+  });
+
+  testWidgets('a failed same-day picker request names the selected date', (tester) async {
+    await pumpGuide(tester, surface: phone);
+    final vm = guideModel(tester);
+    final today = vm.guideDate;
+    final start = DateTime(today.year, today.month, today.day, 10, 30);
+    await vm.setWindowStart(start);
+    await _pumpFrames(tester);
+    guideFailure = TimeoutException('Listings unavailable');
+    await tapAndPump(tester, find.byIcon(Icons.calendar_today));
+    await tapAndPump(tester, find.text('OK'));
+
+    final context = tester.element(find.byType(LiveTvGuideScreen));
+    final date = MaterialLocalizations.of(context).formatMediumDate(start);
+    expect(find.text(AppLocalizations.of(context).guideWindowLoadFailed(date)), findsOneWidget);
+    expect(vm.windowStart, start);
   });
 
   for (final reloadDuringRequest in [false, true]) {
