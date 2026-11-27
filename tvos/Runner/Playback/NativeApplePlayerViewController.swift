@@ -74,6 +74,7 @@ final class NativeApplePlayerViewController: UIViewController {
     var onSubtitleAction: (([String: Any]) -> Void)?
     var onSetSpeed: ((Double) -> Void)?
     var onSetBitrate: ((Int) -> Void)?
+    var onVisibleChannelsChanged: (([String]) -> Void)?
     var onSelectChannel: ((String) -> Void)?
     var onOpenGuide: (() -> Void)?
     var onRecord: (() -> Void)?
@@ -237,7 +238,8 @@ final class NativeApplePlayerViewController: UIViewController {
     private var orientationLock: Bool?
     private var liveChannelNumber = ""
     private var channelList: [ChannelCarouselEntry] = []
-    private var selectedChannelIndex = 0
+    private var selectedChannelIndex: Int?
+    private var channelIndices: [String: Int] = [:]
     private weak var channelCarousel: ChannelCarouselOverlayViewController?
     private var streamStats: [(label: String, value: String)] = []
 
@@ -1682,17 +1684,21 @@ final class NativeApplePlayerViewController: UIViewController {
 
         let accent = themeAccent
         let rawChannels = (args["channelList"] as? [[String: Any]]) ?? []
-        channelList = rawChannels.compactMap { entry in
-            guard let id = entry["id"] as? String, !id.isEmpty else { return nil }
-            return ChannelCarouselEntry(dictionary: entry, accent: accent)
-        }
-        // Resolved by id rather than by position, because an entry with no id
-        // is dropped and would otherwise shift the index.
-        if let tuned = rawChannels.first(where: { ($0["selected"] as? Bool) == true }),
-            let id = tuned["id"] as? String,
-            let index = channelList.firstIndex(where: { $0.channelId == id })
-        {
-            selectedChannelIndex = index
+        if args["partialChannelList"] as? Bool == true {
+            for entry in rawChannels {
+                guard let id = entry["id"] as? String, let index = channelIndices[id] else { continue }
+                channelList[index] = ChannelCarouselEntry(dictionary: entry, accent: accent)
+            }
+        } else {
+            channelList = []
+            channelIndices = [:]
+            selectedChannelIndex = nil
+            for entry in rawChannels {
+                guard let id = entry["id"] as? String, !id.isEmpty else { continue }
+                channelIndices[id] = channelList.count
+                if entry["selected"] as? Bool == true { selectedChannelIndex = channelList.count }
+                channelList.append(ChannelCarouselEntry(dictionary: entry, accent: accent))
+            }
         }
         channelCarousel?.update(entries: channelList, theme: carouselTheme)
 
@@ -2314,9 +2320,10 @@ final class NativeApplePlayerViewController: UIViewController {
         case .pageUp, .pageDown:
             // A remote's channel buttons arrive as page presses. They follow the
             // guide's order like the carousel and wrap at the ends.
-            guard isLive, channelList.count > 1 else { return false }
+            guard isLive, !channelList.isEmpty, channelList.count > 1 || selectedChannelIndex == nil else { return false }
             let step = type == .pageUp ? 1 : -1
-            let next = (selectedChannelIndex + step + channelList.count) % channelList.count
+            let next = selectedChannelIndex.map { ($0 + step + channelList.count) % channelList.count }
+                ?? (step > 0 ? 0 : channelList.count - 1)
             onSelectChannel?(channelList[next].channelId)
             return true
         #endif
@@ -2720,8 +2727,9 @@ final class NativeApplePlayerViewController: UIViewController {
         hideOsd()
         let overlay = ChannelCarouselOverlayViewController(
             entries: channelList,
-            startIndex: selectedChannelIndex,
+            startIndex: selectedChannelIndex ?? 0,
             theme: carouselTheme)
+        overlay.onVisibleChannelsChanged = onVisibleChannelsChanged
         overlay.onChannelSelected = { [weak self] channelId in
             self?.onSelectChannel?(channelId)
         }

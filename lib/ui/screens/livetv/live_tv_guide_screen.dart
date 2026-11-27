@@ -102,7 +102,9 @@ class LiveTvGuideScreen extends StatefulWidget {
   /// of [Navigator] pops.
   final bool embedded;
 
-  final ValueChanged<String>? onChannelSelected;
+  /// Pass the player the channels the viewer can see, including any changes
+  /// since playback started.
+  final void Function(String, List<GuideChannel>)? onChannelSelected;
 
   /// Called when the user dismisses the embedded guide (activates the
   /// mini-player frame) instead of `Navigator.pop()`.
@@ -3575,7 +3577,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     unawaited(_prefs.set(UserPreferences.liveTvLastChannelId, channelId));
     final channels = _vm.surfingChannels;
     if (widget.embedded || widget.miniPlayerMode) {
-      widget.onChannelSelected?.call(channelId);
+      widget.onChannelSelected?.call(channelId, channels);
       if (widget.embedded) return;
       Navigator.of(context).pop(channelId);
       return;

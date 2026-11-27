@@ -299,7 +299,7 @@ void main() {
           LiveTvGuideScreen(
             miniPlayerMode: miniPlayerMode,
             embedded: miniPlayerMode,
-            onChannelSelected: miniPlayerMode ? (_) {} : null,
+            onChannelSelected: miniPlayerMode ? (_, _) {} : null,
             onClose: miniPlayerMode ? () {} : null,
             backController: backController,
           ),
@@ -609,7 +609,8 @@ void main() {
                 miniPlayerMode: true,
                 embedded: true,
                 currentChannel: current,
-                onChannelSelected: (id) {
+                onChannelSelected: (id, currentLineup) {
+                  expect(currentLineup.map((c) => c.id), contains(id));
                   picked = id;
                 },
                 onClose: () {},

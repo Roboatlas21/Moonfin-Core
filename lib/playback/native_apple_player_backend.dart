@@ -237,6 +237,7 @@ class NativeApplePlayerBackend
       case 'configureSecondarySubtitleStyle':
       case 'setSpeed':
       case 'setBitrate':
+      case 'visibleChannelsChanged':
       case 'selectChannel':
       case 'openGuide':
       case 'guideButton':
@@ -701,6 +702,7 @@ class NativeApplePlayerBackend
     bool? orientationLocked,
     String liveChannelNumber = '',
     List<Map<String, dynamic>> channelList = const [],
+    bool partialChannelList = false,
     List<Map<String, dynamic>> streamStats = const [],
     List<String>? osdButtons,
     bool canBrowseEpisodes = false,
@@ -739,6 +741,7 @@ class NativeApplePlayerBackend
       'orientationLocked': ?orientationLocked,
       'liveChannelNumber': liveChannelNumber,
       'channelList': channelList,
+      if (partialChannelList) 'partialChannelList': true,
       'streamStats': streamStats,
       // The buttons the user left switched on, in their order. A caller with
       // no row to arrange leaves this out, which reads as no opinion rather
