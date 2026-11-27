@@ -889,6 +889,9 @@ class PluginSyncService extends ChangeNotifier {
             },
             cancelOnError: false,
           );
+      if (current() && !cancelToken.isCancelled) {
+        unawaited(retryPendingGuidePins(client));
+      }
     } catch (_) {
       if (!cancelToken.isCancelled) {
         _scheduleSettingsStreamReconnect(client);
@@ -1014,6 +1017,24 @@ class PluginSyncService extends ChangeNotifier {
       throw const FormatException('Moonbase did not return saved guide filters');
     }
     return List<String>.from(pins);
+  }
+
+  Future<void> retryPendingGuidePins(MediaServerClient client, {String? serverId}) async {
+    if (!_syncEnabled ||
+        _signInProfileRead != null ||
+        _prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
+      return;
+    }
+    final current = _guidePinAccountCheck(client, serverId: serverId);
+    final profile = syncProfile;
+    bool canReplay() => current() && _syncEnabled && syncProfile == profile;
+    try {
+      await _guidePinSync.synchronized(() => _replayPendingGuidePins(
+        client, profile, serverId: serverId, allowSync: canReplay,
+      ));
+    } catch (error) {
+      debugPrint('Could not replay pending guide pins (${error.runtimeType})');
+    }
   }
 
   /// Save each tap locally, then send pending changes to Moonbase in order.

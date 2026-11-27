@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:get_it/get_it.dart';
 import 'package:moonfin_design/moonfin_design.dart';
 
 import '../../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../../l10n/app_localizations.dart';
+import '../../../../preference/user_preferences.dart';
 import '../../../../util/focus/dpad_keys.dart';
 import '../../../../util/platform_detection.dart';
 import '../../../../util/focus/key_event_utils.dart';
@@ -41,6 +43,7 @@ class GuideFilterPicker extends StatefulWidget {
 typedef _Row = ({String label, _RowId? id, IconData? icon, int? count});
 
 class _GuideFilterPickerState extends State<GuideFilterPicker> {
+  final _prefs = GetIt.instance<UserPreferences>();
   final _searchFieldKey = GlobalKey();
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
@@ -338,7 +341,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                 ],
                 Expanded(
                   child: ListenableBuilder(
-                    listenable: widget.vm,
+                    listenable: Listenable.merge([widget.vm, _prefs]),
                     builder: (context, _) {
                       final saved = _saved.toSet();
                       final rows = _visibleRows = _rows(l10n, saved);
@@ -475,6 +478,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                           listenable: Listenable.merge([
                             _focusedRow,
                             widget.vm,
+                            _prefs,
                           ]),
                           builder: (context, _) {
                             final choice = _focusedRow.value?.$1;

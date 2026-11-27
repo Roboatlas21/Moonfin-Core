@@ -969,6 +969,13 @@ void main() {
     expect(find.text("Couldn't save filter. Try again."), findsOneWidget);
     expect(prefs.get(UserPreferences.liveTvSavedFilters), previous);
     expect(picker, findsOneWidget);
+    prefs.save = null;
+    await prefs.set(UserPreferences.liveTvSavedFilters, <String>[]);
+    await _pumpFrames(tester);
+    expect(rows(), findsOneWidget);
+    await prefs.set(UserPreferences.liveTvSavedFilters, previous);
+    await _pumpFrames(tester);
+    expect(rows(), findsNWidgets(2));
   });
 
   test(

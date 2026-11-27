@@ -660,8 +660,12 @@ class SessionRepository {
   /// Called when the device regains a network, so a socket part way through
   /// its backoff reconnects now rather than at the end of the wait.
   void onNetworkRegained() {
-    if (_socketSuspended) return;
-    _socketHandler.retryNow();
+    if (!_socketSuspended) _socketHandler.retryNow();
+    final client = GetIt.instance.maybeGet<MediaServerClient>();
+    final serverId = _activeServerId;
+    if (client != null && serverId != null) {
+      unawaited(_pluginSyncService.retryPendingGuidePins(client, serverId: serverId));
+    }
   }
 
   void _evaluateSocketIdle() {

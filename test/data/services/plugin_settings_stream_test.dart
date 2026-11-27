@@ -25,6 +25,8 @@ class _StreamAdapter implements HttpClientAdapter {
   final List<StreamController<Uint8List>> streams = [];
   final List<RequestOptions> streamRequests = [];
   final resolved = <String, dynamic>{};
+  int pinPosts = 0;
+  int pinStatus = 503;
 
   void send(String text) =>
       streams.last.add(Uint8List.fromList(utf8.encode(text)));
@@ -36,6 +38,12 @@ class _StreamAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     final path = options.uri.path;
+    if (options.method == 'POST' && options.data is Map &&
+        (options.data as Map).containsKey('liveTvSavedFilterChange')) {
+      pinPosts++;
+      return ResponseBody.fromString('{"liveTvSavedFilters":["group:Sports"]}', pinStatus,
+        headers: {Headers.contentTypeHeader: [Headers.jsonContentType]});
+    }
     if (path.endsWith('/Moonfin/Settings/Stream')) {
       final body = StreamController<Uint8List>();
       streams.add(body);
@@ -128,6 +136,25 @@ void main() {
   tearDown(() => GetIt.instance.reset());
 
   group('settings stream', () {
+    test('reopening a healthy stream replays queued pins without a settings event', () {
+      fakeAsync((async) {
+        final service = createService();
+        service.syncOnLogin(client, serverId: 'srv1');
+        async.elapse(const Duration(seconds: 5));
+        service.changePinnedGuideFilter(client, filter: 'group:Sports');
+        async.elapse(const Duration(seconds: 2));
+        expect(adapter.pinPosts, 1);
+        expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), ['add:group:Sports']);
+        adapter.pinStatus = 200;
+        adapter.send(':connected\n\n');
+        async.elapse(const Duration(seconds: 90));
+        expect(adapter.streams.length, greaterThan(1));
+        expect(adapter.pinPosts, 2);
+        expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
+        expect(prefs.get(UserPreferences.liveTvSavedFilters), ['group:Sports']);
+        service.dispose();
+      });
+    });
     for (final type in [ServerType.jellyfin, ServerType.plex]) {
       test('enabling sync after login receives an admin guide pin on ${type.name}', () async {
         when(() => client.serverType).thenReturn(type);
