@@ -438,17 +438,19 @@ void main() {
     });
   }
 
-  test('missing tuner lists retain channels and mark guide rows for retry', () async {
+  test('a missing tuner channel list retains the channel and its healthy listings', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
     expect((await api.getChannelGroups()).channels, hasLength(3));
-    server.tunerReply = {'MediaContainer': <String, dynamic>{}};
+    server.replies['/tv.plex.providers.epg.xmltv:2/lineups/dvr/channels'] =
+        (_) => {'MediaContainer': <String, dynamic>{}};
     final lineup = await api.getChannelGroups();
     expect(lineup.channels!.any((c) => c['Id'] == tuner), isTrue);
     expect(lineup.partial, isTrue);
     final guide = await api.testGuide([tuner]);
-    expect(guide['Items'], isEmpty);
-    expect(guide['FailedChannelIds'], [tuner]);
+    final listings = (guide['Items'] as List).map((p) => (p['ChannelId'], p['Name']));
+    expect(listings, contains((tuner, 'Teletubbies')));
+    expect(guide.containsKey('FailedChannelIds'), isFalse);
   });
 
   test('malformed provider metadata preserves Featured until a complete response removes it', () async {
