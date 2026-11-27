@@ -23,6 +23,8 @@ class PlexMediaServerClient extends MediaServerClient {
   @override
   final DeviceInfo deviceInfo;
 
+  /// Cloud-only Plex account: no Plex Media Server endpoints are available.
+  final bool cloudOnly;
   String _baseUrl;
   String? _accessToken;
   String? _userId;
@@ -32,6 +34,7 @@ class PlexMediaServerClient extends MediaServerClient {
   PlexMediaServerClient({
     required String baseUrl,
     required this.deviceInfo,
+    this.cloudOnly = false,
     GamesApi? Function(MediaServerClient client)? gamesApi,
     PlexUserConfigurationStore? configStore,
   }) : _baseUrl = baseUrl,
@@ -90,6 +93,7 @@ class PlexMediaServerClient extends MediaServerClient {
 
   @override
   set baseUrl(String url) {
+    if (_baseUrl != url) _liveTvApi = null;
     _baseUrl = url;
     _dio.options.baseUrl = url;
   }
@@ -98,13 +102,19 @@ class PlexMediaServerClient extends MediaServerClient {
   String? get accessToken => _accessToken;
 
   @override
-  set accessToken(String? token) => _accessToken = token;
+  set accessToken(String? token) {
+    if (_accessToken != token) _liveTvApi = null;
+    _accessToken = token;
+  }
 
   @override
   String? get userId => _userId;
 
   @override
-  set userId(String? id) => _userId = id;
+  set userId(String? id) {
+    if (_userId != id) _liveTvApi = null;
+    _userId = id;
+  }
 
   @override
   late final AuthApi authApi = PlexAuthApi();
@@ -141,7 +151,7 @@ class PlexMediaServerClient extends MediaServerClient {
   late final SessionApi sessionApi = PlexSessionApi();
 
   @override
-  late final SystemApi systemApi = PlexSystemApi(_dio);
+  late final SystemApi systemApi = PlexSystemApi(_dio, cloudOnly: cloudOnly);
 
   @override
   late final UserLibraryApi userLibraryApi = PlexUserLibraryApi(_dio, itemsApi);
@@ -152,10 +162,13 @@ class PlexMediaServerClient extends MediaServerClient {
     () async => _userId == null
         ? const UserConfiguration()
         : await usersApi.getUserConfiguration(),
+    cloudOnly: cloudOnly,
   );
 
+  PlexLiveTvApi? _liveTvApi;
   @override
-  late final LiveTvApi liveTvApi = PlexLiveTvApi(_dio);
+  LiveTvApi get liveTvApi =>
+      _liveTvApi ??= PlexLiveTvApi(_dio, cloudOnly: cloudOnly);
 
   @override
   late final InstantMixApi instantMixApi = PlexInstantMixApi(_dio);
@@ -170,6 +183,7 @@ class PlexMediaServerClient extends MediaServerClient {
     _requireUserId,
     (policy) => _mayDeleteMedia = policy.enableContentDeletion,
     configStore: _configStore,
+    cloudOnly: cloudOnly,
   );
 
   static Never _noAdmin() =>

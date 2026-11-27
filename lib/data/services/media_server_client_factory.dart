@@ -18,6 +18,14 @@ import 'pending_rating_store.dart';
 import 'plex_games_api.dart';
 import 'storage_path_service.dart';
 
+/// Unwrap the offline adapter before checking for a Plex Cloud connection.
+bool isCloudOnlyPlexClient(MediaServerClient client) {
+  final online = client is ConnectivityAwareMediaServerClient
+      ? client.onlineClient
+      : client;
+  return online is PlexMediaServerClient && online.cloudOnly;
+}
+
 class MediaServerClientFactory {
   final DeviceInfo deviceInfo;
   final Map<String, MediaServerClient> _clients = {};
@@ -53,6 +61,7 @@ class MediaServerClientFactory {
     required String serverId,
     required ServerType serverType,
     required String baseUrl,
+    bool cloudOnly = false,
   }) {
     final normalizedBaseUrl = normalizeServerBaseUrl(baseUrl);
     // A server whose saved type was corrected needs the other kind of client.
@@ -65,6 +74,7 @@ class MediaServerClientFactory {
         serverId: serverId,
         serverType: serverType,
         baseUrl: normalizedBaseUrl,
+        cloudOnly: cloudOnly,
       );
     });
   }
@@ -103,11 +113,13 @@ class MediaServerClientFactory {
     required String serverId,
     required ServerType serverType,
     required String baseUrl,
+    required bool cloudOnly,
   }) {
     final raw = _createRawClient(
       serverId: serverId,
       serverType: serverType,
       baseUrl: baseUrl,
+      cloudOnly: cloudOnly,
     );
     final getIt = GetIt.instance;
     // Background isolates skip the offline stack, so there's nothing to route
@@ -131,6 +143,7 @@ class MediaServerClientFactory {
     required String serverId,
     required ServerType serverType,
     required String baseUrl,
+    required bool cloudOnly,
   }) {
     switch (serverType) {
       case ServerType.jellyfin:
@@ -156,7 +169,8 @@ class MediaServerClientFactory {
         return PlexMediaServerClient(
           baseUrl: baseUrl,
           deviceInfo: deviceInfo,
-          gamesApi: plexMoonbaseGamesApi,
+          cloudOnly: cloudOnly,
+          gamesApi: cloudOnly ? null : plexMoonbaseGamesApi,
           configStore: _plexConfigStore(serverId),
         );
       case ServerType.silo:
