@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:moonfin_design/moonfin_design.dart';
@@ -6,13 +8,14 @@ import '../../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../../util/focus/dpad_keys.dart';
 import '../../../../util/platform_detection.dart';
+import '../../../../util/focus/key_event_utils.dart';
 import '../../../widgets/local_search_field.dart';
 import '../../../widgets/overlay_sheet.dart';
 
 export '../../../../data/viewmodels/live_tv_guide_view_model.dart'
     show GuideFilterChoice;
 
-typedef _RowId = GuideFilterChoice;
+typedef _RowId = (GuideFilterChoice, bool);
 
 
 class GuideFilterPicker extends StatefulWidget {
@@ -43,9 +46,12 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
   final _searchFocus = FocusNode();
   final _nodes = <_RowId, FocusNode>{};
   final _focusedRow = ValueNotifier<_RowId?>(null);
+  final _hold = FocusedKeyHold();
   ScrollController? _scroll;
   String _query = '';
   List<_Row> _visibleRows = const [];
+  bool _saveErrorVisible = false;
+  Timer? _saveErrorTimer;
 
   GuideFilterChoice get _selected =>
       (widget.vm.filter, widget.vm.selectedGroup);
@@ -58,12 +64,16 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || ModalRoute.isCurrentOf(context) != true) return;
       final active = _visibleRows
-          .where((row) => row.id == _selected)
+          .where((row) => row.id?.$1 == _selected)
           .firstOrNull
           ?.id;
       if (active != null) _focusRow(active);
     });
   }
+
+  List<GuideFilterChoice> get _saved => widget.vm.availableSavedFilters(
+    includeCategories: widget.includeCategories,
+  );
 
   void _focusRow(_RowId id) {
     final index = _visibleRows.indexWhere((row) => row.id == id);
@@ -87,18 +97,63 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
 
   double get _rowHeight => MediaQuery.textScalerOf(context).scale(20) + 36;
 
-  List<_Row> _rows(AppLocalizations l10n) {
+  Future<void> _toggle(_RowId id) async {
+    final (choice, savedCopy) = id;
+    final restore = PlatformDetection.isTV && _nodes[id]?.hasFocus == true;
+    var target = id;
+    if (restore && savedCopy) {
+      final saved = _saved;
+      final index = saved.indexOf(choice);
+      if (index < 0) return;
+      if (saved.length == 1) {
+        target = (choice, false);
+      } else {
+        final neighbor = index == saved.length - 1 ? index - 1 : index + 1;
+        target = (saved[neighbor], true);
+      }
+    }
+    try {
+      await widget.vm.toggleSavedFilter(choice);
+      if (mounted && _saveErrorVisible) {
+        _saveErrorTimer?.cancel();
+        setState(() => _saveErrorVisible = false);
+      }
+    } catch (error) {
+      debugPrint('Could not save guide favorites (${error.runtimeType})');
+      _showSaveError();
+      return;
+    }
+    if (!mounted || !restore || _query.isNotEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ModalRoute.isCurrentOf(context) != true) return;
+      final focused = _focusedRow.value;
+      if (_searchFocus.hasFocus || (focused != null && focused != id)) return;
+      _focusRow(target);
+    });
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
+  void _showSaveError() {
+    if (!mounted || ModalRoute.isCurrentOf(context) != true) return;
+    _saveErrorTimer?.cancel();
+    setState(() => _saveErrorVisible = true);
+    _saveErrorTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _saveErrorVisible = false);
+    });
+  }
+
+  List<_Row> _rows(AppLocalizations l10n, Set<GuideFilterChoice> saved) {
     final rows = <_Row>[];
     void section(String label) =>
         rows.add((label: label, id: null, icon: null, count: null));
 
-    void add(GuideFilterChoice choice) {
+    void add(GuideFilterChoice choice, {bool savedCopy = false}) {
       final (filter, group) = choice;
       final label = group ??
           (filter == GuideFilter.all ? l10n.guideAllChannels : widget.filterLabel(filter));
       if (!label.toLowerCase().contains(_query)) return;
       rows.add((
-        id: choice,
+        id: (choice, savedCopy),
         label: label,
         icon: group != null
             ? Icons.folder_outlined
@@ -118,6 +173,12 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
 
     add((GuideFilter.all, null));
     add((GuideFilter.favorites, null));
+    if (_query.isEmpty && saved.isNotEmpty) {
+      section(l10n.guideFavoriteGroupsAndCategories);
+      for (final choice in saved) {
+        add(choice, savedCopy: true);
+      }
+    }
     void addSection(String title, Iterable<GuideFilterChoice> choices) {
       final start = rows.length;
       section(title);
@@ -160,9 +221,11 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
 
   @override
   void dispose() {
+    _saveErrorTimer?.cancel();
     _scroll?.dispose();
     _search.dispose();
     _searchFocus.dispose();
+    _hold.dispose();
     _focusedRow.dispose();
     for (final node in _nodes.values) {
       node.dispose();
@@ -198,6 +261,10 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
         if (PlatformDetection.isTV &&
             id != null &&
             _nodes[id]?.hasFocus == true) {
+          bool stillFocused(_RowId? row) =>
+              mounted &&
+              ModalRoute.isCurrentOf(context) == true &&
+              _nodes[row]?.hasFocus == true;
           if (event.isActionable && event.logicalKey.isUpKey) {
             final previous = _visibleRows
                 .takeWhile((row) => row.id != id)
@@ -210,6 +277,14 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
               _focusRow(previous);
             }
             return KeyEventResult.handled;
+          }
+          if (event.logicalKey.isSelectKey && id.$1.canFavorite) {
+            return _hold.start(
+              event,
+              stillFocused: () => stillFocused(id),
+              onTap: () => Navigator.of(context).pop(id.$1),
+              onHold: () => unawaited(_toggle(id)),
+            );
           }
         }
         if (event.isActionable &&
@@ -265,14 +340,15 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                   child: ListenableBuilder(
                     listenable: widget.vm,
                     builder: (context, _) {
-                      final rows = _visibleRows = _rows(l10n);
+                      final saved = _saved.toSet();
+                      final rows = _visibleRows = _rows(l10n, saved);
                       final rowHeight = _rowHeight;
                       final indices = {
                         for (var i = 0; i < rows.length; i++)
                           if (rows[i].id != null) rows[i].id!: i,
                       };
                       final selected = rows.indexWhere(
-                        (row) => row.id == _selected,
+                        (row) => row.id?.$1 == _selected,
                       );
                       _scroll ??= ScrollController(
                         initialScrollOffset: selected > 2
@@ -300,7 +376,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                               ),
                             );
                           }
-                          final choice = id;
+                          final choice = id.$1;
                           final active = choice == _selected;
                           return ListTile(
                             key: ValueKey(id),
@@ -343,17 +419,50 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                if (saved.contains(choice))
+                                  Padding(
+                                    padding: const EdgeInsetsDirectional.only(end: 4),
+                                    child: Icon(
+                                      Icons.favorite,
+                                      semanticLabel: l10n.favorited,
+                                      size: 12,
+                                      color: AppColors.red500,
+                                    ),
+                                  ),
                                 if (row.count != null) Text('${row.count}'),
                                 if (active) const Icon(Icons.check),
                               ],
                             ),
                             onTap: () => Navigator.of(context).pop(choice),
+                            onLongPress: choice.canFavorite
+                                ? () => _toggle(id)
+                                : null,
                           );
                         },
                       );
                     },
                   ),
                 ),
+                if (_saveErrorVisible)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: ListTile(
+                        dense: true,
+                        tileColor: AppColors.red500.withValues(alpha: 0.18),
+                        shape: RoundedRectangleBorder(
+                          side: const BorderSide(color: AppColors.red500),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        leading: const Icon(
+                          Icons.error_outline,
+                          color: AppColors.red500,
+                        ),
+                        title: Text(l10n.guideSavedFilterSaveFailed),
+                      ),
+                    ),
+                  ),
                 if (PlatformDetection.isTV)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
@@ -362,6 +471,24 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                       children: [
                         _remoteHint(l10n.ok, l10n.select),
                         if (widget.sidePanel) _remoteHint('→', l10n.close),
+                        ListenableBuilder(
+                          listenable: Listenable.merge([
+                            _focusedRow,
+                            widget.vm,
+                          ]),
+                          builder: (context, _) {
+                            final choice = _focusedRow.value?.$1;
+                            if (choice == null || !choice.canFavorite) {
+                              return const SizedBox.shrink();
+                            }
+                            return _remoteHint(
+                              l10n.guideHoldOk,
+                              _saved.contains(choice)
+                                  ? l10n.guideUnfavorite
+                                  : l10n.favorite,
+                            );
+                          },
+                        ),
                       ],
                     ),
                   ),

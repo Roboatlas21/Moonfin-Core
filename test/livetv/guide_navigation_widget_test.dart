@@ -10,6 +10,7 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
+import 'package:moonfin/data/services/plugin_sync_service.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/preference/user_preferences.dart';
@@ -49,6 +50,19 @@ class _MockLiveTvApi extends Mock implements LiveTvApi, ChannelGroupApi {}
 class _MockUserLibrary extends Mock implements UserLibraryApi {}
 
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
+
+class _PickerPreferences extends UserPreferences {
+  _PickerPreferences(super.store);
+  Completer<void>? save;
+
+  @override
+  Future<void> set<T>(Preference<T> pref, T value) async {
+    if (pref.key == UserPreferences.liveTvSavedFilters.key && save != null) {
+      await save!.future;
+    }
+    await super.set(pref, value);
+  }
+}
 
 /// Deliberately asymmetric row shapes: differing program durations give the
 /// rows differing cell counts and boundaries, which is what makes a drifting
@@ -913,6 +927,69 @@ void main() {
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);
     }
   });
+
+  testWidgets('holding Select pins a group and reports storage errors', (tester) async {
+    useTvLayout();
+    final prefs = _PickerPreferences(GetIt.instance<PreferenceStore>());
+    await GetIt.instance.unregister<UserPreferences>();
+    GetIt.instance.registerSingleton<UserPreferences>(prefs);
+    await prefs.set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.both,
+    );
+    stubGroups(const ChannelGroupLineup({
+        'ch1': {'CA| SPORTS'},
+      }, programmeCategories: {'sports'}));
+    await pumpGuide(tester);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+    Finder rows() => find.descendant(
+      of: picker,
+      matching: find.widgetWithText(ListTile, 'CA| SPORTS'),
+    );
+    tester.widget<ListTile>(rows().first).focusNode!.requestFocus();
+    await _pumpFrames(tester);
+    await _holdSelect(tester);
+    expect(rows(), findsNWidgets(2));
+    final previous = prefs.get(UserPreferences.liveTvSavedFilters);
+    tester.widget<ListTile>(rows().first).focusNode!.requestFocus();
+    await _pumpFrames(tester);
+    prefs.save = Completer<void>();
+    await _holdSelect(tester);
+    prefs.save!.completeError(StateError('storage unavailable'));
+    await _pumpFrames(tester);
+    expect(find.text("Couldn't save filter. Try again."), findsOneWidget);
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), previous);
+    expect(picker, findsOneWidget);
+  });
+
+  test(
+    'saved filter order and exact group names survive reopening within an account',
+    () async {
+      final prefs = GetIt.instance<UserPreferences>();
+      await prefs.set(UserPreferences.lastServerId, 'one');
+      await prefs.set(UserPreferences.lastUserId, 'viewer');
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      const group = (GuideFilter.all, 'CA| SPORTS');
+      const category = (GuideFilter.sports, null);
+      await vm.toggleSavedFilter(group);
+      await vm.toggleSavedFilter(category);
+      await vm.toggleSavedFilter(group);
+      await vm.toggleSavedFilter(group);
+      final reopened = UserPreferences(GetIt.instance<PreferenceStore>());
+      addTearDown(reopened.dispose);
+      List<String> saved() => reopened.get(UserPreferences.liveTvSavedFilters);
+      expect(saved(), ['category:sports', 'group:CA| SPORTS']);
+      await prefs.set(UserPreferences.lastUserId, 'other');
+      expect(saved(), isEmpty);
+      await prefs.set(UserPreferences.lastUserId, 'viewer');
+      await prefs.set(UserPreferences.lastServerId, 'two');
+      expect(saved(), isEmpty);
+      await prefs.set(UserPreferences.lastServerId, 'one');
+      expect(saved(), ['category:sports', 'group:CA| SPORTS']);
+    },
+  );
 
   testWidgets('holding Select updates Favorites and rolls back failures', (tester) async {
     useTvLayout();
