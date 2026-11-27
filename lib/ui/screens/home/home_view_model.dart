@@ -120,6 +120,7 @@ class HomeViewModel extends ChangeNotifier {
   Future<void> _loadDone = Future<void>.value();
   bool _disposed = false;
   Future<void>? _liveTvFavoritesRefresh;
+  Future<void>? _returnCloudFavorites;
   bool _liveTvFavoritesReloadPending = false;
   int _homeLoadGeneration = 0;
   Future<void> _bgMerge = Future<void>.value();
@@ -338,6 +339,7 @@ class HomeViewModel extends ChangeNotifier {
   void _onPlexFavoriteListChanged() {
     final change = PlexLiveTvFavorites.favoriteListChanged.value;
     if (_disposed ||
+        _returnCloudFavorites != null ||
         change == null ||
         change.userId != _ownerUserId ||
         _client.userId != _ownerUserId ||
@@ -827,6 +829,7 @@ class HomeViewModel extends ChangeNotifier {
         await _loadDone;
       }
       if (_disposed ||
+          (_client.userId ?? '') != _ownerUserId ||
           _prefs.get(UserPreferences.kidsModeEnabled) ||
           !_rows.any((row) => row.rowType == HomeRowType.liveTv)) {
         return;
@@ -834,7 +837,7 @@ class HomeViewModel extends ChangeNotifier {
 
       final generation = _homeLoadGeneration;
       final refreshed = await _dataSource.loadFavoritesChannels(_serverId);
-      if (_disposed) return;
+      if (_disposed || (_client.userId ?? '') != _ownerUserId) return;
       if (generation != _homeLoadGeneration) {
         // Another Home load started while this request was running.
         // Refresh again afterward instead of overwriting its results.
@@ -1148,11 +1151,20 @@ class HomeViewModel extends ChangeNotifier {
     while (_isLoading) {
       await _loadDone;
     }
-    if (!_disposed && !_prefs.get(UserPreferences.kidsModeEnabled) &&
-        _rows.any((row) => row.rowType == HomeRowType.liveTv)) {
-      unawaited(PlexLiveTvFavorites.refreshForBrowse(_client));
-    }
-    await Future.wait([_refreshResumeRows(), _refreshOnNowRows()]);
+    await Future.wait([
+      _refreshResumeRows(),
+      _refreshOnNowRows(),
+      if (!_disposed &&
+          (_client.userId ?? '') == _ownerUserId &&
+          !_prefs.get(UserPreferences.kidsModeEnabled) &&
+          _rows.any((row) => row.rowType == HomeRowType.liveTv) &&
+          _client.serverType == ServerType.plex)
+        // Home restores focus after this method returns. A change on another
+        // device can already be newer than the short-lived browse cache.
+        _returnCloudFavorites ??= PlexLiveTvFavorites.refresh(_client)
+            .catchError((Object _) {}) // Rebuild from cached favorites offline.
+            .whenComplete(() => _returnCloudFavorites = null),
+    ]);
     // Returning from the guide can add or remove favorite channels on any
     // supported server. Rebuild only that row, keeping the rest of Home intact.
     await _reloadLiveTvFavoriteChannels();

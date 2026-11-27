@@ -2005,6 +2005,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       for (final source in _sources)
         if (!lineup.sources.contains(source)) source.groupId,
     };
+    final removedPromoted = _selectedGroup == PromotedChannelGroup.groupId &&
+        _client.serverType == ServerType.plex && lineup.promoted == null;
     _setGroupSources(lineup.sources, lineup.promoted);
     final unresolved = lineup.unresolvedChannelIds;
     final partial = lineup.partial;
@@ -2025,7 +2027,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     // An unresolved channel in this user's lineup may still belong to the
     // selected group, even when the playback guide has no cached membership.
     // Source groups are explicitly advertised, independently of genre membership.
-    _rebuildGroupChoices(complete: !hasUnresolvedChannels || removedSources.contains(_selectedGroup));
+    _rebuildGroupChoices(complete: !hasUnresolvedChannels ||
+        removedSources.contains(_selectedGroup) || removedPromoted);
   }
 
   void _setGroupSources(

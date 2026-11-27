@@ -51,6 +51,12 @@ int _seconds(DateTime time) => time.millisecondsSinceEpoch ~/ 1000;
 typedef _Dvr = ({String key, String epg});
 typedef _Channels = List<Map<String, dynamic>>;
 typedef _FreeChannels = Map<String, Map<String, dynamic>>;
+typedef _DvrLineup = ({
+  Map<_Dvr, _Channels> tuners,
+  bool partial,
+  Set<String>? unresolved,
+  DioException? unauthorized,
+});
 typedef _FreeGridKey = ({String station, String gridKey, String day});
 typedef _GridReads = Map<_FreeGridKey, Future<List>>;
 typedef _CloudGroups = ({
@@ -76,11 +82,13 @@ typedef _Grab = ({Map op, Map<String, dynamic> program});
 class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   final Dio _dio;
   final DateTime Function() _gridCacheNow;
+  final DateTime Function() _now;
 
   PlexLiveTvApi(
     this._dio, {
     DateTime Function() gridCacheNow = DateTime.now,
-  }) : _gridCacheNow = gridCacheNow;
+    DateTime Function() now = DateTime.now,
+  }) : _gridCacheNow = gridCacheNow, _now = now;
 
   static final _cloudOptions = Options(
     headers: {'X-Plex-Provider-Version': '7.2'},
@@ -103,13 +111,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   /// don't ask plex.tv again.
   static const _cloudGridLife = Duration(minutes: 10);
 
-  Future<({List rows, bool incomplete, bool recheckEmpty})>? _dvrs;
-  bool _hadDiscoveredDvr = false;
-  Map<_Dvr, _Channels> _lastDvrChannels = {};
+  Future<({List rows, bool incomplete})>? _dvrs;
+  _DvrLineup _dvrLineup = (tuners: {}, partial: false, unresolved: null, unauthorized: null);
+  Map<_Dvr, _Channels> get _lastDvrChannels => _dvrLineup.tuners;
   int _dvrLineupRequest = 0;
   int _publishedDvrRequest = 0;
   Future<String?>? _favoriteMachineId;
   Future<_FreeChannels>? _cloudChannels;
+  Future<_FreeChannels>? _latestFreeRead;
   _FreeChannels? _lastFreeLineup;
   Future<ChannelGroupLineup>? _lineupRead;
   PromotedChannelGroup? _featuredGroup;
@@ -209,15 +218,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       final container = await _dvrContainer('/livetv/dvrs');
       final rows = container['Dvr'] as List? ?? const [];
       final size = container['size'];
-      final incomplete = size != null && int.tryParse('$size') != rows.length;
-      if (rows.isEmpty && incomplete) {
-        throw const FormatException('Missing Plex DVR list');
-      }
-      // Keep known tuners through one ambiguous empty reply, until discovery confirms removal.
-      final recheckEmpty = _hadDiscoveredDvr && !container.containsKey('Dvr') && !container.containsKey('size');
-      return (rows: rows, incomplete: incomplete, recheckEmpty: recheckEmpty);
+      final incomplete = size == null
+          ? container['Dvr'] == null
+          : int.tryParse('$size') != rows.length;
+      return (rows: rows, incomplete: incomplete);
     });
-    final (:rows, :incomplete, :recheckEmpty) = await read;
+    final (:rows, :incomplete) = await read;
     final dvrs = <_Dvr>[];
     for (final row in rows.whereType<Map>()) {
       final key = row['key'], epg = row['epgIdentifier'];
@@ -227,11 +233,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       }
     }
     final invalidRows = incomplete || dvrs.length != rows.length;
-    if (identical(read, _dvrs)) {
-      if (invalidRows || recheckEmpty) _dvrs = null;
-      if (!invalidRows || dvrs.isNotEmpty) _hadDiscoveredDvr = dvrs.isNotEmpty;
+    if (invalidRows) {
+      if (identical(read, _dvrs)) _dvrs = null;
+      onIncomplete?.call();
     }
-    if (invalidRows || recheckEmpty) onIncomplete?.call();
     return dvrs;
   }
 
@@ -274,9 +279,18 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     throw FormatException('Missing or invalid MediaContainer at $path');
   }
 
-  Future<_Channels> _dvrChannels({void Function(_Channels)? onUnavailable}) async {
+  Future<void> _readDvrChannels() async {
     final request = ++_dvrLineupRequest;
     final next = <_Dvr, _Channels>{};
+    final unresolved = <String>{};
+    var partial = false;
+    var unknownIds = false;
+    DioException? unauthorized;
+    void unavailable(_Channels retained) {
+      partial = true;
+      if (retained.isEmpty) unknownIds = true;
+      unresolved.addAll(retained.map((row) => row['Id'] as String));
+    }
     try {
       var incomplete = false;
       var dvrs = const <_Dvr>[];
@@ -305,7 +319,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         for (final dvr in _lastDvrChannels.keys.where((dvr) => !found.contains(dvr.key))) {
           next[dvr] = await retainedChannels(dvr);
         }
-        onUnavailable?.call(next.values.expand((rows) => rows).toList());
+        unavailable(next.values.expand((rows) => rows).toList());
       }
       for (final dvr in dvrs) {
         try {
@@ -331,7 +345,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           if (size != null && int.tryParse('$size') != rows.length) {
             final found = {for (final channel in channels) channel['Id']};
             final missing = (await retainedChannels(dvr)).where((c) => !found.contains(c['Id'])).toList();
-            onUnavailable?.call(missing);
+            unavailable(missing);
             channels.addAll(missing);
           }
           next[dvr] = channels;
@@ -343,76 +357,85 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           if (status == 404 || _temporaryLineupFailure(error)) {
             final retained = await retainedChannels(dvr);
             next[dvr] = retained;
-            onUnavailable?.call(retained);
+            unavailable(retained);
           }
         }
       }
     } catch (error) {
-      if (request > _publishedDvrRequest) {
-        _lastDvrChannels = {};
-        _publishedDvrRequest = request;
-      }
-      if (error is DioException && error.response?.statusCode == 401) rethrow;
-      return [];
+      next.clear();
+      if (error is DioException && error.response?.statusCode == 401) unauthorized = error;
     }
     // An older channel read can finish after a full guide refresh.
     if (request > _publishedDvrRequest) {
-      _lastDvrChannels = next;
+      _dvrLineup = (
+        tuners: next,
+        partial: partial,
+        unresolved: partial && !unknownIds ? unresolved : null,
+        unauthorized: unauthorized,
+      );
       _publishedDvrRequest = request;
     }
-    return next.values.expand((rows) => rows).toList();
+  }
+
+  _Channels get _currentDvrChannels {
+    if (_dvrLineup.unauthorized case final error?) throw error;
+    return _lastDvrChannels.values.expand((rows) => rows).toList();
   }
 
   /// Every free channel carries the same placeholder number, so they go
   /// without one and sort by name after the tuner's numbered channels.
-  Future<_FreeChannels> _freeChannels() async {
-    final read = _cached(
-      () => _cloudChannels,
-      (f) => _cloudChannels = f,
-      () async {
-        final response = await _dio.get<Map<String, dynamic>>(
-          '$plexCloudEpg/lineups/plex/channels',
-          options: _cloudOptions,
-        );
-        final container = response.data?['MediaContainer'];
-        if (container is! Map) {
-          throw const FormatException('Invalid Plex Free TV lineup');
-        }
-        final channels = container['Channel'];
-        final size = container['size'];
-        final zero = size == 0 || size == '0';
-        if (channels is List && size != null && int.tryParse('$size') != channels.length) {
-          throw const FormatException('Free TV channel count does not match the lineup');
-        }
-        if (channels is! List && (channels != null || !zero)) {
-          throw const FormatException('Invalid Plex Free TV lineup channels');
-        }
-        final lineup = <String, Map<String, dynamic>>{};
-        for (final channel in channels is List ? channels : const []) {
-          if (channel is! Map) throw const FormatException('Invalid Free TV channel');
-          final id = channel['id'];
-          if (id is! int && (id is! String || id.trim().isEmpty)) {
-            throw const FormatException('Invalid Free TV channel ID');
-          }
-          if (channel['drm'] != true) {
-            lineup[_channelId(plexCloudSource, id)] = _channel(plexCloudSource, channel);
-          }
-        }
-        return lineup;
-      },
+  Future<_FreeChannels> _fetchFreeChannels() async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '$plexCloudEpg/lineups/plex/channels',
+      options: _cloudOptions,
     );
-    final _FreeChannels lineup;
-    try {
-      lineup = await read;
-    } on DioException catch (error) {
-      if (_accessDenied(error) && _cloudChannels == null) {
+    final container = response.data?['MediaContainer'];
+    if (container is! Map) {
+      throw const FormatException('Invalid Plex Free TV lineup');
+    }
+    final channels = container['Channel'];
+    final size = container['size'];
+    final zero = size == 0 || size == '0';
+    if (channels is List && size != null && int.tryParse('$size') != channels.length) {
+      throw const FormatException('Free TV channel count does not match the lineup');
+    }
+    if (channels is! List && (channels != null || !zero)) {
+      throw const FormatException('Invalid Plex Free TV lineup channels');
+    }
+    final lineup = <String, Map<String, dynamic>>{};
+    for (final channel in channels is List ? channels : const []) {
+      if (channel is! Map) throw const FormatException('Invalid Free TV channel');
+      final id = channel['id'];
+      if (id is! int && (id is! String || id.trim().isEmpty)) {
+        throw const FormatException('Invalid Free TV channel ID');
+      }
+      if (channel['drm'] != true) {
+        lineup[_channelId(plexCloudSource, id)] = _channel(plexCloudSource, channel);
+      }
+    }
+    return lineup;
+  }
+
+  Future<_FreeChannels> _freeChannels() {
+    if (_cloudChannels case final cached?) return cached;
+    late final Future<_FreeChannels> read;
+    read = _fetchFreeChannels().then((lineup) {
+      if (!identical(read, _latestFreeRead)) return _latestFreeRead!;
+      return _publishFreeChannels(lineup);
+    }, onError: (Object error, StackTrace stack) {
+      if (!identical(read, _latestFreeRead)) return _latestFreeRead!;
+      _cloudChannels = null;
+      if (_accessDenied(error)) {
         _lastFreeLineup = null;
         _cloudOnNowRows = null;
         _invalidateGrids((_, _) => true);
       }
-      rethrow;
-    }
-    if (!identical(read, _cloudChannels)) return _freeChannels();
+      Error.throwWithStackTrace(error, stack);
+    });
+    return _cloudChannels = _latestFreeRead = read;
+  }
+
+  _FreeChannels _publishFreeChannels(_FreeChannels lineup) {
     final previous = _lastFreeLineup;
     if (identical(previous, lineup)) return lineup;
     if (previous != null && !_sameStationMapping(previous, lineup)) {
@@ -468,23 +491,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   /// One source failing, like plex.tv being unreachable, still leaves the
   /// other's channels.
-  Future<(_Channels Function(), _Channels)> _channelSources({
-    void Function(_Channels)? onDvrUnavailable,
-  }) async {
-    final free = _freeLineupForBrowse();
-    // Future.wait preserves the original DioException (including 401/403)
-    // rather than wrapping failures in ParallelWaitError as record .wait does.
-    final dvr = _dvrChannels(onUnavailable: onDvrUnavailable);
-    final request = _dvrLineupRequest;
-    final results = await Future.wait<_Channels>([
-      dvr,
-      free.then((lineup) => lineup.values.toList()),
-    ]);
-    // Search and Guide can finish in either order, including while Free TV loads.
-    _Channels currentDvr() => request < _publishedDvrRequest
-        ? _lastDvrChannels.values.expand((rows) => rows).toList()
-        : results[0];
-    return (currentDvr, results[1]);
+  Future<void> _readChannelSources() async {
+    await Future.wait<void>([_freeLineupForBrowse().then((_) {}), _readDvrChannels()]);
+    // Another caller can refresh Free TV while this one waits for its tuner.
+    if (_cloudChannels != null) await _freeLineupForBrowse();
   }
 
   static const _featuredPath = '/lineups/plex/channels/featured';
@@ -500,11 +510,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (size != null && int.tryParse(size.toString()) != channels.length) {
         throw const FormatException('Incomplete Plex Featured lineup');
       }
-      return {
-        for (final channel in channels.whereType<Map>())
-          if (channel['drm'] != true && channel['id'] != null)
-            _channelId(plexCloudSource, channel['id']),
-      };
+      final ids = <String>{};
+      for (final channel in channels) {
+        final id = channel is Map ? channel['id'] : null;
+        if (id is! int && (id is! String || id.trim().isEmpty)) {
+          throw const FormatException('Invalid Plex Featured channel ID');
+        }
+        if (channel['drm'] != true) ids.add(_channelId(plexCloudSource, id));
+      }
+      return ids;
     }
     // Treat a missing list with a zero count as empty, but reject malformed lists.
     if (container is Map &&
@@ -568,52 +582,21 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     // A full guide load refreshes even a successfully cached catalog.
     _cloudChannels = null;
     _dvrs = null;
-    final unresolvedDvrIds = <String>{};
-    var dvrUnavailable = false;
-    var unknownDvrIds = false;
-    var freeUnavailable = false;
-    final (currentDvr, free) = await _channelSources(
-      onDvrUnavailable: (rows) {
-        dvrUnavailable = true;
-        if (rows.isEmpty) unknownDvrIds = true;
-        unresolvedDvrIds.addAll(rows.map((row) => row['Id'] as String));
-      },
-    );
-    // Join a newer catalog read if one exists. Once access is revoked,
-    // _freeChannels also clears the last verified lineup.
-    Future<_FreeChannels> currentFreeLineup() async {
-      if (_cloudChannels == null) {
-        freeUnavailable = true;
-        return _lastFreeLineup ?? const {};
-      }
-      freeUnavailable = false;
-      return _freeLineupForBrowse(onUnavailable: () => freeUnavailable = true);
-    }
-
-    if (free.isEmpty && (await currentFreeLineup()).isEmpty) {
-      final dvr = currentDvr();
-      // Keep DVR channels in their own group when Free TV is unavailable.
-      return ChannelGroupLineup(
-        {
-          for (final channel in dvr)
-            channel['Id'] as String: {ChannelGroupSource.dvr.groupId},
-        },
-        channels: dvr,
-        sources: dvr.isNotEmpty ? const [ChannelGroupSource.dvr] : const [],
-        partial: dvrUnavailable || freeUnavailable,
-        unresolvedChannelIds: freeUnavailable || unknownDvrIds || !dvrUnavailable ? null : unresolvedDvrIds,
-      );
-    }
-    // Keep existing groups if the provider metadata is temporarily unavailable.
+    await _readChannelSources();
     var metadataUnavailable = false;
-    final catalog = await _providerGroups().onError<Object>((_, _) {
-      metadataUnavailable = true;
-      return (genres: const <String, String>{}, promoted: _featuredGroup);
-    });
-    // A browse request can replace or revoke the Free TV catalog while the
-    // provider metadata is loading. Join that read before publishing the rows.
-    final currentFree = (await currentFreeLineup()).values;
-    final dvr = currentDvr();
+    _CloudGroups catalog = (genres: {}, promoted: null);
+    if (_lastFreeLineup?.isNotEmpty == true) {
+      catalog = await _providerGroups().onError<Object>((_, _) {
+        metadataUnavailable = true;
+        return (genres: const <String, String>{}, promoted: _featuredGroup);
+      });
+      if (_cloudChannels != null) await _freeLineupForBrowse();
+    }
+    // Read rows and their failure scope together after the last network wait.
+    final dvr = _currentDvrChannels;
+    final currentFree = _lastFreeLineup?.values ?? const [];
+    final freeUnavailable = _cloudChannels == null;
+    final unresolved = _dvrLineup.unresolved;
     return ChannelGroupLineup(
       {
         for (final channel in dvr)
@@ -628,12 +611,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       channels: [...dvr, ...currentFree],
       sources: dvr.isEmpty ? const [] : currentFree.isEmpty ? const [ChannelGroupSource.dvr] : ChannelGroupSource.values,
       promoted: currentFree.isEmpty ? null : catalog.promoted,
-      partial: metadataUnavailable || dvrUnavailable || freeUnavailable,
-      unresolvedChannelIds: freeUnavailable || unknownDvrIds
+      partial: metadataUnavailable || _dvrLineup.partial || freeUnavailable,
+      unresolvedChannelIds: freeUnavailable || (_dvrLineup.partial && unresolved == null)
           ? null
           : metadataUnavailable
-              ? {...unresolvedDvrIds, for (final channel in currentFree) channel['Id'] as String}
-              : dvrUnavailable ? unresolvedDvrIds : null,
+              ? {...?unresolved, for (final channel in currentFree) channel['Id'] as String}
+              : unresolved,
     );
   }
 
@@ -655,6 +638,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     var succeeded = 0;
     var incomplete = false;
     final dvrs = await _dvrList(onIncomplete: () => incomplete = true);
+    if (incomplete && dvrs.isEmpty && !reportGuideFailures) {
+      throw const FormatException('Incomplete Plex DVR discovery');
+    }
     if (reportGuideFailures && incomplete) {
       final found = {for (final dvr in dvrs) dvr.key};
       final requested = channelIds ??
@@ -691,16 +677,23 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           throw const FormatException('Incomplete Plex DVR grid');
         }
         for (final item in rows) {
-          if (item is! Map) continue;
+          if (item is! Map) {
+            if (reportGuideFailures) throw const FormatException('Invalid Plex DVR grid row');
+            continue;
+          }
           final airings = item['Media'];
           if (airings is! List) {
-            if (reportGuideFailures && airings != null) {
+            if (reportGuideFailures) {
               throw const FormatException('Invalid Plex DVR grid Media');
             }
             continue;
           }
           for (final media in airings) {
-            if (media is Map) fromDvr.add((dvr: dvr, item: item, media: media));
+            if (media is Map) {
+              fromDvr.add((dvr: dvr, item: item, media: media));
+            } else if (reportGuideFailures) {
+              throw const FormatException('Invalid Plex DVR grid airing');
+            }
           }
         }
         showings.addAll(fromDvr);
@@ -719,7 +712,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       }
     }
     if (succeeded == 0 && firstFailure != null) {
-      Error.throwWithStackTrace(firstFailure!, firstFailureStack!);
+      Error.throwWithStackTrace(firstFailure, firstFailureStack!);
     }
     return (showings: showings, failedChannelIds: failedIds);
   }
@@ -819,11 +812,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     required bool reportGuideFailures,
     required _GridReads gridReads,
   }) async {
-    final lineup = await _freeChannels().catchError((Object error) {
-      if (_accessDenied(error)) throw error;
-      // A known station can still use its guide key while the catalog is down.
-      return _lastFreeLineup ?? const <String, Map<String, dynamic>>{};
-    });
+    try {
+      await _freeChannels();
+    } catch (error) {
+      if (_accessDenied(error)) rethrow;
+      // A known station can still use its last verified key during an outage.
+    }
     final first = start.toUtc();
     final exclusiveEnd = end.toUtc();
     final days = {
@@ -853,11 +847,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             final id = _channelId(plexCloudSource, request.channel);
             final catalog = _cloudChannels;
             final station = _lastFreeLineup?[id];
-            if (lineup.containsKey(id) && station == null) {
+            if (station == null) {
               failedChannelIds.add(id);
               return null;
             }
-            final gridKey = station?['PlexGridKey'] as String? ??
+            final gridKey = station['PlexGridKey'] as String? ??
                 request.channel.split('-').last;
             final key = (station: request.channel, gridKey: gridKey, day: request.day);
             final itemsFuture = _freeGrid(key);
@@ -1060,8 +1054,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     bool? enableTotalRecordCount,
     String? userId,
   }) async {
-    final (currentDvr, free) = await _channelSources();
-    final channels = [...currentDvr(), ...free];
+    await _readChannelSources();
+    final channels = [..._currentDvrChannels, ...?_lastFreeLineup?.values];
     final start = (startIndex ?? 0).clamp(0, channels.length);
     final end = limit == null
         ? channels.length
@@ -1253,7 +1247,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           ? match : null;
     }
 
-    final now = _seconds(DateTime.now());
+    final now = _seconds(_now());
     final programs = <Map<String, dynamic>>[];
     final usedChannels = <String>{};
     for (final row in rows) {
@@ -1299,7 +1293,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     var lineup = await _freeLineupForBrowse(onUnavailable: () => stale = true);
     var catalog = stale ? null : _cloudChannels;
     if (lineup.isEmpty) return [];
-    final now = DateTime.now();
+    final now = _now();
     final expires = _cloudOnNowExpiresAt;
     final fresh = _cloudOnNowRows == null || (expires != null && !now.isBefore(expires));
     if (fresh) {
@@ -1348,33 +1342,34 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     int? limit,
     bool? isAiring,
   }) async {
-    final now = DateTime.now();
-    final dvr = <Map<String, dynamic>>[];
+    if (limit != null && limit <= 0) return plexItemsResult([]);
+    final now = _now();
+    final programs = <Map<String, dynamic>>[];
     (Object, StackTrace)? tunerFailure;
-      try {
-        final airings = await _dvrAirings(now, now.add(const Duration(seconds: 1)));
-        dvr.addAll(airings.items);
-      } on DioException catch (error, stack) {
-        if (_accessDenied(error) && !_tunerGridForbidden(error)) rethrow;
-        if (_temporaryLineupFailure(error)) tunerFailure = (error, stack);
-      } on TypeError catch (error, stack) {
-        tunerFailure = (error, stack);
-      } on FormatException catch (error, stack) {
-        tunerFailure = (error, stack);
-      }
-    final programs = <Map<String, dynamic>>[
-      ...(limit == null ? dvr : dvr.take(limit)),
-    ];
-    final remaining = limit == null
-        ? _cloudOnNowLimit
-        : (limit - programs.length).clamp(0, _cloudOnNowLimit).toInt();
-    if (remaining > 0) {
-      programs.addAll((await _freeOnNow()).take(remaining));
-      if (programs.isEmpty && tunerFailure != null) {
-        Error.throwWithStackTrace(tunerFailure.$1, tunerFailure.$2);
-      }
+    try {
+      final airings = await _dvrAirings(now, now.add(const Duration(seconds: 1)));
+      programs.addAll(airings.items);
+    } on DioException catch (error, stack) {
+      if (_accessDenied(error) && !_tunerGridForbidden(error)) rethrow;
+      if (_temporaryLineupFailure(error)) tunerFailure = (error, stack);
+    } on TypeError catch (error, stack) {
+      tunerFailure = (error, stack);
+    } on FormatException catch (error, stack) {
+      tunerFailure = (error, stack);
     }
-    return plexItemsResult(programs);
+    void removeEnded() {
+      final at = _now();
+      programs.removeWhere((p) => !DateTime.parse(p['EndDate'] as String).isAfter(at));
+    }
+    removeEnded();
+    if (limit == null || programs.length < limit) {
+      programs.addAll(await _freeOnNow());
+      removeEnded();
+    }
+    if (programs.isEmpty && tunerFailure != null) {
+      Error.throwWithStackTrace(tunerFailure.$1, tunerFailure.$2);
+    }
+    return plexItemsResult(limit == null ? programs : programs.take(limit).toList());
   }
 
   @override

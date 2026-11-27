@@ -303,6 +303,28 @@ void main() {
       expect(vm.selectedGroup, 'News');
     });
 
+    test('removing Featured clears its selection even if a tuner is unresolved', () async {
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      final membership = Completer<Set<String>>();
+      var lineup = ChannelGroupLineup(
+        {}, channels: [_channel('one')],
+        promoted: PromotedChannelGroup('Featured', () => membership.future),
+      );
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
+      final vm = createGuide();
+      await vm.load();
+      vm.setGroup(PromotedChannelGroup.groupId);
+      lineup = ChannelGroupLineup(
+        {}, channels: [_channel('one')], partial: true, unresolvedChannelIds: {'one'},
+      );
+      await vm.load();
+      membership.complete({'one'});
+      await pumpEventQueue();
+      expect(vm.selectedGroup, isNull);
+      expect(vm.availableGroups, isEmpty);
+      expect(vm.filteredChannels.map((c) => c.id), ['one']);
+    });
+
     test('Next follows a Featured lineup change while listings are pending', () async {
       var featured = 'one';
       when(() => client.serverType).thenReturn(ServerType.plex);

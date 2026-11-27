@@ -316,6 +316,93 @@ void main() {
   const other = 'channel-3-9';
 
   for (final denied in [false, true]) {
+    test('browse uses the refreshed Free TV catalog after waiting for its tuner (denied: $denied)', () async {
+      final (dio, server) = _server();
+      final api = PlexLiveTvApi(dio);
+      await api.getChannels();
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
+        if (request.path.endsWith('/lineups/dvr/channels') && !entered.isCompleted) {
+          entered.complete();
+          await release.future;
+        }
+        handler.next(request);
+      }));
+      final browse = api.getChannels();
+      await entered.future;
+      if (denied) {
+        server.fail('/lineups/plex/channels', 403);
+      } else {
+        server.replies['/lineups/plex/channels'] = (_) => _channels([{'id': 'replacement'}]);
+      }
+      final expected = [tuner, if (!denied) 'channel-plex-replacement'];
+      expect((await api.getChannelGroups()).channels!.map((row) => row['Id']), expected);
+      release.complete();
+      expect((await browse)['Items'].map((row) => row['Id']), expected);
+    });
+  }
+
+  for (final outageFirst in [false, true]) {
+    test('group rows and tuner outage status come from the same read (outage first: $outageFirst)', () async {
+      final (dio, server) = _server();
+      final api = PlexLiveTvApi(dio);
+      await api.getChannelGroups();
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
+        if (request.uri.path == '/') {
+          entered.complete();
+          await release.future;
+        }
+        handler.next(request);
+      }));
+      const path = '/tv.plex.providers.epg.xmltv:2/lineups/dvr/channels';
+      if (outageFirst) server.fail(path, 503);
+      final guide = api.getChannelGroups();
+      await entered.future;
+      if (outageFirst) {
+        server.failWhen = null;
+        server.tunerReply = _channels([{'id': '5'}]);
+      } else {
+        server.fail(path, 503);
+      }
+      final latest = (await api.getChannels())['Items'];
+      release.complete();
+      final published = await guide;
+      expect(published.channels, latest);
+      expect(published.partial, !outageFirst);
+      expect(published.unresolvedChannelIds, outageFirst ? null : {tuner});
+    });
+  }
+
+  test('an older cloud denial cannot erase the lineup retained by a newer outage', () async {
+    const path = '/lineups/plex/channels';
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final healthy = await api.getChannelGroups();
+    server.fail(path, 503);
+    expect((await api.getChannelGroups()).partial, isTrue);
+    final entered = Completer<void>(), release = Completer<void>();
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
+      if (request.uri.path == path && !entered.isCompleted) {
+        entered.complete();
+        await release.future;
+        handler.reject(DioException(requestOptions: request,
+            response: Response(requestOptions: request, statusCode: 403)));
+      } else {
+        handler.next(request);
+      }
+    }));
+    final browse = api.getChannels();
+    await entered.future;
+    expect((await api.getChannelGroups()).channels, healthy.channels);
+    release.complete();
+    expect((await browse)['Items'], healthy.channels);
+    expect((await api.getChannels())['Items'], healthy.channels);
+  });
+
+  for (final denied in [false, true]) {
     test('a guide load uses the latest catalog after a concurrent browse (denied: $denied)', () async {
       final (dio, server) = _server();
       final api = PlexLiveTvApi(dio);
@@ -376,6 +463,13 @@ void main() {
     ], size: 2);
     await featured.refresh(() => instant);
     expect(featured.channelIds, {free, extra});
+    final expiry = featured.expiresAt;
+    for (final malformed in [null, {}, {'id': ' '}, {'id': []}]) {
+      server.replies[path] = (_) => _channels([{'id': 'news-extra'}, malformed], size: 2);
+      await expectLater(featured.refresh(() => instant.add(const Duration(hours: 1))), throwsFormatException);
+      expect(featured.channelIds, {free, extra});
+      expect(featured.expiresAt, expiry);
+    }
     server.replies[path] = (_) => _channels([
       {'id': 'abc-66635fc0'},
     ], size: 2);
@@ -384,6 +478,9 @@ void main() {
       throwsA(isA<FormatException>()),
     );
     expect(featured.channelIds, {free, extra});
+    server.replies[path] = (_) => {'MediaContainer': {'size': 0}};
+    await featured.refresh(() => instant);
+    expect(featured.channelIds, isEmpty);
   });
 
   test('channel and showing ids come apart again', () {
@@ -486,7 +583,7 @@ void main() {
     final healthy = await api.getChannelGroups();
     Future<List> browse() async => [for (final row in (await api.getChannels())['Items'] as List) row['Id']];
     for (final container in <Map<String, dynamic>?>[
-      null, {'size': 1}, {'size': 1, 'Dvr': [{}]},
+      null, {'Dvr': null}, {'size': null}, {'size': 1}, {'size': 1, 'Dvr': [{}]},
       {'Dvr': [{'epgIdentifier': 'tuner'}]}, {'Dvr': [{'key': '2', 'epgIdentifier': ' '}]},
     ]) {
       server.discoveryReply = {if (container != null) 'MediaContainer': container};
@@ -522,9 +619,12 @@ void main() {
     expect(await browse(), contains(tuner));
     server.failWhen = null;
     final reads = server.reads('/livetv/dvrs');
+    expect(await browse(), contains(tuner));
+    expect((await api.getChannelGroups()).unresolvedChannelIds, {tuner});
+    server.discoveryReply = {'MediaContainer': {'size': '0'}};
     expect(await browse(), isNot(contains(tuner)));
     expect(await browse(), isNot(contains(tuner)));
-    expect(server.reads('/livetv/dvrs') - reads, 1);
+    expect(server.reads('/livetv/dvrs') - reads, 3);
   });
 
   test('incomplete discovery marks only unresolved tuner schedules for retry', () async {
@@ -561,11 +661,13 @@ void main() {
     final healthy = await api.getChannelGroups();
     Future<Map<String, dynamic>> guide() => api.testGuide([tuner, free]);
 
-    server.tunerReply = {'MediaContainer': {'Metadata': [{'Media': 'invalid'}]}};
-    final mixed = await guide();
-    expect(mixed['FailedChannelIds'], ['channel-2-4']);
-    expect((mixed['Items'] as List).map((row) => row['ChannelId']).toSet(), {'channel-plex-abc-66635fc0'});
-    expect((await api.testGuide(['channel-2-4']))['FailedChannelIds'], ['channel-2-4']);
+    for (final badRow in [null, {'Media': 'invalid'}, {'Media': [null]}]) {
+      server.tunerReply = {'MediaContainer': {'size': 1, 'Metadata': [badRow]}};
+      final mixed = await guide();
+      expect(mixed['FailedChannelIds'], [tuner]);
+      expect((mixed['Items'] as List).map((row) => row['ChannelId']).toSet(), {free});
+      expect((await api.testGuide([tuner]))['FailedChannelIds'], [tuner]);
+    }
     server.tunerReply = {};
     final partial = await api.getChannelGroups();
     expect(partial.partial, isTrue);
@@ -745,9 +847,10 @@ void main() {
     expect(unknown.unresolvedChannelIds, isNull);
   });
 
-  for (final cloudOnly in [false]) {
+  for (final cloudOnly in [false, true]) {
     test('Free TV keeps the last complete lineup until zero is confirmed (cloudOnly=$cloudOnly)', () async {
       final (dio, server) = _server();
+      if (cloudOnly) server.discoveryReply = {'MediaContainer': {'Dvr': []}};
       List<Object?> rows = [{'id': 'news'}, {'id': 'film'}, {'id': 'locked', 'drm': true}];
       var size = rows.length;
       server.replies['/lineups/plex/channels'] = (_) => _channels(rows, size: size);
@@ -806,6 +909,48 @@ void main() {
     expect((result['Items'] as List).map((p) => p['ChannelId']), [free]);
   });
 
+  test('On Now fills slots vacated by a tuner showing ending during the hub read', () async {
+    final (dio, server) = _server();
+    final start = DateTime.utc(2026, 10, 22, 20);
+    final seconds = start.millisecondsSinceEpoch ~/ 1000;
+    var now = start;
+    Map<String, dynamic> airing(String channel, int duration) => {
+      'beginsAt': seconds - 60, 'endsAt': seconds + duration, 'channelIdentifier': channel,
+    };
+    server.replies['/tv.plex.providers.epg.xmltv:2/grid'] =
+        (_) => _schedule('Ending', [airing('4', 1)]);
+    final entered = Completer<void>(), release = Completer<void>();
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
+      if (request.uri.path == '/hubs/sections/home/whatsOnNow') {
+        entered.complete();
+        await release.future;
+        handler.resolve(Response(requestOptions: request, data: _schedule(
+          'News', [airing('abc-66635fc0', 300), airing('news-extra', 600)],
+        )));
+      } else {
+        handler.next(request);
+      }
+    }));
+    final api = PlexLiveTvApi(dio, now: () => now);
+    final response = api.getRecommendedPrograms(limit: 2);
+    await entered.future;
+    now = start.add(const Duration(seconds: 1));
+    release.complete();
+    expect((await response)['Items'].map((row) => row['ChannelId']), [free, extra]);
+  });
+
+  test('a removed station cannot borrow a grid with the same suffix', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    await api.getChannelGroups();
+    server.replies['/lineups/plex/channels'] = (_) => _channels([{'id': 'new-66635fc0'}]);
+    await api.getChannelGroups();
+    final response = await api.testGuide([free, 'channel-plex-new-66635fc0']);
+    expect(response['FailedChannelIds'], [free]);
+    expect((response['Items'] as List).map((p) => p['ChannelId']), ['channel-plex-new-66635fc0']);
+    expect(server.reads('/grid'), 1);
+  });
+
   test('incomplete Free TV grids can retry through a media server', () async {
     final (dio, server) = _server();
     final grid = <String, dynamic>{'size': 2, 'Metadata': []};
@@ -836,6 +981,11 @@ void main() {
     server.tunerReply = {};
     await expectLater(onNow(), throwsFormatException);
     server.tunerReply = {'MediaContainer': {'Metadata': []}};
+    expect(await onNow(), isEmpty);
+    server.discoveryReply = {'MediaContainer': {'size': 1}};
+    await api.getChannelGroups();
+    await expectLater(onNow(), throwsFormatException);
+    server.discoveryReply = {'MediaContainer': {'size': 0}};
     expect(await onNow(), isEmpty);
   });
 
