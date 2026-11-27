@@ -230,6 +230,43 @@ void main() {
     expect(request.extra[sameOriginRedirectsOnly], isTrue);
   });
 
+  for (final editClock in [false, true]) {
+    test('pin replay with no profile snapshot only uploads a separate settings edit ($editClock)', () async {
+      adapter.pauseResponses();
+      await prefs.batchNotifications(() async {
+        final saving = togglePin('group:Sports');
+        await adapter.responseReady!.future;
+        if (editClock) await prefs.set(UserPreferences.use24HourClock, true);
+        adapter.responseGate!.complete();
+        await saving;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 1400));
+      expect(adapter.pinActions, ['add']);
+      expect(postCount(), editClock ? 2 : 1);
+      if (editClock) expect(adapter.lastPushedProfile?['use24HourClock'], isTrue);
+    });
+  }
+
+  test('an automatic save queued for desktop cannot upload a loaded TV profile', () async {
+    await service.setSyncProfile('desktop');
+    await prefs.set(UserPreferences.use24HourClock, true);
+    adapter.pauseResponses(path: '/Moonfin/Settings/Profile/desktop');
+    final first = service.pushSettings(client);
+    await adapter.responseReady!.future;
+    final queued = service.pushSettings(client);
+    await service.setSyncProfile('tv');
+    adapter.resolvedProfile = {'use24HourClock': false};
+    expect(await service.pullSettingsForProfile(client, profile: 'tv'), isTrue);
+    adapter.responseGate!.complete();
+    await Future.wait([first, queued]);
+    expect(postCount(), 1);
+    expect(adapter.lastPushedProfile?['use24HourClock'], isTrue);
+
+    await service.pushSettingsForProfile(client, profile: 'desktop', force: true);
+    expect(postCount(), 2);
+    expect(adapter.lastPushedProfile?['use24HourClock'], isFalse);
+  });
+
   test('the browser pin transport sends the edit with redirects disabled', () async {
     final options = RequestOptions(path: 'https://plugin.test/pins', data: {'action': 'add'});
     final reply = await http.runWithClient(

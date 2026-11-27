@@ -223,6 +223,8 @@ class PluginSyncService extends ChangeNotifier {
   final _profileWrites = Lock();
   final _localGuidePins = Lock();
   int _sessionGeneration = 0;
+  int _profileSelectionRevision = 0;
+  late int _lastNonPinChange;
   // A tap awaiting its turn owns the upload (and any rejection) for that pin.
   final _pendingGuidePinTaps = <String, Object>{};
   // Network writes are serialized. A new tap on this filter invalidates its reply.
@@ -275,6 +277,7 @@ class PluginSyncService extends ChangeNotifier {
         ),
       );
     }
+    _lastNonPinChange = _prefs.nonPinChangeRevision;
     _prefs.addListener(_onPrefsChanged);
   }
 
@@ -581,6 +584,7 @@ class PluginSyncService extends ChangeNotifier {
   Future<void> setSyncProfile(String profile) async {
     if (!supportedProfiles.contains(profile)) return;
     if (profile == syncProfile) return;
+    _profileSelectionRevision++;
     // Picking only changes where sync points. Without a snapshot the next
     // preference write of any kind would push this device's settings over the
     // picked profile, so only a real settings edit sends anything.
@@ -1327,20 +1331,27 @@ class PluginSyncService extends ChangeNotifier {
       client,
       profile: syncProfile,
       force: force,
+      requireSelectedProfile: true,
     );
   }
 
   /// [force] skips the identity check, since an explicit push means overwrite
   /// whatever the server holds. The snapshot only proves what this device sent
   /// last, not what another device has written since.
+  /// Automatic uploads require the same selection when their turn to write arrives.
   Future<ProfilePushResult> pushSettingsForProfile(
     MediaServerClient client, {
     required String profile,
     bool force = false,
+    bool requireSelectedProfile = false,
   }) async {
     if (!_syncEnabled || !supportedProfiles.contains(profile)) return ProfilePushResult.failed;
     final accountCurrent = _guidePinAccountCheck(client);
-    bool current() => _syncEnabled && accountCurrent();
+    final selection = _profileSelectionRevision;
+    bool current() =>
+        _syncEnabled && accountCurrent() &&
+        (!requireSelectedProfile ||
+            (selection == _profileSelectionRevision && profile == syncProfile));
     if (force && _signInProfileRead != null &&
         _prefs.get(UserPreferences.liveTvSavedFilterChanges).isNotEmpty) {
       await _waitForSignInProfile();
@@ -2971,6 +2982,9 @@ class PluginSyncService extends ChangeNotifier {
   }
 
   void _onPrefsChanged() {
+    final revision = _prefs.nonPinChangeRevision;
+    if (revision == _lastNonPinChange) return;
+    _lastNonPinChange = revision;
     if (_isSyncingFromServer) return;
     if (!_pluginAvailable || !_prefs.get(UserPreferences.pluginSyncEnabled)) {
       return;

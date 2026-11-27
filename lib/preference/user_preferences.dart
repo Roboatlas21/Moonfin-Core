@@ -955,19 +955,8 @@ class UserPreferences extends ChangeNotifier {
       }
     }
 
-    if (_isScopedPreference(pref)) {
-      final scoped = _scopedPreference(pref);
-      if (scoped != null) {
-        await _store.set(scoped, value);
-      } else {
-        await _store.set(pref, value);
-      }
-      notifyListeners();
-      return;
-    }
-
-    await _store.set(pref, value);
-    notifyListeners();
+    await _store.set(getEffectivePreference(pref), value);
+    _notifyChange(pref.key);
   }
 
   /// set pref if it doesn't exist, scoped to the active profile
@@ -989,7 +978,7 @@ class UserPreferences extends ChangeNotifier {
       }
     }
     await _store.delete(pref);
-    notifyListeners();
+    _notifyChange(pref.key);
   }
 
   Future<void> flushPendingWrites() => _store.flushPendingWrites();
@@ -1250,8 +1239,19 @@ class UserPreferences extends ChangeNotifier {
   bool _notificationsSuppressed = false;
   bool _notificationPending = false;
 
+  // Pin writes still rebuild the Guide. A mixed batch must also wake profile sync.
+  int _nonPinChangeRevision = 0;
+  int get nonPinChangeRevision => _nonPinChangeRevision;
+
   @override
-  void notifyListeners() {
+  void notifyListeners() => _notifyChange();
+
+  void _notifyChange([String? key]) {
+    bool matches(Preference<List<String>> pref) =>
+        key == pref.key || (key?.startsWith('${pref.key}_') ?? false);
+    if (!matches(liveTvSavedFilters) && !matches(liveTvSavedFilterChanges)) {
+      _nonPinChangeRevision++;
+    }
     if (_notificationsSuppressed) {
       _notificationPending = true;
       return;
