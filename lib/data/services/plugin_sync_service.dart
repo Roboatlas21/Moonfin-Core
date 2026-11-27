@@ -666,16 +666,13 @@ class PluginSyncService extends ChangeNotifier {
         if (!current()) return;
         final profile = syncProfile;
         bool profileCurrent() => current() && syncProfile == profile;
-        final resolved = await _fetchProfileAndImportGuidePins(
+        restored = await _pullProfile(
           client, profile, serverId: serverId, current: profileCurrent,
+          enableOnRestore: !initialized,
         );
-        if (resolved == null || !profileCurrent()) return;
-        if (!initialized) {
-          await _prefs.set(UserPreferences.pluginSyncEnabled, true);
+        if (restored && !initialized && profileCurrent()) {
+          await _prefs.set(syncInitializedPref, true);
         }
-        await _applyServerSettings(client, profile, resolved);
-        if (!initialized) await _prefs.set(syncInitializedPref, true);
-        restored = true;
       });
       if (current() && (initialized || restored)) {
         unawaited(_startSettingsStream(client));
@@ -825,10 +822,7 @@ class PluginSyncService extends ChangeNotifier {
     bool current() => accountCurrent() && _syncEnabled && syncProfile == profile;
     await _guidePinSync.synchronized(() async {
       if (!current()) return;
-      final resolved = await _fetchProfileAndImportGuidePins(client, profile, current: current);
-      if (resolved == null || !current()) return;
-      await _applyServerSettings(client, profile, resolved);
-      notifyListeners();
+      if (await _pullProfile(client, profile, current: current)) notifyListeners();
     });
   }
 
@@ -1289,18 +1283,34 @@ class PluginSyncService extends ChangeNotifier {
     return current() ? pins : null;
   }
 
-  Future<Map<String, dynamic>?> _fetchProfileAndImportGuidePins(
+  Future<bool> _pullProfile(
     MediaServerClient client,
     String profile, {
     String? serverId,
     required bool Function() current,
+    bool enableOnRestore = false,
+    bool replayPendingPins = true,
   }) async {
-    Future<Map<String, dynamic>?> fetch() =>
-        _fetchResolvedProfile(client, profile, serverId: serverId, allowSync: current);
-    var resolved = await fetch();
-    if (!current()) return null;
-    if (_prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
+    Future<Map<String, dynamic>?> fetchAndApply({List<String>? replayedPins}) async {
+      final resolved = await _fetchResolvedProfile(
+        client, profile, serverId: serverId, allowSync: current,
+      );
+      if (resolved == null || !current()) return null;
+      if (enableOnRestore) {
+        await _prefs.set(UserPreferences.pluginSyncEnabled, true);
+        if (!current()) return null;
+      }
+      if (replayedPins != null) resolved['liveTvSavedFilters'] = replayedPins;
+      // A pin retry can take long enough for the user to edit another setting.
+      // Apply this snapshot now. Queued pins already take precedence during apply.
+      await _applyServerSettings(client, profile, resolved);
       return resolved;
+    }
+
+    final resolved = await fetchAndApply();
+    if (!current()) return false;
+    if (!replayPendingPins || _prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
+      return resolved != null;
     }
     final pins = await _replayPendingGuidePins(
       client,
@@ -1308,20 +1318,19 @@ class PluginSyncService extends ChangeNotifier {
       serverId: serverId,
       allowSync: current,
     );
-    if (!current()) return null;
-    if (pins == null) {
-      if (_prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
-        return resolved;
-      }
-      // Keep offline edits visible until the remaining requests succeed.
-      resolved?.remove('liveTvSavedFilters');
-      resolved?.remove('LiveTvSavedFilters');
-    } else {
+    if (!current()) return false;
+    if (resolved == null) {
       // A pin change can create a previously missing server profile.
-      resolved ??= await fetch();
-      resolved?['liveTvSavedFilters'] = pins;
+      return pins != null && await fetchAndApply(replayedPins: pins) != null && current();
     }
-    return resolved;
+    if (pins == null && _prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
+      // All edits were rejected. The original download still owns the pin list.
+      final saved = _readValue(resolved, 'liveTvSavedFilters');
+      if (saved is List && saved.every((item) => item is String)) {
+        await _prefs.set(UserPreferences.liveTvSavedFilters, List<String>.from(saved));
+      }
+    }
+    return current();
   }
 
   Future<void> pushSettings(
@@ -1669,14 +1678,9 @@ class PluginSyncService extends ChangeNotifier {
       await _refreshCustomThemes(client);
 
       // Order the manual pull with pin saves and incoming settings events.
-      return await _guidePinSync.synchronized(() async {
+      return await _guidePinSync.synchronized(() {
         if (!current()) return false;
-        final resolved = replayPendingPins
-            ? await _fetchProfileAndImportGuidePins(client, profile, current: current)
-            : await _fetchResolvedProfile(client, profile, allowSync: current);
-        if (resolved == null || !current()) return false;
-        await _applyServerSettings(client, profile, resolved);
-        return true;
+        return _pullProfile(client, profile, current: current, replayPendingPins: replayPendingPins);
       });
     } catch (_) {
       return false;

@@ -268,6 +268,42 @@ void main() {
     });
   }
 
+  for (final manual in [false, true]) {
+    test('a ${manual ? 'manual load' : 'settings event'} preserves a clock edit during pin replay', () async {
+      adapter.failPinChanges = true;
+      await togglePin('group:News');
+      adapter.failPinChanges = false;
+      adapter.savedPins = ['group:Sports'];
+      adapter.resolvedProfile = {'use24HourClock': false};
+      final profile = service.syncProfile;
+      adapter.pauseResponses(path: '/Moonfin/Settings/Profile/$profile');
+      final pull = manual
+          ? service.pullSettingsForProfile(client, profile: profile)
+          : settingsUpdated();
+      await adapter.responseReady!.future;
+      await prefs.set(UserPreferences.use24HourClock, true);
+      adapter.responseGate!.complete();
+      await pull;
+
+      expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+      expect(getPins(), ['group:Sports', 'group:News']);
+      expect(pendingPins(), isEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 1400));
+      expect(adapter.lastPushedProfile?['use24HourClock'], isTrue);
+    });
+  }
+
+  test('a rejected replay restores the downloaded pins from another device', () async {
+    adapter.failPinChanges = true;
+    await togglePin('group:News');
+    adapter.failPinChanges = false;
+    adapter.savedPins = ['group:Sports'];
+    adapter.rejectedPin = 'group:News';
+    await settingsUpdated();
+    expect(getPins(), ['group:Sports']);
+    expect(pendingPins(), isEmpty);
+  });
+
   test('an automatic save queued for desktop cannot upload a loaded TV profile', () async {
     await service.setSyncProfile('desktop');
     await prefs.set(UserPreferences.use24HourClock, true);
