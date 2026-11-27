@@ -949,6 +949,18 @@
   "@plexNoServers": {
     "description": "Shown when the Plex account has no servers"
   },
+  "plexConnectingToFreeTv": "Connecting to Plex Free TV...",
+  "@plexConnectingToFreeTv": {
+    "description": "Progress label while connecting a Plex account to Free TV"
+  },
+  "plexFreeTvCloudTitle": "Plex Free TV (Cloud)",
+  "@plexFreeTvCloudTitle": {
+    "description": "Cloud-only Plex Free TV choice in the Plex sign-in screen"
+  },
+  "plexNoMediaServerRequired": "No Plex Media Server required",
+  "@plexNoMediaServerRequired": {
+    "description": "Subtitle explaining that Plex Free TV works without a Plex Media Server"
+  },
   "loadingLinkedServers": "Loading linked servers...",
   "@loadingLinkedServers": {
     "description": "Status text while fetching Emby Connect server list"

@@ -23,6 +23,8 @@ class PlexMediaServerClient extends MediaServerClient {
   @override
   final DeviceInfo deviceInfo;
 
+  /// Cloud-only Plex account: no Plex Media Server endpoints are available.
+  final bool cloudOnly;
   String _baseUrl;
   String? _accessToken;
   String? _userId;
@@ -32,6 +34,7 @@ class PlexMediaServerClient extends MediaServerClient {
   PlexMediaServerClient({
     required String baseUrl,
     required this.deviceInfo,
+    this.cloudOnly = false,
     GamesApi? Function(MediaServerClient client)? gamesApi,
     PlexUserConfigurationStore? configStore,
   }) : _baseUrl = baseUrl,
@@ -148,7 +151,7 @@ class PlexMediaServerClient extends MediaServerClient {
   late final SessionApi sessionApi = PlexSessionApi();
 
   @override
-  late final SystemApi systemApi = PlexSystemApi(_dio);
+  late final SystemApi systemApi = PlexSystemApi(_dio, cloudOnly: cloudOnly);
 
   @override
   late final UserLibraryApi userLibraryApi = PlexUserLibraryApi(_dio, itemsApi);
@@ -159,6 +162,7 @@ class PlexMediaServerClient extends MediaServerClient {
     () async => _userId == null
         ? const UserConfiguration()
         : await usersApi.getUserConfiguration(),
+    cloudOnly: cloudOnly,
   );
 
   PlexLiveTvApi? _liveTvApi;
@@ -178,6 +182,7 @@ class PlexMediaServerClient extends MediaServerClient {
     _requireUserId,
     (policy) => _mayDeleteMedia = policy.enableContentDeletion,
     configStore: _configStore,
+    cloudOnly: cloudOnly,
   );
 
   static Never _noAdmin() =>

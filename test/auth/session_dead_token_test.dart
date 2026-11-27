@@ -76,6 +76,7 @@ class _TestClientFactory extends Fake implements MediaServerClientFactory {
     required String serverId,
     required ServerType serverType,
     required String baseUrl,
+    bool cloudOnly = false,
   }) => client;
 
   @override

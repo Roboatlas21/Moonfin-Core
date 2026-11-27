@@ -364,6 +364,7 @@ class _LoginScreenState extends State<LoginScreen> {
       serverId: server.id,
       serverType: server.serverType,
       baseUrl: server.address,
+      cloudOnly: server.cloudOnly,
     );
 
     final features = FeatureDetector(
