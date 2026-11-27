@@ -279,10 +279,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                             ? (selected - 2) * rowHeight
                             : 0,
                       );
-                      if (rows.isEmpty) {
-                        return Center(child: Text(l10n.noResults));
-                      }
-                      return ListView.builder(
+                      final list = ListView.builder(
                         controller: _scroll,
                         findChildIndexCallback: (key) =>
                             key is ValueKey<_RowId> ? indices[key.value] : null,
@@ -350,6 +347,14 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                             onTap: () => Navigator.of(context).pop(choice),
                           );
                         },
+                      );
+                      // Keep the list attached so query edits can reset its offset.
+                      return Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          list,
+                          if (rows.isEmpty) Center(child: Text(l10n.noResults)),
+                        ],
                       );
                     },
                   ),

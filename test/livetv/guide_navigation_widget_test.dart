@@ -535,9 +535,16 @@ void main() {
       final window = vm.guideWindow;
       final start = vm.windowStart;
       final resize = Completer<Map<String, dynamic>>();
-      when(() => _guideRequest(liveTvApi)).thenAnswer((_) => resize.future);
+      final resizeWidths = <Duration>[];
+      when(() => _guideRequest(liveTvApi)).thenAnswer((call) {
+        final from = call.namedArguments[#startDate] as DateTime;
+        final to = call.namedArguments[#endDate] as DateTime;
+        resizeWidths.add(to.difference(from));
+        return resize.future;
+      });
       tester.view.physicalSize = const Size(1700, 700);
       await _pumpFrames(tester);
+      expect(resizeWidths, contains(greaterThan(window)));
       if (timing == 'before') {
         tester.view.physicalSize = size;
         await _pumpFrames(tester);
@@ -548,10 +555,19 @@ void main() {
       await _pumpFrames(tester);
       expect(vm.guideWindow, window);
 
-      when(() => _guideRequest(liveTvApi)).thenAnswer((_) async => {'Items': []});
+      final pageRequests = <(DateTime, DateTime)>{};
+      when(() => _guideRequest(liveTvApi)).thenAnswer((call) async {
+        pageRequests.add((
+          call.namedArguments[#startDate] as DateTime,
+          call.namedArguments[#endDate] as DateTime,
+        ));
+        return {'Items': []};
+      });
       await tester.tap(find.byIcon(Icons.chevron_right).first);
       await _pumpFrames(tester);
-      expect(vm.windowStart, isNot(start));
+      final nextStart = start.add(window);
+      expect(pageRequests, {(nextStart, nextStart.add(window))});
+      expect(vm.windowStart, nextStart);
       expect(vm.guideWindow, window);
     });
   }
@@ -970,6 +986,28 @@ void main() {
     await tapAndPump(tester, pickerOption('US | PRIME'));
     expect(picker, findsNothing);
     expect(find.text('Channel 47'), findsOneWidget);
+  });
+
+  testWidgets('picker shows the first matches after a search with no results', (tester) async {
+    await GetIt.instance<UserPreferences>().set(
+      UserPreferences.liveTvCategoryDisplay,
+      LiveTvCategoryDisplay.groups,
+    );
+    stubGroups(ChannelGroupLineup({
+      'ch0': {for (var i = 10; i < 60; i++) 'Group $i'},
+    }));
+    await pumpGuide(tester, surface: phone, initialFilter: (GuideFilter.all, 'Group 45'));
+    await tapAndPump(tester, find.byTooltip('Filters'));
+    expect(pickerOption('Group 45').hitTestable(), findsOneWidget);
+    expect(pickerOption('Group 10').hitTestable(), findsNothing);
+
+    final field = find.descendant(of: picker, matching: find.byType(TextField));
+    await tester.enterText(field, 'no such group');
+    await _pumpFrames(tester);
+    expect(pickerOption('No results'), findsOneWidget);
+    await tester.enterText(field, 'group');
+    await _pumpFrames(tester);
+    expect(pickerOption('Group 10').hitTestable(), findsOneWidget);
   });
 
   testWidgets('TV picker selects with OK and closes with Right or Android Back', (
