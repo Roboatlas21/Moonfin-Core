@@ -254,6 +254,39 @@ void main() {
     },
   );
 
+  test('cloud Home loaded in Kids Mode restores Live TV and On Now when the mode ends', () async {
+    await enableSections({HomeSectionType.onNow});
+    await prefs.set(UserPreferences.kidsModeEnabled, true);
+    final plex = _MockPlexClient();
+    when(() => plex.serverType).thenReturn(ServerType.plex);
+    when(() => plex.cloudOnly).thenReturn(true);
+    model.dispose();
+    model = homeFor(plex);
+    stubLiveTvRows();
+
+    var refresh = Future<void>.value();
+    void onPrefsChanged() {
+      refresh = model.refreshForPreferenceChange(layoutChanged: false);
+    }
+    prefs.addListener(onPrefsChanged);
+    addTearDown(() => prefs.removeListener(onPrefsChanged));
+    await model.load();
+    expect(model.rows, isEmpty);
+    verifyNever(() => source.loadOnNow(any()));
+
+    await prefs.set(UserPreferences.kidsModeEnabled, false);
+    await refresh;
+    expect(model.rows.map((row) => row.id), ['liveTv', 'onNow']);
+    verify(() => source.loadOnNow(any())).called(1);
+    await model.refreshForPreferenceChange(layoutChanged: false);
+    verifyNever(() => source.loadOnNow(any()));
+
+    await prefs.set(UserPreferences.kidsModeEnabled, true);
+    await refresh;
+    expect(model.rows, isEmpty);
+    verifyNever(() => source.loadOnNow(any()));
+  });
+
   test('returning from Kids Mode restores live rows even when listings go offline', () async {
     await enableSections({HomeSectionType.liveTv});
     stubLiveTvRows();

@@ -450,7 +450,7 @@ class _HomeShellState extends State<_HomeShell>
     final currentSonarrHideDownloaded = _userPrefs.get(UserPreferences.sonarrCalendarHideDownloaded);
     final currentDateFormat = _userPrefs.get(UserPreferences.dateFormat);
 
-    if (currentJson != _lastSectionsJson ||
+    final layoutChanged = currentJson != _lastSectionsJson ||
         currentMultiServer != _lastMultiServer ||
         currentMergeLibraries != _lastMergeLibraries ||
         currentMergeContinueWatchingNextUp != _lastMergeContinueWatchingNextUp ||
@@ -466,7 +466,8 @@ class _HomeShellState extends State<_HomeShell>
         currentShowSonarrDate != _lastSonarrCalendarShowDate ||
         currentRadarrHideDownloaded != _lastRadarrCalendarHideDownloaded ||
         currentSonarrHideDownloaded != _lastSonarrCalendarHideDownloaded ||
-        currentDateFormat != _lastDateFormat) {
+        currentDateFormat != _lastDateFormat;
+    if (layoutChanged) {
       _lastSectionsJson = currentJson;
       _lastMultiServer = currentMultiServer;
       _lastMergeLibraries = currentMergeLibraries;
@@ -484,9 +485,8 @@ class _HomeShellState extends State<_HomeShell>
       _lastRadarrCalendarHideDownloaded = currentRadarrHideDownloaded;
       _lastSonarrCalendarHideDownloaded = currentSonarrHideDownloaded;
       _lastDateFormat = currentDateFormat;
-
-      _viewModel.refresh();
     }
+    unawaited(_viewModel.refreshForPreferenceChange(layoutChanged: layoutChanged));
     _maybeRegisterThemeMusic();
     setState(() {});
   }

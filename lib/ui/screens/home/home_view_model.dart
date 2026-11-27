@@ -117,6 +117,7 @@ class HomeViewModel extends ChangeNotifier {
       row.isLoading && row.items.isEmpty && _emptySectionIds.contains(row.id);
 
   bool _isLoading = false;
+  bool? _cloudKidsModeAtLoad;
   bool get isLoading => _isLoading;
   Future<void> _loadDone = Future<void>.value();
   bool _disposed = false;
@@ -441,10 +442,14 @@ class HomeViewModel extends ChangeNotifier {
 
       final activeConfigs = _prefs.activeHomeSectionConfigs;
       final fallbackUsed = activeConfigs.isEmpty;
+      final cloudKidsMode = _cloudOnlyPlex
+          ? _prefs.get(UserPreferences.kidsModeEnabled)
+          : null;
+      _cloudKidsModeAtLoad = cloudKidsMode;
       // Cloud Home can show Live TV and external charts, but not library rows.
-      final configs = _cloudOnlyPlex
+      final configs = cloudKidsMode != null
           ? <HomeSectionConfig>[
-              if (!_prefs.get(UserPreferences.kidsModeEnabled))
+              if (!cloudKidsMode)
                 const HomeSectionConfig(
                   type: HomeSectionType.liveTv,
                   enabled: true,
@@ -453,8 +458,7 @@ class HomeViewModel extends ChangeNotifier {
               for (final config in activeConfigs)
                 if (config.isBuiltin &&
                     config.type != HomeSectionType.liveTv &&
-                    ((!_prefs.get(UserPreferences.kidsModeEnabled) &&
-                            config.type == HomeSectionType.onNow) ||
+                    ((!cloudKidsMode && config.type == HomeSectionType.onNow) ||
                         _isSeerrSectionType(config.type) ||
                         _isTmdbSectionType(config.type) ||
                         externalCharts.containsKey(config.type) ||
@@ -1146,6 +1150,16 @@ class HomeViewModel extends ChangeNotifier {
       case HomeSectionType.resumeBook:
       case HomeSectionType.none:
         return false;
+    }
+  }
+
+  Future<void> refreshForPreferenceChange({required bool layoutChanged}) async {
+    // Cloud Home builds its Live TV rows only when Kids Mode is off.
+    final previousMode = _cloudKidsModeAtLoad;
+    if (layoutChanged ||
+        (previousMode != null &&
+            previousMode != _prefs.get(UserPreferences.kidsModeEnabled))) {
+      await refresh();
     }
   }
 
