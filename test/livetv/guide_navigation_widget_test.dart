@@ -500,6 +500,33 @@ void main() {
     });
   }
 
+  testWidgets('a superseded page cannot overwrite the newer failure notice', (tester) async {
+    useTvLayout();
+    channelCount = 8;
+    await pumpGuide(tester);
+    final vm = guideModel(tester);
+    final today = DateTime.now();
+    _fixtureWindowStart = DateTime(today.year, today.month, today.day + 1, 10);
+    await vm.setWindowStart(_fixtureWindowStart);
+    await _pumpFrames(tester);
+
+    deferredChannelId = 'ch0';
+    await tapAndPump(tester, find.byIcon(Icons.chevron_right).first);
+    expect(vm.pendingWindowStart, _fixtureWindowStart.add(vm.guideWindow));
+    expect(releaseDeferredGuide, hasLength(1));
+
+    // Right at the row edge requests 10:30 while the full-page move is pending.
+    guideFailure = TimeoutException('offline');
+    await focusGuideNode(tester, 'GuideProgramRow4:0');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+    final notice = find.textContaining('Couldn’t load');
+    final message = tester.widget<Text>(notice).data!;
+    expect(message, contains('10:30'));
+    releaseDeferredGuide.single();
+    await _pumpFrames(tester);
+    expect(tester.widget<Text>(notice).data, message);
+  });
+
   for (final timing in ['before', 'after']) {
     testWidgets('paging uses the original width when restored $timing a resize failure', (tester) async {
       await pumpGuide(tester);
@@ -986,7 +1013,8 @@ void main() {
     final api = _MockUserLibrary();
     when(() => client.userLibraryApi).thenReturn(api);
     when(() => api.markFavorite('ch0')).thenAnswer((_) async {});
-    when(() => api.unmarkFavorite('ch0')).thenThrow(Exception('offline'));
+    final removal = Completer<void>();
+    when(() => api.unmarkFavorite('ch0')).thenAnswer((_) => removal.future);
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvCategoryDisplay,
       LiveTvCategoryDisplay.groups,
@@ -1001,6 +1029,10 @@ void main() {
     verify(() => api.markFavorite('ch0')).called(1);
     expect(isFavorite(), isTrue);
     await _holdSelect(tester);
+    verify(() => api.unmarkFavorite('ch0')).called(1);
+    expect(isFavorite(), isFalse);
+    removal.completeError(Exception('offline'));
+    await _pumpFrames(tester);
     expect(isFavorite(), isTrue);
     when(() => api.unmarkFavorite('ch0')).thenAnswer((_) async {});
     await tapAndPump(tester, find.byTooltip('Filters'));

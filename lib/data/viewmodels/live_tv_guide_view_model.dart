@@ -377,6 +377,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   int _windowRequest = 0;
   int _failedWindowMoveRevision = 0;
 
+  /// Identifies the current time-window request, including cancellations.
+  int get windowRequestRevision => _windowRequest;
+
   /// Increases only when all channel listings for a requested time failed,
   /// not when the move was cancelled or superseded.
   int get failedWindowMoveRevision => _failedWindowMoveRevision;

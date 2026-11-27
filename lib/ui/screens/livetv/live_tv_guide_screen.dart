@@ -972,19 +972,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         },
       );
       if (picked != null && mounted) {
-        _clearWindowFailure();
-        final failureRevision = _vm.failedWindowMoveRevision;
-        try {
-          if (await _vm.setDate(picked)) {
-            if (mounted) _anchorToWindowStart();
-          } else if (mounted &&
-              (_vm.listingsAccessDenied ||
-                  _vm.failedWindowMoveRevision != failureRevision)) {
-            _showWindowFailure(picked, dateOnly: true);
-          }
-        } catch (_) {
-          if (mounted) _showWindowFailure(picked, dateOnly: true);
-        }
+        final moved = await _moveWithWindowNotice(
+          picked,
+          () => _vm.setDate(picked),
+          dateOnly: true,
+        );
+        if (moved && mounted) _anchorToWindowStart();
       }
     } finally {
       _isShowingDatePicker = false;
@@ -3184,27 +3177,15 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         : target;
     if (clamped == oldStart || clamped == _vm.pendingWindowStart) return;
 
-    _clearWindowFailure();
-    final failureRevision = _vm.failedWindowMoveRevision;
-    try {
-      final moved = await _vm.setWindowStart(
+    final moved = await _moveWithWindowNotice(
+      clamped,
+      () => _vm.setWindowStart(
         clamped,
         livePosition: clamped == liveStart,
         paging: true,
-      );
-      if (!moved) {
-        // Don't show an error if another navigation request replaced this one.
-        if (_vm.listingsAccessDenied ||
-            _vm.failedWindowMoveRevision != failureRevision) {
-          _showWindowFailure(clamped);
-        }
-        return;
-      }
-    } catch (_) {
-      _showWindowFailure(clamped);
-      return;
-    }
-    if (!mounted || _vm.windowStart != clamped) return;
+      ),
+    );
+    if (!moved || !mounted || _vm.windowStart != clamped) return;
     _failedLiveReset = false;
     final selection = _selection;
     if (selection == null) return;
@@ -3222,6 +3203,30 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     );
     _selection = updated;
     if (focusGrid && _gridHasFocus) _focusSelectedCell(updated, cells);
+  }
+
+  Future<bool> _moveWithWindowNotice(
+    DateTime target,
+    Future<bool> Function() move, {
+    bool dateOnly = false,
+  }) async {
+    _clearWindowFailure();
+    final failureRevision = _vm.failedWindowMoveRevision;
+    final result = move();
+    // Starting the move assigns its revision before the listings fetch awaits.
+    final request = _vm.windowRequestRevision;
+    bool failed;
+    try {
+      if (await result) return request == _vm.windowRequestRevision;
+      failed = _vm.listingsAccessDenied ||
+          _vm.failedWindowMoveRevision != failureRevision;
+    } catch (_) {
+      failed = true;
+    }
+    if (failed && request == _vm.windowRequestRevision) {
+      _showWindowFailure(target, dateOnly: dateOnly);
+    }
+    return false;
   }
 
   void _clearWindowFailure() {
