@@ -572,11 +572,31 @@ class _AppleTvLiveTvPlayerHostScreenState
       prewarm = ChannelCarouselPrewarm(_client);
       prewarm.viewModel.addListener(_onScheduleChanged);
       _carouselPrewarm = prewarm;
+      _scheduleVisibleListings();
     }
     final lineup = _syncedChannels.any((c) => c.id == _currentChannel.id)
         ? _syncedChannels
         : [_currentChannel, ..._syncedChannels];
     prewarm.tuned(lineup, _currentChannel.id);
+  }
+
+  void _scheduleVisibleListings() {
+    _carouselBrowseDebounce?.cancel();
+    final prewarm = _carouselPrewarm;
+    if (prewarm == null) return; // The first tune will pick up the latest IDs.
+    final ids = _visibleChannelIds;
+    if (ids.isEmpty) {
+      prewarm.clearVisibleChannels();
+      return;
+    }
+    _carouselBrowseDebounce = Timer(const Duration(milliseconds: 150), () async {
+      try {
+        await prewarm.ensureVisibleChannels(ids);
+        if (mounted && identical(ids, _visibleChannelIds)) _onScheduleChanged();
+      } catch (error) {
+        debugPrint('Live TV carousel listings unavailable (${error.runtimeType})');
+      }
+    });
   }
 
   /// Send schedule updates for the tuned station and the visible carousel cards.
@@ -1001,26 +1021,10 @@ class _AppleTvLiveTvPlayerHostScreenState
           _manager.changeBitrate(mbps == null || mbps < 0 ? null : mbps),
         );
       case 'visibleChannelsChanged':
-        final ids = (action['channelIds'] as List?)
+        _visibleChannelIds = (action['channelIds'] as List?)
             ?.whereType<String>()
-            .toList();
-        _visibleChannelIds = ids ?? const [];
-        _carouselBrowseDebounce?.cancel();
-        if (ids != null && ids.isNotEmpty) {
-          _carouselBrowseDebounce = Timer(const Duration(milliseconds: 150), () async {
-            try {
-              await _carouselPrewarm?.ensureVisibleChannels(ids);
-              if (mounted && identical(ids, _visibleChannelIds)) _onScheduleChanged();
-            } catch (error) {
-              debugPrint(
-                'Live TV carousel listings unavailable (${error.runtimeType})',
-              );
-            }
-          });
-        } else {
-          _carouselPrewarm?.clearVisibleChannels();
-        }
-        // The schedule listener sends the lineup when listings change.
+            .toList() ?? const [];
+        _scheduleVisibleListings();
         return;
       case 'selectChannel':
         final id = action['channelId']?.toString();

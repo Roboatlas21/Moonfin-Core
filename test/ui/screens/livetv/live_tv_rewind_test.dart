@@ -279,15 +279,19 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('native guide shares the starting tune and adopts the selected lineup after Retry', (tester) async {
+  const events = MethodChannel('moonfin/native_apple_player_events');
+  const sports = (GuideFilter.all, 'Sports');
+
+  Map<dynamic, dynamic> prepareNativePlayer(WidgetTester tester) {
     useSavedPlexAccount();
     final messenger = tester.binding.defaultBinaryMessenger;
-    const events = MethodChannel('moonfin/native_apple_player_events');
     const control = MethodChannel('moonfin/native_apple_player_control');
     messenger.setMockMethodCallHandler(events, (_) async => null);
-    Map<dynamic, dynamic> metadata = {};
+    final metadata = <dynamic, dynamic>{};
     messenger.setMockMethodCallHandler(control, (call) async {
-      if (call.method == 'setUiMetadata') metadata = call.arguments as Map;
+      if (call.method == 'setUiMetadata') {
+        metadata..clear()..addAll(call.arguments as Map);
+      }
       return null;
     });
     final api = GetIt.instance<MediaServerClient>().liveTvApi;
@@ -310,24 +314,50 @@ void main() {
       messenger.setMockMethodCallHandler(events, null);
       messenger.setMockMethodCallHandler(control, null);
     });
-    Future<void> send(Map<String, Object> action) async {
-      await messenger.handlePlatformMessage(events.name,
-          const StandardMethodCodec().encodeSuccessEnvelope(action), (_) {});
-      await tester.pump();
-    }
+    return metadata;
+  }
 
-    const sports = (GuideFilter.all, 'Sports');
+  Future<void> sendNativeAction(WidgetTester tester, Map<String, Object> action) async {
+    await tester.binding.defaultBinaryMessenger.handlePlatformMessage(events.name,
+        const StandardMethodCodec().encodeSuccessEnvelope(action), (_) {});
+    await tester.pump();
+  }
+
+  Future<void> pumpNativeHost(WidgetTester tester, List<GuideChannel> channels) async {
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      home: AppleTvLiveTvPlayerHostScreen(
+        channels: channels, startIndex: 0, guideFilter: sports,
+      ),
+    ));
+    await tester.pump();
+  }
+
+  testWidgets('native carousel loads a browsed station after a pending starting tune', (tester) async {
+    final metadata = prepareNativePlayer(tester);
+    manager.failedChannel = ard.id;
+    final tune = manager.failedTune = Completer<void>();
+    await pumpNativeHost(tester, [
+      ard,
+      for (var i = 1; i <= 30; i++) GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
+    ]);
+    await sendNativeAction(tester, {'event': 'visibleChannelsChanged', 'channelIds': ['ch15']});
+    await tester.pump(const Duration(milliseconds: 200));
+    manager.failedChannel = null;
+    tune.complete();
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 500));
+    final cards = (metadata['channelList'] as List).cast<Map>();
+    expect(cards.singleWhere((card) => card['id'] == 'ch15')['programName'], 'Now on ch15');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('native guide shares the starting tune and adopts the selected lineup after Retry', (tester) async {
+    final metadata = prepareNativePlayer(tester);
     const favorites = (GuideFilter.favorites, null);
-    Future<void> pumpHost(List<GuideChannel> channels) async {
-      await tester.pumpWidget(MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        home: AppleTvLiveTvPlayerHostScreen(
-          channels: channels, startIndex: 0, guideFilter: sports,
-        ),
-      ));
-      await tester.pump();
-    }
-
+    Future<void> pumpHost(List<GuideChannel> channels) => pumpNativeHost(tester, channels);
+    Future<void> send(Map<String, Object> action) => sendNativeAction(tester, action);
     manager.failedChannel = ard.id;
     manager.failedTune = Completer<void>();
     final guide = find.byType(LiveTvGuideScreen);

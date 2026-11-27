@@ -1412,13 +1412,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  void _resetCategory() {
+  void _resetCategory({bool keepListings = false}) {
     _categoryFetchInFlight = false;
-    _categoryPrograms.clear();
+    if (!keepListings) {
+      _categoryPrograms.clear();
+      _categoryLoadedFor = null;
+    }
     _categoryQueriedIds.clear();
     _categoryFailedIds.clear();
     _categoryHighWater = 0;
-    _categoryLoadedFor = null;
     _categoryRequest++;
   }
 
@@ -1530,7 +1532,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   Future<void> _reloadPrograms() async {
     final loadGeneration = ++_loadGeneration;
     final depth = _requestedPageDepth;
-    _resetPrograms();
+    // The replacement also refetches known category stations outside the search.
+    _resetPrograms(keepCategoryListings: _isCategory(_filter) && _channelQuery.isNotEmpty);
     _reloadDepth = depth;
     final page = _pageGeneration;
     _listingsStatePage = page;
@@ -1943,7 +1946,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _rebuildGroupChoices(complete: !hasUnresolvedChannels);
   }
 
-  void _resetPrograms() {
+  void _resetPrograms({bool keepCategoryListings = false}) {
     _advancePage();
     _programGeneration++;
     _programsByChannel.clear();
@@ -1953,7 +1956,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _retryingFailedProgramIds.clear();
     _programsHighWater = 0;
     _processedBoundaries.clear();
-    _resetCategory();
+    _resetCategory(keepListings: keepCategoryListings);
   }
 
   Future<void> loadInitialPrograms({List<String>? channelIds}) {

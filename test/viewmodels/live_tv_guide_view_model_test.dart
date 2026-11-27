@@ -1822,6 +1822,31 @@ void main() {
       });
     }
 
+    test('recording recovery refreshes the Sports surfing lineup behind a search', () async {
+      stubNumberedChannels(3);
+      when(() => _guide(liveTv, category: GuideFilter.sports))
+          .thenAnswer(_serverFiltered((_) => true));
+      final vm = await loadFilter(GuideFilter.sports);
+      vm.setChannelQuery('c1');
+      await pumpEventQueue();
+
+      var failRefresh = true;
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        if (failRefresh) {
+          failRefresh = false;
+          throw const FormatException('Invalid recording refresh');
+        }
+        return {'Items': [
+          for (final id in _requestedIds(inv))
+            if (id != 'c2') recorded(_program('updated-$id', id, isSports: true)),
+        ]};
+      });
+      await vm.recordingChanged();
+      expect(vm.filteredChannels.single.id, 'c1');
+      expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+    });
+
     test('a failed recording reload is retried on re-entry until listings recover', () async {
       _stubChannels(liveTv, [_channel('c0')]);
       final vm = LiveTvGuideViewModel(client, now: () => DateTime(2026, 9, 11, 10, 10));
