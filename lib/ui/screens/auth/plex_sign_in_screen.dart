@@ -148,19 +148,19 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     });
     try {
       final connected = await _plexRepository.connect(server, token);
-      if (!mounted) return;
+      if (!mounted || _token != token) return;
       if (connected) {
         context.go(Destinations.home);
         return;
       }
       setState(() {
-        _connecting = null;
         _errorMessage = AppLocalizations.of(context)
             .unableToConnectTo(server.name);
       });
     } catch (e) {
-      _connecting = null;
-      _showError(e);
+      _showConnectionError(token, e);
+    } finally {
+      if (mounted) setState(() => _connecting = null);
     }
   }
 
@@ -175,26 +175,29 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     });
     try {
       final connected = await _plexRepository.connectCloud(token);
-      if (!mounted) return;
+      if (!mounted || _token != token) return;
       if (connected) {
         context.go(Destinations.home);
       } else {
         setState(() => _errorMessage = AppLocalizations.of(context).loginFailed);
       }
     } catch (e) {
-      if (!mounted || _token != token) return;
-      // A rejected account token needs a new approval. A temporary failure
-      // can retry the same cloud connection.
-      if (e is DioException && e.response?.statusCode == 401) {
-        _token = null;
-        _servers = null;
-        _discoveryError = null;
-        _usePassword = false;
-      }
-      _showError(e);
+      _showConnectionError(token, e);
     } finally {
       if (mounted) setState(() => _connectingCloud = false);
     }
+  }
+
+  void _showConnectionError(String token, Object error) {
+    if (!mounted || _token != token) return;
+    // Request fresh approval only when Plex rejects the account token.
+    if (error is DioException && error.response?.statusCode == 401) {
+      _token = null;
+      _servers = null;
+      _discoveryError = null;
+      _usePassword = false;
+    }
+    _showError(error);
   }
 
   void _showError(Object e) {

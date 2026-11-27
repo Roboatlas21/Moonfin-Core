@@ -153,6 +153,75 @@ void main() {
     verify(tv.createPin).called(1);
   });
 
+  testWidgets('server retry keeps approval after a 503 and renews it after a 401', (
+    tester,
+  ) async {
+    final tv = _PlexTv();
+    final repo = _Repository();
+    GetIt.instance.registerSingleton<PlexTvService>(tv);
+    GetIt.instance.registerSingleton<PlexRepository>(repo);
+    addTearDown(() => GetIt.instance.reset());
+    const server = PlexServer(
+      id: 'pms',
+      name: 'Home PMS',
+      version: '1',
+      accessToken: 'pms',
+      connections: [],
+    );
+    var pin = 0;
+    when(tv.createPin).thenAnswer(
+      (_) async =>
+          PlexPin(id: ++pin, code: 'PIN-$pin', expiresAt: DateTime.utc(2100)),
+    );
+    when(() => tv.checkPin(1)).thenAnswer((_) async => 'first');
+    when(() => tv.checkPin(2)).thenAnswer((_) async => 'renewed');
+    when(() => repo.loadServers(any())).thenAnswer((_) async => [server]);
+    var attempts = 0;
+    final request = RequestOptions(path: 'https://plex.tv/api/v2/user');
+    when(() => repo.connect(server, 'first')).thenAnswer((_) async {
+      throw DioException(
+        requestOptions: request,
+        response: Response(
+          requestOptions: request,
+          statusCode: ++attempts == 1 ? 503 : 401,
+        ),
+        type: DioExceptionType.badResponse,
+      );
+    });
+    when(() => repo.connect(server, 'renewed')).thenAnswer((_) async => false);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        home: PlexSignInScreen(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    final l10n = AppLocalizations.of(
+      tester.element(find.byType(PlexSignInScreen)),
+    );
+    await tester.tap(find.text(server.name));
+    await tester.pumpAndSettle();
+    expect(find.text(server.name), findsOneWidget);
+    await tester.tap(find.text(l10n.tryAgain));
+    await tester.pumpAndSettle();
+    expect(find.text(server.name), findsNothing);
+    expect(find.text(l10n.plexFreeTvCloudTitle), findsNothing);
+    verify(() => repo.connect(server, 'first')).called(2);
+
+    await tester.tap(find.text(l10n.tryAgain));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(server.name));
+    await tester.pumpAndSettle();
+    verify(() => repo.loadServers('renewed')).called(1);
+    verify(() => repo.connect(server, 'renewed')).called(1);
+    verify(tv.createPin).called(2);
+  });
+
   testWidgets('failed Plex connections keep both choices and the approved token', (
     tester,
   ) async {

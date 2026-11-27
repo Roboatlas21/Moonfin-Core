@@ -11,9 +11,12 @@ import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/screens/settings/home_sections_screen.dart';
 import 'package:moonfin/util/platform_detection.dart';
 import 'package:server_core/server_core.dart';
+import 'package:server_plex/server_plex.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _MockClient extends Mock implements MediaServerClient {}
+
+class _MockPlexClient extends Mock implements PlexMediaServerClient {}
 
 class _MockItemsApi extends Mock implements ItemsApi {}
 
@@ -94,7 +97,7 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  Future<void> pump(WidgetTester tester) async {
+  Future<void> pump(WidgetTester tester, {bool openCollections = true}) async {
     tester.view.physicalSize = const Size(1200, 6000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -107,8 +110,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     // The collection rows start disabled, inside the closed Collections group.
-    await tester.tap(find.text('Collections').first);
-    await tester.pumpAndSettle();
+    if (openCollections) {
+      await tester.tap(find.text('Collections').first);
+      await tester.pumpAndSettle();
+    }
   }
 
   testWidgets('lists every server\'s collections, naming the other server', (
@@ -142,5 +147,46 @@ void main() {
       prefs.homeSectionsConfig.map((c) => c.stableId),
       contains('pluginDynamic:collections:http://other:collection:Marvel'),
     );
+  });
+
+  testWidgets('Free TV hides saved collections until the media server is active again', (
+    tester,
+  ) async {
+    await prefs.set(UserPreferences.enableMultiServerLibraries, true);
+    await pump(tester);
+    await tester.pumpWidget(const SizedBox());
+    const marvel = 'pluginDynamic:collections:http://other:collection:Marvel';
+    await prefs.setHomeSectionsConfig([
+      for (final section in prefs.homeSectionsConfig)
+        if (section.stableId == marvel)
+          section.copyWith(enabled: true)
+        else
+          section,
+    ]);
+
+    final mediaServer = GetIt.instance<MediaServerClient>();
+    final multiServer = GetIt.instance<MultiServerRepository>();
+    clearInteractions(multiServer);
+    final cloud = _MockPlexClient();
+    when(() => cloud.cloudOnly).thenReturn(true);
+    when(() => cloud.userId).thenReturn('user');
+    when(() => cloud.baseUrl).thenReturn('https://plex.tv');
+    await GetIt.instance.unregister<MediaServerClient>();
+    GetIt.instance.registerSingleton<MediaServerClient>(cloud);
+    await pump(tester, openCollections: false);
+    expect(find.text('Collections'), findsNothing);
+    expect(find.text('Marvel'), findsNothing);
+    verifyNever(multiServer.getLoggedInServers);
+    expect(
+      prefs.homeSectionsConfig.singleWhere((s) => s.stableId == marvel).enabled,
+      isTrue,
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await GetIt.instance.unregister<MediaServerClient>();
+    GetIt.instance.registerSingleton<MediaServerClient>(mediaServer);
+    await pump(tester, openCollections: false);
+    expect(find.text('Marvel'), findsOneWidget);
+    expect(find.text('Collections row from Other'), findsOneWidget);
   });
 }

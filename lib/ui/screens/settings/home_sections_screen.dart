@@ -111,6 +111,9 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
   bool _serverHasLiveTv = true;
 
   /// Read once: who is signed in doesn't change while this screen is open.
+  final bool _cloudOnlyPlex = isCloudOnlyPlexClient(
+    GetIt.instance<MediaServerClient>(),
+  );
   final bool _liveTvOnAnyServer = liveTvOnAnySignedInServer();
   final bool _musicOnAnyServer = musicOnAnySignedInServer();
   final bool _playlistsOnAnyServer = playlistsOnAnySignedInServer();
@@ -163,6 +166,7 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
     }
 
     for (final section in _sections) {
+      if (_cloudOnlyPlex && _isCollectionSection(section)) continue;
       final stableId = section.stableId;
       if (section.isBuiltin) {
         switch (section.type) {
@@ -490,9 +494,10 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
     }
   }
 
-  bool _isCollectionsSectionType(HomeSectionType type) {
-    return type == HomeSectionType.collections;
-  }
+  bool _isCollectionSection(HomeSectionConfig section) =>
+      section.type == HomeSectionType.collections ||
+      (section.isPluginDynamic &&
+          section.pluginSource == HomeSectionPluginSource.collections);
 
   bool _isGenresSectionType(HomeSectionType type) {
     return type == HomeSectionType.genres;
@@ -621,10 +626,7 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
     final hiddenByFavorites =
         !showFavoritesRows && _isFavoriteSectionType(section.type);
     final hiddenByCollections =
-        !showCollectionsRows &&
-        ((section.isBuiltin && _isCollectionsSectionType(section.type)) ||
-            (section.isPluginDynamic &&
-                section.pluginSource == HomeSectionPluginSource.collections));
+        (_cloudOnlyPlex || !showCollectionsRows) && _isCollectionSection(section);
     final hiddenByServer =
         section.pluginSource == HomeSectionPluginSource.collections &&
         _otherServerName(section) != null &&
@@ -953,6 +955,7 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
   /// server that couldn't be reached is left out, so its rows are kept.
   Future<Map<String, List<_DiscoveredCollectionRow>>>
   _fetchCollectionsPerServer() async {
+    if (_cloudOnlyPlex) return const {};
     final active = GetIt.instance<MediaServerClient>();
     var others = const <ServerUserSession>[];
     try {
@@ -971,7 +974,7 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
     };
 
     final clients = [
-      if (!isCloudOnlyPlexClient(active)) active,
+      active,
       if (_prefs.get(UserPreferences.enableMultiServerLibraries))
         for (final session in others) session.client,
     ];
