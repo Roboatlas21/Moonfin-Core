@@ -1705,10 +1705,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         .firstOrNull
         ?.key;
     final channels = _vm.filteredChannels;
-    final previousChannelId =
-        previousRow != null && previousRow < channels.length
-        ? channels[previousRow].id
-        : null;
+    final previousChannelId = previousRow == null
+        ? null
+        : _focusedChannel.value?.id ?? channels.elementAtOrNull(previousRow)?.id;
     // Clear channel search before browsing groups; the picker has its own search.
     _clearChannelSearch();
     var closedWithRight = false;
