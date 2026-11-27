@@ -180,6 +180,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final Map<int, FocusNode> _channelFocusNodes = {};
   final Map<GuideFilter, FocusNode> _filterFocusNodes = {};
   late LiveTvCategoryDisplay _categoryDisplay;
+  late List<String> _savedFilters;
   final _browseFocus = FocusNode(debugLabel: 'GuideBrowse');
   final _shortcutNodes = <GuideFilterChoice, FocusNode>{};
   final _channelHold = FocusedKeyHold();
@@ -282,6 +283,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void initState() {
     super.initState();
     _categoryDisplay = _prefs.get(UserPreferences.liveTvCategoryDisplay);
+    _savedFilters = List.of(_prefs.get(UserPreferences.liveTvSavedFilters));
     _vm = LiveTvGuideViewModel(
       _client,
       initialSortBy: _prefs.get(UserPreferences.liveTvChannelSortBy),
@@ -1604,8 +1606,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   void _onCategoryDisplayChanged() {
+    final saved = _prefs.get(UserPreferences.liveTvSavedFilters);
+    final savedChanged = !listEquals(saved, _savedFilters);
+    if (savedChanged) _savedFilters = List.of(saved);
     final mode = _prefs.get(UserPreferences.liveTvCategoryDisplay);
     if (mode == _categoryDisplay) {
+      if (savedChanged) setState(() {});
       return;
     }
     _suppressPickerRestorePrefetch = false;
@@ -1859,12 +1865,15 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   List<GuideFilterChoice> get _shortcuts => [
     (GuideFilter.favorites, null),
+    ..._vm.availableSavedFilters(
+      includeCategories: _categoryDisplay == LiveTvCategoryDisplay.both,
+    ),
   ];
 
   FocusNode _shortcutNode(GuideFilterChoice choice) =>
       _shortcutNodes.putIfAbsent(
         choice,
-        () => FocusNode(debugLabel: 'GuideShortcut:category:${choice.$1.name}'),
+        () => FocusNode(debugLabel: 'GuideShortcut:${choice.preferenceKey}'),
       );
 
   KeyEventResult _headerKey(
@@ -1907,11 +1916,25 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     ButtonStyle style,
     double width,
   ) {
+    final l10n = AppLocalizations.of(context);
+    String name(GuideFilterChoice c) =>
+        c.$2 == null ? _filterLabel(c.$1) : c.$2!;
+    final names = <String>{};
+    final duplicates = {
+      for (final c in choices)
+        if (!names.add(name(c))) name(c),
+    };
     Widget chip(int index) {
       final choice = choices[index];
       final active = choice == (_vm.filter, _vm.selectedGroup);
       final node = _shortcutNode(choice);
-      final label = _filterLabel(choice.$1);
+      final favoriteChannels = choice.$1 == GuideFilter.favorites;
+      final label = name(choice);
+      final typedLabel = favoriteChannels
+          ? label
+          : choice.$2 == null
+          ? l10n.guideCategoryShortcut(label)
+          : l10n.guideGroupShortcut(label);
       return Focus(
         key: ValueKey(choice),
         canRequestFocus: false,
@@ -1937,9 +1960,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                   )
                 : style,
             onPressed: () => _applyPickerChoice(choice),
-            icon: const Icon(Icons.favorite_border),
+            icon: favoriteChannels ? const Icon(Icons.favorite_border) : null,
             label: Text(
-              label,
+              duplicates.contains(label) ? typedLabel : label,
+              semanticsLabel: typedLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
