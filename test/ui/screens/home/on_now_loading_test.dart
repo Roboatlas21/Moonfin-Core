@@ -319,6 +319,10 @@ void main() {
           .thenAnswer((_) async => favoriteChannels(List.of(favorites)));
       model.dispose();
       model = homeFor(serverClient);
+      if (cloudOnly) {
+        await prefs.set(UserPreferences.mergeContinueWatchingNextUp, true);
+        await prefs.set(UserPreferences.enableMultiServerLibraries, false);
+      }
       await model.load();
       expect(model.rows.any((r) => r.rowType == HomeRowType.liveTvFavorites), isFalse);
 
@@ -341,6 +345,8 @@ void main() {
       expect(model.rows.any((r) => r.rowType == HomeRowType.liveTvFavorites), isFalse);
       verify(() => source.loadFavoritesChannels('http://server.test')).called(3);
       if (cloudOnly) {
+        verifyNever(() => source.loadResume(any()));
+        verifyNever(() => source.loadNextUp(any()));
         verifyNever(() => source.hasLiveTvChannels());
         final bar = model.mediaBarViewModel as _MockMediaBar;
         verifyNever(() => bar.load(force: true));
@@ -356,6 +362,7 @@ void main() {
     await enableSections({HomeSectionType.liveTv});
     stubLiveTvRows();
     final client = _MockPlexClient();
+    when(() => client.cloudOnly).thenReturn(false);
     final api = _LiveTvApi();
     const device = DeviceInfo(id: 'device', name: 'Test', appName: 'Moonfin', appVersion: '1');
     when(() => client.serverType).thenReturn(ServerType.plex);
@@ -418,6 +425,7 @@ void main() {
     stubLiveTvRows();
     stubFavoriteChannel();
     final client = _MockPlexClient();
+    when(() => client.cloudOnly).thenReturn(false);
     when(() => client.serverType).thenReturn(ServerType.plex);
     model.dispose();
     model = homeFor(client);

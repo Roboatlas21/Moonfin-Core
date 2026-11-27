@@ -11,6 +11,7 @@ import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/repositories/item_mutation_repository.dart';
 import 'package:moonfin/data/repositories/search_repository.dart';
 import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
+import 'package:moonfin/data/services/row_data_source.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/data/viewmodels/search_view_model.dart';
@@ -135,6 +136,36 @@ void main() {
     users.dispose();
     http.close();
     await GetIt.instance.reset();
+  });
+
+  test('cloud Home drops denied TV rows and reports a temporary outage', () async {
+    final api = _LineupApi();
+    final client = _LineupClient(api, cloudOnly: true)..userId = 'plex-user';
+    addTearDown(client.dispose);
+    final source = RowDataSource(client);
+    final request = RequestOptions(path: '/lineups/plex/channels');
+    var status = 403;
+    Future<Map<String, dynamic>> unavailable() async => throw DioException(
+      requestOptions: request,
+      response: Response(requestOptions: request, statusCode: status),
+    );
+    when(() => api.getChannels(limit: 1, enableTotalRecordCount: true))
+        .thenAnswer((_) => unavailable());
+    when(() => api.getChannels(fields: 'ImageTags,UserData'))
+        .thenAnswer((_) => unavailable());
+    when(() => api.getRecommendedPrograms(limit: any(named: 'limit'), isAiring: true))
+        .thenAnswer((_) => unavailable());
+    for (final denied in [401, 403]) {
+      status = denied;
+      expect(await source.hasLiveTvChannels(), isFalse);
+      expect((await source.loadFavoritesChannels(client.baseUrl)).items, isEmpty);
+      expect((await source.loadOnNow(client.baseUrl)).items, isEmpty);
+    }
+    status = 503;
+    final outage = throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 503));
+    await expectLater(source.hasLiveTvChannels(), outage);
+    await expectLater(source.loadFavoritesChannels(client.baseUrl), outage);
+    await expectLater(source.loadOnNow(client.baseUrl), outage);
   });
 
   for (final legacy in [false, true]) {

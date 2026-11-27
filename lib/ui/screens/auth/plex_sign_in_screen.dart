@@ -125,11 +125,11 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
         token,
         address: widget.address,
       );
-      if (!mounted) return;
+      if (!mounted || _token != token) return;
       setState(() => _servers = servers);
     } catch (error) {
       // Keep Free TV selectable if server discovery fails.
-      if (!mounted) return;
+      if (!mounted || _token != token) return;
       setState(() {
         _servers ??= const [];
         _discoveryError = describeError(error, AppLocalizations.of(context));
@@ -182,7 +182,16 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
         setState(() => _errorMessage = AppLocalizations.of(context).loginFailed);
       }
     } catch (e) {
-      if (mounted) _showError(e);
+      if (!mounted) return;
+      // A rejected account token needs a new approval. A temporary failure
+      // can retry the same cloud connection.
+      if (e is DioException && e.response?.statusCode == 401) {
+        _token = null;
+        _servers = null;
+        _discoveryError = null;
+        _usePassword = false;
+      }
+      _showError(e);
     } finally {
       if (mounted) setState(() => _connectingCloud = false);
     }

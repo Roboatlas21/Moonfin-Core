@@ -5,6 +5,31 @@ import 'package:server_core/server_core.dart';
 import 'package:server_silo/server_silo.dart';
 
 void main() {
+  test('reuses a Plex client only for the saved connection mode', () {
+    final factory = MediaServerClientFactory(
+      deviceInfo: const DeviceInfo(
+        id: 'device',
+        name: 'Device',
+        appName: 'Moonfin',
+        appVersion: '1.0.0',
+      ),
+    );
+    addTearDown(factory.disposeAll);
+    MediaServerClient client({required bool cloudOnly}) => factory.getClient(
+      serverId: 'plex-cloud-user',
+      serverType: ServerType.plex,
+      baseUrl: 'https://plex.tv',
+      cloudOnly: cloudOnly,
+    );
+
+    final pms = client(cloudOnly: false);
+    final cloud = client(cloudOnly: true);
+    expect(cloud, isNot(same(pms)));
+    expect(isCloudOnlyPlexClient(cloud), isTrue);
+    expect(client(cloudOnly: true), same(cloud));
+    expect(isCloudOnlyPlexClient(client(cloudOnly: false)), isFalse);
+  });
+
   test('skips the offline wrapper when the offline stack is missing', () {
     // Background isolates register a minimal set of services, so resolving the
     // catalog here used to throw and take the worker down with it.

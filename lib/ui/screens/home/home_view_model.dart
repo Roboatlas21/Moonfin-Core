@@ -1182,7 +1182,7 @@ class HomeViewModel extends ChangeNotifier {
       await _loadDone;
     }
     await Future.wait([
-      _refreshResumeRows(),
+      if (!_cloudOnlyPlex) _refreshResumeRows(),
       _refreshOnNowRows(),
       if (!_disposed &&
           (_client.userId ?? '') == _ownerUserId &&

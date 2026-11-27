@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:collection/collection.dart';
 
 import 'plex_live_tv_favorites.dart';
+import 'media_server_client_factory.dart';
 
 import '../../preference/home_section_config.dart';
 import '../../preference/user_preferences.dart';
@@ -178,10 +179,24 @@ class RowDataSource {
   static bool _shouldRetryWithoutFields(int statusCode) =>
       statusCode == 400 || statusCode >= 500;
 
+  Future<Map<String, dynamic>> _accessibleLiveTvRows(
+    Future<Map<String, dynamic>> request,
+  ) async {
+    try {
+      return await request;
+    } on DioException catch (error) {
+      final status = error.response?.statusCode;
+      if (!isCloudOnlyPlexClient(_client) || (status != 401 && status != 403)) {
+        rethrow;
+      }
+      // Home removes denied cards. A temporary failure can keep visible rows.
+      return const {'Items': <Map<String, dynamic>>[], 'TotalRecordCount': 0};
+    }
+  }
+
   Future<bool> hasLiveTvChannels() async {
-    final response = await _client.liveTvApi.getChannels(
-      limit: 1,
-      enableTotalRecordCount: true,
+    final response = await _accessibleLiveTvRows(
+      _client.liveTvApi.getChannels(limit: 1, enableTotalRecordCount: true),
     );
     final total = response['TotalRecordCount'] as int? ?? 0;
     return total > 0;
@@ -192,8 +207,8 @@ class RowDataSource {
   Future<HomeRow> loadFavoritesChannels(String serverId) async {
     // Show cached hearts as soon as the channel lineup arrives. Home starts
     // the cloud refresh separately and updates this row when it finishes.
-    final response = await _client.liveTvApi.getChannels(
-      fields: 'ImageTags,UserData',
+    final response = await _accessibleLiveTvRows(
+      _client.liveTvApi.getChannels(fields: 'ImageTags,UserData'),
     );
     final pairs = <(GuideChannel, AggregatedItem)>[];
     for (final item in _parseItems(response, serverId)) {
@@ -217,9 +232,8 @@ class RowDataSource {
   }
 
   Future<HomeRow> loadOnNow(String serverId) async {
-    final response = await _client.liveTvApi.getRecommendedPrograms(
-      limit: _defaultLimit,
-      isAiring: true,
+    final response = await _accessibleLiveTvRows(
+      _client.liveTvApi.getRecommendedPrograms(limit: _defaultLimit, isAiring: true),
     );
     return _buildRow(
       id: 'liveTvOnNow',

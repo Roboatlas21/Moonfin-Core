@@ -482,11 +482,19 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     'UserData': {'IsFavorite': false},
   };
 
-  Future<_FreeChannels> _freeLineupForBrowse({void Function()? onUnavailable}) async {
+  Future<_FreeChannels> _freeLineupForBrowse({
+    void Function()? onUnavailable,
+    bool requireAccess = false,
+    Future<_FreeChannels>? read,
+  }) async {
     try {
-      return await _freeChannels();
+      return await (read ?? _freeChannels());
     } catch (error) {
       onUnavailable?.call();
+      if (_accessDenied(error)) {
+        if (cloudOnly || requireAccess) rethrow;
+        return const {};
+      }
       if (cloudOnly) {
         final recoverable = error is FormatException ||
             (error is DioException && error.type != DioExceptionType.cancel &&
@@ -494,7 +502,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         if (_lastFreeLineup == null || !recoverable) rethrow;
       }
       // Keep the last lineup visible without caching it as a successful retry.
-      return _accessDenied(error) ? const {} : _lastFreeLineup ?? const {};
+      return _lastFreeLineup ?? const {};
     }
   }
 
@@ -503,7 +511,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<void> _readChannelSources() async {
     await Future.wait<void>([_freeLineupForBrowse().then((_) {}), _readDvrChannels()]);
     // Another caller can refresh Free TV while this one waits for its tuner.
-    if (_cloudChannels != null) await _freeLineupForBrowse();
+    if (cloudOnly || _cloudChannels != null) {
+      await _freeLineupForBrowse(read: _latestFreeRead);
+    }
   }
 
   static const _featuredPath = '/lineups/plex/channels/featured';
@@ -599,7 +609,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         metadataUnavailable = true;
         return (genres: const <String, String>{}, promoted: _featuredGroup);
       });
-      if (_cloudChannels != null) await _freeLineupForBrowse();
+      if (cloudOnly || _cloudChannels != null) {
+        await _freeLineupForBrowse(read: _latestFreeRead);
+      }
     }
     // Read rows and their failure scope together after the last network wait.
     final dvr = _currentDvrChannels;
@@ -822,14 +834,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     required _GridReads gridReads,
     _FreeChannels? requestedLineup,
   }) async {
-    if (requestedLineup == null) {
-      try {
-        await _freeChannels();
-      } catch (error) {
-        if (_accessDenied(error)) rethrow;
-        // A known station can still use its last verified key during an outage.
-      }
-    }
+    if (requestedLineup == null) await _freeLineupForBrowse(requireAccess: true);
     final first = start.toUtc();
     final exclusiveEnd = end.toUtc();
     final days = {
@@ -1302,8 +1307,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     return programs;
   }
 
-  Future<List<Map<String, dynamic>>> _freeOnNow() =>
-      _loadFreeOnNow().timeout(_cloudOnNowTimeout).onError<Object>((_, _) => []);
+  Future<List<Map<String, dynamic>>> _freeOnNow() {
+    final read = _loadFreeOnNow().timeout(_cloudOnNowTimeout);
+    // With a tuner, the optional hub must leave local programs available.
+    return cloudOnly ? read : read.onError<Object>((_, _) => []);
+  }
 
   Future<List<Map<String, dynamic>>> _loadFreeOnNow({bool retry = true}) async {
     var stale = false;
@@ -1315,9 +1323,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final fresh = _cloudOnNowRows == null || (expires != null && !now.isBefore(expires));
     if (fresh) {
       _cloudOnNowExpiresAt = now.add(_cloudOnNowCacheLife);
-      _cloudOnNowRows = _fetchCloudOnNowRows()
-          .timeout(_cloudOnNowTimeout)
-          .onError<Object>((_, _) => <Map>[]);
+      late final Future<List<Map>> request;
+      request = _fetchCloudOnNowRows().timeout(_cloudOnNowTimeout).catchError((Object error) {
+        if (!cloudOnly || (error is DioException && error.response?.statusCode == 404)) {
+          return <Map>[];
+        }
+        if (identical(_cloudOnNowRows, request)) _cloudOnNowRows = null;
+        throw error;
+      });
+      _cloudOnNowRows = request;
     }
 
     final cached = _cloudOnNowRows!;

@@ -324,6 +324,7 @@ class _ServerScreenState extends State<ServerScreen> {
       serverId: server.id,
       serverType: server.serverType,
       baseUrl: server.address,
+      cloudOnly: server.cloudOnly,
     );
     try {
       return await _authRepo.authenticate(

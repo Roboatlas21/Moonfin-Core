@@ -438,6 +438,36 @@ void main() {
     });
   }
 
+  for (final status in [401, 403]) {
+    test('a concurrent cloud catalog denial reaches the pending guide ($status)', () async {
+      final (dio, server) = _server();
+      final api = PlexLiveTvApi(dio, cloudOnly: true);
+      await api.getChannelGroups();
+      final metadataRequested = Completer<void>();
+      final release = Completer<void>();
+      dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
+        if (request.uri.path == '/') {
+          metadataRequested.complete();
+          await release.future;
+        }
+        handler.next(request);
+      }));
+      server.fail('/lineups/plex/channels', 503);
+      final guide = api.getChannelGroups();
+      await metadataRequested.future.timeout(const Duration(seconds: 3));
+      server.fail('/lineups/plex/channels', status);
+      await expectLater(api.getChannels(), _httpError(status));
+      // Publishing the pending guide must honor the observed denial, even if
+      // the service is now unavailable.
+      server.fail('/lineups/plex/channels', 503);
+      release.complete();
+      await expectLater(guide, _httpError(status));
+      await expectLater(api.getChannels(), _httpError(503));
+      server.failWhen = null;
+      expect((await api.getChannels())['Items'], hasLength(2));
+    });
+  }
+
   test('missing tuner lists retain channels and mark guide rows for retry', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
@@ -943,6 +973,18 @@ void main() {
     expect(lineup.sources.map((source) => source.groupId), ['source:dvr']);
   });
 
+  test('cloud-only On Now can retry a denied or unavailable hub immediately', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    const hub = '/hubs/sections/home/whatsOnNow';
+    for (final status in [401, 403, 503]) {
+      server.fail(hub, status);
+      await expectLater(api.getRecommendedPrograms(), _httpError(status));
+    }
+    server.failWhen = null;
+    expect((await api.getRecommendedPrograms())['Items'], hasLength(1));
+  });
+
   test('Plex On Now uses a cached hub after the DVR lineup', () async {
     const hubPath = '/hubs/sections/home/whatsOnNow';
     final (dio, server) = _server(liveDvr: true);
@@ -1282,14 +1324,23 @@ void main() {
     expect((await sameWindow([free]))['Items'], result['Items']);
     expect((await sameWindow())['Items'], containsAll(programs));
 
+    // A fresh server-backed client has never verified this station's grid key.
     final offline = PlexLiveTvApi(dio);
-    await offline.getProgram('airing-plex-1792699200-abc-66635fc0');
-    expect(server.requests.last.queryParameters['channelGridKey'], '66635fc0');
+    final readsBeforeColdLookup = server.reads('/grid');
+    await expectLater(offline.getProgram(programs.single['Id']), throwsStateError);
+    expect(server.reads('/grid'), readsBeforeColdLookup);
 
+    final readsBeforeDenial = server.reads('/grid');
     server.failureStatus = () => 403;
     await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
     await expectLater(sameWindow(), _httpError(403));
     await expectLater(api.getProgram(programs.single['Id']), throwsA(isA<DioException>()));
+
+    server.failureStatus = () => 503;
+    await expectLater(sameWindow([free]), _httpError(503));
+    await expectLater(sameWindow(), _httpError(503));
+    await expectLater(api.getProgram(programs.single['Id']), _httpError(503));
+    expect(server.reads('/grid'), readsBeforeDenial);
   });
 
   test('a later guide batch can expire a cached grid without losing its listings', () async {

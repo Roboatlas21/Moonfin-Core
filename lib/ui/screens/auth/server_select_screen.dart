@@ -243,7 +243,7 @@ class _ServerSelectScreenState extends State<ServerSelectScreen> {
     }
 
     final server = await _ensureServer(candidateAddress);
-    if (server == null) {
+    if (server == null || server.cloudOnly) {
       return false;
     }
 

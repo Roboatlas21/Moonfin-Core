@@ -65,9 +65,11 @@ class MediaServerClientFactory {
     bool cloudOnly = false,
   }) {
     final normalizedBaseUrl = normalizeServerBaseUrl(baseUrl);
-    // A server whose saved type was corrected needs the other kind of client.
-    if (_clients[serverId]?.serverType case final cached?
-        when cached != serverType) {
+    final cached = _clients[serverId];
+    if (cached != null &&
+        (cached.serverType != serverType ||
+            (serverType == ServerType.plex &&
+                isCloudOnlyPlexClient(cached) != cloudOnly))) {
       removeClient(serverId);
     }
     return _clients.putIfAbsent(serverId, () {
