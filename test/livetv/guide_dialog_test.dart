@@ -15,7 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _MockMediaServerClient extends Mock implements MediaServerClient {}
 
-class _MockLiveTvApi extends Mock implements LiveTvApi {}
+class _MockLiveTvApi extends Mock implements LiveTvApi, ChannelGroupApi {}
 
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
 
@@ -117,6 +117,8 @@ void main() {
     when(() => client.serverType).thenReturn(ServerType.jellyfin);
     when(() => client.userId).thenReturn('user');
     when(() => client.baseUrl).thenReturn('fixture');
+    when(() => liveTvApi.getChannelGroups(userId: 'user'))
+        .thenAnswer((_) async => const ChannelGroupLineup({}));
 
     when(
       () => liveTvApi.getChannels(
