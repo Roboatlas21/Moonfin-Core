@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
@@ -121,6 +123,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<String?>? _favoriteMachineId;
   Future<_FreeChannels>? _cloudChannels;
   Future<_FreeChannels>? _latestFreeRead;
+  AsyncError? _cloudGuideDenial;
   _FreeChannels? _lastFreeLineup;
   Future<ChannelGroupLineup>? _lineupRead;
   PromotedChannelGroup? _featuredGroup;
@@ -424,11 +427,13 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     late final Future<_FreeChannels> read;
     read = _fetchFreeChannels().then((lineup) {
       if (!identical(read, _latestFreeRead)) return _latestFreeRead!;
+      _cloudGuideDenial = null;
       return _publishFreeChannels(lineup);
     }, onError: (Object error, StackTrace stack) {
       if (!identical(read, _latestFreeRead)) return _latestFreeRead!;
       _cloudChannels = null;
       if (_accessDenied(error)) {
+        if (cloudOnly) _cloudGuideDenial = AsyncError(error, stack);
         _lastFreeLineup = null;
         _cloudOnNowRows = null;
         _invalidateGrids((_, _) => true);
@@ -595,7 +600,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   @override
   Future<ChannelGroupLineup> getChannelGroups({String? userId}) =>
-      _lineupRead ??= _loadLineup().whenComplete(() => _lineupRead = null);
+      _lineupRead ??= _loadLineup().whenComplete(() {
+        _lineupRead = null;
+        // The guide clears stale channels on denial. A later outage cannot
+        // confirm access while the guide waits for provider metadata.
+        final denial = _cloudGuideDenial;
+        if (denial != null) {
+          Error.throwWithStackTrace(denial.error, denial.stackTrace);
+        }
+      });
 
   Future<ChannelGroupLineup> _loadLineup() async {
     // A full guide load refreshes even a successfully cached catalog.

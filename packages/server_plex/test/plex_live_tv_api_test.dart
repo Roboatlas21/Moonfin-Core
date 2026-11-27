@@ -431,6 +431,10 @@ void main() {
       }
       final expected = [tuner, if (!denied) ...[free, extra]];
       expect((await api.getChannels())['Items'], hasLength(expected.length));
+      if (denied) {
+        server.fail('/lineups/plex/channels', 503);
+        expect((await api.getChannels())['Items'].single['Id'], tuner);
+      }
       release.complete();
       final published = await guide;
       expect(published.channels!.map((c) => c['Id']), unorderedEquals(expected));
@@ -438,8 +442,8 @@ void main() {
     });
   }
 
-  for (final status in [401, 403]) {
-    test('a concurrent cloud catalog denial reaches the pending guide ($status)', () async {
+  for (final (status, recovered) in [(401, false), (403, false), (403, true)]) {
+    test('pending cloud guide honors catalog denial until recovery ($status, recovered: $recovered)', () async {
       final (dio, server) = _server();
       final api = PlexLiveTvApi(dio, cloudOnly: true);
       await api.getChannelGroups();
@@ -457,14 +461,20 @@ void main() {
       await metadataRequested.future.timeout(const Duration(seconds: 3));
       server.fail('/lineups/plex/channels', status);
       await expectLater(api.getChannels(), _httpError(status));
-      // Publishing the pending guide must honor the observed denial, even if
-      // the service is now unavailable.
       server.fail('/lineups/plex/channels', 503);
-      release.complete();
-      await expectLater(guide, _httpError(status));
       await expectLater(api.getChannels(), _httpError(503));
-      server.failWhen = null;
-      expect((await api.getChannels())['Items'], hasLength(2));
+      if (recovered) {
+        server.failWhen = null;
+        expect((await api.getChannels())['Items'], hasLength(2));
+      }
+      release.complete();
+      if (recovered) {
+        expect((await guide).channels, hasLength(2));
+      } else {
+        await expectLater(guide, _httpError(status));
+        server.failWhen = null;
+        expect((await api.getChannelGroups()).channels, hasLength(2));
+      }
     });
   }
 
