@@ -12,6 +12,7 @@ import 'package:moonfin_design/moonfin_design.dart';
 import 'package:server_core/server_core.dart';
 
 import '../../../data/models/series_recording_episodes.dart';
+import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../data/services/user_data_sync.dart';
 import '../../../l10n/app_localizations.dart';
@@ -167,8 +168,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final _prefs = GetIt.instance<UserPreferences>();
   final _client = GetIt.instance<MediaServerClient>();
 
+  bool get _canOpenRecordings => !isCloudOnlyPlexClient(_client);
   int get _maxWindowBarIndex =>
-      _kWindowBarRecordings;
+      _canOpenRecordings ? _kWindowBarRecordings : _kWindowBarDate;
   final _categoryRetryFocus = FocusNode(debugLabel: 'GuideCategoryRetry');
   final _guideErrorRetryFocus = FocusNode(debugLabel: 'GuideErrorRetry');
   final _channelScrollController = ScrollController();
@@ -1051,7 +1053,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   Future<void> _openRecordings() async {
-    if (_isOpeningRecordings) return;
+    if (!_canOpenRecordings || _isOpeningRecordings) return;
     _cancelPendingVerticalMove();
     _isOpeningRecordings = true;
     try {
@@ -1190,7 +1192,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         if (!event.logicalKey.isRecordingsKey) {
           return KeyEventResult.ignored;
         }
-        if (event is KeyDownEvent) {
+        if (_canOpenRecordings && event is KeyDownEvent) {
           unawaited(_openRecordings());
         }
         return KeyEventResult.handled;
@@ -2643,7 +2645,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             icon: Icons.calendar_today,
             onPressed: _openDatePicker,
           ),
-          ...[
+          if (_canOpenRecordings) ...[
             const SizedBox(width: 4),
             _windowBarButton(
               _kWindowBarRecordings,

@@ -19,6 +19,7 @@ import '../../../data/repositories/multi_server_repository.dart';
 import '../../../data/repositories/user_views_repository.dart';
 import '../../../data/utils/latest_media_row_normalizer.dart';
 import '../../../data/services/connectivity_service.dart';
+import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/services/plex_live_tv_favorites.dart';
 import '../../../data/services/home_row_cache_store.dart';
 import '../../../data/services/row_data_source.dart';
@@ -161,6 +162,11 @@ class HomeViewModel extends ChangeNotifier {
 
   bool get _multiServerEnabled =>
       !_isOffline && _prefs.get(UserPreferences.enableMultiServerLibraries);
+
+  bool get _cloudOnlyPlex => isCloudOnlyPlexClient(_client);
+
+  /// Whether this connection is Plex Free TV without a media server.
+  bool get isCloudOnlyPlex => _cloudOnlyPlex;
 
   /// Whether a stored address is the server this client is on, ignoring the
   /// harmless ways the two spellings differ, such as a trailing slash or the
@@ -414,7 +420,7 @@ class HomeViewModel extends ChangeNotifier {
     final done = Completer<void>();
     _loadDone = done.future;
     if (!newSectionsOnly) {
-      _mediaBarViewModel.load(force: forceRefresh);
+      if (!_cloudOnlyPlex) _mediaBarViewModel.load(force: forceRefresh);
       _rowOffsets.clear();
       _multiServerRepo.clearOffsets();
       _rowsPagedThisLoad.clear();
@@ -433,7 +439,27 @@ class HomeViewModel extends ChangeNotifier {
 
       final activeConfigs = _prefs.activeHomeSectionConfigs;
       final fallbackUsed = activeConfigs.isEmpty;
-      final configs = fallbackUsed
+      // Cloud Home can show Live TV and external charts, but not library rows.
+      final configs = _cloudOnlyPlex
+          ? <HomeSectionConfig>[
+              if (!_prefs.get(UserPreferences.kidsModeEnabled))
+                const HomeSectionConfig(
+                  type: HomeSectionType.liveTv,
+                  enabled: true,
+                  order: 0,
+                ),
+              for (final config in activeConfigs)
+                if (config.isBuiltin &&
+                    config.type != HomeSectionType.liveTv &&
+                    ((!_prefs.get(UserPreferences.kidsModeEnabled) &&
+                            config.type == HomeSectionType.onNow) ||
+                        _isSeerrSectionType(config.type) ||
+                        _isTmdbSectionType(config.type) ||
+                        externalCharts.containsKey(config.type) ||
+                        config.type == HomeSectionType.mdblistWatchingNow))
+                  config,
+            ]
+          : fallbackUsed
           ? const [
               HomeSectionConfig(
                 type: HomeSectionType.resume,
@@ -547,7 +573,7 @@ class HomeViewModel extends ChangeNotifier {
         _watchingNowTimer = null;
       }
 
-      if (!sections.contains(HomeSectionType.mediaBar)) {
+      if (!_cloudOnlyPlex && !sections.contains(HomeSectionType.mediaBar)) {
         _mediaBarViewModel.load(force: forceRefresh);
       }
 
@@ -643,7 +669,11 @@ class HomeViewModel extends ChangeNotifier {
           }
         }
         final currentConfigs = _prefs.activeHomeSectionConfigs;
-        final isStillActive = currentConfigs.any((c) => c.stableId == cfg.stableId);
+        final isStillActive =
+            (_cloudOnlyPlex &&
+                !_prefs.get(UserPreferences.kidsModeEnabled) &&
+                cfg.type == HomeSectionType.liveTv) ||
+            currentConfigs.any((c) => c.stableId == cfg.stableId);
         if (!isStillActive) return;
         // Cleanup runs even when the load failed, so the section's loading
         // placeholder is cleared instead of spinning forever.
@@ -1871,10 +1901,13 @@ class HomeViewModel extends ChangeNotifier {
                 ),
         ];
       case HomeSectionType.liveTv:
-        try {
-          if (!await _dataSource.hasLiveTvChannels()) return [];
-        } catch (_) {
-          return [];
+        // Keep Live TV visible even if the Cloud lineup is unavailable.
+        if (!_cloudOnlyPlex) {
+          try {
+            if (!await _dataSource.hasLiveTvChannels()) return [];
+          } catch (_) {
+            return [];
+          }
         }
         final rows = <HomeRow>[
           HomeRow(

@@ -460,15 +460,21 @@ class SearchViewModel extends ChangeNotifier {
   Future<List<List<AggregatedItem>>> _searchEachServer(
     Future<List<AggregatedItem>> Function(SearchRepository repository) search, {
     required String label,
+    bool includeCloudOnly = false,
     void Function()? onPartialFailure,
   }) async {
     final multiServer = _multiServerRepository;
     if (multiServer == null) {
+      // Cloud accounts can search Live TV channels, but not media libraries.
+      if (!includeCloudOnly && isCloudOnlyPlexClient(_client)) {
+        return const <List<AggregatedItem>>[];
+      }
       return [await search(_searchRepository)];
     }
     return multiServer.searchEachServer(
       search,
       label: label,
+      includeCloudOnly: includeCloudOnly,
       onPartialFailure: onPartialFailure,
     );
   }
@@ -493,6 +499,7 @@ class SearchViewModel extends ChangeNotifier {
     final perServer = await _searchEachServer(
       (repository) => repository.fetchLiveTvChannels(),
       label: 'channel lineup',
+      includeCloudOnly: true,
       onPartialFailure: () => partial = true,
     );
     if (partial) _channelsFuture = null;

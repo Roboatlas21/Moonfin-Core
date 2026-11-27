@@ -126,6 +126,7 @@ void main() {
           serverId: id,
           serverType: ServerType.jellyfin,
           baseUrl: 'http://$id',
+          cloudOnly: false,
         ),
       ).thenReturn(client);
       when(() => factory.getClientIfExists(id)).thenReturn(client);

@@ -75,10 +75,12 @@ typedef _Grab = ({Map op, Map<String, dynamic> program});
 /// Plex's free channels, which plex.tv serves itself.
 class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   final Dio _dio;
+  final bool cloudOnly;
   final DateTime Function() _gridCacheNow;
 
   PlexLiveTvApi(
     this._dio, {
+    this.cloudOnly = false,
     DateTime Function() gridCacheNow = DateTime.now,
   }) : _gridCacheNow = gridCacheNow;
 
@@ -203,6 +205,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }
 
   Future<List<_Dvr>> _dvrList({void Function()? onIncomplete}) async {
+    if (cloudOnly) return [];
     final read = _cached(() => _dvrs, (f) => _dvrs = f, () async {
       // A rediscovered tuner at the same address can belong to another PMS.
       _favoriteMachineId = null;
@@ -458,6 +461,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       return await _freeChannels();
     } catch (error) {
       onUnavailable?.call();
+      if (cloudOnly) {
+        final recoverable = error is FormatException ||
+            (error is DioException && error.type != DioExceptionType.cancel &&
+                error.type != DioExceptionType.badCertificate && _temporaryLineupFailure(error));
+        if (_lastFreeLineup == null || !recoverable) rethrow;
+      }
       // Keep the last lineup visible without caching it as a successful retry.
       return _accessDenied(error) ? const {} : _lastFreeLineup ?? const {};
     }
@@ -923,7 +932,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     List<String>? channelIds,
     bool reportGuideFailures = false,
   }) async {
-    final requestedIds = channelIds ?? const <String>[];
+    // Omitted IDs request all Cloud-only channels; [] remains a no-op.
+    final requestedIds = channelIds ??
+        (cloudOnly
+            ? (await _freeChannels()).keys.toList()
+            : const <String>[]);
     final free = [
       for (final id in requestedIds)
         if (plexChannelOf(id) case (source: plexCloudSource, :final channel))
@@ -973,7 +986,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final stale = <String>{};
     if (free.isNotEmpty) _activeGridReads[gridReads] = stale;
     final pending = Future.wait([
-      if (channelIds == null || channelIds.length > free.length)
+      if (!cloudOnly && (channelIds == null || channelIds.length > free.length))
         attempt(
           () => _dvrAirings(start, end, channelIds: channelIds?.toSet(),
               reportGuideFailures: reportGuideFailures),
@@ -1316,6 +1329,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final now = DateTime.now();
     final dvr = <Map<String, dynamic>>[];
     (Object, StackTrace)? tunerFailure;
+    if (!cloudOnly) {
       try {
         final airings = await _dvrAirings(now, now.add(const Duration(seconds: 1)));
         dvr.addAll(airings.items);
@@ -1327,6 +1341,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       } on FormatException catch (error, stack) {
         tunerFailure = (error, stack);
       }
+    }
     final programs = <Map<String, dynamic>>[
       ...(limit == null ? dvr : dvr.take(limit)),
     ];
@@ -1378,6 +1393,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   @override
   Future<Map<String, dynamic>> getTimers() async => plexItemsResult([
+    if (!cloudOnly)
       for (final grab in await _grabs())
       {
         'Id': grab.op['id'],
@@ -1400,6 +1416,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   @override
   Future<Map<String, dynamic>> getSeriesTimers() async {
+    if (cloudOnly) return plexItemsResult([]);
     final container = await plexContainer(_dio, '/media/subscriptions');
     return plexItemsResult([
       for (final rule in container['MediaSubscription'] as List? ?? const [])

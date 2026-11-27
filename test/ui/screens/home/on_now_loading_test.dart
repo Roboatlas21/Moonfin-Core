@@ -293,6 +293,7 @@ void main() {
     (ServerType.jellyfin, false),
     (ServerType.emby, false),
     (ServerType.plex, false),
+    (ServerType.plex, true),
   ]) {
     test('returning from the guide updates ${cloudOnly ? 'Plex Cloud' : serverType.name} channel favorites', () async {
       await enableSections({HomeSectionType.liveTv});
@@ -300,6 +301,7 @@ void main() {
       final MediaServerClient serverClient;
       if (serverType == ServerType.plex) {
         final plex = _MockPlexClient();
+        when(() => plex.cloudOnly).thenReturn(cloudOnly);
         serverClient = plex;
       } else {
         serverClient = _MockClient();

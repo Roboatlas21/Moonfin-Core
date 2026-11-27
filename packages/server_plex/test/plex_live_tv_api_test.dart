@@ -635,6 +635,40 @@ void main() {
     expect(server.requests.last.headers['X-Plex-Provider-Version'], '7.2');
   });
 
+  test('full lineup refresh picks up new Free TV channels and genres', () async {
+    var name = 'Sports';
+    final server = _FakeServer((request) => switch (request.uri.path) {
+      '/lineups/plex/channels' => {'MediaContainer': {'Channel': [
+        {'id': name, 'title': name, 'genreRatingKeys': ['genre']},
+      ]}},
+      '/' => {'MediaProvider': {'Feature': [
+        {'type': 'grid', 'GridChannelFilter': [
+          {'genreRatingKey': 'genre', 'title': name},
+        ]},
+      ]}},
+      _ => throw StateError('Unexpected request ${request.uri.path}'),
+    });
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
+    await api.getChannelGroups();
+    name = 'News';
+    final (lineup, concurrent) = await (api.getChannelGroups(), api.getChannelGroups()).wait;
+    expect(concurrent, same(lineup));
+    expect(lineup.groupsByChannelId, {'channel-plex-News': {'News'}});
+    expect((await api.getChannels())['Items'], lineup.channels);
+    expect(server.requests, hasLength(4));
+
+    server.fail('/lineups/plex/channels', 503);
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final stale = await api.getChannelGroups();
+      expect(stale.channels, lineup.channels);
+      expect(stale.partial, isTrue);
+      expect(stale.unresolvedChannelIds, isNull);
+    }
+    server.failWhen = null;
+    name = 'Movies';
+    final recovered = (await api.getChannels())['Items'] as List;
+    expect(recovered.single['Id'], 'channel-plex-Movies');
+  });
 
   test('tuner errors preserve healthy sources until discovery confirms removal', () async {
     final (dio, server) = _server(secondDvr: true);
@@ -669,13 +703,13 @@ void main() {
     expect((await api.getChannelGroups()).unresolvedChannelIds, isEmpty);
   });
 
-  for (final cloudOnly in [false]) {
+  for (final cloudOnly in [true, false]) {
     test('Free TV keeps the last complete lineup until zero is confirmed (cloudOnly=$cloudOnly)', () async {
       final (dio, server) = _server();
       List<Object?> rows = [{'id': 'news'}, {'id': 'film'}, {'id': 'locked', 'drm': true}];
       var size = rows.length;
       server.replies['/lineups/plex/channels'] = (_) => _channels(rows, size: size);
-      final api = PlexLiveTvApi(dio);
+      final api = PlexLiveTvApi(dio, cloudOnly: cloudOnly);
       final healthy = await api.getChannelGroups();
       final dvrIds = [if (!cloudOnly) 'channel-2-4'];
       expect(healthy.groupsByChannelId.keys, unorderedEquals([...dvrIds, 'channel-plex-news', 'channel-plex-film']));
@@ -705,9 +739,150 @@ void main() {
     });
   }
 
+  test('cloud-only lineup failures propagate while Plex DVRs remain usable', () async {
+    final (dio, server) = _server();
+    server.failWhen = (request) => request.uri.path == '/lineups/plex/channels';
 
+    final cloud = PlexLiveTvApi(dio, cloudOnly: true);
+    final cloudFailure = isA<DioException>().having(
+      (error) => error.type,
+      'Free TV connection failure',
+      DioExceptionType.connectionError,
+    );
+    await expectLater(cloud.getChannelGroups(), throwsA(cloudFailure));
+    await expectLater(cloud.getChannels(), throwsA(cloudFailure));
+    expect(server.requests, isEmpty);
 
+    final serverWithDvr = PlexLiveTvApi(dio);
+    final lineup = await serverWithDvr.getChannelGroups();
+    expect(lineup.channels?.map((channel) => channel['Id']), ['channel-2-4']);
+    expect(lineup.partial, isTrue);
+    expect(lineup.unresolvedChannelIds, isNull);
+    expect(lineup.groupsByChannelId, {
+      'channel-2-4': {'source:dvr'},
+    });
+    expect(lineup.sources.map((source) => source.groupId), ['source:dvr']);
+  });
 
+  test('Plex On Now uses a cached hub after the DVR lineup', () async {
+    const hubPath = '/hubs/sections/home/whatsOnNow';
+    final (dio, server) = _server(liveDvr: true);
+    final cloud = PlexLiveTvApi(dio, cloudOnly: true);
+    final free = (await cloud.getRecommendedPrograms(limit: 15))['Items'] as List;
+    expect(free, hasLength(1));
+    expect(free.single['ChannelId'], 'channel-plex-abc-66635fc0');
+    expect(free.single['Name'], 'Free TV show');
+    await cloud.getRecommendedPrograms(limit: 15);
+    expect(server.reads(hubPath), 1);
+    expect(server.requests.any((r) => r.uri.path == '/grid'), isFalse);
+
+    final dvr = PlexLiveTvApi(dio);
+    expect((await dvr.getRecommendedPrograms(limit: 1))['Items'], hasLength(1));
+    expect(server.reads(hubPath), 1);
+    // Past and future repeats of the DVR show must leave room for Free TV.
+    final combined = (await dvr.getRecommendedPrograms(limit: 2))['Items'] as List;
+    expect(combined.map((item) => item['ChannelId']), [
+      'channel-2-4', 'channel-plex-abc-66635fc0',
+    ]);
+  });
+
+  test('On Now prefers exact channel references and skips ambiguous suffixes', () async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    var refreshedLineup = false;
+    final references = {
+      'Shared grid only': {'channelGridKey': 'shared-grid'},
+      'East news': {'channelGridKey': 'shared-grid'},
+      'Exact ID': {'channelIdentifier': 'east'},
+      'Retired station': {'channelId': {'id': 'retired-west', 'gridKey': 'west-grid'}},
+      'Conflicting short ID': {'channelIdentifier': 'south', 'channelGridKey': 'west-grid'},
+      'West broadcast': {'channelGridKey': 'west-grid'},
+      'Nested grid key': {'channelId': {'id': '', 'gridKey': 'north-grid'}},
+      'Unique suffix': {'channelId': 'south'},
+      'Ambiguous suffix': {'channelId': 'shared'},
+    };
+    final server = _FakeServer((options) => {
+      'MediaContainer': options.uri.path == '/lineups/plex/channels'
+          ? {'Channel': [
+              for (final id in ['city-east', 'east', 'city-south', 'a-shared', 'b-shared'])
+                {'id': id, 'title': id},
+              {'id': 'west-news', 'gridKey': 'shared-grid'},
+              {'id': 'east-news', 'gridKey': refreshedLineup ? 'east-grid' : 'shared-grid'},
+              {'id': 'city-west', 'gridKey': refreshedLineup ? 'north-grid' : 'west-grid'},
+              {'id': 'city-north', 'gridKey': refreshedLineup ? 'west-grid' : 'north-grid'},
+            ]}
+          : {'Metadata': [
+              for (final entry in references.entries)
+                {'title': entry.key, 'type': 'movie',
+                 if (entry.key == 'East news') 'channelIdentifier': 'east-news',
+                 'Media': [
+                  {...entry.value, 'beginsAt': now - 60, 'endsAt': now + 60},
+                ]},
+            ]},
+    });
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
+    final items = (await api.getRecommendedPrograms(limit: 10))['Items'] as List;
+    expect({for (final item in items) item['Name']: item['ChannelId']}, {
+      'East news': 'channel-plex-east-news',
+      'Exact ID': 'channel-plex-east',
+      'West broadcast': 'channel-plex-city-west',
+      'Nested grid key': 'channel-plex-city-north',
+      'Unique suffix': 'channel-plex-city-south',
+    });
+
+    await api.getChannelGroups();
+    await api.getRecommendedPrograms();
+    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(1));
+
+    refreshedLineup = true;
+    references['North broadcast'] = references.remove('West broadcast')!;
+    await api.getChannelGroups();
+    final refreshed = (await api.getRecommendedPrograms())['Items'] as List;
+    expect({for (final item in refreshed) item['Name']: item['ChannelId']}, {
+      'Shared grid only': 'channel-plex-west-news',
+      'East news': 'channel-plex-east-news',
+      'Exact ID': 'channel-plex-east',
+      'North broadcast': 'channel-plex-city-north',
+      'Nested grid key': 'channel-plex-city-west',
+      'Unique suffix': 'channel-plex-city-south',
+    });
+    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(2));
+    final pms = PlexLiveTvApi(Dio()..interceptors.add(server));
+    await pms.getChannels();
+    server.fail('/lineups/plex/channels', 503);
+    await pms.getChannelGroups();
+    final duringOutage = (await pms.getRecommendedPrograms())['Items'] as List;
+    expect(duringOutage.map((row) => row['Name']), ['East news', 'Exact ID']);
+  });
+
+  test('a fresh Home hub rechecks aliases and uses exact station IDs directly', () async {
+    var owner = 'west';
+    final reference = <String, dynamic>{'channelIdentifier': 'west'};
+    final server = _FakeServer((r) {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      if (r.uri.path == '/lineups/plex/channels') {
+        return {'MediaContainer': {'Channel': [for (final id in ['west', 'north'])
+            {'id': id, if (id == owner) 'gridKey': 'moving-key'}]}};
+      }
+      final title = '$owner broadcast';
+      if (reference.containsKey('channelGridKey')) owner = 'north';
+      return {'MediaContainer': {'Metadata': [{'title': title, 'Media': [
+              {...reference, 'beginsAt': now - 60, 'endsAt': now + 2},
+          ]}]}};
+    });
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
+    await api.getChannels();
+    Future<Map> onNow() async =>
+        ((await api.getRecommendedPrograms())['Items'] as List).single as Map;
+    final first = await onNow();
+    expect(first['ChannelId'], 'channel-plex-west');
+    expect(server.reads('/lineups/plex/channels'), 1);
+    reference..clear()..['channelGridKey'] = 'moving-key';
+    await Future<void>.delayed(DateTime.parse(first['EndDate']).difference(DateTime.now()));
+    final refreshed = await Future.wait([onNow(), onNow()]);
+    expect(refreshed.map((row) => row['ChannelId']), everyElement('channel-plex-north'));
+    expect(refreshed.map((row) => row['Name']), everyElement('north broadcast'));
+    expect(server.requests.where((r) => r.uri.path.endsWith('/whatsOnNow')), hasLength(3));
+  });
 
   test('On Now retains programs from healthy sources and propagates session errors', () async {
     const grid = '/tv.plex.providers.epg.xmltv:2/grid';
@@ -822,9 +997,114 @@ void main() {
         ['/media/subscriptions/7', '/media/grabbers/operations/weekly']);
   });
 
+  test('a missing Free TV program list is retryable until Plex confirms zero', () async {
+    final grid = <String, dynamic>{'size': 1};
+    final (dio, server) = _server();
+    server.replies['/grid'] = (_) => {'MediaContainer': grid};
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    Future<Map<String, dynamic>> guide() => api.testGuide([free]);
+    await expectLater(guide(), throwsFormatException);
+    grid.clear();
+    await expectLater(guide(), throwsFormatException);
+    grid['size'] = 0;
+    expect((await guide())['Items'], isEmpty);
+    expect((await guide())['Items'], isEmpty);
+    expect(server.reads('/grid'), 3);
+  });
 
+  test('Free TV guide and program details share the published grid key', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    final result = await api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22, 20).toLocal(),
+      endDate: DateTime.utc(2026, 10, 22, 22).toLocal(),
+      channelIds: ['channel-plex-abc-66635fc0'],
+    );
 
+    final programs = (result['Items'] as List).cast<Map>();
+    expect(programs.map((p) => p['Id']), [
+      'airing-plex-1792699200-abc-66635fc0',
+    ]);
+    expect((await api.getProgram(programs.single['Id']))['Name'], 'Law Abiding Citizen');
+    expect(server.requests.map((r) => r.uri.path), ['/lineups/plex/channels', '/grid']);
+    expect(server.requests.last.queryParameters, {
+      'date': '2026-10-22', 'channelGridKey': 'provider-42',
+    });
 
+    server.fail('/lineups/plex/channels', 503);
+    expect((await api.getChannelGroups()).partial, isTrue);
+    expect((await api.getProgram(programs.single['Id']))['Name'], 'Law Abiding Citizen');
+    expect(server.reads('/grid'), 1);
+
+    final offline = PlexLiveTvApi(dio);
+    await offline.getProgram('airing-plex-1792699200-abc-66635fc0');
+    expect(server.requests.last.queryParameters['channelGridKey'], '66635fc0');
+
+    server.failureStatus = () => 403;
+    await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
+    await expectLater(api.getProgram(programs.single['Id']), throwsA(isA<DioException>()));
+  });
+
+  test('a later guide batch can expire a cached grid without losing its listings', () async {
+    var now = DateTime.utc(2026, 10, 22, 12);
+    const stations = ['a', 'b', 'c', 'd'];
+    final (dio, server) = _server();
+    server.replies['/lineups/plex/channels'] = (_) => _channels([for (final id in stations) {'id': id}]);
+    server.replies['/grid'] = (r) {
+      final station = r.queryParameters['channelGridKey'];
+      if (station == 'c') now = now.add(const Duration(minutes: 2));
+      return _schedule('Show $station', [_airing]);
+    };
+    final api = PlexLiveTvApi(dio, cloudOnly: true, gridCacheNow: () => now);
+    Future<Map> guide(List<String> ids) => api.testGuide([for (final id in ids) 'channel-plex-$id']);
+    await guide(['a']);
+    now = now.add(const Duration(minutes: 9));
+    final result = await guide(stations);
+    expect((result['Items'] as List).map((item) => item['Name']), unorderedEquals(
+      [for (final id in stations) 'Show $id'],
+    ));
+    expect(result['FailedChannelIds'], isNull);
+    await guide(['a']);
+    expect(server.requests.where((r) => r.uri.path == '/grid')
+        .map((r) => r.queryParameters['channelGridKey']), ['a', 'b', 'c', 'd', 'a']);
+  });
+
+  test('a guide refresh during station reassignment drops the stale grid and caches each new schedule', () async {
+    final started = Completer<void>(), release = Completer<void>();
+    final (dio, server) = _server();
+    var owner = 'west';
+    server.replies['/lineups/plex/channels'] = (_) => _channels([
+      for (final id in ['west', 'north']) {'id': id, 'gridKey': id == owner ? 'shared' : 'other'},
+    ]);
+    server.replies['/grid'] = (r) => _schedule(
+        r.queryParameters['channelGridKey'] == 'shared' ? '$owner show' : 'Other show', [_airing]);
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (r, handler) async {
+      if (r.uri.path == '/grid' && !started.isCompleted) {
+        started.complete();
+        await release.future;
+      }
+      handler.next(r);
+    }));
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    Future<Map> guide(String station) => api.testGuide(['channel-plex-$station']);
+    final pending = guide('west');
+    await started.future;
+    owner = 'north';
+    await api.getChannelGroups();
+    release.complete();
+    final stale = await pending;
+    expect(stale['Items'], isEmpty);
+    expect(stale['FailedChannelIds'], ['channel-plex-west']);
+    for (final station in ['west', 'north']) {
+      final result = await guide(station);
+      final item = (result['Items'] as List).single;
+      expect(item['ChannelId'], 'channel-plex-$station');
+      expect(item['Name'], station == owner ? 'north show' : 'Other show');
+      final reads = server.reads('/grid');
+      expect((await guide(station))['Items'], result['Items']);
+      expect(server.reads('/grid'), reads);
+    }
+  });
 
   test('a conflicting grid station during a catalog outage is retryable', () async {
     const channel = free;
