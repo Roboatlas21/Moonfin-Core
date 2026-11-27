@@ -1076,10 +1076,11 @@ void main() {
   });
 
   test('a fresh Home hub rechecks aliases and uses exact station IDs directly', () async {
+    var now = DateTime.utc(2026, 10, 22, 20);
     var owner = 'west';
     final reference = <String, dynamic>{'channelIdentifier': 'west'};
     final server = _FakeServer((r) {
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final seconds = now.millisecondsSinceEpoch ~/ 1000;
       if (r.uri.path == '/lineups/plex/channels') {
         return {'MediaContainer': {'Channel': [for (final id in ['west', 'north'])
             {'id': id, if (id == owner) 'gridKey': 'moving-key'}]}};
@@ -1087,10 +1088,10 @@ void main() {
       final title = '$owner broadcast';
       if (reference.containsKey('channelGridKey')) owner = 'north';
       return {'MediaContainer': {'Metadata': [{'title': title, 'Media': [
-              {...reference, 'beginsAt': now - 60, 'endsAt': now + 2},
+              {...reference, 'beginsAt': seconds - 60, 'endsAt': seconds + 2},
           ]}]}};
     });
-    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true);
+    final api = PlexLiveTvApi(Dio()..interceptors.add(server), cloudOnly: true, now: () => now);
     await api.getChannels();
     Future<Map> onNow() async =>
         ((await api.getRecommendedPrograms())['Items'] as List).single as Map;
@@ -1098,7 +1099,7 @@ void main() {
     expect(first['ChannelId'], 'channel-plex-west');
     expect(server.reads('/lineups/plex/channels'), 1);
     reference..clear()..['channelGridKey'] = 'moving-key';
-    await Future<void>.delayed(DateTime.parse(first['EndDate']).difference(DateTime.now()));
+    now = DateTime.parse(first['EndDate']);
     final refreshed = await Future.wait([onNow(), onNow()]);
     expect(refreshed.map((row) => row['ChannelId']), everyElement('channel-plex-north'));
     expect(refreshed.map((row) => row['Name']), everyElement('north broadcast'));

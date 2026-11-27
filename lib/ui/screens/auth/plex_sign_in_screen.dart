@@ -182,7 +182,7 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
         setState(() => _errorMessage = AppLocalizations.of(context).loginFailed);
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || _token != token) return;
       // A rejected account token needs a new approval. A temporary failure
       // can retry the same cloud connection.
       if (e is DioException && e.response?.statusCode == 401) {
