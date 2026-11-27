@@ -537,6 +537,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     _ => null,
   };
 
+  static String _providerField(Object? row, String field) {
+    final value = row is Map ? row[field] : null;
+    if (value is! String || value.trim().isEmpty) {
+      throw FormatException('Invalid Plex provider $field');
+    }
+    return value;
+  }
+
   Future<_CloudGroups> _providerGroups() async {
     final response = await _dio.get<Map<String, dynamic>>(
       '$plexCloudEpg/',
@@ -548,8 +556,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     }
     final genres = <String, String>{};
     PromotedChannelGroup? promoted;
-    for (final feature in (provider['Feature'] as List).whereType<Map>()) {
-      if (feature['type'] != 'grid') continue;
+    for (final feature in provider['Feature'] as List) {
+      if (_providerField(feature, 'type') != 'grid') continue;
       for (final filter
           in feature['GridChannelFilter'] as List? ?? const []) {
         if (filter case {'genreRatingKey': final rawKey, 'title': String title}) {
@@ -558,16 +566,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           if (key != null && name.isNotEmpty) genres[key] = name;
         }
       }
-      for (final filter
-          in feature['PromotedGridChannelFilter'] as List? ?? const []) {
-        if (filter case {
-          'key': _featuredPath,
-          'title': String name,
-        } when name.isNotEmpty) {
-          promoted = _featuredGroup?.name == name
-              ? _featuredGroup
-              : PromotedChannelGroup(name, _featuredIds);
-        }
+      if (!feature.containsKey('PromotedGridChannelFilter')) continue;
+      final filters = feature['PromotedGridChannelFilter'];
+      if (filters is! List) throw const FormatException('Invalid Plex promoted filters');
+      for (final filter in filters) {
+        if (_providerField(filter, 'key') != _featuredPath) continue;
+        final name = _providerField(filter, 'title');
+        promoted = _featuredGroup?.name == name
+            ? _featuredGroup
+            : PromotedChannelGroup(name, _featuredIds);
       }
     }
     _featuredGroup = promoted;
@@ -861,18 +868,17 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
               // Commit a grid's programs only after it decodes completely.
               final decoded = <Map<String, dynamic>>[];
               for (final item in items) {
-                if (item is! Map) continue;
+                if (item is! Map) throw const FormatException('Invalid Plex Free TV grid row');
                 final mediaItems = item['Media'];
                 if (mediaItems == null) continue;
                 if (mediaItems is! List) {
                   throw const FormatException('Invalid Plex Free TV grid Media');
                 }
                 for (final media in mediaItems) {
-                  if (media is! Map) continue;
+                  if (media is! Map) throw const FormatException('Invalid Plex Free TV grid airing');
                   final program = _program(plexCloudSource, request.channel, item, media);
                   if (program == null || !_overlapsWindow(media, from, to)) continue;
-                  final station = _stationIds(media, item).firstOrNull;
-                  if (station != null && station != request.channel) {
+                  if (_stationIds(media, item).any((id) => id != request.channel)) {
                     failedChannelIds.add(id);
                     if (identical(catalog, _cloudChannels)) _cloudChannels = null;
                     _invalidateGrids((k, items) => k == key && identical(items, itemsFuture));
@@ -1204,7 +1210,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
     String? matchChannel(Map media, Map row) {
       final stationIds = <String>[];
-      String? exact, grid, stationInGridField, suffix;
+      final exact = <String>{};
+      String? grid, stationInGridField, suffix;
       void consider(Object? value, {required bool stationId}) {
         final raw = value?.toString().trim();
         if (raw == null || raw.isEmpty) return;
@@ -1213,7 +1220,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         final knownStation = lineup.containsKey(_channelId(plexCloudSource, key));
         if (stationId) {
           stationIds.add(raw);
-          if (knownStation) exact ??= key;
+          if (knownStation) exact.add(key);
         }
         if (gridKeys.containsKey(key)) {
           // A shared guide cannot identify a station by itself.
@@ -1238,7 +1245,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           }
         }
       }
-      if (exact != null || !allowAliases) return exact;
+      if (exact.isNotEmpty || !allowAliases) return exact.singleOrNull;
       final match = grid ?? stationInGridField ?? suffix;
       if (match == null || stationIds.isEmpty) return match;
       // A guide key can change owners. An explicit short ID must agree with its unique station.

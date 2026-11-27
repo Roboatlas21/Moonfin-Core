@@ -451,6 +451,28 @@ void main() {
     expect(guide['FailedChannelIds'], [tuner]);
   });
 
+  test('malformed provider metadata preserves Featured until a complete response removes it', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final featured = (await api.getChannelGroups()).promoted;
+    expect(featured, isNotNull);
+    for (final features in [
+      [null],
+      [{}],
+      [{'type': 'grid', 'PromotedGridChannelFilter': [null]}],
+      [{'type': 'grid', 'PromotedGridChannelFilter': [{'key': '/lineups/plex/channels/featured'}]}],
+    ]) {
+      server.replies['/'] = (_) => {'MediaProvider': {'Feature': features}};
+      final lineup = await api.getChannelGroups();
+      expect(lineup.partial, isTrue);
+      expect(lineup.promoted, same(featured));
+    }
+    server.replies['/'] = (_) => {'MediaProvider': {'Feature': []}};
+    final empty = await api.getChannelGroups();
+    expect(empty.partial, isFalse);
+    expect(empty.promoted, isNull);
+  });
+
   test('partial Featured counts preserve the last verified membership', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
@@ -957,9 +979,16 @@ void main() {
     server.replies['/grid'] = (_) => {'MediaContainer': grid};
     final api = PlexLiveTvApi(dio);
     await expectLater(api.testGuide([free]), throwsFormatException);
-    grid['size'] = 0;
+    grid.addAll({'size': 1, 'Metadata': [17]});
+    final partial = await api.testGuide([free, tuner]);
+    expect(partial['FailedChannelIds'], [free]);
+    expect((partial['Items'] as List).map((row) => row['ChannelId']).toSet(), {tuner});
+    grid['Metadata'] = [{'Media': [null]}];
+    await expectLater(api.testGuide([free]), throwsFormatException);
+    grid.addAll({'size': 0, 'Metadata': []});
     expect((await api.testGuide([free]))['Items'], isEmpty);
-    expect(server.reads('/grid'), 2);
+    expect((await api.testGuide([free]))['Items'], isEmpty);
+    expect(server.reads('/grid'), 4);
   });
 
   test('Home shows a tuner outage when Free TV has nothing airing and recovers on retry', () async {
@@ -1068,7 +1097,7 @@ void main() {
   test('a conflicting grid station during a catalog outage is retryable', () async {
     const channel = free;
     final (dio, server) = _server();
-    final media = <String, dynamic>{..._airing, 'channelIdentifier': 'news-extra'};
+    final media = <String, dynamic>{..._airing, 'channelIdentifier': channel, 'channelId': 'news-extra'};
     server.replies['/grid'] = (_) => _schedule('News', [media, {'beginsAt': 1792699200}]);
     final api = PlexLiveTvApi(dio);
     await api.getChannels();
@@ -1079,11 +1108,28 @@ void main() {
     expect(failed['Items'], isEmpty);
     expect(failed['FailedChannelIds'], [channel]);
     server.failWhen = null;
-    media['channelIdentifier'] = {'id': channel};
+    media['channelId'] = {'id': 'abc-66635fc0'};
     final recovered = await guide();
     expect((recovered['Items'] as List).single['ChannelId'], channel);
     expect(recovered.containsKey('FailedChannelIds'), isFalse);
     expect(server.reads('/grid'), 2);
+  });
+
+  test('On Now skips conflicting explicit stations and accepts agreeing references', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio, now: () => DateTime.utc(2026, 10, 22, 20, 30));
+    server.discoveryReply = {'MediaContainer': {'Dvr': []}};
+    server.replies['/hubs/sections/home/whatsOnNow'] = (_) => {
+      'MediaContainer': {
+        'Metadata': [
+          for (final id in [extra, free])
+            {'title': id, 'channelId': id, 'Media': [{..._airing, 'channelIdentifier': 'abc-66635fc0'}]},
+        ],
+      },
+    };
+    final programs = (await api.getRecommendedPrograms())['Items'] as List;
+    expect(programs.single['Name'], free);
+    expect(programs.single['ChannelId'], free);
   });
 
   test('a free channel plays straight from plex.tv', () async {

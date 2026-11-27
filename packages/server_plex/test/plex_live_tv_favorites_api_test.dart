@@ -12,11 +12,12 @@ void main() {
     const device = DeviceInfo(id: 'device', name: 'Test', appName: 'Moonfin', appVersion: '1');
     Map<String, dynamic> container = {'FavoriteChannel': rows};
     final methods = <String>[];
+    final writes = <Object?>[];
     final dio = Dio()..interceptors.add(InterceptorsWrapper(onRequest: (request, handler) {
       methods.add(request.method);
       expect(request.uri.toString(), 'https://epg.provider.plex.tv/settings/favoriteChannels');
       expect(request.headers['X-Plex-Token'], 'account-token');
-      if (request.method == 'PUT') expect(request.data, rows);
+      if (request.method == 'PUT') writes.add(request.data);
       handler.resolve(Response(requestOptions: request, data: {'MediaContainer': container}, statusCode: 200));
     }));
     addTearDown(() => dio.close());
@@ -24,6 +25,15 @@ void main() {
     Future<List<Map<String, dynamic>>> read() => api.readFavorites(deviceInfo: device, accountToken: 'account-token');
     await api.writeFavorites(deviceInfo: device, accountToken: 'account-token', rows: await read());
     expect(methods, ['GET', 'PUT']);
+    Future<void> write(List<Map<String, dynamic>> list) =>
+        api.writeFavorites(deviceInfo: device, accountToken: 'account-token', rows: list);
+    for (final field in ['source', 'id']) {
+      for (final value in ['', '  ']) {
+        await expectLater(write([rows.first, {...rows.last, field: value}]), throwsFormatException);
+      }
+    }
+    await write([]);
+    expect(writes, [rows, []]);
     for (final empty in [{'size': 0}, {'size': '0', 'FavoriteChannel': []}]) {
       container = empty;
       expect(await read(), isEmpty);

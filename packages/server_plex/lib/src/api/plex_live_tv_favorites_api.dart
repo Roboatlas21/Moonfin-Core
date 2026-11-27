@@ -45,13 +45,21 @@ class PlexLiveTvFavoritesApi {
     final raw = container['FavoriteChannel'];
     final size = container['size'];
     if (raw == null && (size == 0 || size == '0')) return [];
-    bool hasValue(dynamic value) => value is String && value.trim().isNotEmpty;
     if (raw is! List ||
-        (size != null && int.tryParse('$size') != raw.length) ||
-        raw.any((row) => row is! Map || !hasValue(row['source']) || !hasValue(row['id']))) {
+        (size != null && int.tryParse('$size') != raw.length)) {
       throw const FormatException('Invalid Plex favorite-channel list');
     }
+    _validateRows(raw);
     return [for (final row in raw) Map<String, dynamic>.from(row as Map)];
+  }
+
+  static void _validateRows(List<Object?> rows) {
+    bool hasValue(Object? value) => value is String && value.trim().isNotEmpty;
+    for (final row in rows) {
+      if (row is! Map || !hasValue(row['source']) || !hasValue(row['id'])) {
+        throw const FormatException('Invalid Plex favorite-channel identity');
+      }
+    }
   }
 
   Future<void> writeFavorites({
@@ -59,6 +67,7 @@ class PlexLiveTvFavoritesApi {
     required String accountToken,
     required List<Map<String, dynamic>> rows,
   }) async {
+    _validateRows(rows);
     await _dio.put<void>(
       _url,
       data: rows,

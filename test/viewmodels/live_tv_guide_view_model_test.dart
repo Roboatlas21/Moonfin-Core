@@ -273,6 +273,46 @@ void main() {
       expect(vm.filteredChannels.map((c) => c.id), ['two']);
     });
 
+    for (final leaveFeatured in [false, true]) {
+      test('opening Featured loads listings for the active filter (leave: $leaveFeatured)', () async {
+        when(() => client.serverType).thenReturn(ServerType.plex);
+        final started = Completer<void>();
+        final membership = Completer<Set<String>>();
+        final promoted = PromotedChannelGroup('Featured', () {
+          started.complete();
+          return membership.future;
+        });
+        when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async =>
+            ChannelGroupLineup({}, channels: [_channel('one'), _channel('two')], promoted: promoted));
+        final requests = <String>[];
+        when(() => _guide(api)).thenAnswer((inv) async {
+          requests.addAll(_requestedIds(inv));
+          return {'Items': [for (final id in _requestedIds(inv)) _program('p-$id', id)]};
+        });
+        final vm = LiveTvGuideViewModel(client, initialFilter: (GuideFilter.all, PromotedChannelGroup.groupId));
+        addTearDown(vm.dispose);
+        final opening = vm.load();
+        await started.future;
+        expect(vm.state, GuideState.loading);
+        if (leaveFeatured) {
+          vm.setFilter(GuideFilter.all);
+          await pumpEventQueue();
+          expect(vm.state, GuideState.ready);
+          expect(requests, unorderedEquals(['one', 'two']));
+          membership.completeError(Exception('Featured unavailable'));
+        } else {
+          expect(requests, isEmpty);
+          membership.complete({'two'});
+        }
+        await opening;
+        await pumpEventQueue();
+        expect(vm.state, GuideState.ready);
+        expect(vm.error, isNull);
+        expect(vm.programsForChannel('two').single.id, 'p-two');
+        expect(requests, unorderedEquals(leaveFeatured ? ['one', 'two'] : ['two']));
+      });
+    }
+
     test('completing Featured preserves an unresolved News selection', () async {
       when(() => client.serverType).thenReturn(ServerType.plex);
       final membership = Completer<Set<String>>();

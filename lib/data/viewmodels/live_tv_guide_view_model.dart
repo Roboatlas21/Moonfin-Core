@@ -1715,10 +1715,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       // Null means the category check was unavailable, not unchanged.
       _programmeCategories = lineup.programmeCategories;
       _applyChannelGroupLineup(lineup);
-      if (isPromotedGroupSelected) {
-        await refreshPromotedGroup();
-        if (!current()) return false;
-      }
+      // Featured has its own loading state. Other filters can use the lineup now.
+      if (isPromotedGroupSelected) unawaited(refreshPromotedGroup());
     } else if (account != null) {
       // The fallback channel reply cannot confirm the previous categories.
       _programmeCategories = null;
