@@ -562,6 +562,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (focus == null ||
         !_mayTakeFocus ||
         _browseFocus.hasFocus ||
+        _categoryRetryFocus.hasFocus ||
         _channelSearchFocus.hasFocus) {
       return false;
     }
@@ -1287,7 +1288,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
                           AppLocalizations.of(context).guideWindowLoadFailed(
                             DateUtils.isSameDay(target, _vm.windowStart)
                                 ? _formatTime(target)
-                                : _formatDate(target),
+                                : MaterialLocalizations.of(context).formatMediumDate(target),
                           ),
                         ),
                       ),

@@ -271,7 +271,10 @@ class UserDataSync extends ChangeNotifier {
         final patch = Map<String, dynamic>.from(entry)..remove('ItemId');
         if (patch.isNotEmpty) changes[id] = patch;
         if (serverId != null && patch['IsFavorite'] is bool) {
-          changes[serverChannelKey(serverId, id)] = {'IsFavorite': patch['IsFavorite']};
+          final key = serverChannelKey(serverId, id);
+          // An identical socket confirmation still supersedes an older read.
+          _itemRevisions[key] = ++_revision;
+          changes[key] = {'IsFavorite': patch['IsFavorite']};
         }
       }
       publishAll(changes, replace: true);

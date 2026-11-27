@@ -620,7 +620,10 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     _scheduleHeader();
     if (prewarm != null ||
         _lineupChangedDuringLoad ||
-        _neighborhood().any((id) => !initialIds.contains(id))) {
+        _neighborhood().any((id) =>
+            !initialIds.contains(id) ||
+            (!_vm.listingsAccessDenied &&
+                _vm.loadStateFor(id) == GuideChannelLoadState.failed))) {
       _lineupChangedDuringLoad = false;
       _scheduleVisibleLoad();
     }

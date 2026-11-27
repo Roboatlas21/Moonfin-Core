@@ -352,8 +352,20 @@ void main() {
     final vm = LiveTvGuideViewModel(client);
     addTearDown(vm.dispose);
     final start = DateTime.utc(2026, 9, 11, 10);
+    final visited = <String>{};
+    when(() => _guide(liveTv)).thenAnswer((inv) async {
+      final ids = _requestedIds(inv);
+      visited.addAll(ids);
+      return {'Items': [if (ids.contains('c0')) _program('old', 'c0', start: start)]};
+    });
     await vm.load(windowStart: start);
-    while (vm.hasMorePrograms) { await vm.loadMorePrograms(); }
+    while (vm.hasMorePrograms) {
+      final count = visited.length;
+      await vm.loadMorePrograms();
+      expect(visited.length, greaterThan(count));
+      expect(visited.length, lessThanOrEqualTo(120));
+    }
+    expect(visited, {for (var i = 0; i < 120; i++) 'c$i'});
     final next = vm.windowEnd;
     var offline = true;
     when(() => _guide(liveTv)).thenAnswer((inv) async {
@@ -365,6 +377,7 @@ void main() {
     expect(await vm.setWindowStart(next), isFalse);
     expect(vm.windowStart, start);
     expect(vm.failedWindowMoveRevision, revision + 1);
+    expect(vm.programsForChannel('c0').single.id, 'old');
     offline = false;
     expect(await vm.setWindowStart(next), isTrue);
     expect(vm.windowStart, next);
@@ -1716,9 +1729,10 @@ void main() {
       });
       final first = vm.recordingChanged();
       await started.future;
-      final second = vm.recordingChanged();
+      await vm.recordingChanged();
+      expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
       release.complete();
-      await Future.wait([first, second]);
+      await first;
       expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
       vm.dispose();
     });

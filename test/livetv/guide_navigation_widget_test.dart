@@ -603,6 +603,43 @@ void main() {
     });
   }
 
+  testWidgets('category Retry retains focus when paging completes', (tester) async {
+    useTvLayout();
+    channelCount = 2;
+    final issued = Completer<void>(), release = Completer<void>();
+    var hold = false;
+    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
+      final ids = (inv.namedArguments[#channelIds] as List).cast<String>();
+      final category = inv.namedArguments[#isSports] == true;
+      if (hold && category) {
+        if (!issued.isCompleted) issued.complete();
+        await release.future;
+      }
+      return {
+        'Items': [
+          for (final id in ids)
+            if (!category || id == 'ch0') ..._programsFor(id, sports: true),
+        ],
+        if (category && ids.contains('ch1')) 'FailedChannelIds': ['ch1'],
+      };
+    });
+    await pumpGuide(tester);
+    final vm = guideModel(tester)..setFilter(GuideFilter.sports);
+    await _pumpFrames(tester);
+    expect(vm.hasFailedCategoryListings, isTrue);
+    final last = _cellIndexForRow(0, vm.guideWindow.inMinutes - 1);
+    await focusGuideNode(tester, 'GuideProgramRow0:$last');
+    hold = true;
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+    expect(issued.isCompleted, isTrue);
+    await focusGuideNode(tester, 'GuideCategoryRetry');
+    expect(_focusedLabel(), 'GuideCategoryRetry');
+    release.complete();
+    await _pumpFrames(tester);
+    expect(vm.hasFailedCategoryListings, isTrue);
+    expect(_focusedLabel(), 'GuideCategoryRetry');
+  });
+
   testWidgets('a searched channel keeps its group when the playback guide opens', (
     tester,
   ) async {
@@ -1009,6 +1046,7 @@ void main() {
   }
 
   testWidgets('browse from listings through the header, channel column and page controls', (tester) async {
+    useTvLayout();
     await pumpGuide(tester);
     Future<void> move(LogicalKeyboardKey key, String label) => expectFocusAfter(tester, key, label);
     await focusGuideNode(tester, 'GuideProgramRow0:0');
@@ -1126,7 +1164,7 @@ void main() {
     String? hero() => tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview)).title;
     expect(hero(), 'Channel 0');
     final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
-    rail.onSelect(GuideFilter.values.indexOf(GuideFilter.favorites));
+    rail.onSelect(rail.labels.indexOf('Favorites'));
     await tester.pumpAndSettle();
     expect(_focusedLabel(), 'GuideChannel:0');
     expect(hero(), 'Channel 5');
@@ -1146,7 +1184,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(player.hasPrimaryFocus, isTrue);
-    rail.onSelect(GuideFilter.values.indexOf(GuideFilter.favorites));
+    rail.onSelect(rail.labels.indexOf('Favorites'));
     await tester.pumpAndSettle();
     expect(player.hasPrimaryFocus, isTrue);
   });

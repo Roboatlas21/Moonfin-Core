@@ -203,16 +203,19 @@ void main() {
     VoidCallback? onShowControls,
     Duration inactivity = const Duration(seconds: 5),
     ChannelCarouselPrewarm? prewarm,
+    String? failedChannel,
+    double surfaceWidth = 1000,
   }) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
     addTearDown(
       () => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic),
     );
-    await tester.binding.setSurfaceSize(const Size(1000, 600));
+    await tester.binding.setSurfaceSize(Size(surfaceWidth, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
     final channels = _guideChannels(20, numbered: true);
     final vm = prewarm?.viewModel as _CarouselGuide? ?? _CarouselGuide(client, channels);
+    if (failedChannel != null) vm.failedChannels.add(failedChannel);
     prewarm?.tuned(channels, 'ch10');
     await tester.pumpWidget(
       MaterialApp(
@@ -238,6 +241,21 @@ void main() {
     return vm;
   }
 
+
+  testWidgets('a cold carousel retries a failed visible channel at a stable width', (
+    tester,
+  ) async {
+    final vm = await pumpOverlay(
+      tester,
+      failedChannel: 'ch10',
+      surfaceWidth: ChannelCarouselCard.cardPitch * 5 + 66,
+      inactivity: const Duration(minutes: 1),
+    );
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(vm.requests.where((ids) => ids.contains('ch10')), hasLength(2));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('a cold-open carousel still shows favorite changes when listings fail', (tester) async {
     userDataSync.reset();
@@ -688,6 +706,8 @@ void main() {
   }) async {
     await tester.binding.setSurfaceSize(const Size(_surfaceWidth, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
     final centred = <int>[];
     await tester.pumpWidget(
       MaterialApp(

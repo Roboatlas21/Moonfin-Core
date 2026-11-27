@@ -331,6 +331,49 @@ void main() {
       expect(sync.favoriteFor(serverChannelKeyFor(fake.client, 'sports')), isFalse);
     });
 
+    test('a repeated socket favorite supersedes an earlier read', () async {
+      final fake = clientReturning([]);
+      const server = 'http://media.test';
+      when(() => fake.client.baseUrl).thenReturn(server);
+      final reply = Completer<Map<String, dynamic>>();
+      when(
+        () => fake.itemsApi.getItems(
+          ids: any(named: 'ids'),
+          fields: 'UserData',
+          recursive: true,
+          limit: 1,
+          enableTotalRecordCount: false,
+        ),
+      ).thenAnswer((_) => reply.future);
+      final events = StreamController<ServerWebSocketMessage>();
+      addTearDown(events.close);
+      sync.bindTo(events.stream, userId: 'viewer', serverId: server);
+      const event = UserDataChangedMessage(
+        userId: 'viewer',
+        userDataList: [
+          {'ItemId': 'news', 'IsFavorite': true},
+        ],
+      );
+      events.add(event);
+      await pumpEventQueue();
+      final key = serverChannelKey(server, 'news');
+      expect(sync.favoriteFor(key), isTrue);
+      final reading = sync.refreshFromServer(fake.client, ['news']);
+      events.add(event);
+      await pumpEventQueue();
+      reply.complete({
+        'Items': [
+          {
+            'Id': 'news',
+            'Type': 'TvChannel',
+            'UserData': {'IsFavorite': false},
+          },
+        ],
+      });
+      await reading;
+      expect(sync.favoriteFor(key), isTrue);
+    });
+
     test('publishes the user data the server returned', () async {
       final fake = clientReturning([
         {
