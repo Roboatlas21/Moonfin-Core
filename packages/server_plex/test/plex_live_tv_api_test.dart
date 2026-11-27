@@ -1274,6 +1274,13 @@ void main() {
     expect((await api.getChannelGroups()).partial, isTrue);
     expect((await api.getProgram(programs.single['Id']))['Name'], 'Law Abiding Citizen');
     expect(server.reads('/grid'), 1);
+    Future<Map<String, dynamic>> sameWindow([List<String>? ids]) => api.getGuide(
+      startDate: DateTime.utc(2026, 10, 22, 20).toLocal(),
+      endDate: DateTime.utc(2026, 10, 22, 22).toLocal(),
+      channelIds: ids,
+    );
+    expect((await sameWindow([free]))['Items'], result['Items']);
+    expect((await sameWindow())['Items'], containsAll(programs));
 
     final offline = PlexLiveTvApi(dio);
     await offline.getProgram('airing-plex-1792699200-abc-66635fc0');
@@ -1281,6 +1288,7 @@ void main() {
 
     server.failureStatus = () => 403;
     await expectLater(api.getChannelGroups(), throwsA(isA<DioException>()));
+    await expectLater(sameWindow(), _httpError(403));
     await expectLater(api.getProgram(programs.single['Id']), throwsA(isA<DioException>()));
   });
 

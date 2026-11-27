@@ -340,7 +340,15 @@ void main() {
       await model.refreshResumeAndNextUp();
       expect(model.rows.any((r) => r.rowType == HomeRowType.liveTvFavorites), isFalse);
       verify(() => source.loadFavoritesChannels('http://server.test')).called(3);
-      verify(() => source.hasLiveTvChannels()).called(1);
+      if (cloudOnly) {
+        verifyNever(() => source.hasLiveTvChannels());
+        final bar = model.mediaBarViewModel as _MockMediaBar;
+        verifyNever(() => bar.load(force: true));
+        await model.refresh(newMediaBar: true);
+        verifyNever(() => bar.load(force: true));
+      } else {
+        verify(() => source.hasLiveTvChannels()).called(1);
+      }
     });
   }
 

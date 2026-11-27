@@ -1155,7 +1155,7 @@ class HomeViewModel extends ChangeNotifier {
     bool newSectionsOnly = false,
   }) async {
     if (newMediaBar) {
-      unawaited(_mediaBarViewModel.load(force: true));
+      if (!_cloudOnlyPlex) unawaited(_mediaBarViewModel.load(force: true));
       // The user asked for a fresh Home, so the libraries are read again too.
       final getIt = GetIt.instance;
       if (getIt.isRegistered<GameLibraryRegistry>()) {

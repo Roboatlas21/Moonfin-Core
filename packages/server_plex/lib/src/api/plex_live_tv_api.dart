@@ -820,12 +820,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     List<String> channels, {
     required bool reportGuideFailures,
     required _GridReads gridReads,
+    _FreeChannels? requestedLineup,
   }) async {
-    try {
-      await _freeChannels();
-    } catch (error) {
-      if (_accessDenied(error)) rethrow;
-      // A known station can still use its last verified key during an outage.
+    if (requestedLineup == null) {
+      try {
+        await _freeChannels();
+      } catch (error) {
+        if (_accessDenied(error)) rethrow;
+        // A known station can still use its last verified key during an outage.
+      }
     }
     final first = start.toUtc();
     final exclusiveEnd = end.toUtc();
@@ -962,10 +965,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     bool reportGuideFailures = false,
   }) async {
     // Omitted IDs request all Cloud-only channels; [] remains a no-op.
-    final requestedIds = channelIds ??
-        (cloudOnly
-            ? (await _freeChannels()).keys.toList()
-            : const <String>[]);
+    final requestedLineup = cloudOnly && channelIds == null
+        ? await _freeLineupForBrowse()
+        : null;
+    final requestedIds = channelIds ?? requestedLineup?.keys ?? const <String>[];
     final free = [
       for (final id in requestedIds)
         if (plexChannelOf(id) case (source: plexCloudSource, :final channel))
@@ -1025,7 +1028,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (free.isNotEmpty)
         attempt(
           () => _freeAirings(start, end, free,
-              reportGuideFailures: reportGuideFailures, gridReads: gridReads),
+              reportGuideFailures: reportGuideFailures, gridReads: gridReads,
+              requestedLineup: requestedLineup),
           freeIds,
         ),
     ], eagerError: true);
