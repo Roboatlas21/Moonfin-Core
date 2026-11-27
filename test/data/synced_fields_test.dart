@@ -179,6 +179,8 @@ void main() {
     'loadingAnimationSize',
     'loadingAnimationSpeed',
     'liveTvChannelSortBy',
+    'liveTvCategoryDisplay',
+    'liveTvSavedFilters',
     'liveTvDirectPlayEnabled',
     'maxBitrate',
     'maxVideoResolution',
@@ -437,12 +439,12 @@ void main() {
       }
     });
 
-    test('only the API keys are receive-only', () {
+    test('server-owned keys and atomic guide pins are receive-only', () {
       final receiveOnly = syncedFields
           .where((f) => f.receiveOnly)
           .map((f) => f.serverKey)
           .toSet();
-      expect(receiveOnly, {'mdblistApiKey', 'tmdbApiKey'});
+      expect(receiveOnly, {'mdblistApiKey', 'tmdbApiKey', 'liveTvSavedFilters'});
     });
 
     // A synced field that isn't scoped per server and user carries one server's value onto

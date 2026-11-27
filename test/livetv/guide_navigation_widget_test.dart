@@ -284,6 +284,14 @@ void main() {
     });
 
     GetIt.instance.registerSingleton<MediaServerClient>(client);
+    // Production always registers the sync service, even without Moonbase.
+    GetIt.instance.registerLazySingleton<PluginSyncService>(
+      () => PluginSyncService(
+        GetIt.instance<UserPreferences>(),
+        GetIt.instance<PreferenceStore>(),
+      ),
+      dispose: (service) => service.dispose(),
+    );
   });
 
   tearDown(() async {
