@@ -1294,6 +1294,34 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('Back retries the live window after a newer date request fails', (tester) async {
+    useTvLayout();
+    channelCount = 8;
+    await openGuideRoute(tester);
+    final vm = guideModel(tester);
+    final tomorrow = vm.windowStart.add(const Duration(days: 1));
+    expect(await vm.setWindowStart(tomorrow), isTrue);
+    await focusGuideNode(tester, 'GuideChannel:0');
+
+    deferredChannelId = 'ch0';
+    await tester.binding.handlePopRoute();
+    await _pumpFrames(tester);
+    expect(releaseDeferredGuide, hasLength(1));
+    final failures = vm.failedWindowMoveRevision;
+    guideFailure = TimeoutException('offline');
+    expect(await vm.setDate(tomorrow.add(const Duration(days: 1))), isFalse);
+    expect(vm.failedWindowMoveRevision, failures + 1);
+    deferredChannelId = null;
+    guideFailure = null;
+    releaseDeferredGuide.single();
+    await _pumpFrames(tester);
+
+    expect(vm.windowStart, tomorrow);
+    await back(tester);
+    expect(find.byType(LiveTvGuideScreen), findsOneWidget);
+    expect(vm.atLivePosition, isTrue);
+  });
+
   testWidgets('TV back returns to the tuned channel, then header, then exits', (
     tester,
   ) async {

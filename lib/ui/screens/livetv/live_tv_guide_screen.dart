@@ -3365,11 +3365,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         }
       } else {
         final failureRevision = _vm.failedWindowMoveRevision;
-        final moved = await _vm.setWindowStart(liveStart, livePosition: true);
-        if (!moved) {
+        final move = _vm.setWindowStart(liveStart, livePosition: true);
+        final request = _vm.windowRequestRevision;
+        if (!await move) {
           // Back should exit only after a failed live-window load. If another
           // request took over, let it finish instead.
-          if (_vm.failedWindowMoveRevision != failureRevision) {
+          if (request == _vm.windowRequestRevision &&
+              _vm.failedWindowMoveRevision != failureRevision) {
             _failedLiveReset = true;
           }
           _resettingToEntryState = false;

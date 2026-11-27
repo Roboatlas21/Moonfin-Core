@@ -204,7 +204,7 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
     super.initState();
     _focusNode = widget.focusNode ?? FocusNode(debugLabel: 'ChannelCarousel');
     _ownsFocusNode = widget.focusNode == null;
-    _seedFromChannels();
+    _seedFromChannels(widget.initialIndex);
     _reportEmptyIfNeeded();
     _requestInitialFocus();
   }
@@ -218,28 +218,28 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
       _ownsFocusNode = widget.focusNode == null;
       _requestInitialFocus();
     }
-    final centered = _centredChannelIndex;
-    if (oldWidget.channels.length != widget.channels.length) {
+    final previous = oldWidget.channels;
+    final centered = previous.isEmpty ? 0 : channelIndexFor(_rawIndex, previous.length);
+    var target = widget.initialIndex;
+    if (previous.isNotEmpty &&
+        oldWidget.initialIndex == widget.initialIndex &&
+        oldWidget.selectionRevision == widget.selectionRevision) {
+      final id = previous[centered].channelId;
+      final index = widget.channels.elementAtOrNull(centered)?.channelId == id
+          ? centered
+          : widget.channels.indexWhere((channel) => channel.channelId == id);
+      if (index >= 0) target = index;
+    }
+    if (previous.length != _channelCount) {
       _endHold();
-      _seedFromChannels();
+      _seedFromChannels(target);
       _alignScrollAfterLayout();
       _reportEmptyIfNeeded();
-    } else if (_channelCount > 0) {
-      final previousId = oldWidget.channels[centered].channelId;
-      var target = centered;
-      if (oldWidget.initialIndex != widget.initialIndex ||
-          oldWidget.selectionRevision != widget.selectionRevision) {
-        target = widget.initialIndex;
-      } else if (widget.channels[centered].channelId != previousId) {
-        final moved = widget.channels.indexWhere((c) => c.channelId == previousId);
-        target = moved < 0 ? widget.initialIndex : moved;
-      }
-      if (target != centered) {
-        _endHold();
-        _rawIndex = _seedIndex + target.clamp(0, _channelCount - 1);
-        _rawIndexListenable.value = _rawIndex;
-        _alignScrollAfterLayout();
-      }
+    } else if (_channelCount > 0 && target != centered) {
+      _endHold();
+      _rawIndex = _seedIndex + target.clamp(0, _channelCount - 1);
+      _rawIndexListenable.value = _rawIndex;
+      _alignScrollAfterLayout();
     }
   }
 
@@ -252,7 +252,7 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
     super.dispose();
   }
 
-  void _seedFromChannels() {
+  void _seedFromChannels(int index) {
     if (_channelCount == 0) {
       _seedIndex = 0;
       _rawIndex = 0;
@@ -260,7 +260,7 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
       _scrollController = null;
       return;
     }
-    final start = widget.initialIndex.clamp(0, _channelCount - 1);
+    final start = index.clamp(0, _channelCount - 1);
     _seedIndex = _channelCount * _seedLineups;
     _rawIndex = _seedIndex + start;
     _rawIndexListenable.value = _rawIndex;

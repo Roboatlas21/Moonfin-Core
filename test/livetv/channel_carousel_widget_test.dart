@@ -780,16 +780,28 @@ void main() {
     expect(tester.getCenter(centered).dx, closeTo(_stripCentre, 0.01));
   });
 
-  testWidgets('OK tunes the visibly centered station after the lineup grows', (tester) async {
+  testWidgets('OK tunes the browsed station after the lineup grows or shrinks', (tester) async {
     await pumpCarousel(tester, 20, initialIndex: 7);
-    String? tuned;
-    await pumpCarousel(tester, 22, initialIndex: 7, onSelected: (entry) => tuned = entry.channelId);
-    final station = find.byWidgetPredicate(
-      (widget) => widget is ChannelCarouselCard && widget.centered && widget.channelName == 'Channel 7',
-    );
-    expect(tester.getCenter(station).dx, closeTo(_stripCentre, 0.01));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    expect(tuned, 'ch7');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expectCentered(tester, 8);
+
+    final grown = _lineup(22);
+    for (final channels in [grown, grown.sublist(3)]) {
+      String? tuned;
+      await pumpCarousel(
+        tester, channels.length,
+        channels: channels,
+        initialIndex: 7,
+        onSelected: (entry) => tuned = entry.channelId,
+      );
+      expectCentered(tester, 8);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(tuned, 'ch8');
+    }
+    // Station 8 has left the lineup. Fall back to the player's selection.
+    await pumpCarousel(tester, 8, initialIndex: 7);
+    expectCentered(tester, 7);
   });
 
   testWidgets('changing the tuned station recentres the strip', (tester) async {
