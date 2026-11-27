@@ -963,6 +963,26 @@ void main() {
     expect((await response)['Items'].map((row) => row['ChannelId']), [free, extra]);
   });
 
+  test('program lookup distinguishes a catalog outage from a missing Free TV station', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    const path = '/lineups/plex/channels';
+    const program = 'airing-plex-1792699200-abc-66635fc0';
+    const unknown = 'airing-plex-1792699200-unknown';
+
+    server.fail(path, 503);
+    await expectLater(api.getProgram(program), _httpError(503));
+    expect((await api.testGuide([free]))['FailedChannelIds'], [free]);
+
+    server.failWhen = null;
+    await expectLater(api.getProgram(unknown), throwsStateError);
+    server.fail(path, 503);
+    expect((await api.getChannelGroups()).partial, isTrue);
+    await expectLater(api.getProgram(unknown), _httpError(503));
+    expect(server.reads('/grid'), 0);
+    expect((await api.getProgram(program))['Id'], program);
+  });
+
   test('a removed station cannot borrow a grid with the same suffix', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);

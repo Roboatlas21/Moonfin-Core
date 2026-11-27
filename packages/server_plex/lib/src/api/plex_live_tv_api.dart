@@ -828,6 +828,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     } catch (error) {
       if (_accessDenied(error)) rethrow;
       // A known station can still use its last verified key during an outage.
+      if (!reportGuideFailures && channels.every(
+        (channel) => _lastFreeLineup?[_channelId(plexCloudSource, channel)] == null,
+      )) {
+        rethrow;
+      }
     }
     final first = start.toUtc();
     final exclusiveEnd = end.toUtc();
