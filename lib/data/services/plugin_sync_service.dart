@@ -564,6 +564,7 @@ class PluginSyncService extends ChangeNotifier {
     final client = GetIt.instance.maybeGet<MediaServerClient>();
     final current = client == null ? null : _guidePinAccountCheck(client);
     final profile = syncProfile;
+    final selection = _profileSelectionRevision;
     final previousStream = _settingsStreamCancelToken;
     await _prefs.set(UserPreferences.pluginSyncEnabled, enabled);
     notifyListeners();
@@ -575,8 +576,8 @@ class PluginSyncService extends ChangeNotifier {
         identical(_settingsStreamCancelToken, previousStream)) {
       unawaited(_startSettingsStream(client));
     }
-    if (syncProfile == profile) {
-      await pushSettingsForProfile(client, profile: profile, force: true);
+    if (syncProfile == profile && selection == _profileSelectionRevision) {
+      await pushSettings(client, force: true);
     }
   }
 

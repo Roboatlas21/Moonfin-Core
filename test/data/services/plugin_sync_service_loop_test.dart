@@ -267,6 +267,23 @@ void main() {
     expect(adapter.lastPushedProfile?['use24HourClock'], isFalse);
   });
 
+  test('enabling sync drops its queued upload if another profile is selected', () async {
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    await service.setSyncProfile('desktop');
+    adapter.pauseResponses(path: '/Moonfin/Settings/Profile/desktop');
+    final pin = togglePin('group:Sports');
+    await adapter.responseReady!.future;
+    await service.setSyncEnabled(false);
+    final enabling = service.setSyncEnabled(true);
+    await Future<void>.delayed(Duration.zero);
+    await service.setSyncProfile('tv');
+    adapter.responseGate!.complete();
+    await pin;
+    await enabling;
+    expect(adapter.pinActions, ['add']);
+    expect(postCount(), 1);
+  });
+
   test('the browser pin transport sends the edit with redirects disabled', () async {
     final options = RequestOptions(path: 'https://plugin.test/pins', data: {'action': 'add'});
     final reply = await http.runWithClient(
