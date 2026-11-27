@@ -27,6 +27,7 @@ import '../../preference/seerr_preferences.dart';
 import '../../util/episode_playability.dart';
 import '../services/plugin_sync_service.dart';
 import '../services/user_data_sync.dart';
+import '../services/plex_live_tv_favorites.dart';
 import '../services/seerr/seerr_api_models.dart';
 import 'seerr_discover_view_model.dart';
 import 'seerr_media_detail_view_model.dart';
@@ -1094,7 +1095,7 @@ class ItemDetailViewModel extends ChangeNotifier {
         final candidate = AggregatedItem(
           id: itemId,
           serverId: _serverId ?? _client.baseUrl,
-          rawData: data,
+          rawData: PlexLiveTvFavorites.applyToItem(_client, data),
         );
         // Checked before the item is published and before the secondary loads
         // fan out, so nothing downstream can read the title and nothing goes
@@ -2812,7 +2813,8 @@ class ItemDetailViewModel extends ChangeNotifier {
     final newState = !item.isFavorite;
     _applyOptimisticUpdate({'IsFavorite': newState});
     try {
-      await _mutations.setFavorite(_mutationId, isFavorite: newState);
+      await _mutations.setFavorite(_mutationId, isFavorite: newState, isChannel: item.type == 'TvChannel',
+          expectedChannelKey: channelFavoriteKey(item.rawData));
       await _reload();
     } catch (_) {
       _applyOptimisticUpdate({'IsFavorite': !newState});
@@ -2933,7 +2935,7 @@ class ItemDetailViewModel extends ChangeNotifier {
       _item = AggregatedItem(
         id: itemId,
         serverId: _serverId ?? _client.baseUrl,
-        rawData: _withProbedSources(data),
+        rawData: _withProbedSources(PlexLiveTvFavorites.applyToItem(_client, data)),
       );
       notifyListeners();
     } catch (_) {}

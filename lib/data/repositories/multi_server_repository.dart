@@ -1525,6 +1525,7 @@ class MultiServerRepository {
     List<ServerUserSession> sessions,
     Future<List<AggregatedItem>> Function(ServerUserSession session) task, {
     required String label,
+    void Function()? onPartialFailure,
   }) async {
     var failures = 0;
     final results = await Future.wait(
@@ -1541,6 +1542,7 @@ class MultiServerRepository {
     if (sessions.isNotEmpty && failures == sessions.length) {
       throw StateError('MultiServer: all servers failed to load $label');
     }
+    if (failures > 0) onPartialFailure?.call();
     return results;
   }
 
@@ -1550,6 +1552,7 @@ class MultiServerRepository {
   Future<List<List<AggregatedItem>>> searchEachServer(
     Future<List<AggregatedItem>> Function(SearchRepository repository) search, {
     required String label,
+    void Function()? onPartialFailure,
   }) async {
     final sessions = await getLoggedInServers();
     return _gatherPerServer(
@@ -1563,6 +1566,7 @@ class MultiServerRepository {
           ),
       ],
       label: label,
+      onPartialFailure: onPartialFailure,
     );
   }
 

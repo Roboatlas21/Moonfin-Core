@@ -447,7 +447,31 @@ class LiveTvGuideViewModel extends ChangeNotifier {
        _now = now ?? DateTime.now,
        _guideDate = (now ?? DateTime.now)(),
        _windowStart = (now ?? DateTime.now)(),
-       _windowEnd = (now ?? DateTime.now)();
+       _windowEnd = (now ?? DateTime.now)() {
+    if (_client.serverType == ServerType.plex) {
+      PlexLiveTvFavorites.favoriteListChanged.addListener(
+        _onPlexFavoritesChanged,
+      );
+    }
+  }
+
+  void _onPlexFavoritesChanged() {
+    final change = PlexLiveTvFavorites.favoriteListChanged.value;
+    if (_disposed ||
+        change == null ||
+        change.userId != _client.userId ||
+        _client.serverType != ServerType.plex) {
+      return;
+    }
+    // Publishing the second PMS catalog updates its synthetic DVR keys.
+    try {
+      PlexLiveTvFavorites.applyCachedToClient(_client);
+      syncChannelUserData();
+    } catch (_) {
+      // The account's saved token can disappear during a user switch.
+      // The next guide load will populate its own favorite state.
+    }
+  }
 
   /// Clock the boundary refresh reads, injectable so tests can advance it.
   final DateTime Function() _now;
@@ -870,7 +894,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     try {
       await ItemMutationRepository(
         _client,
-      ).setFavorite(channelId, isFavorite: next, isChannel: true);
+      ).setFavorite(channelId, isFavorite: next, isChannel: true,
+          expectedChannelKey: channelFavoriteKey(current.rawData));
     } catch (_) {
       if (identical(channelForId(channelId), updated)) _applyChannelUpdate(current);
       rethrow;
@@ -1679,6 +1704,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       items = (response['Items'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     }
     _publishChannels(items, revision);
+    if (_client.serverType == ServerType.plex) {
+      PlexLiveTvFavorites.pruneMissingDvrChannels(_client, lineup);
+      // Keep cached favorites visible if Plex Cloud fails. Retry on next open.
+      unawaited(PlexLiveTvFavorites.refresh(_client).catchError((Object _) {}));
+    }
     if (lineup != null) {
       // Null means the category check was unavailable, not unchanged.
       _programmeCategories = lineup.programmeCategories;
@@ -1739,7 +1769,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   }
 
   void _publishChannels(List<Map<String, dynamic>> items, int revision) {
-    final channels = [for (final item in items) withServerChannelKey(_client, item)];
+    final channels = [
+      for (final item in items) PlexLiveTvFavorites.applyToItem(_client, item, fromLineup: true),
+    ];
     final fresh = <String, Map<String, dynamic>>{};
     for (final item in channels) {
       final id = channelFavoriteKey(item) ?? item['Id']?.toString();
@@ -2451,6 +2483,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    PlexLiveTvFavorites.favoriteListChanged.removeListener(
+      _onPlexFavoritesChanged,
+    );
+    _promotedTimer?.cancel();
     _finishPendingWindow();
     _openingLineup?.complete(false);
     _openingLineup = null;

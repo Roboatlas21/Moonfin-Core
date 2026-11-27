@@ -3,6 +3,7 @@ import 'package:server_core/server_core.dart';
 
 import '../../preference/user_preferences.dart';
 import '../services/user_data_sync.dart';
+import '../services/plex_live_tv_favorites.dart';
 
 class ItemMutationRepository {
   final MediaServerClient _client;
@@ -21,8 +22,15 @@ class ItemMutationRepository {
   Future<void> setFavorite(String itemId, {
     required bool isFavorite,
     bool isChannel = false,
+    String? expectedChannelKey,
   }) async {
-    final stateId = isChannel ? serverChannelKeyFor(_client, itemId) : itemId;
+    final stateId = isChannel && _client.serverType != ServerType.plex
+        ? serverChannelKeyFor(_client, itemId)
+        : PlexLiveTvFavorites.syncKey(_client, itemId);
+    if (expectedChannelKey != null && isPlexLiveTvChannel(_client, itemId) &&
+        expectedChannelKey != stateId) {
+      throw StateError('Plex channel changed since this row was loaded');
+    }
     userDataSync.requestFavorite(stateId, isFavorite);
     final session = userDataSync.session;
     final key = '$session:$stateId';
@@ -46,7 +54,14 @@ class ItemMutationRepository {
           return;
         }
         try {
-          if (wanted) {
+          if (isPlexLiveTvChannel(_client, itemId)) {
+            await PlexLiveTvFavorites.setFavorite(
+              _client,
+              itemId,
+              isFavorite: wanted,
+              expectedSyncKey: stateId,
+            );
+          } else if (wanted) {
             await _client.userLibraryApi.markFavorite(itemId);
           } else {
             await _client.userLibraryApi.unmarkFavorite(itemId);

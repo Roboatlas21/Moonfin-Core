@@ -15,14 +15,8 @@ String serverChannelKeyFor(MediaServerClient client, String channelId) {
   return serverChannelKey(factory?.serverIdOf(client) ?? client.baseUrl, channelId);
 }
 
-Map<String, dynamic> withServerChannelKey(MediaServerClient client, Map<String, dynamic> item) {
-  final id = item['Id']?.toString();
-  if (id == null || id.isEmpty) return item;
-  return {...item, 'ChannelFavoriteSyncKey': serverChannelKeyFor(client, id)};
-}
-
 String? channelFavoriteKey(Map<String, dynamic> row) =>
-    row['ChannelFavoriteSyncKey'] as String?;
+    (row['PlexFavoriteSyncKey'] ?? row['ChannelFavoriteSyncKey']) as String?;
 
 /// The newest watched state, resume position and favourite flag this client
 /// knows about, for every item a screen is still holding.
