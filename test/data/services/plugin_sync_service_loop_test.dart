@@ -329,6 +329,32 @@ void main() {
     expect(adapter.lastPushedProfile?['liveTvCategoryDisplay'], 'groups');
   });
 
+  for (final pending in [false, true]) {
+    test('manual Save during sign-in with ${pending ? 'a queued pin' : 'no queued pins'}', () async {
+      when(() => client.serverType).thenReturn(ServerType.emby);
+      adapter.savedPins = [];
+      if (pending) {
+        service.resetState();
+        await togglePin('group:News');
+      }
+      adapter.pauseResponses(path: '/Moonfin/Seerr/Config');
+      final login = service.syncOnLogin(client, serverId: 'srv1');
+      await adapter.responseReady!.future;
+      final save = service.pushSettingsForProfile(client, profile: 'global', force: true);
+      adapter.responseGate!.complete();
+      expect(await save, ProfilePushResult.saved);
+      await login;
+
+      final read = 'GET /Moonfin/Settings/Resolved/${service.syncProfile}';
+      const write = 'POST /Moonfin/Settings/Profile/global';
+      expect(
+        adapter.requests.where((r) => r == read || r == write),
+        pending ? [read, write] : [write, read],
+      );
+      expect(adapter.savedPins, [if (pending) 'group:News']);
+    });
+  }
+
   test('network regain during a failed sign-in replay retries on Emby', () async {
     when(() => client.serverType).thenReturn(ServerType.emby);
     service.resetState();

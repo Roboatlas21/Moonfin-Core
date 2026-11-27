@@ -1341,7 +1341,8 @@ class PluginSyncService extends ChangeNotifier {
     if (!_syncEnabled || !supportedProfiles.contains(profile)) return ProfilePushResult.failed;
     final accountCurrent = _guidePinAccountCheck(client);
     bool current() => _syncEnabled && accountCurrent();
-    if (force && _signInProfileRead != null) {
+    if (force && _signInProfileRead != null &&
+        _prefs.get(UserPreferences.liveTvSavedFilterChanges).isNotEmpty) {
       await _waitForSignInProfile();
       if (!current()) return ProfilePushResult.failed;
     }
