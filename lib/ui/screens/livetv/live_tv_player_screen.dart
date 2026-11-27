@@ -1957,6 +1957,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       );
 
   Future<void> _openRecordings() async {
+    if (isCloudOnlyPlexClient(_client)) return;
     await _leavePlayerFor(Destinations.liveTvRecordings);
   }
 

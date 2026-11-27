@@ -167,7 +167,8 @@ class PlexMediaServerClient extends MediaServerClient {
 
   PlexLiveTvApi? _liveTvApi;
   @override
-  LiveTvApi get liveTvApi => _liveTvApi ??= PlexLiveTvApi(_dio);
+  LiveTvApi get liveTvApi =>
+      _liveTvApi ??= PlexLiveTvApi(_dio, cloudOnly: cloudOnly);
 
   @override
   late final InstantMixApi instantMixApi = PlexInstantMixApi(_dio);

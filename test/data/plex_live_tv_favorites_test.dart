@@ -42,7 +42,7 @@ class _FailingPlexPreferences extends UserPreferences {
 PlexMediaServerClient _plex({bool cloudOnly = false, String userId = 'plex-user'}) {
   final client = PlexMediaServerClient(
       baseUrl: cloudOnly ? 'https://plex.tv' : 'https://pms.example',
-      deviceInfo: _device,
+      deviceInfo: _device, cloudOnly: cloudOnly,
     )..userId = userId
      ..accessToken = cloudOnly ? 'cloud-token' : 'pms-token';
   addTearDown(client.dispose);
@@ -57,7 +57,7 @@ bool _saved(MediaServerClient client, String id) =>
 class _LineupApi extends Mock implements LiveTvApi, DirectChannelGroupApi {}
 
 class _LineupClient extends PlexMediaServerClient {
-  _LineupClient(this.liveTvApi) : super(baseUrl: 'https://pms.example', deviceInfo: _device);
+  _LineupClient(this.liveTvApi, {super.cloudOnly}) : super(baseUrl: 'https://pms.example', deviceInfo: _device);
   @override
   final LiveTvApi liveTvApi;
 }
@@ -208,7 +208,7 @@ void main() {
 
   test('Search updates a visible favorite in a 2,001-channel Plex lineup', () async {
     final api = _LineupApi();
-    final client = _LineupClient(api)..userId = 'plex-user';
+    final client = _LineupClient(api, cloudOnly: true)..userId = 'plex-user';
     addTearDown(client.dispose);
     when(() => api.getChannels(fields: 'ImageTags', enableTotalRecordCount: false, userId: 'plex-user'))
         .thenAnswer((_) async => {'Items': [

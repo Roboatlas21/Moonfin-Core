@@ -27,17 +27,23 @@ void main() {
 
   tearDown(() => GetIt.instance.reset());
 
-  test('Plex Free TV cannot record through a media server', () {
+  test('Plex Free TV cannot record through cloud or PMS players', () {
     const device = DeviceInfo(
       id: 'test',
       name: 'Test',
       appName: 'Moonfin',
       appVersion: '1',
     );
+    final cloud = PlexMediaServerClient(
+      baseUrl: 'https://plex.tv',
+      deviceInfo: device,
+      cloudOnly: true,
+    );
     final pms = PlexMediaServerClient(
       baseUrl: 'https://pms.example',
       deviceInfo: device,
     );
+    addTearDown(cloud.dispose);
     addTearDown(pms.dispose);
 
     final now = DateTime.now();
@@ -52,6 +58,7 @@ void main() {
 
     const free = 'channel-plex-free123';
     const dvr = 'channel-2-4';
+    expect(canRecordChannelAiring(cloud, free, program(free)), isFalse);
     expect(canRecordChannelAiring(pms, free, program(free)), isFalse);
     expect(canRecordChannelAiring(pms, dvr, program(dvr)), isTrue);
     expect(canRecordChannelAiring(pms, dvr, null), isFalse);
