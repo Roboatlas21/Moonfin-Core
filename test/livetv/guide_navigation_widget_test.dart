@@ -416,19 +416,20 @@ void main() {
     List<FocusNode> makeNodes() => [for (final label in labels) FocusNode(debugLabel: label)];
     final original = makeNodes();
     final replacement = makeNodes();
+    final sibling = FocusNode(debugLabel: 'Search');
     addTearDown(() {
-      for (final node in [...original, ...replacement]) {
+      for (final node in [...original, ...replacement, sibling]) {
         node.dispose();
       }
     });
     Future<void> show(List<FocusNode> nodes) async {
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: SizedBox(
-        width: 160,
-        child: EpgFilterRail(
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: Column(children: [
+        Focus(focusNode: sibling, child: const Text('Search')),
+        SizedBox(width: 160, child: EpgFilterRail(
           labels: labels, selectedIndex: 2, onSelect: (_) {}, apple: false,
           focusNodeFor: (index) => nodes[index],
-        ),
-      ))));
+        )),
+      ]))));
       await _pumpFrames(tester);
     }
     await show(original);
@@ -437,6 +438,9 @@ void main() {
     expect(original.first.hasFocus, isTrue);
     await show(replacement);
     expect(replacement[2].hasFocus, isTrue);
+    WidgetsBinding.instance.addPostFrameCallback((_) => sibling.requestFocus());
+    await show(original);
+    expect(sibling.hasPrimaryFocus, isTrue);
   });
 
   testWidgets('Favorites stays in view when categories move its focused chip', (tester) async {
@@ -447,11 +451,11 @@ void main() {
         node.dispose();
       }
     });
-    Future<void> show(List<String> labels) async {
+    Future<void> show(List<String> labels, {int selected = 0}) async {
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: SizedBox(
         width: 160,
         child: EpgFilterRail(
-          labels: labels, selectedIndex: 0, onSelect: (_) {}, apple: false,
+          labels: labels, selectedIndex: selected, onSelect: (_) {}, apple: false,
           focusNodeFor: (i) => nodes.putIfAbsent(labels[i], () => FocusNode(debugLabel: labels[i])),
         ),
       ))));
@@ -461,12 +465,16 @@ void main() {
     await show(['All', 'Favorites']);
     nodes['Favorites']!.requestFocus();
     await tester.pumpAndSettle();
-    await show(['All', 'Movies', 'Series', 'Sports', 'News', 'Kids', 'Premiere', 'Favorites']);
+    const expanded = ['All', 'Movies', 'Series', 'Sports', 'News', 'Kids', 'Premiere', 'Favorites'];
+    await show(expanded);
     expect(nodes['Favorites']!.hasPrimaryFocus, isTrue);
     final rail = tester.getRect(find.byType(EpgFilterRail));
     final label = tester.getRect(find.text('Favorites'));
     expect(label.left, greaterThanOrEqualTo(rail.left - 1));
     expect(label.right, lessThanOrEqualTo(rail.right + 1));
+    await show(expanded, selected: 1);
+    expect(nodes['Favorites']!.hasPrimaryFocus, isTrue);
+    expect(tester.getRect(find.text('Favorites')).right, lessThanOrEqualTo(rail.right + 1));
   });
 
   testWidgets('TV guide error Retry is reachable from the window bar', (

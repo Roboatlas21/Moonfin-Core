@@ -51,13 +51,13 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
   @override
   void didUpdateWidget(EpgFilterRail oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final focused = FocusManager.instance.primaryFocus;
     FocusNode? chipToReveal;
     if (widget.selectedIndex >= 0 && oldWidget.selectedIndex != widget.selectedIndex) {
-      chipToReveal = widget.focusNodeFor(widget.selectedIndex);
+      chipToReveal = _focusListeners.containsKey(focused) ? focused : widget.focusNodeFor(widget.selectedIndex);
     }
     if (!listEquals(oldWidget.labels, widget.labels) ||
         _focusListeners.keys.indexed.any((entry) => entry.$2 != widget.focusNodeFor(entry.$1))) {
-      final focused = FocusManager.instance.primaryFocus;
       final hadFocus = _focusListeners.containsKey(focused);
       _detachFocusListeners();
       _attachFocusListeners();
@@ -67,6 +67,8 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
       } else if (hadFocus) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted || widget.selectedIndex < 0 || widget.selectedIndex >= widget.labels.length) return;
+          FocusManager.instance.applyFocusChangesIfNeeded();
+          if (!mounted || FocusManager.instance.primaryFocus != FocusScope.of(context)) return;
           final node = widget.focusNodeFor(widget.selectedIndex);
           if (node.context?.mounted == true) node.requestFocus();
         });

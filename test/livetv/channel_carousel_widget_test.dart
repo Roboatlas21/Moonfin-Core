@@ -34,6 +34,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   Completer<void>? nextTopUpGate;
   Completer<void>? refreshGate;
   final Set<String> failedChannels = {};
+  final Set<String> loadedChannels = {};
   bool get listening => hasListeners;
   String titleSuffix = '';
 
@@ -84,10 +85,10 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   }
 
   @override
-  GuideChannelLoadState loadStateFor(String channelId) =>
-      failedChannels.contains(channelId)
-          ? GuideChannelLoadState.failed
-          : GuideChannelLoadState.loading;
+  GuideChannelLoadState loadStateFor(String channelId) {
+    if (failedChannels.contains(channelId)) return GuideChannelLoadState.failed;
+    return loadedChannels.contains(channelId) ? GuideChannelLoadState.loaded : GuideChannelLoadState.loading;
+  }
 
   @override
   Future<void> ensureProgramsForChannels(List<String> channelIds) async {
@@ -220,6 +221,7 @@ void main() {
     ChannelCarouselPrewarm? prewarm,
     _CarouselGuide? coldGuide,
     double surfaceWidth = 1000,
+    List<GuideChannel>? lineup,
   }) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
     addTearDown(
@@ -228,7 +230,7 @@ void main() {
     await tester.binding.setSurfaceSize(Size(surfaceWidth, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
-    final channels = _guideChannels(20, numbered: true);
+    final channels = lineup ?? _guideChannels(20, numbered: true);
     final vm = prewarm?.viewModel as _CarouselGuide? ?? coldGuide ?? _CarouselGuide(client, channels);
     prewarm?.tuned(channels, 'ch10');
     await tester.pumpWidget(
@@ -370,6 +372,21 @@ void main() {
       AppTypography.fontSizeLg,
       reason: 'the description carries the overview face, not a default',
     );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('a lineup that shrinks during scrolling restores the show header', (tester) async {
+    final channels = _guideChannels(20, numbered: true);
+    final vm = await pumpOverlay(tester, lineup: channels);
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.text('Show ch10 (S6:E19)'), findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(find.text('Show ch10 (S6:E19)'), findsNothing);
+    await pumpOverlay(tester, lineup: channels.sublist(10, 12), coldGuide: vm);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Show ch11 (S6:E19)'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -650,15 +667,17 @@ void main() {
       prewarm.tuned(channels, 'ch1');
       await tester.pump(ChannelCarouselPrewarm.settleDelay);
       await tester.pump();
+      vm.loadedChannels.addAll(vm.requests.single);
       prewarm.tuned(channels, 'ch2');
       await tester.pump(ChannelCarouselPrewarm.settleDelay);
       await tester.pump();
 
+      expect(vm.requests, hasLength(1));
+      vm.loadedChannels.remove('ch3');
+      prewarm.tuned(channels, 'ch3');
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
       expect(vm.requests, hasLength(2));
-      expect(
-        vm.requests.last,
-        unorderedEquals(channels.map((channel) => channel.id)),
-      );
+      expect(vm.requests.last, ['ch3']);
       expect(vm.refreshCalls, 0);
       prewarm.dispose();
     },

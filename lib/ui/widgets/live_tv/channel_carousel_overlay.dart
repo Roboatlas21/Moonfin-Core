@@ -542,6 +542,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     final lineupChanged = !identical(oldWidget.channels, widget.channels);
     if (lineupChanged) {
       _channels = widget.channels;
+      if (_channels.length <= _visibleCards) _scrolling = false;
       _vm.usePlaybackLineup(_channels);
       _invalidateEntries();
       if (!_ready) _lineupChangedDuringLoad = true;
