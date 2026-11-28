@@ -261,6 +261,19 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
   }
 
+  testWidgets('the remote Record key explains that Plex Free TV cannot record', (tester) async {
+    final client = GetIt.instance<MediaServerClient>();
+    when(() => client.serverType).thenReturn(ServerType.plex);
+    await pumpPlayer(tester, channels: const [
+      GuideChannel(id: 'channel-plex-news', name: 'Plex News', rawData: {}),
+    ]);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.mediaRecord);
+    await tester.pump();
+    expect(find.text('This channel cannot be recorded.'), findsOneWidget);
+    expect(find.text(l10n.noProgramData), findsNothing);
+  });
+
   void useSavedPlexAccount() {
     final client = GetIt.instance<MediaServerClient>();
     when(() => client.baseUrl).thenReturn('https://plex.tv');

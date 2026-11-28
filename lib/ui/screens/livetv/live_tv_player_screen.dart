@@ -14,6 +14,7 @@ import 'package:screen_brightness_platform_interface/screen_brightness_platform_
 import 'package:volume_controller/volume_controller.dart';
 
 import '../../../data/services/log_service.dart';
+import '../../../data/services/plex_live_tv_favorites.dart';
 import '../../../data/services/user_data_sync.dart';
 import '../../../data/services/media_server_client_factory.dart';
 import '../../../data/repositories/item_mutation_repository.dart';
@@ -1194,6 +1195,12 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   Future<void> _showRecordingDialog() async {
     if (_recordingActionInProgress || _isSwitching || _isStopping) return;
     final l10n = AppLocalizations.of(context);
+    if (isPlexFreeTvChannel(_client, _currentChannel.id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.liveTvChannelCannotRecord)),
+      );
+      return;
+    }
     _recordingActionInProgress = true;
     _hideTimer?.cancel();
     String? message;

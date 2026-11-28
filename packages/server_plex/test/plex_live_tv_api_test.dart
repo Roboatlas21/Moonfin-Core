@@ -496,6 +496,30 @@ void main() {
     expect(empty.promoted, isNull);
   });
 
+  test('Featured fetches fresh membership after Free TV catalog access returns', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    const catalog = '/lineups/plex/channels';
+    const featuredPath = '/lineups/plex/channels/featured';
+    final now = DateTime.utc(2026, 10, 22);
+    final before = (await api.getChannelGroups()).promoted!;
+    await before.refresh(() => now);
+    expect(before.channelIds, {free});
+
+    server.fail(catalog, 503);
+    expect((await api.getChannelGroups()).promoted, same(before));
+    server.failureStatus = () => 403;
+    expect((await api.getChannelGroups()).promoted, isNull);
+
+    server.failWhen = null;
+    server.replies[featuredPath] = (_) => _channels([{'id': 'news-extra'}]);
+    final after = (await api.getChannelGroups()).promoted!;
+    expect(after.expiresAt, isNull);
+    await after.refresh(() => now);
+    expect(after.channelIds, {extra});
+    expect(server.reads(featuredPath), 2);
+  });
+
   test('partial Featured counts preserve the last verified membership', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);

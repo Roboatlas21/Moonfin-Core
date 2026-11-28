@@ -3578,6 +3578,10 @@
   "@noChannelsFound": {
     "description": "Empty state when no TV channels match the filter"
   },
+  "liveTvChannelCannotRecord": "This channel cannot be recorded.",
+  "@liveTvChannelCannotRecord": {
+    "description": "Message when the viewer presses Record on a channel that does not support recording"
+  },
   "noProgramData": "No program data",
   "@noProgramData": {
     "description": "Guide cell label for a real EPG schedule gap, not a genre-filtered program"

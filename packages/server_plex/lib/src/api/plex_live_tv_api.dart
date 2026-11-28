@@ -441,6 +441,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       if (denied) {
         _publishedFreeRead = null;
         _lastFreeLineup = null;
+        _featuredGroup = null;
         _cloudOnNowRows = null;
         _invalidateGrids((_, _) => true);
       }
