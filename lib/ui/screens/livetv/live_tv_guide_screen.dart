@@ -3249,7 +3249,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final clamped = amount.isNegative && target.isBefore(floor)
         ? floor
         : target;
-    if (clamped == oldStart || clamped == _vm.pendingWindowStart) return;
+    if (clamped == oldStart) {
+      if (amount.isNegative && (_vm.pendingWindowStart?.isAfter(oldStart) ?? false)) {
+        _vm.cancelPendingPage();
+      }
+      return;
+    }
+    if (clamped == _vm.pendingWindowStart) return;
 
     final moved = await _moveWithWindowNotice(
       clamped,

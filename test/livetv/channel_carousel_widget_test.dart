@@ -406,10 +406,9 @@ void main() {
         await tester.pump(ChannelCarouselPrewarm.settleDelay);
         if (open) await prewarm.ensureVisibleChannels(['ch0', 'ch1']);
         await tester.pump(const Duration(seconds: 4));
+        prewarm.tuned(channels.reversed.toList(), 'ch0');
         if (open) {
           await prewarm.ensureVisibleChannels(['ch1', 'ch0']);
-        } else {
-          prewarm.tuned(channels, 'ch1');
         }
         vm.requests.clear();
         await tester.pump(const Duration(seconds: 1));

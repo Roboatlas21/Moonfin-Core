@@ -501,6 +501,22 @@ void main() {
     });
   }
 
+  testWidgets('paging back at the history limit cancels an unfinished forward page', (tester) async {
+    useTvLayout();
+    await pumpGuide(tester);
+    final vm = guideModel(tester);
+    final floor = guideLeftEdge(DateTime.now()).subtract(const Duration(hours: 24));
+    await vm.setWindowStart(floor);
+    await _pumpFrames(tester);
+    deferredChannelId = 'ch0';
+    await tapAndPump(tester, find.byIcon(Icons.chevron_right).first);
+    expect(vm.pendingWindowStart, floor.add(vm.guideWindow));
+    await tapAndPump(tester, find.byIcon(Icons.chevron_left).first);
+    releaseDeferredGuide.single();
+    await _pumpFrames(tester);
+    expect(vm.windowStart, floor);
+  });
+
   testWidgets('a superseded page cannot overwrite the newer failure notice', (tester) async {
     useTvLayout();
     channelCount = 8;
@@ -526,6 +542,7 @@ void main() {
     releaseDeferredGuide.single();
     await _pumpFrames(tester);
     expect(tester.widget<Text>(notice).data, message);
+    expect(vm.windowStart, _fixtureWindowStart);
   });
 
   for (final timing in ['before', 'after']) {
