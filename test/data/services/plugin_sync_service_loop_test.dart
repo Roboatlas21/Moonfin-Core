@@ -395,6 +395,56 @@ void main() {
     expect(pendingPins(), isEmpty);
   });
 
+  for (final pinned in [true, false]) {
+    for (final retry in [false, true]) {
+      test('rejecting an already satisfied pin choice preserves it (pinned=$pinned, retry=$retry)', () async {
+        const filter = 'group:Sports';
+        final original = ['group:News', if (pinned) filter, 'group:Kids'];
+        adapter.savedPins = List.of(original);
+        await prefs.set(UserPreferences.liveTvSavedFilters, original);
+        adapter.rejectedPin = filter;
+        if (retry) service.resetState();
+
+        final edit = service.changePinnedGuideFilter(client, filter: filter, pinned: pinned);
+        if (retry) {
+          await edit;
+          expect(pendingPins(), hasLength(1));
+          expect(postCount(), 0);
+          service.resetState();
+          await service.retryPendingGuidePins(client);
+        } else {
+          await expectLater(edit, throwsA(isA<DioException>()));
+        }
+
+        expect(adapter.lastPinRequest?.data['liveTvSavedFilterChange'], {
+          'action': pinned ? 'add' : 'remove', 'filter': filter,
+        });
+        expect(getPins(), original);
+        expect(adapter.savedPins, original);
+        expect(pendingPins(), isEmpty);
+      });
+    }
+
+    test('a server reply preserves a pending explicit pin choice (pinned=$pinned)', () async {
+      const filter = 'group:Sports';
+      service.resetState();
+      await prefs.set(UserPreferences.liveTvSavedFilters, [if (pinned) filter]);
+      await togglePin('group:News');
+      await service.changePinnedGuideFilter(client, filter: filter, pinned: pinned);
+      adapter.savedPins = [if (!pinned) filter];
+      adapter.unavailablePin = filter;
+      await service.retryPendingGuidePins(client);
+      expect(getPins(), ['group:News', if (pinned) filter]);
+      expect(pendingPins(), hasLength(1));
+
+      adapter.unavailablePin = null;
+      await service.retryPendingGuidePins(client);
+      expect(adapter.savedPins, getPins());
+      expect(getPins(), ['group:News', if (pinned) filter]);
+      expect(pendingPins(), isEmpty);
+    });
+  }
+
   test('a final rejection keeps remote pins from the preceding successful reply', () async {
     service.resetState();
     await togglePin('group:News');

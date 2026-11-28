@@ -39,6 +39,21 @@ enum _PluginAvailabilityStatus { available, unavailable, unknown }
 
 enum ProfilePushResult { saved, savedWithPinErrors, failed }
 
+extension _GuidePinQueueEntry on String {
+  // An explicit Pin or Unpin can already match the local state. Persist that
+  // distinction so a rejection after a restart only undoes an actual edit.
+  static const unchangedPrefix = 'unchanged-';
+
+  String get pinFilter => substring(indexOf(':') + 1);
+  bool get preservesMembership => startsWith(unchangedPrefix);
+
+  String get pinAction {
+    final separator = indexOf(':');
+    if (separator < 0) return '';
+    return substring(preservesMembership ? unchangedPrefix.length : 0, separator);
+  }
+}
+
 /// Bounds for the plugin's own requests.
 ///
 /// Without them the socket falls back to whatever the system allows, which is
@@ -1112,15 +1127,13 @@ class PluginSyncService extends ChangeNotifier {
       if (add && length > 1024) {
         throw const FormatException('Guide shortcut is too long');
       }
-      if (add) {
-        pins.add(filter);
-      } else {
-        pins.remove(filter);
-      }
+      final changed = add ? pins.add(filter) : pins.remove(filter);
+      final action = add ? 'add' : 'remove';
+      final queuedAction = changed ? action : '${_GuidePinQueueEntry.unchangedPrefix}$action';
       final changes = [
         for (final change in previousChanges)
-          if (change != 'add:$filter' && change != 'remove:$filter') change,
-        if (length <= 1024) '${add ? 'add' : 'remove'}:$filter',
+          if (change.pinFilter != filter) change,
+        if (length <= 1024) '$queuedAction:$filter',
       ];
       await _prefs.batchNotifications(() async {
         try {
@@ -1214,7 +1227,7 @@ class PluginSyncService extends ChangeNotifier {
     // Older queues can contain several choices for the same shortcut.
     final latest = <String, String>{};
     for (final entry in _prefs.get(UserPreferences.liveTvSavedFilterChanges)) {
-      final key = entry.substring(entry.indexOf(':') + 1);
+      final key = entry.pinFilter;
       latest.remove(key);
       latest[key] = entry;
     }
@@ -1228,8 +1241,7 @@ class PluginSyncService extends ChangeNotifier {
       final owner = _pendingGuidePinTaps[filter];
       if (owner != null && !identical(owner, tap)) break;
       final encoded = entry.value;
-      final separator = encoded.indexOf(':');
-      final action = separator < 0 ? '' : encoded.substring(0, separator);
+      final action = encoded.pinAction;
       final shouldSend = await _localGuidePins.synchronized(() {
         if (!canSend() ||
             !identical(owner, _pendingGuidePinTaps[filter]) ||
@@ -1263,8 +1275,7 @@ class PluginSyncService extends ChangeNotifier {
         if (rejection != null && !canSend()) return;
         final pending = _prefs.get(UserPreferences.liveTvSavedFilterChanges);
         // A newer choice for this group supersedes this response.
-        bool forThisFilter(String change) =>
-            change.substring(change.indexOf(':') + 1) == filter;
+        bool forThisFilter(String change) => change.pinFilter == filter;
         if (pending.lastWhere(forThisFilter, orElse: () => '') != encoded) {
           return;
         }
@@ -1274,11 +1285,11 @@ class PluginSyncService extends ChangeNotifier {
           // fails. Pending local choices still take precedence for their pins.
           final visible = pins.toSet();
           for (final change in remaining) {
-            if (change.startsWith('add:')) visible.add(change.substring(4));
-            if (change.startsWith('remove:')) visible.remove(change.substring(7));
+            if (change.pinAction == 'add') visible.add(change.pinFilter);
+            if (change.pinAction == 'remove') visible.remove(change.pinFilter);
           }
           await _prefs.set(pinsPref, visible.toList());
-        } else if (rejection != null) {
+        } else if (rejection != null && !encoded.preservesMembership) {
           final local = _prefs.get(pinsPref).toSet();
           if (action == 'add') {
             local.remove(filter);
