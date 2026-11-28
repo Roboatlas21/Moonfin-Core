@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -28,6 +29,7 @@ class _RecordingAdapter implements HttpClientAdapter {
 
   /// Set when the server should refuse to delete.
   bool failDeletes = false;
+  Future<void> Function(String method, String path)? beforeResponse;
 
   /// Set when nothing is left to resolve after a delete.
   bool failResolved = false;
@@ -49,6 +51,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   ) async {
     final path = options.uri.path;
     requests.add('${options.method} $path');
+    await beforeResponse?.call(options.method, path);
 
     if (options.method == 'DELETE') {
       return ResponseBody.fromString('', failDeletes ? 500 : 200);
@@ -217,6 +220,44 @@ void main() {
     expect(postCount(), 0);
   });
 
+  test('a background refresh during reset cannot recreate the device profile', () async {
+    final profile = service.syncProfile;
+    adapter.resolvedProfile = {'use24HourClock': true};
+    await prefs.set(UserPreferences.use24HourClock, true);
+    await service.pushSettings(client, force: true);
+    adapter.requests.clear();
+
+    final deleteStarted = Completer<void>();
+    final releaseDelete = Completer<void>();
+    final reloadStarted = Completer<void>();
+    final releaseReload = Completer<void>();
+    adapter.beforeResponse = (method, path) async {
+      if (method == 'DELETE') {
+        deleteStarted.complete();
+        await releaseDelete.future;
+      } else if (path == '/Moonfin/Settings/Resolved/$profile') {
+        reloadStarted.complete();
+        await releaseReload.future;
+      }
+    };
+    final reset = service.resetProfileToDefaults(client, profile: profile);
+    await deleteStarted.future;
+    await prefs.set(UserPreferences.lastSonarrCalendarFetchTime, 123456);
+    await settle();
+    releaseDelete.complete();
+
+    await reloadStarted.future;
+    await prefs.set(UserPreferences.lastSonarrCalendarFetchTime, 123457);
+    await settle();
+    releaseReload.complete();
+
+    expect(await reset, isTrue);
+    await settle();
+    expect(adapter.requests, contains('GET /Moonfin/Settings/Resolved/$profile'));
+    expect(postCount(), 0);
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+  });
+
   test('an edit after a reset still reaches the server', () async {
     await service.resetProfileToDefaults(client, profile: 'desktop');
 
@@ -248,6 +289,8 @@ void main() {
 
     expect(ok, isFalse);
     expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+    await settle();
+    expect(postCount(), 1);
   });
 
   test('a re-ping keeps the incomplete recordings it already has', () async {

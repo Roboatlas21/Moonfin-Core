@@ -224,6 +224,9 @@ class PluginSyncService extends ChangeNotifier {
   final _localGuidePins = Lock();
   int _sessionGeneration = 0;
   int _profileSelectionRevision = 0;
+  int _profileResetRevision = 0;
+  final _restoringResetAccounts = <bool Function()>{};
+  bool get _restoringResetProfile => _restoringResetAccounts.any((current) => current());
   late int _lastNonPinChange;
   // A tap awaiting its turn owns the upload (and any rejection) for that pin.
   final _pendingGuidePinTaps = <String, Object>{};
@@ -1360,10 +1363,13 @@ class PluginSyncService extends ChangeNotifier {
     bool requireSelectedProfile = false,
   }) async {
     if (!_syncEnabled || !supportedProfiles.contains(profile)) return ProfilePushResult.failed;
+    if (!force && _restoringResetProfile) return ProfilePushResult.failed;
     final accountCurrent = _guidePinAccountCheck(client);
     final selection = _profileSelectionRevision;
+    final resetRevision = _profileResetRevision;
     bool current() =>
         _syncEnabled && accountCurrent() &&
+        (force || resetRevision == _profileResetRevision) &&
         (!requireSelectedProfile ||
             (selection == _profileSelectionRevision && profile == syncProfile));
     if (force && _signInProfileRead != null &&
@@ -1703,48 +1709,50 @@ class PluginSyncService extends ChangeNotifier {
     if (!_syncEnabled || !supportedProfiles.contains(profile)) return false;
 
     final current = _guidePinAccountCheck(client);
-    final reset = await _guidePinSync.synchronized(
-      () => _profileWrites.synchronized(() => _localGuidePins.synchronized(() async {
-        if (!_syncEnabled || !current()) return false;
-        final ep = await moonbaseEndpoint(client, _dio);
-        if (ep == null || !_syncEnabled || !current()) return false;
+    Future<bool> deleteAndClear() async {
+      if (!_syncEnabled || !current()) return false;
+      final ep = await moonbaseEndpoint(client, _dio);
+      if (ep == null || !_syncEnabled || !current()) return false;
 
-        // A push queued by an earlier edit would put the old settings back moments
-        // after the delete, so drop it before anything is removed.
-        _pushDebounceTimer?.cancel();
+      try {
+        await _dio.delete(
+          profile == 'global'
+              ? '${ep.base}/Moonfin/Settings'
+              : '${ep.base}/Moonfin/Settings/Profile/$profile',
+          options: Options(headers: ep.headers),
+        );
+      } catch (_) {
+        return false;
+      }
+      if (!current()) return false;
 
-        try {
-          await _dio.delete(
-            profile == 'global'
-                ? '${ep.base}/Moonfin/Settings'
-                : '${ep.base}/Moonfin/Settings/Profile/$profile',
-            options: Options(headers: ep.headers),
-          );
-        } catch (_) {
-          return false;
-        }
+      // Cancel the timer and invalidate uploads it already queued behind DELETE.
+      // The next automatic upload must start with the restored preferences.
+      _pushDebounceTimer?.cancel();
+      _profileResetRevision++;
+      _restoringResetAccounts.add(current);
 
-        if (!current()) return false;
+      if (profile == 'global') {
+        _lastSyncedProfileJson.clear();
+      } else {
+        _lastSyncedProfileJson.remove(_snapshotKey(client, profile));
+      }
+      await _restoreLocalDefaults(global: profile == 'global');
+      return true;
+    }
 
-        // Nothing this device sent still stands, so a later push must not be
-        // skipped for matching a snapshot the server no longer holds.
-        if (profile == 'global') {
-          _lastSyncedProfileJson.clear();
-        } else {
-          _lastSyncedProfileJson.remove(_snapshotKey(client, profile));
-        }
-
-        await _restoreLocalDefaults(global: profile == 'global');
-        return true;
-      })),
-    );
-    if (!reset || !current()) return false;
-
-    // Admin defaults, plus the global profile when this was a device one, are
-    // what the profile resolves to from here on.
-    await pullSettingsForProfile(client, profile: profile, replayPendingPins: false);
-
-    return true;
+    try {
+      final reset = await _guidePinSync.synchronized(
+        () => _profileWrites.synchronized(
+          () => _localGuidePins.synchronized(deleteAndClear),
+        ),
+      );
+      if (!reset || !current()) return false;
+      await pullSettingsForProfile(client, profile: profile, replayPendingPins: false);
+      return true;
+    } finally {
+      _restoringResetAccounts.remove(current);
+    }
   }
 
   /// Drops the stored value of every setting a profile carries so each one
@@ -2989,7 +2997,7 @@ class PluginSyncService extends ChangeNotifier {
     final revision = _prefs.nonPinChangeRevision;
     if (revision == _lastNonPinChange) return;
     _lastNonPinChange = revision;
-    if (_isSyncingFromServer) return;
+    if (_isSyncingFromServer || _restoringResetProfile) return;
     if (!_pluginAvailable || !_prefs.get(UserPreferences.pluginSyncEnabled)) {
       return;
     }
