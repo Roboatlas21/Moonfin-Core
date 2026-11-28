@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -382,6 +383,22 @@ void main() {
     expect(requests.expand((ids) => ids), isNot(contains('ch15')));
     await tester.pump(const Duration(milliseconds: 150));
     expect(requests.last, ['ch20']);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('browsing native cards keeps the server’s listings denial', (tester) async {
+    final request = RequestOptions();
+    var listingRequests = 0;
+    prepareNativePlayer(tester, beforeListings: (_) async {
+      listingRequests++;
+      throw DioException(requestOptions: request, response: Response(requestOptions: request, statusCode: 403));
+    });
+    await pumpNativeHost(tester, [ard, zdf]);
+    await tester.pump(const Duration(seconds: 1));
+    expect(listingRequests, 1);
+    await sendNativeAction(tester, {'event': 'visibleChannelsChanged', 'channelIds': [zdf.id]});
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(listingRequests, 1);
     await tester.pumpWidget(const SizedBox());
   });
 

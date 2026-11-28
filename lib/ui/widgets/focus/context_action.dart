@@ -131,7 +131,7 @@ Future<void> _changeEveryCopy(
     );
     return played != null
         ? mutations.setPlayed(item.id, isPlayed: played)
-        : mutations.setFavorite(item.id, isFavorite: favorite!, isChannel: item.type == 'TvChannel');
+        : mutations.setFavorite(item.id, isFavorite: favorite!);
   }
   // The shared user data is keyed by item id alone, and another server can
   // use a copy's id for a different title. So every server is asked directly

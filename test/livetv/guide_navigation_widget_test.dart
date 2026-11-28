@@ -1096,9 +1096,17 @@ void main() {
     await pumpGuide(tester, surface: phone);
     final retry = find.descendant(of: find.byType(EpgNowNextCard), matching: find.text('Retry'));
     final node = Focus.of(tester.element(retry));
-    node.requestFocus();
+    final api = _MockUserLibrary();
+    when(() => client.userLibraryApi).thenReturn(api);
+    when(() => api.markFavorite('ch0')).thenAnswer((_) async {});
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
     await _pumpFrames(tester);
     expect(node.hasPrimaryFocus, isTrue);
+    await tester.pump(const Duration(milliseconds: 550));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+    verifyNever(() => api.markFavorite('ch0'));
     requests.clear();
     await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
     expect(requests, [['ch0']]);

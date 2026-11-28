@@ -149,7 +149,7 @@ class FocusedKeyHold {
   }
 
   void _onFocusChange() {
-    if (_origin?.hasFocus == true) return;
+    if (_origin?.hasPrimaryFocus == true) return;
     // Consume the key-up even if focus returns to this station.
     _timer?.cancel();
     _tap = null;

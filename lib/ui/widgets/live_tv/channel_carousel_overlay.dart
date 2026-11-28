@@ -269,6 +269,7 @@ class ChannelCarouselPrewarm {
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
     if (_disposed || channelIds.isEmpty) return;
     updateVisibleChannels(channelIds);
+    if (viewModel.listingsAccessDenied) return;
     final visible = _visibleChannelIds;
     await ensureReady();
     if (_disposed || !isWarm || !identical(visible, _visibleChannelIds)) return;

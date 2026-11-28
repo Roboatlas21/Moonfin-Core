@@ -2969,7 +2969,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       origin: node,
       stillFocused: () =>
           _mayTakeFocus &&
-          node.hasFocus &&
+          node.hasPrimaryFocus &&
           _vm.filteredChannels.elementAtOrNull(index)?.id == channelId,
       onTap: () => _watchChannel(channelId),
       onHold: () => _toggleGuideChannelFavorite(channelId, index),
