@@ -227,14 +227,20 @@ void main() {
       expect(vm.playbackChannels.single.id, 'one');
     });
 
-    test('the playback group survives unresolved membership until the server confirms it', () async {
+    test('the playback group survives a timeout and partial membership until confirmed', () async {
       _stubChannels(api, [_channel('fox'), _channel('news')]);
-      const news = {'news': {'News'}};
-      var lineup = const ChannelGroupLineup(news, partial: true, unresolvedChannelIds: {'fox'});
-      when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
       final vm = LiveTvGuideViewModel(client, initialFilter: (GuideFilter.all, 'Sports'));
       addTearDown(vm.dispose);
 
+      when(() => api.getChannelGroups(userId: 'user')).thenThrow(TimeoutException('timed out'));
+      await vm.load();
+      expect(vm.selectedGroup, 'Sports');
+      expect(vm.availableGroups, contains('Sports'));
+      expect(vm.filteredChannels, isEmpty);
+
+      const news = {'news': {'News'}};
+      var lineup = const ChannelGroupLineup(news, partial: true, unresolvedChannelIds: {'fox'});
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
       await vm.load();
       expect(vm.selectedGroup, 'Sports');
       expect(vm.filteredChannels, isEmpty);

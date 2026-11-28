@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:custom_tv_text_field/custom_tv_text_field.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -961,6 +962,41 @@ void main() {
     expect(_focusedLabel(), 'GuideChannel:$index');
     expect(find.text('Channel 2').hitTestable(), findsOneWidget);
   });
+
+  for (final style in [KeyboardStyle.native, KeyboardStyle.docked]) {
+    testWidgets('TV channel search keeps its ${style.name} keyboard open when groups arrive', (tester) async {
+      useTvLayout();
+      final prefs = GetIt.instance<UserPreferences>();
+      await prefs.set(UserPreferences.keyboardStyle, style);
+      await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.both);
+      final groups = Completer<ChannelGroupLineup>();
+      when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer((_) => groups.future);
+      await pumpGuide(tester);
+      await focusGuideNode(tester, 'GuideSearch');
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
+      final controller = tester.widget<LocalSearchField>(find.byType(LocalSearchField)).controller;
+
+      if (style == KeyboardStyle.native) {
+        tester.testTextInput.enterText('4');
+      } else {
+        await tester.sendKeyEvent(LogicalKeyboardKey.digit4, character: '4');
+      }
+      expect(controller.text, '4');
+      groups.complete(const ChannelGroupLineup({'ch1': {'Sports'}}));
+      await _pumpFrames(tester);
+      expect(guideModel(tester).availableGroups, contains('Sports'));
+      expect(CustomTVTextField.isKeyboardVisibleNotifier.value, isTrue);
+      expect(controller.text, '4');
+
+      if (style == KeyboardStyle.native) {
+        tester.testTextInput.enterText('47');
+      } else {
+        await tester.sendKeyEvent(LogicalKeyboardKey.digit7, character: '7');
+      }
+      await _pumpFrames(tester);
+      expect(guideModel(tester).filteredChannels.map((c) => c.id), unorderedEquals(['ch46', 'ch47']));
+    });
+  }
 
   testWidgets('channel search fits a narrow desktop guide', (tester) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.desktop);

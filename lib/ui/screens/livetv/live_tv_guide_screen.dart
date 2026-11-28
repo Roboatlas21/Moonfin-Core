@@ -184,6 +184,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   final _browseFocus = FocusNode(debugLabel: 'GuideBrowse');
   final _shortcutNodes = <GuideFilterChoice, FocusNode>{};
   final _channelHold = FocusedKeyHold();
+  // Keep the active keyboard when group metadata moves search into the Browse row.
+  final _channelSearchKey = GlobalKey();
   final _channelSearchFocus = FocusNode(debugLabel: 'GuideSearch');
   final _channelSearch = TextEditingController();
   Timer? _channelSearchDebounce;
@@ -2110,6 +2112,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Widget _buildChannelSearchField({bool compact = false}) => ConstrainedBox(
     constraints: const BoxConstraints(maxWidth: 360),
     child: LocalSearchField(
+      key: _channelSearchKey,
       controller: _channelSearch,
       focusNode: _channelSearchFocus,
       hint: AppLocalizations.of(context).guideSearchChannels,

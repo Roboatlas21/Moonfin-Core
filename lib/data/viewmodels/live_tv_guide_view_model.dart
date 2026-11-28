@@ -1675,11 +1675,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _programmeCategories = lineup.programmeCategories;
       _applyChannelGroupLineup(lineup);
     } else if (account != null) {
-      // The fallback channel reply cannot confirm the previous categories.
+      // The fallback lists visible stations but has no group or category metadata.
       _programmeCategories = null;
       final visible = _channels.map((channel) => channel.id).toSet();
       _channelGroups.removeWhere((id, _) => !visible.contains(id));
-      _rebuildGroupChoices(complete: true);
+      _rebuildGroupChoices(complete: visible.isEmpty);
     } else {
       _updatePageRows();
     }
