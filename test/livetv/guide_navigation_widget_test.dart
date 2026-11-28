@@ -1876,7 +1876,7 @@ void main() {
     await expectFocusAfter(tester, LogicalKeyboardKey.arrowRight, 'GuideChannel:0');
   });
 
-  for (final action in ['wait', 'move up', 'open details']) {
+  for (final action in ['wait', 'move up', 'open details', 'focus search']) {
     testWidgets('a loading row respects the viewer’s next action: $action', (tester) async {
       final anchor = await reachLoadedEdge(tester);
       void expectRow(int row) =>
@@ -1890,6 +1890,9 @@ void main() {
         case 'open details':
           await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
           expect(_alertDialog, findsOneWidget);
+        case 'focus search':
+          await focusGuideNode(tester, 'GuideSearch');
+          expect(_focusedLabel(), 'GuideSearch');
       }
       await releaseGuideData(tester);
       if (action == 'open details') {
@@ -1897,6 +1900,8 @@ void main() {
         Navigator.of(tester.element(_alertDialog)).pop();
         await _pumpFrames(tester);
         expectRow(49);
+      } else if (action == 'focus search') {
+        expect(_focusedLabel(), 'GuideSearch');
       } else {
         expectRow(action == 'wait' ? 50 : 48);
       }

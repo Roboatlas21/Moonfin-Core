@@ -305,6 +305,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _focusedProgram.addListener(_scheduleArtworkLookup);
     _focusedChannel.addListener(_scheduleArtworkLookup);
     _channelRailFocused.addListener(_scheduleArtworkLookup);
+    _channelSearchFocus.addListener(() {
+      if (_channelSearchFocus.hasFocus) _cancelPendingVerticalMove();
+    });
 
     _channelScrollController.addListener(_syncVerticalScroll);
     _programScrollController.addListener(_syncVerticalScroll);
