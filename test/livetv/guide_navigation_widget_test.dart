@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:custom_tv_text_field/custom_tv_text_field.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -51,6 +52,8 @@ class _DialogBackObserver extends WidgetsBindingObserver {
 class _MockMediaServerClient extends Mock implements MediaServerClient {}
 
 class _MockLiveTvApi extends Mock implements LiveTvApi, ChannelGroupApi {}
+
+class _MockImageApi extends Mock implements ImageApi {}
 
 class _MockUserLibrary extends Mock implements UserLibraryApi {}
 
@@ -679,6 +682,28 @@ void main() {
     expect(_focusedCell()?.row, 0);
     await expectFocusAfter(tester, LogicalKeyboardKey.arrowLeft, 'GuideChannel:0');
     expect(vm.windowStart, futureStart);
+  });
+
+  testWidgets('a date change keeps focus in channel search when its listings arrive', (tester) async {
+    useTvLayout();
+    channelCount = 1;
+    final now = DateTime(2026, 9, 11, 13);
+    await pumpGuide(tester, now: () => now);
+    final vm = guideModel(tester);
+    await focusGuideNode(tester, 'GuideProgramRow0:0');
+    await tapAndPump(tester, find.byIcon(Icons.calendar_today));
+    final calendar = find.byType(CalendarDatePicker);
+    await tapAndPump(tester, find.descendant(of: calendar, matching: find.text('12')));
+    deferredChannelId = 'ch0';
+    _fixtureWindowStart = DateTime(2026, 9, 12, vm.windowStart.hour);
+    await tapAndPump(tester, find.text('OK'));
+    expect(releaseDeferredGuide, hasLength(1));
+    await focusGuideNode(tester, 'GuideSearch');
+    expect(_focusedLabel(), 'GuideSearch');
+    releaseDeferredGuide.single();
+    await _pumpFrames(tester);
+    expect(vm.windowStart, _fixtureWindowStart);
+    expect(_focusedLabel(), 'GuideSearch');
   });
 
   testWidgets('choosing a date shows a notice when listings access is denied', (tester) async {
@@ -1986,10 +2011,21 @@ void main() {
   testWidgets('the full Guide loads artwork and the mini Guide skips it on both focus targets', (tester) async {
     useTvLayout();
     channelCount = 1;
+    final images = _MockImageApi();
+    when(() => client.imageApi).thenReturn(images);
+    when(() => images.getPrimaryImageUrl(any(), maxHeight: any(named: 'maxHeight'),
+        maxWidth: any(named: 'maxWidth'), tag: 'show-art')).thenAnswer(
+      (call) => 'https://example.test/${call.positionalArguments.single}.png',
+    );
+    when(() => liveTvApi.getProgram(any(), userId: 'user')).thenAnswer((call) async => {
+      ..._programsFor('ch0').firstWhere((p) => p['Id'] == call.positionalArguments.single),
+      'ImageTags': {'Primary': 'show-art'},
+    });
     await pumpGuide(tester);
     await focusGuideNode(tester, 'GuideProgramRow0:0');
     await tester.pump(const Duration(seconds: 1));
-    expect(find.byType(EpgHeroPreview), findsOneWidget);
+    final image = find.descendant(of: find.byType(EpgHeroPreview), matching: find.byType(CachedNetworkImage));
+    expect(tester.widget<CachedNetworkImage>(image).imageUrl, 'https://example.test/ch0-p0.png');
     verify(() => liveTvApi.getProgram(any(), userId: any(named: 'userId'))).called(greaterThan(0));
     await tester.pumpWidget(const SizedBox());
     clearInteractions(liveTvApi);

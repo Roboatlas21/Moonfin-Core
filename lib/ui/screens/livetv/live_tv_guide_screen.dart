@@ -1008,7 +1008,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         );
         if (moved && mounted) {
           _failedLiveReset = false;
-          _anchorToWindowStart();
+          _anchorToWindowStart(focusGrid: _gridHasFocus);
         }
       }
     } finally {
@@ -3398,7 +3398,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   /// Puts the anchor on the new window start after a jump, so it addresses the
   /// first cell of every row instead of a time the window no longer covers.
-  void _anchorToWindowStart() {
+  void _anchorToWindowStart({bool focusGrid = true}) {
     final selection = _selection;
     if (selection == null) return;
     final cells = _cellsForChannel(selection.channelId);
@@ -3416,7 +3416,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       clearProgramId: cell.program == null,
     );
     _selection = updated;
-    _focusSelectedCell(updated, cells);
+    if (focusGrid) _focusSelectedCell(updated, cells);
   }
 
   Future<void> _goToNow() async {
