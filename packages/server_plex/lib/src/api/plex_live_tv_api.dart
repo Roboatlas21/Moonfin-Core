@@ -451,6 +451,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }
 
   _FreeChannels _publishFreeChannels(_FreeChannels lineup) {
+    if (lineup.isEmpty) _featuredGroup = null;
     final previous = _lastFreeLineup;
     if (identical(previous, lineup)) return lineup;
     if (previous != null && !_sameStationMapping(previous, lineup)) {

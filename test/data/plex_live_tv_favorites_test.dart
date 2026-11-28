@@ -512,6 +512,36 @@ void main() {
     }
   });
 
+  test('Home can remove a DVR favorite fetched by another Plex connection', () async {
+    const id = 'channel-2-4';
+    const source = 'server://pms-a/epg';
+    const station = {
+      'Id': id, 'Type': 'TvChannel', 'Name': 'CBC', 'PlexFavoriteSource': source, 'PlexFavoriteId': '4',
+    };
+    final api = _LineupApi();
+    final client = _LineupClient(api)..userId = 'plex-user';
+    addTearDown(client.dispose);
+    final other = _plex()..baseUrl = 'https://other-pms.example';
+    when(() => api.getChannels(fields: 'ImageTags,UserData'))
+        .thenAnswer((_) async => {'Items': [station]});
+    PlexLiveTvFavorites.applyToItem(client, station);
+    await PlexLiveTvFavorites.refresh(client);
+
+    cloud.rows = [{'source': source, 'id': '4'}];
+    await PlexLiveTvFavorites.refresh(other);
+    final row = await RowDataSource(client).loadFavoritesChannels('home-pms');
+    final item = row.items.single;
+    final key = channelFavoriteKey(item.rawData)!;
+    expect(item.isFavorite, isTrue);
+    expect(userDataSync.favoriteFor(key), isFalse);
+
+    await ItemMutationRepository(client).setFavorite(
+      id, isFavorite: false, isChannel: true, expectedChannelKey: key,
+    );
+    expect(cloud.rows, isEmpty);
+    expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(1));
+  });
+
   group('two DVRs with channel 4', () {
     late PlexMediaServerClient first, second;
     late Map<String, dynamic> a, b;

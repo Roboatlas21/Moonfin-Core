@@ -43,18 +43,21 @@ class ItemMutationRepository {
   }
 
   Future<void> _syncFavorite(String itemId, String stateId, int session, String key) async {
+    final plexChannel = isPlexLiveTvChannel(_client, itemId);
     try {
       // Lets setFavorite store this run before it can finish and remove it.
       await Future<void>.value();
       while (userDataSync.session == session) {
         final wanted = userDataSync.pendingFavorite(stateId);
         if (wanted == null) return;
-        if (wanted == userDataSync.confirmedFavorite(stateId)) {
+        // Plex's account list can change without refreshing this connection's
+        // local favorite flag. Its save checks the cloud list before any PUT.
+        if (!plexChannel && wanted == userDataSync.confirmedFavorite(stateId)) {
           userDataSync.confirmFavorite(stateId, wanted);
           return;
         }
         try {
-          if (isPlexLiveTvChannel(_client, itemId)) {
+          if (plexChannel) {
             await PlexLiveTvFavorites.setFavorite(
               _client,
               itemId,
