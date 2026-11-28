@@ -1316,7 +1316,8 @@ class PluginSyncService extends ChangeNotifier {
       client,
       profile,
       serverId: serverId,
-      allowSync: current,
+      // First sign-in may look for a profile before this device has enabled sync.
+      allowSync: () => _syncEnabled && current(),
     );
     if (!current()) return false;
     if (resolved == null) {

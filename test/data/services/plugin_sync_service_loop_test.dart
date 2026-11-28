@@ -422,6 +422,33 @@ void main() {
     expect(pendingPins(), isEmpty);
   });
 
+  for (final restoreProfile in [false, true]) {
+    test('sign-in keeps a queued pin local until ${restoreProfile ? 'a profile is restored' : 'sync is enabled'}', () async {
+      when(() => client.serverType).thenReturn(ServerType.emby);
+      await prefs.removePreference(UserPreferences.pluginSyncEnabled);
+      adapter.missingProfileUntilPins = true;
+      adapter.confirmsEmptyPins = true;
+      await togglePin('group:News');
+      await service.syncOnLogin(client, serverId: 'srv1');
+      expect(postCount(), 0);
+      expect(resolvedCount(), 1);
+      expect(prefs.get(UserPreferences.pluginSyncEnabled), isFalse);
+      expect(getPins(), ['group:News']);
+      expect(pendingPins(), ['add:group:News']);
+
+      if (restoreProfile) {
+        adapter.savedPins = ['group:Sports'];
+        await service.syncOnLogin(client, serverId: 'srv1');
+      } else {
+        await service.setSyncEnabled(true);
+      }
+      expect(prefs.get(UserPreferences.pluginSyncEnabled), isTrue);
+      expect(adapter.pinActions, ['add']);
+      expect(getPins(), [if (restoreProfile) 'group:Sports', 'group:News']);
+      expect(pendingPins(), isEmpty);
+    });
+  }
+
   test('enabling sync before the first profile GET uploads the restored settings', () async {
     when(() => client.serverType).thenReturn(ServerType.emby);
     await prefs.set(UserPreferences.pluginSyncEnabled, false);
