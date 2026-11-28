@@ -126,15 +126,15 @@ class _PluginSettingsSectionState extends State<PluginSettingsSection> {
     if (!mounted) return;
     setState(() => _profileSyncBusy = false);
     final l10n = AppLocalizations.of(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(switch (result) {
-          ProfilePushResult.saved => l10n.syncedSettingsToProfile(_profileLabel(profile, l10n)),
-          ProfilePushResult.savedWithPinErrors => l10n.profileSavedWithPinErrors,
-          ProfilePushResult.failed => l10n.friendsSaveFailed,
-        }),
-      ),
-    );
+    final message = switch (result) {
+      ProfilePushResult.saved => l10n.syncedSettingsToProfile(_profileLabel(profile, l10n)),
+      ProfilePushResult.savedWithPinErrors => l10n.profileSavedWithPinErrors,
+      ProfilePushResult.failed => l10n.friendsSaveFailed,
+      ProfilePushResult.accountChanged => null,
+    };
+    if (message != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 
   Future<void> _resetSelectedProfile() async {

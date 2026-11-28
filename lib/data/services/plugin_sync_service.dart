@@ -37,7 +37,7 @@ import '../../util/signed_in_server_features.dart';
 
 enum _PluginAvailabilityStatus { available, unavailable, unknown }
 
-enum ProfilePushResult { saved, savedWithPinErrors, failed }
+enum ProfilePushResult { saved, savedWithPinErrors, failed, accountChanged }
 
 extension _GuidePinQueueEntry on String {
   // An explicit Pin or Unpin can already match the local state. Persist that
@@ -245,8 +245,8 @@ class PluginSyncService extends ChangeNotifier {
   bool get _restoringResetProfile => _restoringResetAccount?.call() ?? false;
   late int _lastNonPinChange;
   // A tap awaiting its turn owns the upload (and any rejection) for that pin.
-  final _pendingGuidePinTaps = <String, Object>{};
-  // Network writes are serialized. A new tap on this filter invalidates its reply.
+  final _pendingGuidePinTaps = <String, Completer<List<String>?>>{};
+  // Network writes are serialized. A different choice on this filter invalidates its reply.
   String? _guidePinAwaitingReply;
   Timer? _pushDebounceTimer;
   static const _pushDebounce = Duration(milliseconds: 1000);
@@ -1107,7 +1107,8 @@ class PluginSyncService extends ChangeNotifier {
       }
     }
 
-    final tap = Object();
+    final tap = Completer<List<String>?>();
+    Future<List<String>?>? existingUpload;
     final upload = await _localGuidePins.synchronized(() async {
       requireCurrent();
       final pinsPref = _prefs.getEffectivePreference(
@@ -1129,8 +1130,11 @@ class PluginSyncService extends ChangeNotifier {
       }
       final changed = add ? pins.add(filter) : pins.remove(filter);
       final action = add ? 'add' : 'remove';
+      final previous = previousChanges.lastWhereOrNull((change) => change.pinFilter == filter);
+      final repeated = previous?.pinAction == action;
       final queuedAction = changed ? action : '${_GuidePinQueueEntry.unchangedPrefix}$action';
-      final changes = [
+      // An identical pending choice already has its rollback state and queue position.
+      final changes = repeated ? previousChanges : [
         for (final change in previousChanges)
           if (change.pinFilter != filter) change,
         if (length <= 1024) '$queuedAction:$filter',
@@ -1149,16 +1153,20 @@ class PluginSyncService extends ChangeNotifier {
           rethrow;
         }
       });
-      if (_guidePinAwaitingReply == filter) _guidePinAwaitingReply = null;
+      if (!repeated && _guidePinAwaitingReply == filter) _guidePinAwaitingReply = null;
       requireCurrent();
       onLocalChange?.call();
       if (!_syncEnabled) return false;
+      final owner = _pendingGuidePinTaps[filter];
+      if (repeated && owner != null) {
+        existingUpload = owner.future;
+        return false;
+      }
       _pendingGuidePinTaps[filter] = tap;
       return true;
     });
-    if (!upload) return null;
-    await _waitForSignInProfile();
-    return _guidePinSync.synchronized(() async {
+    if (!upload) return existingUpload;
+    Future<List<String>?> send() async {
       try {
         requireCurrent();
         final saved = await _replayPendingGuidePins(
@@ -1174,7 +1182,9 @@ class PluginSyncService extends ChangeNotifier {
           _pendingGuidePinTaps.remove(filter);
         }
       }
-    });
+    }
+    tap.complete(_waitForSignInProfile().then((_) => _guidePinSync.synchronized(send)));
+    return tap.future;
   }
 
   // Active clients have an offline wrapper; compare their online clients.
@@ -1272,7 +1282,11 @@ class PluginSyncService extends ChangeNotifier {
       await _localGuidePins.synchronized(() async {
         if (!current() || _guidePinAwaitingReply != filter) return;
         _guidePinAwaitingReply = null;
-        if (rejection != null && !canSend()) return;
+        // If a tap joined a background retry, leave a rejected edit for its owner to report.
+        if (rejection != null &&
+            (!canSend() || !identical(owner, _pendingGuidePinTaps[filter]))) {
+          return;
+        }
         final pending = _prefs.get(UserPreferences.liveTvSavedFilterChanges);
         // A newer choice for this group supersedes this response.
         bool forThisFilter(String change) => change.pinFilter == filter;
@@ -1396,6 +1410,7 @@ class PluginSyncService extends ChangeNotifier {
     if (force && _signInProfileRead != null &&
         _prefs.get(UserPreferences.liveTvSavedFilterChanges).isNotEmpty) {
       await _waitForSignInProfile();
+      if (!accountCurrent()) return ProfilePushResult.accountChanged;
       if (!current()) return ProfilePushResult.failed;
     }
 
@@ -1409,15 +1424,14 @@ class PluginSyncService extends ChangeNotifier {
       if (!force && _lastSyncedProfileJson[key] == json) return ProfilePushResult.saved;
 
       await _postProfile(ep, profile, payload);
-      if (!current()) return ProfilePushResult.failed;
-      _lastSyncedProfileJson[key] = json;
+      if (!accountCurrent()) return ProfilePushResult.accountChanged;
+      if (current()) _lastSyncedProfileJson[key] = json;
       if (force && _prefs.get(UserPreferences.liveTvSavedFilterChanges).isNotEmpty) {
         try {
-          await _replayPendingGuidePins(client, profile, reportRejections: true);
+          await _replayPendingGuidePins(client, profile, reportRejections: true, allowSync: current);
         } catch (_) {
-          return current() ? ProfilePushResult.savedWithPinErrors : ProfilePushResult.failed;
+          return ProfilePushResult.savedWithPinErrors;
         }
-        if (!current()) return ProfilePushResult.failed;
         if (_prefs.get(UserPreferences.liveTvSavedFilterChanges).isNotEmpty) {
           return ProfilePushResult.savedWithPinErrors;
         }
@@ -1425,14 +1439,16 @@ class PluginSyncService extends ChangeNotifier {
       return ProfilePushResult.saved;
     }
 
+    ProfilePushResult result;
     try {
       // The server can echo a settings event as soon as the profile is saved.
       // Finish the explicit transfer, including its pin edits, before that pull.
       Future<ProfilePushResult> write() => _profileWrites.synchronized(push);
-      return await (force ? _guidePinSync.synchronized(write) : write());
+      result = await (force ? _guidePinSync.synchronized(write) : write());
     } catch (_) {
-      return ProfilePushResult.failed;
+      result = ProfilePushResult.failed;
     }
+    return accountCurrent() ? result : ProfilePushResult.accountChanged;
   }
 
   Future<void> _postProfile(MoonbaseEndpoint ep, String profile, Map<String, dynamic> payload) async {

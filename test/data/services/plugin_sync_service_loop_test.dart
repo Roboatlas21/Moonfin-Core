@@ -62,6 +62,7 @@ class _RecordingAdapter implements HttpClientAdapter {
   Completer<void>? responseReady;
   Completer<void>? responseGate;
   String? pausedPath;
+  bool pausePinsOnly = false;
   final List<String> pinActions = [];
 
   void applyPinChange(Map<dynamic, dynamic> change) {
@@ -105,7 +106,9 @@ class _RecordingAdapter implements HttpClientAdapter {
       final pause = pausedPath == null
           ? path.contains('/Moonfin/Settings/Resolved/') || options.method == 'POST'
           : path == pausedPath;
-      if (pause) await holdResponse();
+      if (pause && (!pausePinsOnly || options.data?['liveTvSavedFilterChange'] != null)) {
+        await holdResponse();
+      }
       return response;
     }
 
@@ -396,6 +399,25 @@ void main() {
   });
 
   for (final pinned in [true, false]) {
+    test('repeating a pending offline choice rolls back to its original membership ($pinned)', () async {
+      const filter = 'group:Sports';
+      final original = [if (!pinned) filter];
+      await prefs.set(UserPreferences.liveTvSavedFilters, original);
+      adapter.savedPins = List.of(original);
+      service.resetState();
+      await service.changePinnedGuideFilter(client, filter: filter, pinned: pinned);
+      await togglePin('group:News');
+      final pending = pendingPins();
+      await service.changePinnedGuideFilter(client, filter: filter, pinned: pinned);
+      expect(pendingPins(), pending);
+      adapter.rejectedPin = filter;
+      adapter.unavailablePin = 'group:News';
+      await service.retryPendingGuidePins(client);
+      expect(getPins().contains(filter), !pinned);
+      expect(adapter.savedPins, original);
+      expect(pendingPins(), ['add:group:News']);
+    });
+
     for (final retry in [false, true]) {
       test('rejecting an already satisfied pin choice preserves it (pinned=$pinned, retry=$retry)', () async {
         const filter = 'group:Sports';
@@ -455,6 +477,28 @@ void main() {
     expect(getPins(), ['group:Sports', 'group:News']);
     expect(pendingPins(), isEmpty);
   });
+
+  for (final rejected in [true, false]) {
+    test('identical taps share the in-flight result (rejected=$rejected)', () async {
+      const filter = 'group:Sports';
+      adapter.pauseResponses();
+      if (rejected) adapter.rejectedPin = filter;
+      final first = service.changePinnedGuideFilter(client, filter: filter, pinned: true);
+      await adapter.responseReady!.future;
+      final local = Completer<void>();
+      final repeated = service.changePinnedGuideFilter(
+        client, filter: filter, pinned: true, onLocalChange: local.complete,
+      );
+      await local.future;
+      final result = rejected ? throwsA(isA<DioException>()) : completion([filter]);
+      final checks = [expectLater(first, result), expectLater(repeated, result)];
+      adapter.responseGate!.complete();
+      await Future.wait(checks);
+      expect(postCount(), 1);
+      expect(pendingPins(), isEmpty);
+      expect(getPins().contains(filter), !rejected);
+    });
+  }
 
   test('a queued tap keeps remote pins from an earlier tap when rejected', () async {
     adapter.savedPins = ['group:Sports'];
@@ -756,6 +800,32 @@ void main() {
     );
     expect(getPins(), ['group:Sports']);
   });
+
+  for (final (accountChanged, pinAccepted, expected) in [
+    (false, false, ProfilePushResult.savedWithPinErrors),
+    (false, true, ProfilePushResult.saved),
+    (true, true, ProfilePushResult.accountChanged),
+  ]) {
+    test('manual Save preserves the profile acknowledgement (accountChanged=$accountChanged, pinAccepted=$pinAccepted)', () async {
+      service.resetState();
+      await togglePin('group:News');
+      await service.refreshAvailability(client);
+      adapter.pausePinsOnly = true;
+      adapter.pauseResponses();
+      if (!pinAccepted) adapter.unavailablePin = 'group:News';
+      final saving = service.pushSettingsForProfile(client, profile: 'tv', force: true);
+      await adapter.responseReady!.future;
+      expect(postCount(), 2);
+      if (accountChanged) {
+        when(() => client.userId).thenReturn('other');
+      } else {
+        await service.setSyncEnabled(false);
+      }
+      adapter.responseGate!.complete();
+      expect(await saving, expected);
+      expect(pendingPins().isEmpty, pinAccepted && !accountChanged);
+    });
+  }
 
   test('manual Save distinguishes profile failure from a pending or rejected pin', () async {
     Future<ProfilePushResult> save() => service.pushSettingsForProfile(client, profile: 'tv', force: true);
