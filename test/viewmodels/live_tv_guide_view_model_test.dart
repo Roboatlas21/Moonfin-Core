@@ -2213,6 +2213,31 @@ void main() {
       expect(vm.programsForChannel('c299').single.id, 'retry-c299');
     });
 
+    test('recording recovery restores the far page after a gap in a window move', () async {
+      stubNumberedChannels(150);
+      final vm = await loadFilter(GuideFilter.all);
+      await vm.loadMorePrograms();
+      await vm.loadMorePrograms();
+      when(() => _guide(liveTv)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        return {'Items': [], if (ids.contains('c50')) 'FailedChannelIds': ids};
+      });
+      expect(await vm.setWindowStart(vm.windowEnd), isTrue);
+      expect(vm.loadStateFor('c50'), GuideChannelLoadState.failed);
+      expect(vm.loadStateFor('c149'), GuideChannelLoadState.loaded);
+      var failRefresh = true;
+      when(() => _guide(liveTv)).thenAnswer((inv) async {
+        if (failRefresh) {
+          failRefresh = false;
+          throw const FormatException('Invalid recording refresh');
+        }
+        return {'Items': [for (final id in _requestedIds(inv)) _program('recovered-$id', id)]};
+      });
+      await vm.recordingChanged();
+      expect(vm.programsForChannel('c149').map((p) => p.id), ['recovered-c149']);
+      expect(vm.loadStateFor('c50'), GuideChannelLoadState.loaded);
+    });
+
     test('a recording recovery stops after two timeouts and retains the reached rows for Retry', () async {
       stubNumberedChannels(650);
       final vm = await loadFilter(GuideFilter.all);

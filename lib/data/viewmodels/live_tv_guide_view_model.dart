@@ -1903,6 +1903,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         if (samePage() || (current() && identical(error, _error))) rethrow;
       }
       if (!samePage()) continue;
+      final reachedDepth = _requestedPageDepth;
       final ids = rows.take(end).map((c) => c.id).toSet();
       final requestedIds = {
         ...ids,
@@ -1950,7 +1951,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _advanceCategoryCursor();
         _categoryLoadedFor = category;
       }
-      _reloadDepth = 0;
+      // A failed middle batch can leave the cursor behind rows already reached.
+      _reloadDepth = category == null && _programsHighWater < reachedDepth ? reachedDepth : 0;
       if (failed.isEmpty && recordingRevision == liveTvRecordingRevision.value) {
         _loadedRecordingRevision = recordingRevision;
       }
