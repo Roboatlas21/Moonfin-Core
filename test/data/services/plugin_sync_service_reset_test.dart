@@ -284,7 +284,7 @@ void main() {
       adapter.failResolved = !found;
       adapter.resolvedProfile = {
         'detailShowFullDate': true,
-        if (remoteClock != null) 'use24HourClock': remoteClock,
+        'use24HourClock': ?remoteClock,
       };
       adapter.beforeResponse = (method, path) async {
         if (path == '/Moonfin/Settings/Resolved/$profile') {
