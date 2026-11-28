@@ -1428,6 +1428,25 @@ void main() {
       expect(vm.filteredChannels.any((c) => c.id == 'c200'), isTrue);
     });
 
+    test('a recording refresh keeps a Sports station recovered while it was waiting', () async {
+      const sports = GuideFilter.sports;
+      stubNumberedChannels(2);
+      when(() => _guide(liveTv, category: sports)).thenAnswer((_) async => {
+        'Items': [_program('old', 'c0', isSports: true)], 'FailedChannelIds': ['c1'],
+      });
+      final vm = await loadFilter(sports);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      final held = pendingGuide(sports);
+      final refresh = vm.recordingChanged();
+      await pumpEventQueue();
+      when(() => _guide(liveTv, category: sports)).thenAnswer(_serverFiltered((_) => true));
+      expect(await vm.ensureCategoryChannel('c1'), isTrue);
+      held.complete({'Items': []});
+      await refresh;
+      expect(vm.filteredChannels.map((c) => c.id), ['c1']);
+      expect(vm.hasFailedCategoryListings, isFalse);
+    });
+
     test('an older Sports Retry keeps a station recovered while it was waiting', () async {
       stubNumberedChannels(2);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {

@@ -958,7 +958,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final request = _categoryRequest;
     final session = userDataSync.session;
     final filter = _filter;
-    final channels = {..._categoryPrograms.keys, ..._categoryFailedIds}
+    final pendingFailures = _categoryFailedIds.toSet();
+    final channels = {..._categoryPrograms.keys, ...pendingFailures}
         .map(channelForId)
         .whereType<GuideChannel>()
         .toList();
@@ -987,6 +988,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
     }
     if (!current()) return null;
+    // A focus lookup or Retry may have resolved a failed row while we waited.
+    final alreadyRecovered = pendingFailures.difference(_categoryFailedIds);
+    succeeded.removeAll(alreadyRecovered);
+    failed.removeAll(alreadyRecovered);
+    refreshed.removeWhere((id, _) => alreadyRecovered.contains(id));
     // A successful empty result means this channel left the category.
     // Only failed requests retain the old entry and can be retried.
     _categoryPrograms.removeWhere((id, _) => succeeded.contains(id));
