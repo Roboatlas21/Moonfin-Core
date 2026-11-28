@@ -977,11 +977,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _cancelPendingVerticalMove();
     _isShowingDatePicker = true;
     try {
+      final today = widget.now();
       final picked = await showDatePicker(
         context: context,
         initialDate: _vm.guideDate,
-        firstDate: widget.now().subtract(const Duration(days: 7)),
-        lastDate: widget.now().add(const Duration(days: 14)),
+        currentDate: today,
+        firstDate: today.subtract(const Duration(days: 7)),
+        lastDate: today.add(const Duration(days: 14)),
         builder: (context, child) {
           return FocusTraversalGroup(
             policy: OrderedTraversalPolicy(),

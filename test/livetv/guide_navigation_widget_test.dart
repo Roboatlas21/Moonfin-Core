@@ -633,7 +633,8 @@ void main() {
   });
 
   testWidgets('a failed same-day picker request names the selected date', (tester) async {
-    await pumpGuide(tester, surface: phone);
+    final now = DateTime(2026, 9, 11, 10, 30);
+    await pumpGuide(tester, surface: phone, now: () => now);
     final vm = guideModel(tester);
     final today = vm.guideDate;
     final start = DateTime(today.year, today.month, today.day, 10, 30);
@@ -641,6 +642,8 @@ void main() {
     await _pumpFrames(tester);
     guideFailure = TimeoutException('Listings unavailable');
     await tapAndPump(tester, find.byIcon(Icons.calendar_today));
+    expect(tester.widget<CalendarDatePicker>(find.byType(CalendarDatePicker)).currentDate,
+        DateUtils.dateOnly(now));
     await tapAndPump(tester, find.text('OK'));
 
     final context = tester.element(find.byType(LiveTvGuideScreen));

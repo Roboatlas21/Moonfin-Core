@@ -641,6 +641,8 @@ void main() {
   testWidgets('overlay follows a restored current channel after tune failure', (
     tester,
   ) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
     await tester.binding.setSurfaceSize(const Size(1000, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
