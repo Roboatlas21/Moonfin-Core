@@ -1566,8 +1566,10 @@ void main() {
     }
   });
 
-  for (final (apiLevel, consumeRelease) in [(32, false), (32, true), (33, false), (33, true)]) {
-    testWidgets('Back dismisses the native search keyboard before the picker on API $apiLevel (handled release: $consumeRelease)', (tester) async {
+  for (final (apiLevel, keyboardHandlesUp, pickerHandlesUp) in [
+    (32, false, false), (32, true, true), (32, true, false), (33, false, false), (33, true, true),
+  ]) {
+    testWidgets('Back dismisses the native search keyboard before the picker on API $apiLevel (handled releases: $keyboardHandlesUp/$pickerHandlesUp)', (tester) async {
       useTvLayout();
       final prefs = GetIt.instance<UserPreferences>();
       await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);
@@ -1581,6 +1583,7 @@ void main() {
       );
       GetIt.instance.registerSingleton<ScreensaverController>(screensaver);
       addTearDown(screensaver.visible.dispose);
+      var consumeRelease = keyboardHandlesUp;
       bool handleRelease(KeyEvent event) =>
           consumeRelease && event is KeyUpEvent && event.logicalKey == LogicalKeyboardKey.goBack;
       HardwareKeyboard.instance.addHandler(handleRelease);
@@ -1619,6 +1622,7 @@ void main() {
       await pressBack();
       expect(CustomTVTextField.isKeyboardVisibleNotifier.value, isFalse);
       expect(picker, findsOneWidget);
+      consumeRelease = pickerHandlesUp;
       await pressBack();
       expect(picker, findsNothing);
       expect(find.byType(LiveTvGuideScreen), findsOneWidget);

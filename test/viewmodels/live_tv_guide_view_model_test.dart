@@ -2216,8 +2216,12 @@ void main() {
       vm.addListener(() => states.add(vm.state));
       final recording = vm.recordingChanged();
       await pumpEventQueue();
-      if (!staleSuccess) stale.completeError(denied);
-      await pumpEventQueue();
+      if (!staleSuccess) {
+        stale.completeError(denied);
+        await pumpEventQueue();
+        expect(vm.listingsAccessDenied, isFalse);
+        expect(vm.programsForChannel('c0'), isNotEmpty);
+      }
       final row = _program('show', 'c0', isKids: category == GuideFilter.kids, isSports: category == GuideFilter.sports);
       reply.complete({'Items': [recorded(row)]});
       await recording;

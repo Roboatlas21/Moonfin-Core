@@ -192,6 +192,7 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
   Timer? _pageRepeatTimer;
   Timer? _watchdogTimer;
   int _holdDirection = 0;
+  int _cancelledHoldDirection = 0;
   final ValueNotifier<int> _rawIndexListenable = ValueNotifier(0);
 
   int get _channelCount => widget.channels.length;
@@ -232,6 +233,7 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
     }
     if (oldWidget.selectionRevision != widget.selectionRevision ||
         previous.length != _channelCount || target != centered) {
+      if (_holdDirection != 0) _cancelledHoldDirection = _holdDirection;
       _endHold();
     }
     if (previous.length != _channelCount) {
@@ -327,13 +329,19 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
     final key = event.logicalKey;
     if (!key.isLeftKey && !key.isRightKey) return KeyEventResult.ignored;
 
+    final direction = key.isRightKey ? 1 : -1;
     if (event is KeyUpEvent) {
+      if (direction == _cancelledHoldDirection) _cancelledHoldDirection = 0;
       _endHold();
       return KeyEventResult.handled;
     }
     if (!event.isActionable) return KeyEventResult.ignored;
 
-    final direction = key.isRightKey ? 1 : -1;
+    // A lineup change stopped this press. Only a fresh press may start it again.
+    if (direction == _cancelledHoldDirection) {
+      if (event is KeyRepeatEvent) return KeyEventResult.handled;
+      _cancelledHoldDirection = 0;
+    }
 
     // A physical key event, down or repeat, is the only thing that keeps the
     // hold alive. `_pageFromTimer` deliberately never reaches this line.

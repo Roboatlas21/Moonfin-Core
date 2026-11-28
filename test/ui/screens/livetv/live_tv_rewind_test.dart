@@ -622,9 +622,13 @@ void main() {
     starting.complete();
     await tester.pump();
     expect(centered(), ard.name);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
     expect(centered(), ard.name);
+    await press(tester, LogicalKeyboardKey.arrowRight);
+    expect(centered(), last.name);
     await tester.pumpWidget(const SizedBox());
   });
 
