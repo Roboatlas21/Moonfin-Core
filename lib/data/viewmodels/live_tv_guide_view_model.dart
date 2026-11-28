@@ -1302,6 +1302,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       !_accessDenied(error) &&
       (error is TimeoutException || isTransientTransportFailure(error));
 
+  Object? _categoryDecodeError(Object error) {
+    // Dio can wrap the decoder exception before it reaches the guide.
+    final cause = error is DioException && error.type == DioExceptionType.unknown
+        ? error.error
+        : error;
+    return cause is FormatException || cause is TypeError ? cause : null;
+  }
+
   Future<bool> _walkCategory({
     int? recordingRevision,
     List<GuideChannel>? initialLineup,
@@ -1356,13 +1364,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         } catch (error) {
           if (!current()) return false;
           if (!_temporaryCategoryFailure(error)) {
-            // Dio wraps JSON decoder errors before the response reaches the guide.
-            final cause = error is DioException && error.type == DioExceptionType.unknown
-                ? error.error
-                : error;
-            final malformed = cause is FormatException || cause is TypeError;
+            final cause = _categoryDecodeError(error);
             final hasListings = fetched.programs.isNotEmpty || programsHighWater > 0;
-            if (!malformed || !hasListings) rethrow;
+            if (cause == null || !hasListings) rethrow;
             debugPrint('Malformed Live TV category retry (${cause.runtimeType})');
           }
         }
@@ -1434,7 +1438,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         final requested = batch.map((c) => c.id).toSet();
         final reply = await _fetchPrograms(batch, category: filter, current: current).onError<Object>(
           (_, _) => (programs: <String, List<GuideProgram>>{}, failedChannelIds: requested),
-          test: _temporaryCategoryFailure,
+          test: (error) => _temporaryCategoryFailure(error) || _categoryDecodeError(error) != null,
         );
         if (!current()) return;
         // A focus lookup may have already settled a station while Retry waited.

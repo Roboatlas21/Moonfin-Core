@@ -1723,6 +1723,24 @@ void main() {
       expect(vm.error, isA<FormatException>());
     });
 
+    test('Sports Retry recovers a later station when the first batch is malformed', () async {
+      stubNumberedChannels(201);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async =>
+          {'Items': [], 'FailedChannelIds': _requestedIds(inv)});
+      final vm = await loadFilter(GuideFilter.sports);
+      expect(vm.filteredChannels, isEmpty);
+      expect(vm.hasFailedCategoryListings, isTrue);
+
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        if (ids.contains('c0')) throw const FormatException('Invalid EPG grid');
+        return {'Items': [for (final id in ids) _program('p-$id', id, isSports: true)]};
+      });
+      await vm.retryFailedCategoryListings();
+      expect(vm.filteredChannels.map((channel) => channel.id), ['c200']);
+      expect(vm.hasFailedCategoryListings, isTrue);
+    });
+
     final retryFailures = <String, Map<String, dynamic> Function()>{
       'timeout': () => throw TimeoutException('Plex grid temporarily unavailable'),
       'malformed grid': () => throw const FormatException('Invalid EPG grid'),
