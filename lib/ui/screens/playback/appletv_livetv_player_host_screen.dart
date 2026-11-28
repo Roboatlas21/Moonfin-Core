@@ -1030,6 +1030,9 @@ class _AppleTvLiveTvPlayerHostScreenState
         unawaited(
           _manager.changeBitrate(mbps == null || mbps < 0 ? null : mbps),
         );
+      case 'requestChannelList':
+        if (!_exiting) _pushMetadata();
+        return;
       case 'visibleChannelsChanged':
         _visibleChannelIds = (action['channelIds'] as List?)
             ?.whereType<String>()

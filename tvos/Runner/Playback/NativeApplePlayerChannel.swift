@@ -484,6 +484,10 @@ final class NativeApplePlayerChannel: NSObject, FlutterStreamHandler {
             return
         }
         playerVC = vc
+        // A fresh controller has no channel indices for the cached schedule patch.
+        if lastMetadata?["partialChannelList"] as? Bool == true {
+            send(["event": "requestChannelList"])
+        }
         #if os(iOS)
         let presented: UIViewController = IosNativePlayerHostController(content: vc)
         #else

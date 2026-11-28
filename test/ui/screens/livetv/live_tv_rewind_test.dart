@@ -353,6 +353,31 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a recreated native player gets the full lineup after a partial update', (tester) async {
+    final metadata = prepareNativePlayer(tester);
+    const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
+    final lineup = [ard, zdf, third];
+    List<dynamic> cardIds() => [for (final card in metadata['channelList'] as List) card['id']];
+    await pumpNativeHost(tester, lineup);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(metadata['partialChannelList'], isTrue);
+    expect(cardIds(), [ard.id]);
+
+    await sendNativeAction(tester, {'event': 'requestChannelList'});
+    expect(metadata.containsKey('partialChannelList'), isFalse);
+    expect(cardIds(), [ard.id, zdf.id, third.id]);
+    final cards = (metadata['channelList'] as List).cast<Map>();
+    expect(cards.singleWhere((card) => card['selected'] == true)['id'], ard.id);
+
+    await sendNativeAction(tester, {'event': 'visibleChannelsChanged', 'channelIds': [third.id]});
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(metadata['partialChannelList'], isTrue);
+    expect(cardIds(), [ard.id, third.id]);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('native guide shares the starting tune and adopts the selected lineup after Retry', (tester) async {
     final metadata = prepareNativePlayer(tester);
     const favorites = (GuideFilter.favorites, null);
