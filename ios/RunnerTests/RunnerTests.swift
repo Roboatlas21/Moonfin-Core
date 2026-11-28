@@ -101,6 +101,15 @@ final class RunnerTests: XCTestCase {
         carousel.update(entries: channels, theme: theme)
         XCTAssertEqual(carousel.centeredChannel?.channelId, "A")
         XCTAssertEqual(Set(visible), Set(["A", "B", "C", "D"]))
+
+        carousel.beginHold(direction: 1)
+        XCTAssertEqual(carousel.centeredChannel?.channelId, "B")
+        carousel.update(entries: [channels[1], channels[2], channels[3]], theme: theme)
+        carousel.stepFromTimer()
+        XCTAssertEqual(carousel.centeredChannel?.channelId, "C")
+        carousel.update(entries: [channels[0], channels[3], channels[1]], theme: theme)
+        carousel.stepFromTimer()
+        XCTAssertEqual(carousel.centeredChannel?.channelId, "A")
     }
 
     @MainActor

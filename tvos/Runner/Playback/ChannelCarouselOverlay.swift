@@ -280,7 +280,12 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
         let countChanged = entries.count != self.entries.count
         self.entries = entries
         if let previousId, centeredChannel?.channelId != previousId {
-            centerIndex = entries.firstIndex { $0.channelId == previousId } ?? 0
+            if let index = entries.firstIndex(where: { $0.channelId == previousId }) {
+                centerIndex = index
+            } else {
+                endHold()
+                centerIndex = 0
+            }
         }
         if countChanged {
             rebuildCards()
@@ -520,7 +525,7 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     }
 
     /// One card per discrete press, then the hold timers take over.
-    private func beginHold(direction: Int) {
+    func beginHold(direction: Int) {
         holdStartTimer?.invalidate()
         holdRepeatTimer?.invalidate()
         holdDirection = direction
@@ -551,7 +556,7 @@ final class ChannelCarouselOverlayViewController: UIViewController, RemotePlayer
     }
 
     /// Timer driven movement. It must never refresh the watchdog.
-    private func stepFromTimer() {
+    func stepFromTimer() {
         guard holdDirection != 0, count > 1 else { return }
         move(by: holdDirection)
     }

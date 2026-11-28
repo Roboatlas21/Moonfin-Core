@@ -281,6 +281,10 @@ void main() {
 
     final search = tester.getRect(find.byType(TextField));
     final minimumSearchHeight = PlatformDetection.isTV ? 36.0 : kMinInteractiveDimension;
+    expect(search.left, greaterThanOrEqualTo(rail.right));
+    expect(search.right, lessThanOrEqualTo(surface.width));
+    expect(search.top, greaterThanOrEqualTo(0));
+    expect(search.bottom, lessThanOrEqualTo(hero.top));
     expect(search.height, greaterThanOrEqualTo(minimumSearchHeight));
     expect(hero.height + search.height, closeTo(EpgHeroPreview.compactHeight + 36, 0.1));
     expect(hero.top - rail.bottom, lessThanOrEqualTo(8));
