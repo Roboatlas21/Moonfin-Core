@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
+import '../plex_cloud_transport.dart'
+    if (dart.library.js_interop) '../plex_cloud_transport_web.dart';
 import '../plex_item_mapper.dart';
 import 'plex_apis.dart';
 
@@ -88,10 +90,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     this._dio, {
     DateTime Function() gridCacheNow = DateTime.now,
     DateTime Function() now = DateTime.now,
-  }) : _gridCacheNow = gridCacheNow, _now = now;
+  }) : _gridCacheNow = gridCacheNow, _now = now {
+    configurePlexCloudTransport(_dio);
+  }
 
   static final _cloudOptions = Options(
-    // Native redirects would forward X-Plex-Token to the redirect target.
+    // A redirect must not forward X-Plex-Token to another service.
     followRedirects: false,
     headers: {'X-Plex-Provider-Version': '7.2'},
   );

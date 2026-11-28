@@ -1,6 +1,9 @@
 import 'package:dio/dio.dart';
 import 'package:server_core/server_core.dart';
 
+import '../plex_cloud_transport.dart'
+    if (dart.library.js_interop) '../plex_cloud_transport_web.dart';
+
 /// The Plex Cloud favorite-channel endpoint. This API uses a Plex *account*
 /// token supplied by its caller, which may differ from a PMS access token.
 ///
@@ -17,7 +20,9 @@ class PlexLiveTvFavoritesApi {
               connectTimeout: const Duration(seconds: 8),
               receiveTimeout: const Duration(seconds: 15),
             ),
-          );
+          ) {
+    configurePlexCloudTransport(_dio);
+  }
 
   static Map<String, String> _headers(
     DeviceInfo deviceInfo,
