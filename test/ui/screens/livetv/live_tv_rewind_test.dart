@@ -631,6 +631,8 @@ void main() {
 
   for (final cloudOnly in [true, false]) {
     testWidgets('Recordings key from the channel carousel (cloud only: $cloudOnly)', (tester) async {
+      PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+      addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
       final liveTv = GetIt.instance<MediaServerClient>().liveTvApi;
       final plex = _PlexClient();
       when(() => plex.cloudOnly).thenReturn(cloudOnly);
