@@ -2369,6 +2369,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Widget _buildNowNextList(List<GuideChannel> channels) {
     return ListView.builder(
       controller: _nowNextScrollController,
+      physics: _vm.hasMorePrograms ? const AlwaysScrollableScrollPhysics() : null,
       key: ValueKey((_vm.filter, _vm.selectedGroup)),
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
       itemCount: channels.length,

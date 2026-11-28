@@ -1085,6 +1085,41 @@ void main() {
     expect(_focusedLabel(), 'GuideChannel:47');
   });
 
+  testWidgets('swiping a short Sports list after closing Browse loads more stations', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.both);
+    await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
+    channelCount = 1001;
+    stubGroups(const ChannelGroupLineup({'ch0': {'Local'}}, programmeCategories: {'sports'}));
+    final pending = Completer<void>();
+    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
+      final ids = (inv.namedArguments[#channelIds] as List).cast<String>();
+      if (inv.namedArguments[#isSports] != true) return {'Items': []};
+      if (ids.contains('ch400')) await pending.future;
+      if (ids.contains('ch200') || ids.contains('ch400')) throw TimeoutException('listings');
+      return {'Items': [
+        for (final id in ['ch0', 'ch800'])
+          if (ids.contains(id)) ..._programsFor(id, sports: true),
+      ]};
+    });
+    await pumpGuide(tester, surface: phone);
+    final vm = guideModel(tester);
+    vm.setFilter(GuideFilter.sports);
+    await _pumpFrames(tester);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await tapAndPump(tester, find.byTooltip('Filters'));
+    Navigator.of(tester.element(picker)).pop();
+    await _pumpFrames(tester);
+    pending.complete();
+    await _pumpFrames(tester);
+    expect(vm.filteredChannels.map((c) => c.id), ['ch0']);
+    expect(vm.hasMorePrograms, isTrue);
+    await tester.drag(find.byType(EpgNowNextCard).first, const Offset(0, -120));
+    await _pumpFrames(tester);
+    expect(vm.filteredChannels.map((c) => c.id), contains('ch800'));
+  });
+
   testWidgets('closing Browse restores the card selected after a lineup change', (tester) async {
     useLayout(InterfaceLayout.phone);
     final prefs = GetIt.instance<UserPreferences>();
@@ -1608,6 +1643,7 @@ void main() {
     tester.view.viewInsets = const FakeViewPadding(bottom: 300);
     await _pumpFrames(tester);
     await focusGuideNode(tester, 'GuideCategoryRetry');
+    expect(_focusedLabel(), 'GuideCategoryRetry');
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
     expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
   });

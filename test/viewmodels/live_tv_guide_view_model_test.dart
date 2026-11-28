@@ -1363,12 +1363,13 @@ void main() {
       expect(vm.hasFailedCategoryListings, isTrue);
       failLast = false;
       await vm.retryFailedCategoryListings();
-      expect(vm.programsForChannel('c250'), isNotEmpty);
+      final recovered = vm.programsForChannel('c250').single.id;
       final countAfterRecovery = requestsForLast;
       while (vm.hasMorePrograms) {
         await vm.loadMorePrograms();
       }
       expect(requestsForLast, countAfterRecovery);
+      expect(vm.programsForChannel('c250').single.id, recovered);
     });
     test('search during the first Sports request keeps the playback lineup', () async {
       _stubChannels(liveTv, [
