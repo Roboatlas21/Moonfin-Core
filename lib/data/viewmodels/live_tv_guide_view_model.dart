@@ -1427,13 +1427,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           test: _temporaryCategoryFailure,
         );
         if (!current()) return;
-        final recovered = requested.difference(reply.failedChannelIds);
+        // A focus lookup may have already settled a station while Retry waited.
+        final recovered = requested.intersection(_categoryFailedIds).difference(reply.failedChannelIds);
         _categoryQueriedIds.addAll(recovered);
         _advanceCategoryCursor();
         _categoryPrograms.removeWhere((id, _) => recovered.contains(id));
-        _categoryFailedIds.removeAll(requested);
-        _categoryFailedIds.addAll(reply.failedChannelIds);
-        _categoryPrograms.addAll(reply.programs);
+        _categoryFailedIds.removeAll(recovered);
+        _categoryPrograms.addEntries(reply.programs.entries.where((e) => recovered.contains(e.key)));
         _notifyListeners();
       }
       // Scrolling may already own the next category page.

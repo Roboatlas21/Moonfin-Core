@@ -1428,6 +1428,24 @@ void main() {
       expect(vm.filteredChannels.any((c) => c.id == 'c200'), isTrue);
     });
 
+    test('an older Sports Retry keeps a station recovered while it was waiting', () async {
+      stubNumberedChannels(2);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {
+        'Items': [], 'FailedChannelIds': ['c1'],
+      });
+      final vm = await loadFilter(GuideFilter.sports);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      final held = pendingGuide(GuideFilter.sports);
+      final retry = vm.retryFailedCategoryListings();
+      await pumpEventQueue();
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+      expect(await vm.ensureCategoryChannel('c1'), isTrue);
+      held.complete({'Items': []});
+      await retry;
+      expect(vm.filteredChannels.map((c) => c.id), ['c1']);
+      expect(vm.hasFailedCategoryListings, isFalse);
+    });
+
     test('targeted focus retries a failed category channel and skips known nonmatches', () async {
       stubNumberedChannels(3);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {
