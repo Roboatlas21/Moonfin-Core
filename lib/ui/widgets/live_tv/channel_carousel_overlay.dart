@@ -730,6 +730,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
   DateTime? _lastBlindLoad;
 
   void _scheduleVisibleLoad() {
+    widget.prewarm?.updateVisibleChannels(_neighborhood());
     _loadTimer?.cancel();
     if (_ready && _vm.unfilteredProgramsForChannel(_centeredId).isEmpty) {
       final now = DateTime.now();

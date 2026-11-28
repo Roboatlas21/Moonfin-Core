@@ -463,7 +463,10 @@ void main() {
     await tester.pumpAndSettle();
     await show(['All', 'Movies', 'Series', 'Sports', 'News', 'Kids', 'Premiere', 'Favorites']);
     expect(nodes['Favorites']!.hasPrimaryFocus, isTrue);
-    expect(find.text('Favorites').hitTestable(), findsOneWidget);
+    final rail = tester.getRect(find.byType(EpgFilterRail));
+    final label = tester.getRect(find.text('Favorites'));
+    expect(label.left, greaterThanOrEqualTo(rail.left - 1));
+    expect(label.right, lessThanOrEqualTo(rail.right + 1));
   });
 
   testWidgets('TV guide error Retry is reachable from the window bar', (

@@ -32,6 +32,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   bool failTopUp = false;
   bool recoverOnTopUp = false;
   Completer<void>? nextTopUpGate;
+  Completer<void>? refreshGate;
   final Set<String> failedChannels = {};
   bool get listening => hasListeners;
   String titleSuffix = '';
@@ -107,6 +108,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   @override
   Future<void> refreshCarouselPrograms() async {
     refreshCalls++;
+    if (refreshGate != null) await refreshGate!.future;
     notifyListeners();
   }
 
@@ -275,6 +277,32 @@ void main() {
     await tester.pump();
     expect(tester.widget<ChannelCarouselCard>(card).programTitle, 'Show ch10');
     await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('browsing during a refresh loads only the newly visible cards', (tester) async {
+    final client = _CarouselClient();
+    final gate = Completer<void>();
+    final guide = _CarouselGuide(client, _guideChannels(20))
+      ..ready = true
+      ..refreshGate = gate;
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => guide);
+    try {
+      await pumpOverlay(tester, prewarm: prewarm);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(guide.refreshCalls, 1);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect(selectedName(tester), 'Channel 11');
+      gate.complete();
+      await tester.pump();
+      expect(guide.requests, isEmpty);
+      await tester.pump(const Duration(milliseconds: 200));
+      final ids = guide.requests.single;
+      expect(ids[ids.length ~/ 2], 'ch11');
+    } finally {
+      await tester.pumpWidget(const SizedBox.shrink());
+      prewarm.dispose();
+    }
   });
 
   testWidgets('a cold-open carousel still shows favorite changes when listings fail', (tester) async {
