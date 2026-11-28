@@ -30,8 +30,10 @@ void main() {
     expect(grouped.partial, isTrue);
     expect(grouped.unresolvedChannelIds, {'offline'});
 
-    final unsupported = await ChannelGroupLineup.fetch(fixture(200, body: {'supported': false, 'channels': [rows.last]}));
-    expect(unsupported.groupsByChannelId, isEmpty);
+    final ungrouped = await ChannelGroupLineup.fetch(fixture(200, body: {'supported': false, 'channels': [rows.last]}));
+    expect(ungrouped.endpointAvailable, isTrue);
+    expect(ungrouped.channels, [rows.last]);
+    expect(ungrouped.groupsByChannelId, isEmpty);
   });
 
   test('missing plugin falls back but errors propagate', () async {
