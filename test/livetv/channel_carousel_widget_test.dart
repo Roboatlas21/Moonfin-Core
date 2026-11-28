@@ -289,9 +289,10 @@ void main() {
       ..refreshGate = gate;
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => guide);
     try {
-      await pumpOverlay(tester, prewarm: prewarm);
+      await pumpOverlay(tester, prewarm: prewarm, surfaceWidth: ChannelCarouselCard.cardPitch * 5 + 66);
       await tester.pump(const Duration(milliseconds: 200));
       expect(guide.refreshCalls, 1);
+      guide.loadedChannels.addAll(prewarm.visibleOrNearbyChannelIds);
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
       await tester.pump();
       expect(selectedName(tester), 'Channel 11');
@@ -299,8 +300,7 @@ void main() {
       await tester.pump();
       expect(guide.requests, isEmpty);
       await tester.pump(const Duration(milliseconds: 200));
-      final ids = guide.requests.single;
-      expect(ids[ids.length ~/ 2], 'ch11');
+      expect(guide.requests.single, ['ch15']);
     } finally {
       await tester.pumpWidget(const SizedBox.shrink());
       prewarm.dispose();

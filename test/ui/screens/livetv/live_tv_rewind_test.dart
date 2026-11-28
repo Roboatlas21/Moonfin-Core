@@ -626,6 +626,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
     expect(centered(), ard.name);
     await press(tester, LogicalKeyboardKey.arrowRight);
     expect(centered(), last.name);

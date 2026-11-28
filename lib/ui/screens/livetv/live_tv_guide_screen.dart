@@ -2802,11 +2802,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         (_vm.state == GuideState.error && !_vm.listingsAccessDenied)) {
       return SingleChildScrollView(child: _buildBody());
     }
+    final denied = _vm.listingsAccessDenied;
     final retry = _vm.hasFailedCategoryListings;
     return ListView.builder(
       controller: _channelScrollController,
-      itemCount: channels.length + (retry ? 1 : 0),
-      itemBuilder: (_, index) {
+      itemCount: channels.length + (denied ? 1 : 0) + (retry ? 1 : 0),
+      itemBuilder: (_, row) {
+        if (denied && row == 0) return _buildListingsDeniedNotice();
+        final index = denied ? row - 1 : row;
         if (index == channels.length) return _buildCategoryRetryButton(partial: true);
         _maybeLoadMore(index);
         final channel = channels[index];

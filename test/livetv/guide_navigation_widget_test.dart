@@ -2023,6 +2023,23 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('compact landscape search explains denied listings and keeps stations accessible', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    final request = RequestOptions();
+    when(() => _guideRequest(liveTvApi)).thenThrow(DioException(
+      requestOptions: request, response: Response(requestOptions: request, statusCode: 403),
+    ));
+    await pumpGuide(tester, surface: const Size(640, 360));
+    await tester.tap(find.byType(TextField));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await _pumpFrames(tester);
+    expect(find.textContaining('Failed to load guide').hitTestable(), findsOneWidget);
+    final station = find.widgetWithText(ListTile, 'Channel 0');
+    await tester.ensureVisible(station);
+    await _pumpFrames(tester);
+    expect(station.hitTestable(), findsOneWidget);
+  });
+
   testWidgets('Up from category Retry returns to search above a tall keyboard', (tester) async {
     useLayout(InterfaceLayout.phone);
     channelCount = 2;
