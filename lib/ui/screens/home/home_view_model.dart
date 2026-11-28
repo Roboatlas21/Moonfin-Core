@@ -785,16 +785,30 @@ class HomeViewModel extends ChangeNotifier {
   static bool _isDeferrable(HomeSectionConfig cfg) =>
       cfg.isPluginDynamic && (cfg.pluginSection?.isNotEmpty ?? false);
 
+  bool? _cachedPlexFavorite(AggregatedItem item) {
+    final key = item.rawData['PlexFavoriteSyncKey'];
+    return key is String
+        ? PlexLiveTvFavorites.cachedFavoriteFor(_client, item.id, key)
+        : null;
+  }
+
   /// Repaints the watched ticks on the rows already built, without refetching
   /// them. The home screen drives this so the listener lives and dies with the
   /// widget rather than with this singleton.
   void applyUserDataChanges() {
     List<HomeRow>? rows;
     for (var i = 0; i < _rows.length; i++) {
-      final patched = userDataSync.applyAll(_rows[i].items);
-      if (identical(patched, _rows[i].items)) continue;
+      final row = _rows[i];
+      final patched = userDataSync.applyAll(
+        row.items,
+        favoriteOverride: row.rowType == HomeRowType.liveTvFavorites &&
+                _client.serverType == ServerType.plex
+            ? _cachedPlexFavorite
+            : null,
+      );
+      if (identical(patched, row.items)) continue;
       rows ??= List<HomeRow>.of(_rows);
-      rows[i] = _rows[i].copyWith(items: patched);
+      rows[i] = row.copyWith(items: patched);
     }
     if (rows == null) return;
     _rows = rows;

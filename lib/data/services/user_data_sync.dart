@@ -165,8 +165,10 @@ class UserDataSync extends ChangeNotifier {
 
   /// Returns [item] itself when nothing newer is known, so callers can compare
   /// with `identical` and skip rebuilding a list that did not move.
+  /// A [favoriteOverride] replaces stored scoped data after pending edits.
   AggregatedItem apply(AggregatedItem item, {
     bool? Function(AggregatedItem)? favoriteFallback,
+    bool? Function(AggregatedItem)? favoriteOverride,
   }) {
     final original = _userData[item.id];
     final scopedKey = channelFavoriteKey(item.rawData) ??
@@ -174,7 +176,10 @@ class UserDataSync extends ChangeNotifier {
             ? serverChannelKey(item.serverId, item.id)
             : null);
     final scopedFavorite = scopedKey is String
-        ? favoriteFor(scopedKey) ?? favoriteFallback?.call(item)
+        ? pendingFavorite(scopedKey) ??
+              favoriteOverride?.call(item) ??
+              (_userData[scopedKey]?['IsFavorite'] as bool?) ??
+              favoriteFallback?.call(item)
         : null;
     if (original == null && scopedFavorite == null) return item;
     final patch = <String, dynamic>{...?original};
@@ -204,11 +209,18 @@ class UserDataSync extends ChangeNotifier {
   /// stable for the caches that key off it.
   List<AggregatedItem> applyAll(List<AggregatedItem> items, {
     bool? Function(AggregatedItem)? favoriteFallback,
+    bool? Function(AggregatedItem)? favoriteOverride,
   }) {
-    if (_userData.isEmpty && favoriteFallback == null) return items;
+    if (_userData.isEmpty && favoriteFallback == null && favoriteOverride == null) {
+      return items;
+    }
     List<AggregatedItem>? patched;
     for (var i = 0; i < items.length; i++) {
-      final updated = apply(items[i], favoriteFallback: favoriteFallback);
+      final updated = apply(
+        items[i],
+        favoriteFallback: favoriteFallback,
+        favoriteOverride: favoriteOverride,
+      );
       if (identical(updated, items[i])) continue;
       patched ??= List<AggregatedItem>.of(items);
       patched[i] = updated;

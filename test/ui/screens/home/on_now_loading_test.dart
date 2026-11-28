@@ -12,6 +12,7 @@ import 'package:moonfin/data/repositories/multi_server_repository.dart';
 import 'package:moonfin/data/services/plugin_sync_service.dart';
 import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
 import 'package:moonfin/data/services/row_data_source.dart';
+import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/media_bar_view_model.dart';
 import 'package:moonfin/preference/home_section_config.dart';
 import 'package:moonfin/preference/preference_constants.dart';
@@ -397,6 +398,33 @@ void main() {
     when(read).thenAnswer((_) async => []);
     await model.refreshResumeAndNextUp();
     expect(favorites(), isEmpty);
+
+    final other = _MockPlexClient();
+    when(() => other.userId).thenReturn('user');
+    when(() => other.serverType).thenReturn(ServerType.plex);
+    when(() => other.deviceInfo).thenReturn(device);
+    when(read).thenAnswer((_) async => [
+      {'source': 'provider://tv.plex.provider.epg', 'id': 'news'},
+    ]);
+    await PlexLiveTvFavorites.refresh(other);
+    await pumpEventQueue();
+    final key = PlexLiveTvFavorites.syncKey(client, 'channel-plex-news');
+    expect(userDataSync.favoriteFor(key), isFalse);
+    bool cardIsFavorite() => model.rows
+        .singleWhere((row) => row.rowType == HomeRowType.liveTvFavorites)
+        .items.single.isFavorite;
+    expect(cardIsFavorite(), isTrue);
+
+    userDataSync.addListener(model.applyUserDataChanges);
+    addTearDown(() {
+      userDataSync.removeListener(model.applyUserDataChanges);
+      userDataSync.reset();
+    });
+    userDataSync.publish('unrelated-movie', {'Played': true});
+    expect(cardIsFavorite(), isTrue);
+    userDataSync.requestFavorite(key, false);
+    userDataSync.publish('unrelated-movie', {'Played': false});
+    expect(cardIsFavorite(), isFalse);
   });
 
   test('a favorites row read for a previous Home user cannot replace the current row', () async {
