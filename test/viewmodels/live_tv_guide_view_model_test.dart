@@ -828,6 +828,7 @@ void main() {
       expect(vm.boundaryDueAt, clock.add(backoff));
       clock = clock.add(backoff);
       await tester.pump(backoff);
+      expect(vm.boundaryDueAt, isNull);
       pending.complete({'Items': []});
       await stale;
 
@@ -1130,6 +1131,45 @@ void main() {
     expect(vm.programsHighWater, 2);
   });
 
+  for (final removeStation in [false, true]) {
+    test('pending carousel cards survive a lineup update (removeStation=$removeStation)', () async {
+      final vm = LiveTvGuideViewModel(client);
+      addTearDown(vm.dispose);
+      final lineup = [for (var i = 0; i < 3; i++) GuideChannel.fromRawItem(_channel('c$i'))];
+      vm.usePlaybackLineup(lineup);
+      await vm.load(initialChannelIds: ['c0']);
+      final pending = Completer<Map<String, dynamic>>();
+      final requests = <List<String>>[];
+      when(() => _guide(liveTv)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        requests.add(ids);
+        if (requests.length == 1) return pending.future;
+        return {'Items': [for (final id in ids) _program('new-$id', id)]};
+      });
+
+      final visible = vm.ensureProgramsForChannels(['c1', 'c2']);
+      await pumpEventQueue();
+      expect(requests, [['c1', 'c2']]);
+      vm.usePlaybackLineup([
+        lineup.first,
+        if (!removeStation) lineup[1],
+        GuideChannel.fromRawItem(_channel('c2', number: '22')),
+      ]);
+      pending.complete({'Items': [for (final id in ['c1', 'c2']) _program('old-$id', id)]});
+      await visible;
+
+      if (removeStation) {
+        expect(requests.last, ['c2']);
+        expect(vm.hasProgramsFor('c1'), isFalse);
+        expect(vm.programsForChannel('c2').single.id, 'new-c2');
+      } else {
+        expect(requests, hasLength(1));
+        expect(vm.programsForChannel('c1').single.id, 'old-c1');
+        expect(vm.programsForChannel('c2').single.id, 'old-c2');
+      }
+    });
+  }
+
   test('paging fetches the next missing station immediately after a row retry', () async {
     stubNumberedChannels(101);
     final vm = await loadFilter(GuideFilter.all);
@@ -1308,11 +1348,56 @@ void main() {
       expect(vm.filteredChannels.single.id, 'c1');
       expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
       expect(vm.programsHighWater, 1);
-      await vm.setWindowStart(vm.windowEnd);
+      final next = vm.windowEnd;
+      expect(await vm.setWindowStart(next), isTrue);
+      expect(vm.windowStart, next);
       expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
       matching = {'c1'};
-      await vm.setWindowStart(vm.windowEnd);
+      final following = vm.windowEnd;
+      expect(await vm.setWindowStart(following), isTrue);
+      expect(vm.windowStart, following);
       expect(vm.surfingChannels.single.id, 'c1');
+    });
+
+    test('search removes a stale Sports match when the failed station returns no listings', () async {
+      stubNumberedChannels(2);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+      final vm = await loadFilter(GuideFilter.sports);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {
+        'Items': [_program('sport-c1', 'c1', isSports: true)],
+        'FailedChannelIds': ['c0'],
+      });
+      await vm.recordingChanged();
+      expect(vm.hasFailedCategoryListings, isTrue);
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c1']);
+
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => false));
+      vm.setChannelQuery('c0');
+      await pumpEventQueue();
+      expect(vm.hasFailedCategoryListings, isFalse);
+      expect(vm.filteredChannels, isEmpty);
+      expect(vm.surfingChannels.single.id, 'c1');
+    });
+
+    test('clearing a category search restores Retry for an off-page failure', () async {
+      stubNumberedChannels(600);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        return {
+          'Items': [for (final id in ids) if (id != 'c599') _program('p-$id', id, isSports: true)],
+          if (ids.contains('c599')) 'FailedChannelIds': ['c599'],
+        };
+      });
+      final vm = await loadFilter(GuideFilter.sports);
+      vm.setChannelQuery('c599');
+      await pumpEventQueue();
+      expect(vm.hasFailedCategoryListings, isTrue);
+      vm.setChannelQuery('c1');
+      await pumpEventQueue();
+      expect(vm.hasFailedCategoryListings, isFalse);
+      vm.setChannelQuery('');
+      await pumpEventQueue();
+      expect(vm.hasFailedCategoryListings, isTrue);
     });
 
     for (final reload in [false, true]) {

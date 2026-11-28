@@ -559,8 +559,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// that remain, and ignore late results for removed channels.
   void usePlaybackLineup(List<GuideChannel> channels) {
     if (_usesPlaybackLineup && identical(_channels, channels)) return;
+    final sameStations = _usesPlaybackLineup && GuideChannel.sameStationOrder(_channels, channels);
     _usesPlaybackLineup = true;
-    _programGeneration++;
+    if (!sameStations) _programGeneration++;
     _channels = channels;
     _updatePageRows();
     final ids = channels.map((channel) => channel.id).toSet();
@@ -569,7 +570,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _failedProgramIds.retainAll(ids);
     _failedReplacementIds.retainAll(ids);
     if (_failedReplacementIds.isEmpty) _retryRollingRange = false;
-    _resetPageCursor();
+    _resetPageCursor(advancePage: !sameStations);
   }
 
   final Map<String, List<GuideProgram>> _programsByChannel = {};
@@ -1184,7 +1185,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       // Searching and sorting can reuse listings for channels already checked.
       _categoryRequest++;
       _categoryQueriedIds.removeAll(_categoryFailedIds);
-      _categoryFailedIds.clear();
       _categoryHighWater = 0;
       _advanceCategoryCursor();
     } else {
@@ -1349,7 +1349,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _advanceCategoryCursor();
       // Two transport failures on the same batch are enough for this walk.
       if (transportFailed) break;
-      if (fetched.programs.isEmpty) continue;
+      final previousCount = _categoryPrograms.length;
+      for (final id in queried) {
+        if (!failed.contains(id) && !fetched.programs.containsKey(id)) {
+          _categoryPrograms.remove(id);
+        }
+      }
+      if (fetched.programs.isEmpty && _categoryPrograms.length == previousCount) continue;
       _categoryPrograms.addAll(fetched.programs);
       _notifyListeners();
     }
@@ -2082,7 +2088,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       move = pendingWindowResult;
     }
     if (_disposed || listingsAccessDenied) return;
-    final lineup = _channels;
     final missing = channelIds
         .where((id) => !_programsLoadedIds.contains(id))
         .toList();
@@ -2092,22 +2097,21 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         i,
         min(i + _programBatchSize, missing.length),
       );
-      final chunk = chunkIds
+      List<GuideChannel> currentChunk() => chunkIds
           .map(channelForId)
           .whereType<GuideChannel>()
           .toList();
-      if (!await _loadProgramsBatch(chunk)) {
+      if (!await _loadProgramsBatch(currentChunk())) {
         // A card refresh can interrupt its first listing request.
         // Retry once while the same player is still open.
         if (!_usesPlaybackLineup ||
             _disposed ||
             _state != GuideState.ready ||
             load != _loadGeneration ||
-            session != userDataSync.session ||
-            !identical(lineup, _channels)) {
+            session != userDataSync.session) {
           return;
         }
-        if (!await _loadProgramsBatch(chunk)) return;
+        if (!await _loadProgramsBatch(currentChunk())) return;
       }
     }
     _notifyListeners();

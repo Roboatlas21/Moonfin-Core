@@ -1339,7 +1339,23 @@ void main() {
     },
   );
 
+  testWidgets('landscape phone search and Clear have full touch targets', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    await pumpGuide(tester, surface: const Size(900, 430));
+    final field = find.byType(TextField);
+    expect(tester.getSize(field).height, greaterThanOrEqualTo(kMinInteractiveDimension));
+    await tester.enterText(field, 'ch1');
+    await _pumpFrames(tester);
+    final clear = find.descendant(of: field, matching: find.byType(IconButton));
+    final size = tester.getSize(clear);
+    expect(size.shortestSide, greaterThanOrEqualTo(kMinInteractiveDimension));
+    await tester.tap(clear);
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+  });
+
   testWidgets('moving into the mini player skips hero artwork', (tester) async {
+    useTvLayout();
     await pumpGuide(tester, miniPlayerMode: true);
     await focusGuideNode(tester, 'GuideProgramRow0:0');
     await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideMiniPlayer');
