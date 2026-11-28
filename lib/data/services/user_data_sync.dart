@@ -6,6 +6,7 @@ import 'package:get_it/get_it.dart';
 import 'package:playback_core/playback_core.dart' show MediaStreamResolver;
 import 'package:server_core/server_core.dart';
 
+import '../../util/server_url.dart';
 import '../models/aggregated_item.dart';
 import 'media_server_client_factory.dart';
 
@@ -26,6 +27,17 @@ Map<String, dynamic> withServerChannelKey(MediaServerClient client, Map<String, 
 
 String? channelFavoriteKey(Map<String, dynamic> row) =>
     row['ChannelFavoriteSyncKey'] as String?;
+
+String _channelServerId(String stored) {
+  if (!stored.contains('://')) return stored;
+  final clients = GetIt.instance.maybeGet<MediaServerClientFactory>()?.clients;
+  if (clients == null || clients.containsKey(stored)) return stored;
+  // Two saved accounts can use the same address. Only accept a unique match.
+  final matches = clients.entries.where(
+    (entry) => isStoredServer(stored, serverId: entry.key, baseUrl: entry.value.baseUrl),
+  );
+  return matches.singleOrNull?.key ?? stored;
+}
 
 /// The newest watched state, resume position and favourite flag this client
 /// knows about, for every item a screen is still holding.
@@ -184,7 +196,7 @@ class UserDataSync extends ChangeNotifier {
     final original = _userData[item.id];
     final scopedKey = channelFavoriteKey(item.rawData) ??
         (item.serverId.isNotEmpty && MediaStreamResolver.isLiveTvItem(item.rawData)
-            ? serverChannelKey(item.serverId, item.id)
+            ? serverChannelKey(_channelServerId(item.serverId), item.id)
             : null);
     final scopedFavorite = scopedKey is String
         ? favoriteFor(scopedKey) ?? favoriteFallback?.call(item)

@@ -1031,7 +1031,10 @@ class _AppleTvLiveTvPlayerHostScreenState
           _manager.changeBitrate(mbps == null || mbps < 0 ? null : mbps),
         );
       case 'requestChannelList':
-        if (!_exiting) _pushMetadata();
+        if (!_exiting) {
+          _readSchedule();
+          _pushMetadata();
+        }
         return;
       case 'visibleChannelsChanged':
         _visibleChannelIds = (action['channelIds'] as List?)

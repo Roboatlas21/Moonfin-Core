@@ -203,6 +203,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       _vm.supportsGroupPicker &&
       _vm.availableGroups.isNotEmpty &&
       _categoryDisplay != LiveTvCategoryDisplay.programmes;
+  TextDirection get _pickerRowDirection =>
+      _usesPicker ? Directionality.of(context) : TextDirection.ltr;
   bool get _sidePanel =>
       PlatformDetection.isTV ||
       (PlatformDetection.useDesktopUi && _isLandscapeSize(MediaQuery.sizeOf(context)));
@@ -2735,7 +2737,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       onKeyEvent: (_, event) {
         if (!event.isActionable) return KeyEventResult.ignored;
         final key = event.logicalKey;
-        if (key.isLeftKey) {
+        if (key.isTowardStart(_pickerRowDirection)) {
           if (index == _kWindowBarPrevious &&
               _usesPicker &&
               PlatformDetection.isTV) {
@@ -2745,7 +2747,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           }
           return KeyEventResult.handled;
         }
-        if (key.isRightKey) {
+        if (key.isTowardEnd(_pickerRowDirection)) {
           _focusWindowBar(index + 1);
           return KeyEventResult.handled;
         }
@@ -3007,12 +3009,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           }
           return KeyEventResult.handled;
         }
-        if (key.isRightKey) {
+        if (key.isTowardEnd(_pickerRowDirection)) {
           _onNavigationKey();
           _focusProgramFromChannel(index);
           return KeyEventResult.handled;
         }
-        if (key.isLeftKey) {
+        if (key.isTowardStart(_pickerRowDirection)) {
           _onNavigationKey();
           if (_usesPicker) {
             unawaited(_openFilterPicker());

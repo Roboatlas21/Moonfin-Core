@@ -1543,6 +1543,20 @@ void main() {
     expect(picker, findsOneWidget);
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
     expect(picker, findsNothing);
+    for (final target in ['GuideChannel:0', 'GuideWindowBar:0']) {
+      await focusGuideNode(tester, target);
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+      expect(picker, findsOneWidget, reason: target);
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+      expect(picker, findsNothing);
+      await focusGuideNode(tester, target);
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+      if (target == 'GuideChannel:0') {
+        expect(_focusedCell()?.row, 0);
+      } else {
+        expect(_focusedLabel(), 'GuideWindowBar:1');
+      }
+    }
   });
 
   for (final action in ['wait', 'move up', 'open details']) {

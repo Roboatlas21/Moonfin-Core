@@ -372,6 +372,7 @@ void main() {
     expect(cardIds(), [ard.id, zdf.id, third.id]);
     final cards = (metadata['channelList'] as List).cast<Map>();
     expect(cards.singleWhere((card) => card['selected'] == true)['id'], ard.id);
+    expect(cards.singleWhere((card) => card['id'] == third.id)['programName'], 'Now on ${third.id}');
 
     await sendNativeAction(tester, {'event': 'visibleChannelsChanged', 'channelIds': [third.id]});
     await tester.pump(const Duration(milliseconds: 150));

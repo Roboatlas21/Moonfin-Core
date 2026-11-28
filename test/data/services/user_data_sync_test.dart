@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:get_it/get_it.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/models/aggregated_item.dart';
+import 'package:moonfin/data/services/media_server_client_factory.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/services/websocket_message_parser.dart';
 import 'package:server_core/server_core.dart';
@@ -55,6 +57,25 @@ void main() {
   tearDown(() => sync.dispose());
 
   group('patching items', () {
+    test('an address-based channel reads the saved server favorite', () {
+      final factory = MediaServerClientFactory(
+        deviceInfo: const DeviceInfo(id: 'test', name: 'Test', appName: 'Moonfin', appVersion: '1'),
+      );
+      GetIt.instance.registerSingleton<MediaServerClientFactory>(factory);
+      addTearDown(() => GetIt.instance.unregister<MediaServerClientFactory>());
+      addTearDown(factory.disposeAll);
+      const address = 'http://media.test';
+      final client = factory.getClient(serverId: 'srv', serverType: ServerType.jellyfin, baseUrl: address);
+      final info = {'Id': 'news', 'Type': 'TvChannel', 'UserData': {'IsFavorite': false}};
+      final item = AggregatedItem(id: 'news', serverId: address, rawData: info);
+      sync.publish(serverChannelKeyFor(client, 'news'), {'IsFavorite': true});
+      expect(sync.apply(item).isFavorite, isTrue);
+      factory.getClient(serverId: 'other', serverType: ServerType.jellyfin, baseUrl: address);
+      expect(sync.apply(item).isFavorite, isFalse);
+      final tagged = AggregatedItem(id: 'news', serverId: address, rawData: withServerChannelKey(client, info));
+      expect(sync.apply(tagged).isFavorite, isTrue);
+    });
+
     test('a channel-only update patches lists until reset', () {
       final items = [AggregatedItem(id: 'news', serverId: 'srv', rawData: {
         'Id': 'news', 'Type': 'TvChannel', 'UserData': {'IsFavorite': false},
