@@ -74,13 +74,15 @@ const _teletubbies = {
   ],
 };
 
+final _liveDvrTime = DateTime.utc(2026, 10, 22, 20, 30);
+
 (Dio, _FakeServer) _server({
   bool secondDvr = false,
-  bool liveDvr = false,
+  DateTime? liveDvrAt,
   bool malformedDvrGrid = false,
   String Function()? machineId,
 }) {
-  final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  final now = (liveDvrAt ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000;
   final server = _FakeServer(
     (options) => switch (options.uri.path) {
       '/identity' => {
@@ -133,7 +135,7 @@ const _teletubbies = {
       },
       '/tv.plex.providers.epg.xmltv:2/grid' => {
         'MediaContainer': {
-          'Metadata': malformedDvrGrid ? <String, dynamic>{} : liveDvr ? [
+          'Metadata': malformedDvrGrid ? <String, dynamic>{} : liveDvrAt != null ? [
             {'title': 'Malformed listing', 'Media': {}},
             {..._teletubbies, 'Media': [
               for (final offset in [-3600, 0, 7200])
@@ -1094,9 +1096,10 @@ void main() {
       (grid, null, free), (grid, 403, free), (grid, 503, free),
       (grid, 401, null), ('/livetv/dvrs', 403, null),
     ]) {
-      final (dio, server) = _server(liveDvr: true);
+      final (dio, server) = _server(liveDvrAt: _liveDvrTime);
       server.fail(path, status);
-      final result = PlexLiveTvApi(dio).getRecommendedPrograms(limit: 4);
+      final result = PlexLiveTvApi(dio, now: () => _liveDvrTime)
+          .getRecommendedPrograms(limit: 4);
       if (expected == null) {
         await expectLater(result, _httpError(status!));
       } else {
@@ -1191,8 +1194,8 @@ void main() {
   });
 
   test('Home shows a tuner outage when Free TV has nothing airing and recovers on retry', () async {
-    final (dio, server) = _server(liveDvr: true);
-    final api = PlexLiveTvApi(dio);
+    final (dio, server) = _server(liveDvrAt: _liveDvrTime);
+    final api = PlexLiveTvApi(dio, now: () => _liveDvrTime);
     Future<List> onNow() async => (await api.getRecommendedPrograms(limit: 1))['Items'] as List;
     server.replies['/lineups/plex/channels'] = (_) => _channels([], size: 0);
     expect(await onNow(), hasLength(1));
