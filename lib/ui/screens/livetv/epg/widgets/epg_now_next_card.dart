@@ -111,24 +111,24 @@ class EpgNowNextCard extends StatelessWidget {
                   ],
                 )
               else if (loadState == GuideChannelLoadState.failed)
-                Row(
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 18,
-                      color: AppColorScheme.statusError,
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        AppLocalizations.of(context).failedToLoad,
-                        style: textTheme.bodyMedium?.copyWith(
-                          color: AppColorScheme.statusError,
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.error_outline, size: 18, color: AppColorScheme.statusError),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            AppLocalizations.of(context).failedToLoad,
+                            style: textTheme.bodyMedium?.copyWith(color: AppColorScheme.statusError),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
-                    if (onRetry != null) ...[
-                      const SizedBox(width: 8),
+                    if (onRetry != null)
                       Focus(
                         canRequestFocus: false,
                         onKeyEvent: (_, event) {
@@ -142,7 +142,6 @@ class EpgNowNextCard extends StatelessWidget {
                           label: Text(AppLocalizations.of(context).retry),
                         ),
                       ),
-                    ],
                   ],
                 )
               else if (nowTitle == null && nextLabel == null)

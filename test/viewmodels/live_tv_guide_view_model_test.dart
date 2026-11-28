@@ -1344,6 +1344,32 @@ void main() {
       expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
       expect(vm.hasFailedCategoryListings, isFalse);
     });
+
+    test('paging past a recovered station keeps its new listings', () async {
+      stubNumberedChannels(251);
+      var failLast = false;
+      var requestsForLast = 0;
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        if (_requestedIds(inv).contains('c250')) {
+          requestsForLast++;
+          if (failLast) return {'Items': [], 'FailedChannelIds': ['c250']};
+        }
+        return _serverFiltered((_) => true)(inv);
+      });
+      final vm = await loadFilter(GuideFilter.sports);
+      expect(await vm.ensureCategoryChannel('c250'), isTrue);
+      failLast = true;
+      expect(await vm.setWindowStart(vm.windowEnd), isTrue);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      failLast = false;
+      await vm.retryFailedCategoryListings();
+      expect(vm.programsForChannel('c250'), isNotEmpty);
+      final countAfterRecovery = requestsForLast;
+      while (vm.hasMorePrograms) {
+        await vm.loadMorePrograms();
+      }
+      expect(requestsForLast, countAfterRecovery);
+    });
     test('search during the first Sports request keeps the playback lineup', () async {
       _stubChannels(liveTv, [
         _channel('FOX', number: '1'),

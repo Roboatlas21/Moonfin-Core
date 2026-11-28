@@ -1411,6 +1411,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         );
         if (!current()) return;
         final recovered = requested.difference(reply.failedChannelIds);
+        _categoryQueriedIds.addAll(recovered);
+        _advanceCategoryCursor();
         _categoryPrograms.removeWhere((id, _) => recovered.contains(id));
         _categoryFailedIds.removeAll(requested);
         _categoryFailedIds.addAll(reply.failedChannelIds);

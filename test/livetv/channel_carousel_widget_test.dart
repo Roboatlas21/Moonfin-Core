@@ -88,7 +88,10 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   @override
   Future<void> ensureProgramsForChannels(List<String> channelIds) async {
     requests.add(channelIds);
-    if (failTopUp) throw StateError('HTTP 403 during optional top-up');
+    if (failTopUp) {
+      failedChannels.addAll(channelIds);
+      throw StateError('Optional top-up failed');
+    }
   }
 
   @override
@@ -487,7 +490,7 @@ void main() {
   testWidgets('carousel retries only failed visible cards, including after a top-up error', (tester) async {
     final client = _CarouselClient();
     final channels = _guideChannels(20);
-    final vm = _CarouselGuide(client, channels)..failedChannels.addAll(['ch10', 'ch14']);
+    final vm = _CarouselGuide(client, channels)..failedChannels.add('ch10');
     final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
     int retries(String id) => vm.requests.where((ids) => ids.length == 1 && ids.single == id).length;
     Future<void> advance(Duration delay) async {
@@ -501,14 +504,13 @@ void main() {
       await prewarm.ensureVisibleChannels(['ch10']);
       await advance(const Duration(seconds: 2));
       vm.failTopUp = true;
-      await expectLater(prewarm.ensureVisibleChannels(['ch14', 'ch15']), throwsStateError);
+      await expectLater(prewarm.ensureVisibleChannels(['ch15']), throwsStateError);
       vm.failTopUp = false;
       await advance(ChannelCarouselPrewarm.failedListingsRetryDelay);
       expect(retries('ch10'), 0);
-      expect(vm.requests.last, ['ch14']);
-      final first = retries('ch14');
+      expect(retries('ch15'), 2); // The original top-up and its scheduled retry.
       await advance(const Duration(seconds: 30));
-      expect(retries('ch14'), greaterThan(first));
+      expect(retries('ch15'), 3);
     } finally {
       prewarm.dispose();
     }
@@ -676,6 +678,13 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.text('Show ch10 (S6:E19)'), findsOneWidget);
+    // Move back onto the restored station while Left is still held.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowLeft);
+    setHostState(() => selectionRevision++);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 450));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowLeft);
     final selected = find.byWidgetPredicate(
       (widget) => widget is ChannelCarouselCard && widget.centered,
     );

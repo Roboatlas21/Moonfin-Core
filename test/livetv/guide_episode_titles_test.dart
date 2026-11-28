@@ -336,4 +336,40 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  for (final scale in [1.0, 2.0]) {
+    testWidgets('a narrow failed card keeps Retry tappable at text scale $scale', (tester) async {
+      var retries = 0;
+      await tester.pumpWidget(MaterialApp(
+        locale: const Locale('de'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: MediaQuery(
+          data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+          child: Center(
+            child: SizedBox(
+              width: 320,
+              child: EpgNowNextCard(
+                logoUrl: null,
+                channelName: 'Sport',
+                channelNumber: null,
+                nowTitle: null,
+                nowProgress: 0,
+                remainingLabel: null,
+                nextLabel: null,
+                isLive: false,
+                apple: false,
+                onTap: () {},
+                onRetry: () => retries++,
+                loadState: GuideChannelLoadState.failed,
+              ),
+            ),
+          ),
+        ),
+      ));
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byType(TextButton));
+      expect(retries, 1);
+    });
+  }
 }

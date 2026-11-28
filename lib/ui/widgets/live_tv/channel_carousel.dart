@@ -230,13 +230,15 @@ class _ChannelCarouselState extends State<ChannelCarousel> {
           : widget.channels.indexWhere((channel) => channel.channelId == id);
       if (index >= 0) target = index;
     }
-    if (previous.length != _channelCount) {
+    if (oldWidget.selectionRevision != widget.selectionRevision ||
+        previous.length != _channelCount || target != centered) {
       _endHold();
+    }
+    if (previous.length != _channelCount) {
       _seedFromChannels(target);
       _alignScrollAfterLayout();
       _reportEmptyIfNeeded();
     } else if (_channelCount > 0 && target != centered) {
-      _endHold();
       _rawIndex = _seedIndex + target.clamp(0, _channelCount - 1);
       _rawIndexListenable.value = _rawIndex;
       _alignScrollAfterLayout();
