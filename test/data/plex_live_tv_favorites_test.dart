@@ -89,6 +89,8 @@ class _Cloud extends Interceptor {
     requests.add(request);
     final error = request.method == 'GET' ? getError : putError;
     if (error != null) {
+      final pending = holdGet;
+      if (request.method == 'GET' && pending != null) await pending;
       handler.reject(DioException(
         requestOptions: request,
         response: Response(requestOptions: request, statusCode: error),
@@ -677,6 +679,32 @@ void main() {
     await PlexLiveTvFavorites.refreshForBrowse(client);
     await Future.wait([failedRemove, failedAdd]);
     expect(cloud.requests.map((request) => request.method), ['GET', 'GET']);
+  });
+
+  test('the Guide uses the shared rollback when two Plex heart taps fail', () async {
+    final client = _plex();
+    const id = 'channel-plex-free123';
+    final row = PlexLiveTvFavorites.applyToItem(client, _channel);
+    final guide = LiveTvGuideViewModel(client)
+      ..usePlaybackLineup([GuideChannel.fromRawItem(row)]);
+    userDataSync.addListener(guide.syncChannelUserData);
+    addTearDown(() {
+      userDataSync.removeListener(guide.syncChannelUserData);
+      guide.dispose();
+    });
+    await PlexLiveTvFavorites.refresh(client);
+    final release = Completer<void>();
+    cloud.holdGet = release.future;
+    cloud.getError = 503;
+
+    final add = expectLater(guide.toggleChannelFavorite(id), throwsA(isA<DioException>()));
+    await pumpEventQueue();
+    expect(cloud.requests, hasLength(2));
+    final remove = expectLater(guide.toggleChannelFavorite(id), throwsA(isA<DioException>()));
+    release.complete();
+    await Future.wait([add, remove]);
+    expect(userDataSync.favoriteFor(PlexLiveTvFavorites.syncKey(client, id)), isFalse);
+    expect(guide.channelForId(id)!.isFavorite, isFalse);
   });
 
   group('two DVRs with channel 4', () {

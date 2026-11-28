@@ -920,9 +920,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     } catch (error) {
       if (_disposed || session != userDataSync.session) rethrow;
       final row = channelForId(channelId);
-      if (identical(row, updated)) _applyChannelUpdate(current);
+      final plexChannel = isPlexLiveTvChannel(_client, channelId);
+      if (identical(row, updated)) {
+        _applyChannelUpdate(plexChannel
+            ? current.withSyncedUserData(favoriteFallback: _cachedPlexFavorite)
+            : current);
+      }
       if (row != null && expectedKey != null && channelFavoriteKey(row.rawData) == expectedKey &&
-          isPlexLiveTvChannel(_client, channelId) &&
+          plexChannel &&
           (error is PlexDvrIdentityUnavailable ||
               expectedKey != PlexLiveTvFavorites.syncKey(_client, channelId))) {
         // Get the current station before the viewer retries the edit.
