@@ -1749,6 +1749,13 @@ void main() {
 
   testWidgets('landscape search keeps its field and matches above a tall keyboard', (tester) async {
     useLayout(InterfaceLayout.phone);
+    userDataSync.reset();
+    addTearDown(userDataSync.reset);
+    channelCount = 5;
+    final api = _MockUserLibrary();
+    when(() => client.userLibraryApi).thenReturn(api);
+    when(() => api.markFavorite('ch4')).thenAnswer((_) async {});
+    when(() => api.unmarkFavorite('ch4')).thenAnswer((_) async {});
     await pumpGuide(tester, surface: const Size(640, 360));
     final field = find.byType(TextField);
     await tester.tap(field);
@@ -1757,7 +1764,16 @@ void main() {
     expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
     tester.testTextInput.enterText('Channel 4');
     await _pumpFrames(tester);
-    expect(find.widgetWithText(ListTile, 'Channel 4').hitTestable(), findsOneWidget);
+    final match = find.widgetWithText(ListTile, 'Channel 4').hitTestable();
+    final heart = find.descendant(of: match, matching: find.byIcon(Icons.favorite));
+    expect(match, findsOneWidget);
+    expect(heart, findsNothing);
+    await tester.longPress(match);
+    await _pumpFrames(tester);
+    expect(heart, findsOneWidget);
+    await tester.longPress(match);
+    await _pumpFrames(tester);
+    expect(heart, findsNothing);
     expect(tester.takeException(), isNull);
   });
 

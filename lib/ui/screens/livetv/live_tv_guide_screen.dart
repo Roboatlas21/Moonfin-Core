@@ -2791,6 +2791,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         final channel = channels[index];
         return ListTile(
           focusNode: _channelFocusNodeFor(index),
+          leading: channel.isFavorite
+              ? Icon(Icons.favorite, size: 16, color: AppColors.red500,
+                  semanticLabel: AppLocalizations.of(context).favorited)
+              : null,
           title: Text(channel.name),
           trailing: channel.number == null ? null : Text(channel.number!),
           onTap: () => _watchChannel(channel.id),
