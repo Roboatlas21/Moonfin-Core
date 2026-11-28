@@ -1341,6 +1341,7 @@ void main() {
       expect(vm.filteredChannels.map((c) => c.id), ['c0']);
       final scrolling = vm.loadMorePrograms();
       await pumpEventQueue();
+      expect(pageReads, 1);
       recovering = true;
       final retry = vm.retryFailedCategoryListings();
       await pumpEventQueue();
@@ -1401,8 +1402,10 @@ void main() {
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
       final vm = await loadFilter(GuideFilter.sports);
       final held = pendingGuide(GuideFilter.sports);
+      clearInteractions(liveTv);
       final lookup = vm.ensureCategoryChannel('c200');
       await pumpEventQueue();
+      expect(verify(() => _guide(liveTv, category: GuideFilter.sports, captureChannelIds: true)).captured, [['c200']]);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {'Items': []});
       await vm.loadMorePrograms();
       expect(vm.surfingChannels.any((c) => c.id == 'c200'), isFalse);
@@ -2186,9 +2189,10 @@ void main() {
         'Items': [for (final id in _requestedIds(inv)) _program('old-$id', id)],
       });
       final vm = await loadFilter(GuideFilter.all);
-      while (vm.hasMorePrograms) {
+      for (var page = 1; page < 6; page++) {
         await vm.loadMorePrograms();
       }
+      expect(vm.programsHighWater, 300);
       var reads = 0;
       when(() => _guide(liveTv)).thenAnswer((inv) async {
         if (++reads != 2) throw TimeoutException('Listings unavailable');
