@@ -303,6 +303,7 @@ void main() {
     Size surface = const Size(900, 700),
     List<NavigatorObserver> observers = const [],
     LiveTvGuideBackController? backController,
+    Future<void> Function()? onOpenRecordings,
     DateTime Function()? now,
     Locale? locale,
   }) async {
@@ -332,6 +333,7 @@ void main() {
             onChannelSelected: miniPlayerMode ? (_, _) {} : null,
             onClose: miniPlayerMode ? () {} : null,
             backController: backController,
+            onOpenRecordings: onOpenRecordings,
           ),
           embedded: embedded ?? miniPlayerMode,
         ),
@@ -1256,14 +1258,17 @@ void main() {
     });
   }
 
-  testWidgets('channel search fits a narrow desktop guide', (tester) async {
+  testWidgets('a narrow desktop guide keeps search and Recordings clickable', (tester) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.desktop);
     addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
-    await pumpGuide(tester, surface: const Size(240, 600));
+    var opened = 0;
+    await pumpGuide(tester, surface: const Size(240, 600), onOpenRecordings: () async { opened++; });
     final search = find.byType(TextField);
     await tester.enterText(search, 'Channel 5');
     await _pumpFrames(tester);
     expect(guideModel(tester).filteredChannels.first.name, 'Channel 5');
+    await tapAndPump(tester, find.byTooltip('Recordings'));
+    expect(opened, 1);
     expect(tester.takeException(), isNull);
   });
 

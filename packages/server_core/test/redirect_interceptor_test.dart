@@ -52,7 +52,7 @@ void main() {
       dio.httpClientAdapter = _Adapter((options) {
         lastRequest = options;
         requested.add(options.uri);
-        if (options.uri.path == '/start' || options.uri.path == '/Moonfin/LiveTv/ChannelGroups') {
+        if (options.uri.path == '/start') {
           return ResponseBody.fromString(
             '',
             307,
@@ -120,9 +120,14 @@ void main() {
       expect(requested.last.host, 'other.example');
     });
 
-    test('the optional channel group request falls back on an external redirect', () async {
+    test('a single request can restrict redirects on an unrestricted client', () async {
       final dio = dioFor('https://other.example/next', sameOriginOnly: false);
-      expect((await ChannelGroupLineup.fetch(dio)).endpointAvailable, isFalse);
+      await expectLater(
+        dio.get('/start', options: Options(
+          followRedirects: false, extra: {sameOriginRedirectsOnly: true},
+        )),
+        throwsA(isA<DioException>().having((e) => e.response?.statusCode, 'status', 307)),
+      );
       expect(requested.map((uri) => uri.host), ['silo.example']);
     });
   });

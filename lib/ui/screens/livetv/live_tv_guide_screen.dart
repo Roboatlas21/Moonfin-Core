@@ -2227,38 +2227,43 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
-      child: Row(
+      child: OverflowBar(
+        alignment: MainAxisAlignment.spaceBetween,
+        overflowAlignment: OverflowBarAlignment.end,
+        overflowSpacing: 4,
         children: [
-          _GuidePillButton(
-            icon: Icons.arrow_back,
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              l10n.guideTimeline,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: AppTypography.fontSizeLg,
-                fontWeight: FontWeight.w700,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            _GuidePillButton(
+              icon: Icons.arrow_back,
+              onPressed: () => Navigator.of(context).pop(),
             ),
-          ),
-          _GuidePillButton(icon: Icons.sort, onPressed: _openSortDialog),
-          const SizedBox(width: 6),
-          _GuidePillButton(
-            icon: Icons.calendar_today,
-            onPressed: _openDatePicker,
-          ),
-          const SizedBox(width: 6),
-          _GuidePillButton(
-            icon: _mobileView == EpgMobileView.grid
-                ? Icons.view_agenda
-                : Icons.grid_view,
-            onPressed: _toggleMobileView,
-          ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                l10n.guideTimeline,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: AppTypography.fontSizeLg,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ]),
+          Wrap(spacing: 6, runSpacing: 4, children: [
+            _GuidePillButton(icon: Icons.sort, onPressed: _openSortDialog),
+            _GuidePillButton(icon: Icons.calendar_today, onPressed: _openDatePicker),
+            _GuidePillButton(
+              icon: _mobileView == EpgMobileView.grid ? Icons.view_agenda : Icons.grid_view,
+              onPressed: _toggleMobileView,
+            ),
+            if (PlatformDetection.useDesktopUi)
+              Tooltip(
+                message: l10n.recordings,
+                child: _GuidePillButton(icon: Icons.fiber_dvr, onPressed: _openRecordings),
+              ),
+          ]),
         ],
       ),
     );

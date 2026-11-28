@@ -1,7 +1,3 @@
-import 'package:dio/dio.dart';
-
-import '../network/redirect_interceptor.dart';
-
 /// Reads channel groups from the server's supported source.
 abstract interface class ChannelGroupApi {
   Future<ChannelGroupLineup> getChannelGroups({String? userId});
@@ -35,84 +31,6 @@ class ChannelGroupLineup {
     this.unresolvedChannelIds,
     this.programmeCategories,
   });
-
-  static Future<ChannelGroupLineup> fetch(Dio dio) async {
-    // Browser adapters follow redirects before the same-origin guard can inspect them.
-    if (const bool.fromEnvironment('dart.library.js_interop')) {
-      return const ChannelGroupLineup({}, endpointAvailable: false);
-    }
-    try {
-      final response = await dio.get(
-        '/Moonfin/LiveTv/ChannelGroups',
-        options: Options(
-          receiveTimeout: const Duration(seconds: 6),
-          followRedirects: false,
-          extra: {sameOriginRedirectsOnly: true},
-        ),
-      );
-      final data = response.data;
-      if (data is! Map ||
-          data['supported'] is! bool ||
-          data['channels'] is! List) {
-        throw const FormatException('Invalid channel group response');
-      }
-      final channels = <Map<String, dynamic>>[];
-      final memberships = <String, Set<String>>{};
-      Set<String> labels(List values) => {
-        for (final value in values)
-          if (value is String && value.trim().isNotEmpty) value.trim(),
-      };
-      for (final row in data['channels'] as List) {
-        if (row is! Map<String, dynamic> ||
-            row['Id'] is! String ||
-            (row['Id'] as String).isEmpty ||
-            row['Name'] is! String ||
-            row['groups'] is! List) {
-          throw const FormatException('Invalid guide channel');
-        }
-        final channel = Map<String, dynamic>.of(row);
-        if (channel['ChannelNumber'] is! String) channel.remove('ChannelNumber');
-        final userData = channel['UserData'];
-        if (userData is! Map<String, dynamic>) {
-          channel.remove('UserData');
-        } else if (userData.containsKey('IsFavorite') && userData['IsFavorite'] is! bool) {
-          channel['UserData'] = Map.of(userData)..remove('IsFavorite');
-        }
-        if (channel['ImageTags'] case Map<String, dynamic> tags) {
-          channel['ImageTags'] = {
-            for (final entry in tags.entries)
-              if (entry.value is String) entry.key: entry.value,
-          };
-        } else {
-          channel.remove('ImageTags');
-        }
-        channels.add(channel);
-        final groups = labels(row['groups'] as List);
-        if (groups.isNotEmpty) memberships[row['Id'] as String] = groups;
-      }
-      final unresolved = data['unresolvedChannelIds'];
-      final categories = data['programmeCategories'];
-      return ChannelGroupLineup(
-        memberships,
-        channels: channels,
-        partial: data['partial'] == true,
-        programmeCategories:
-            categories is List && categories.every((c) => c is String)
-            ? categories.cast<String>().toSet()
-            : null,
-        unresolvedChannelIds:
-            unresolved is List && unresolved.every((id) => id is String)
-            ? unresolved.cast<String>().toSet()
-            : null,
-      );
-    } on DioException catch (error) {
-      final status = error.response?.statusCode;
-      if (status == 404 || (status != null && status >= 300 && status < 400)) {
-        return const ChannelGroupLineup({}, endpointAvailable: false);
-      }
-      rethrow;
-    }
-  }
 }
 
 abstract class LiveTvApi {
