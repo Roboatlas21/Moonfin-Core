@@ -1027,6 +1027,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     bool livePosition = true,
   }) async {
     final loadGeneration = ++_loadGeneration;
+    _finishPendingWindow();
     final recordingRevision = liveTvRecordingRevision.value;
     final session = userDataSync.session;
     final lineupRequest = ++_lineupRequest;
@@ -2550,6 +2551,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final session = userDataSync.session;
     final replacements = <String, List<GuideProgram>>{};
     final failed = <String>{};
+    var consecutiveTransportFailures = 0;
     for (var i = 0; i < ids.length; i += _programBatchSize) {
       if (_disposed ||
           generation != _programGeneration ||
@@ -2567,9 +2569,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         }
         if (!_accessDenied(error) &&
             (error is TimeoutException || isTransientTransportFailure(error))) {
-          // The earlier chunks are still good. Keep this whole batch's old
-          // programs and continue with later 50-channel batches.
           failed.addAll(chunk);
+          if (++consecutiveTransportFailures >= 2) {
+            failed.addAll(ids.skip(i + chunk.length));
+            break;
+          }
           continue;
         }
         rethrow;
@@ -2580,6 +2584,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         return null;
       }
       // Merge healthy channels; retain cached programs for failed ones.
+      consecutiveTransportFailures = 0;
       final failedInBatch = _failedGuideIds(response);
       failed.addAll(failedInBatch);
       final parsed = _parsePrograms(response);

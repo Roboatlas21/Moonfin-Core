@@ -1739,6 +1739,9 @@ void main() {
     await _pumpFrames(tester);
     final field = find.byType(TextField);
     await tester.tap(field);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 212);
+    await _pumpFrames(tester);
+    expect(find.text('Channel 1').hitTestable(), findsOneWidget);
     tester.view.viewInsets = const FakeViewPadding(bottom: 300);
     await _pumpFrames(tester);
     await focusGuideNode(tester, 'GuideCategoryRetry');

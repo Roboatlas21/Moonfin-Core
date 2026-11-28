@@ -1522,6 +1522,7 @@ void main() {
       'sort': (vm) => vm.setSortBy(ChannelSortBy.name),
       'filter': (vm) => vm.setFilter(GuideFilter.favorites),
       'Guide exit': (vm) => vm.resetWindowOnExit(),
+      'full reload': (vm) => unawaited(vm.load()),
     };
     for (final change in changes.entries) {
       test('a ${change.key} change releases a resize waiting for the cancelled page', () async {
@@ -1531,17 +1532,20 @@ void main() {
         final page = vm.setWindowStart(vm.windowEnd, paging: true);
         await pumpEventQueue();
         final width = vm.guideWindow + const Duration(hours: 1);
-        final resize = vm.setWindow(width);
+        var resized = false;
+        final resize = vm.setWindow(width).then((_) => resized = true);
         expect(vm.pendingWindowResult, isNotNull);
         expect(vm.guideWindow, isNot(width));
         when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
         change.value(vm);
         await pumpEventQueue();
         final widthBeforeOldReply = vm.guideWindow;
+        final settledBeforeOldReply = resized;
         held.complete({'Items': []});
         expect(await page, isFalse);
         await resize;
         expect(widthBeforeOldReply, width);
+        expect(settledBeforeOldReply, isTrue);
       });
     }
 
@@ -2141,6 +2145,31 @@ void main() {
       expect(vm.filteredChannels.single.id, 'c1');
       expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
       expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+    });
+
+    test('a recording refresh keeps cached shows and stops after two consecutive timeouts', () async {
+      stubNumberedChannels(300);
+      when(() => _guide(liveTv)).thenAnswer((inv) async => {
+        'Items': [for (final id in _requestedIds(inv)) _program('old-$id', id)],
+      });
+      final vm = await loadFilter(GuideFilter.all);
+      while (vm.hasMorePrograms) {
+        await vm.loadMorePrograms();
+      }
+      var reads = 0;
+      when(() => _guide(liveTv)).thenAnswer((inv) async {
+        if (++reads != 2) throw TimeoutException('Listings unavailable');
+        return {'Items': [for (final id in _requestedIds(inv)) _program('new-$id', id)]};
+      });
+      await vm.recordingChanged();
+      expect(reads, 4);
+      expect(vm.programsForChannel('c50').single.id, 'new-c50');
+      expect(vm.programsForChannel('c299').single.id, 'old-c299');
+      when(() => _guide(liveTv)).thenAnswer((inv) async => {
+        'Items': [for (final id in _requestedIds(inv)) _program('retry-$id', id)],
+      });
+      await vm.handleBoundaryElapsed();
+      expect(vm.programsForChannel('c299').single.id, 'retry-c299');
     });
 
     test('a recording recovery stops after two timeouts and retains the reached rows for Retry', () async {

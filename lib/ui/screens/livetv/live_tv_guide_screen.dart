@@ -1281,9 +1281,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         } else {
           _lastLayoutWindow = null;
         }
-        // A tall phone keyboard can leave less than one toolbar and one row.
-        // Keep both the focused search field and its matches within reach.
-        if (compactSearch && area.height < kMinInteractiveDimension + profile.timeHeaderHeight + profile.rowHeight) {
+        final minimumGridHeight = kMinInteractiveDimension + 2 +
+            (_showPartialCategoryRetry ? kMinInteractiveDimension : 0) +
+            profile.timeHeaderHeight + profile.rowHeight;
+        if (compactSearch && area.height < minimumGridHeight) {
           return Row(
             children: [
               Flexible(child: _buildChannelSearchField(compact: true)),
@@ -1420,6 +1421,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  bool get _showPartialCategoryRetry =>
+      _vm.hasFailedCategoryListings && _vm.filteredChannels.isNotEmpty;
+
   Widget _buildLandscape({required bool compactSearch}) {
     return Column(
       children: [
@@ -1429,7 +1433,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         // left region is only channel-column wide and 22-24 px tall, so it
         // can't hold the chevrons and the range text at the narrowest size.
         if (!widget.miniPlayerMode && !compactSearch) _buildGuideWindowBar(),
-        if (_vm.hasFailedCategoryListings && _vm.filteredChannels.isNotEmpty)
+        if (_showPartialCategoryRetry)
           _buildCategoryRetryButton(partial: true),
         Expanded(child: _buildBody()),
       ],
@@ -1458,7 +1462,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             ),
         ],
         const SizedBox(height: 8),
-        if (_vm.hasFailedCategoryListings && _vm.filteredChannels.isNotEmpty)
+        if (_showPartialCategoryRetry)
           _buildCategoryRetryButton(partial: true),
         if (_mobileView == EpgMobileView.list &&
             _vm.listingsAccessDenied &&
