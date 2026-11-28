@@ -413,9 +413,12 @@ void main() {
         0,
         InterceptorsWrapper(
           onRequest: (r, h) async {
-            if (r.uri.path == '/') {
+            if (r.uri.path == '/' && !entered.isCompleted) {
+              final metadata = server.answer(r);
               entered.complete();
               await release.future;
+              h.resolve(Response(requestOptions: r, data: metadata));
+              return;
             }
             h.next(r);
           },
@@ -428,13 +431,31 @@ void main() {
         server.fail('/lineups/plex/channels', 403);
       } else {
         server.failWhen = null;
+        server.replies['/lineups/plex/channels'] = (_) => _channels([
+          {'id': 'jazz', 'genreRatingKeys': ['music']},
+        ]);
+        server.replies['/'] = (_) => {
+          'MediaProvider': {
+            'Feature': [
+              {
+                'type': 'grid',
+                'GridChannelFilter': [
+                  {'genreRatingKey': 'music', 'title': 'Music'},
+                ],
+              },
+            ],
+          },
+        };
       }
-      final expected = [tuner, if (!denied) ...[free, extra]];
+      final expected = [tuner, if (!denied) 'channel-plex-jazz'];
       expect((await api.getChannels())['Items'], hasLength(expected.length));
       release.complete();
       final published = await guide;
       expect(published.channels!.map((c) => c['Id']), unorderedEquals(expected));
       expect(published.partial, denied);
+      if (!denied) {
+        expect(published.groupsByChannelId['channel-plex-jazz'], contains('Music'));
+      }
     });
   }
 

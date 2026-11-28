@@ -587,7 +587,6 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             : PromotedChannelGroup(name, _featuredIds);
       }
     }
-    _featuredGroup = promoted;
     return (genres: genres, promoted: promoted);
   }
 
@@ -600,18 +599,27 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     _cloudChannels = null;
     _dvrs = null;
     await _readChannelSources();
-    var metadataUnavailable = false;
-    _CloudGroups catalog = (genres: {}, promoted: null);
-    if (_lastFreeLineup?.isNotEmpty == true) {
-      catalog = await _providerGroups().onError<Object>((_, _) {
-        metadataUnavailable = true;
-        return (genres: const <String, String>{}, promoted: _featuredGroup);
-      });
+    _CloudGroups? catalog;
+    // Browse can replace the lineup while its genre metadata is in flight.
+    // Retry once for the replacement, then leave the groups unresolved.
+    for (var attempt = 0; attempt < 2 && _lastFreeLineup?.isNotEmpty == true; attempt++) {
+      final lineup = _lastFreeLineup;
+      try {
+        catalog = await _providerGroups();
+      } catch (_) {
+        catalog = null;
+      }
       if (_cloudChannels != null) await _freeLineupForBrowse();
+      if (identical(lineup, _lastFreeLineup)) {
+        if (catalog != null) _featuredGroup = catalog.promoted;
+        break;
+      }
+      catalog = null;
     }
     // Read rows and their failure scope together after the last network wait.
     final dvr = _currentDvrChannels;
     final currentFree = _lastFreeLineup?.values ?? const [];
+    final metadataUnavailable = currentFree.isNotEmpty && catalog == null;
     final freeUnavailable = _cloudChannels == null;
     final unresolved = _dvrLineup.unresolved;
     return ChannelGroupLineup(
@@ -622,12 +630,12 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           channel['Id'] as String: {
             if (dvr.isNotEmpty) ChannelGroupSource.plexFreeTv.groupId,
             for (final key in channel['genreRatingKeys'] as List? ?? const [])
-              ?catalog.genres[_genreKey(key)],
+              ?catalog?.genres[_genreKey(key)],
           },
       },
       channels: [...dvr, ...currentFree],
       sources: dvr.isEmpty ? const [] : currentFree.isEmpty ? const [ChannelGroupSource.dvr] : ChannelGroupSource.values,
-      promoted: currentFree.isEmpty ? null : catalog.promoted,
+      promoted: currentFree.isEmpty ? null : _featuredGroup,
       partial: metadataUnavailable || _dvrLineup.partial || freeUnavailable,
       unresolvedChannelIds: freeUnavailable || (_dvrLineup.partial && unresolved == null)
           ? null
