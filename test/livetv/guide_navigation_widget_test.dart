@@ -726,6 +726,15 @@ void main() {
     expect(find.textContaining(' ${target.day} listings.'), findsOneWidget);
   });
 
+  GoRouter guideWithPlayerRoute() => GoRouter(routes: [
+    GoRoute(path: '/', builder: (_, _) => const LiveTvGuideScreen()),
+    GoRoute(path: Destinations.liveTvPlayer, builder: (_, state) {
+      final extra = state.extra as Map;
+      final channels = extra['channels'] as List<GuideChannel>;
+      return Text('Playing ${channels[extra['startIndex'] as int].id}');
+    }),
+  ]);
+
   testWidgets('Now/Next shows the listings denial reason alongside tunable channels', (tester) async {
     useLayout(InterfaceLayout.phone);
     await GetIt.instance<UserPreferences>().set(UserPreferences.epgMobileView, EpgMobileView.list);
@@ -735,15 +744,7 @@ void main() {
       requestOptions: request,
       response: Response(requestOptions: request, statusCode: 403, data: {'message': reason}),
     ));
-    final router = GoRouter(routes: [
-      GoRoute(path: '/', builder: (_, _) => const LiveTvGuideScreen()),
-      GoRoute(path: Destinations.liveTvPlayer, builder: (_, state) {
-        final extra = state.extra as Map;
-        final channels = extra['channels'] as List<GuideChannel>;
-        return Text('Playing ${channels[extra['startIndex'] as int].id}');
-      }),
-    ]);
-    await pumpRoutedGuide(tester, phone, router);
+    await pumpRoutedGuide(tester, phone, guideWithPlayerRoute());
     expect(find.textContaining(reason), findsOneWidget);
     expect(find.text('Retry'), findsNothing);
     await tapAndPump(tester, find.text('Channel 0'));
@@ -758,11 +759,12 @@ void main() {
       requestOptions: request,
       response: Response(requestOptions: request, statusCode: 403, data: {'message': reason}),
     ));
-    await pumpGuide(tester);
+    await pumpRoutedGuide(tester, const Size(900, 700), guideWithPlayerRoute());
     expect(find.textContaining(reason), findsOneWidget);
     expect(find.descendant(of: find.byType(EpgProgramCell), matching: find.byIcon(Icons.refresh)), findsNothing);
     await focusGuideNode(tester, 'GuideChannel:0');
-    expect(_focusedLabel(), 'GuideChannel:0');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
+    expect(find.text('Playing ch0'), findsOneWidget);
   });
 
   testWidgets('a failed same-day picker request names the selected date', (tester) async {

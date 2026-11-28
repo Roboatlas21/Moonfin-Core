@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
+import 'package:playback_core/playback_core.dart' show MediaStreamResolver;
 import 'package:server_core/server_core.dart' hide ImageType;
 
 import '../../preference/preference_constants.dart';
@@ -580,7 +581,9 @@ class FavoritesViewModel extends ChangeNotifier {
             (raw) => AggregatedItem(
               id: raw['Id']?.toString() ?? '',
               serverId: _client.baseUrl,
-              rawData: raw,
+              rawData: MediaStreamResolver.isLiveTvItem(raw)
+                  ? withServerChannelKey(_client, raw)
+                  : raw,
             ),
           )
           .toList(),

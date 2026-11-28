@@ -2132,27 +2132,29 @@ void main() {
       });
     }
 
-    test('an obsolete Sports recording error leaves a newer All time change running', () async {
-      stubNumberedChannels(1);
-      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
-      final vm = await loadFilter(GuideFilter.sports);
-      final sports = pendingGuide(GuideFilter.sports);
-      final recording = vm.recordingChanged();
-      await pumpEventQueue();
-      vm.setFilter(GuideFilter.all);
-      await pumpEventQueue();
-      final next = vm.windowEnd;
-      final page = pendingGuide(GuideFilter.all);
-      final moving = vm.setWindowStart(next);
-      await pumpEventQueue();
-      sports.completeError(const FormatException('Bad Sports listing'));
-      await pumpEventQueue();
-      page.complete({'Items': [_program('next', 'c0', start: next)]});
-      await recording;
-      expect(await moving, isTrue);
-      expect(vm.windowStart, next);
-      expect(vm.programsForChannel('c0').single.id, 'next');
-    });
+    for (final filter in [GuideFilter.all, GuideFilter.sports]) {
+      test('an obsolete ${filter.name} recording error leaves a newer All time change running', () async {
+        stubNumberedChannels(1);
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+        final vm = await loadFilter(filter);
+        final previous = pendingGuide(filter);
+        final recording = vm.recordingChanged();
+        await pumpEventQueue();
+        vm.setFilter(GuideFilter.all);
+        await pumpEventQueue();
+        final next = vm.windowEnd;
+        final page = pendingGuide(GuideFilter.all);
+        final moving = vm.setWindowStart(next);
+        await pumpEventQueue();
+        previous.completeError(const FormatException('Bad recording listing'));
+        await pumpEventQueue();
+        page.complete({'Items': [_program('next', 'c0', start: next)]});
+        await recording;
+        expect(await moving, isTrue);
+        expect(vm.windowStart, next);
+        expect(vm.programsForChannel('c0').single.id, 'next');
+      });
+    }
 
     final deniedRequest = RequestOptions();
     final denied = DioException(requestOptions: deniedRequest,

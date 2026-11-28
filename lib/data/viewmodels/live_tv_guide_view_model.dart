@@ -932,6 +932,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
     final recordingRevision = liveTvRecordingRevision.value;
     final categoryRequest = _categoryRequest;
+    final windowRequest = _windowRequest;
     try {
       final categoryResult = _isCategory(_filter)
           ? await _refreshCategoryRows(recordingRevision)
@@ -946,7 +947,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _loadedRecordingRevision = recordingRevision;
       }
     } catch (error) {
-      if (categoryRequest == _categoryRequest && recordingRevision == liveTvRecordingRevision.value &&
+      if (categoryRequest == _categoryRequest && windowRequest == _windowRequest &&
+          recordingRevision == liveTvRecordingRevision.value &&
           !_accessDenied(error)) {
         await _reloadPrograms();
       }

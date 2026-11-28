@@ -6,6 +6,8 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:moonfin/data/repositories/mdblist_repository.dart';
 import 'package:moonfin/data/repositories/seerr_repository.dart';
+import 'package:moonfin/data/services/media_server_client_factory.dart';
+import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/services/seerr/seerr_api_models.dart';
 import 'package:moonfin/data/utils/blocked_ratings.dart';
 import 'package:moonfin/data/viewmodels/favorites_view_model.dart';
@@ -15,6 +17,8 @@ import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class _Client extends Mock implements MediaServerClient {}
+
+class _Factory extends Mock implements MediaServerClientFactory {}
 
 class _ItemsApi extends Mock implements ItemsApi {}
 
@@ -36,6 +40,8 @@ void main() {
   late UserPreferences prefs;
   late _Seerr seerr;
   late FavoritesViewModel vm;
+  late _Client client;
+  late _ItemsApi api;
 
   setUp(() async {
     await GetIt.instance.reset();
@@ -46,7 +52,7 @@ void main() {
     prefs = UserPreferences(store);
     GetIt.instance.registerSingleton<UserPreferences>(prefs);
 
-    final api = _ItemsApi();
+    api = _ItemsApi();
     when(
       () => api.getItems(
         sortBy: any(named: 'sortBy'),
@@ -59,7 +65,7 @@ void main() {
         fields: any(named: 'fields'),
       ),
     ).thenAnswer((_) async => {'Items': <dynamic>[]});
-    final client = _Client();
+    client = _Client();
     when(() => client.itemsApi).thenReturn(api);
     when(() => client.serverType).thenReturn(ServerType.jellyfin);
     when(() => client.baseUrl).thenReturn('https://jellyfin.test');
@@ -82,6 +88,28 @@ void main() {
   tearDown(() async {
     vm.dispose();
     await GetIt.instance.reset();
+  });
+
+  test('the favorites grid follows the channel favorite from its own account at a shared URL', () async {
+    final other = _Client();
+    when(() => other.baseUrl).thenReturn(client.baseUrl);
+    final factory = _Factory();
+    when(() => factory.clients).thenReturn({'viewer': client, 'other': other});
+    when(() => factory.serverIdOf(client)).thenReturn('viewer');
+    GetIt.instance.registerSingleton<MediaServerClientFactory>(factory);
+    addTearDown(userDataSync.reset);
+    when(() => api.getItems(
+      sortBy: any(named: 'sortBy'), sortOrder: any(named: 'sortOrder'),
+      startIndex: 0, limit: 75, recursive: true, isFavorite: true, fields: any(named: 'fields'),
+    )).thenAnswer((_) async => {'Items': [
+      {'Id': 'news', 'Type': 'TvChannel', 'UserData': {'IsFavorite': true}},
+    ]});
+    await vm.setViewStyle(FavoritesViewStyle.library);
+    expect(vm.gridItems.single.isFavorite, isTrue);
+    userDataSync.publish(serverChannelKey('other', 'news'), {'IsFavorite': false});
+    expect(vm.gridItems.single.isFavorite, isTrue);
+    userDataSync.publish(serverChannelKey('viewer', 'news'), {'IsFavorite': false});
+    expect(vm.gridItems.single.isFavorite, isFalse);
   });
 
   List<String> watchlistIds() => [
