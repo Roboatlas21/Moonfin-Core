@@ -892,11 +892,12 @@ void main() {
 
   test('Plex Cloud guide requests disable automatic redirects', () async {
     final (dio, server) = _server();
-    final api = PlexLiveTvApi(dio);
+    final api = PlexLiveTvApi(dio, now: () => DateTime.utc(2026, 10, 22, 20, 30));
     final lineup = await api.getChannelGroups();
     await lineup.promoted!.refresh(DateTime.now);
     await api.testGuide([free]);
-    await api.getRecommendedPrograms(limit: 1);
+    // One slot is filled by the tuner, leaving another for the cloud hub.
+    await api.getRecommendedPrograms(limit: 2);
 
     final cloud = server.requests.where((r) => r.uri.host == 'epg.provider.plex.tv');
     expect(cloud.map((r) => r.uri.path).toSet(), {

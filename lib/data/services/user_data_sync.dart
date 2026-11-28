@@ -43,7 +43,7 @@ class UserDataSync extends ChangeNotifier {
   final Map<String, int> _itemRevisions = {};
   final _activeFavoriteReads = <({int start, bool Function(String) includes})>[];
   final Map<String, bool> _pendingFavorites = {};
-  final Map<String, bool> _confirmedFavorites = {};
+  final _confirmedFavorites = <String, ({bool value, bool observed})>{};
   int _revision = 0;
   int get revision => _revision;
   int revisionFor(String itemId) => _itemRevisions[itemId] ?? 0;
@@ -71,7 +71,7 @@ class UserDataSync extends ChangeNotifier {
   /// has it, so a quick next toggle starts from what the user last chose.
   void requestFavorite(String itemId, bool value) {
     if (!_pendingFavorites.containsKey(itemId)) {
-      _confirmedFavorites[itemId] = favoriteFor(itemId) ?? !value;
+      _confirmedFavorites[itemId] = (value: favoriteFor(itemId) ?? !value, observed: false);
     }
     _pendingFavorites[itemId] = value;
     publish(itemId, {'IsFavorite': value});
@@ -80,17 +80,24 @@ class UserDataSync extends ChangeNotifier {
   /// The flag the user last asked for, while the server is catching up.
   bool? pendingFavorite(String itemId) => _pendingFavorites[itemId];
 
-  /// The flag the server last confirmed for a change still in progress.
-  bool? confirmedFavorite(String itemId) => _confirmedFavorites[itemId];
+  /// The rollback flag for an active edit. [observedOnly] requires a
+  /// successful server read or write since the edit started.
+  bool? confirmedFavorite(String itemId, {bool observedOnly = false}) {
+    final state = _confirmedFavorites[itemId];
+    if (state == null || (observedOnly && !state.observed)) return null;
+    return state.value;
+  }
 
   /// Updates the rollback value without replacing the viewer's pending edit.
   void observeFavoriteWhilePending(String itemId, bool value) {
-    if (favoriteChangePending(itemId)) _confirmedFavorites[itemId] = value;
+    if (favoriteChangePending(itemId)) {
+      _confirmedFavorites[itemId] = (value: value, observed: true);
+    }
   }
 
   /// The server now holds [value]. The change ends if that's what was asked.
   void confirmFavorite(String itemId, bool value) {
-    _confirmedFavorites[itemId] = value;
+    observeFavoriteWhilePending(itemId, value);
     if (_pendingFavorites[itemId] != value) return;
     _pendingFavorites.remove(itemId);
     _confirmedFavorites.remove(itemId);
@@ -102,7 +109,7 @@ class UserDataSync extends ChangeNotifier {
     final confirmed = _confirmedFavorites.remove(itemId);
     if (_pendingFavorites.remove(itemId) == null) return;
     _itemRevisions[itemId] = ++_revision;
-    if (confirmed != null) publish(itemId, {'IsFavorite': confirmed});
+    if (confirmed != null) publish(itemId, {'IsFavorite': confirmed.value});
   }
 
   bool favoriteChangePending(String itemId) =>

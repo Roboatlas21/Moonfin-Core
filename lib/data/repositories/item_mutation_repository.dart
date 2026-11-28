@@ -44,7 +44,6 @@ class ItemMutationRepository {
 
   Future<void> _syncFavorite(String itemId, String stateId, int session, String key) async {
     final plexChannel = isPlexLiveTvChannel(_client, itemId);
-    bool? cloudFavorite;
     try {
       // Lets setFavorite store this run before it can finish and remove it.
       await Future<void>.value();
@@ -64,12 +63,9 @@ class ItemMutationRepository {
               itemId,
               isFavorite: wanted,
               expectedSyncKey: stateId,
-              onCloudFavoriteRead: (value) {
-                cloudFavorite = value;
-                userDataSync.observeFavoriteWhilePending(stateId, value);
-              },
+              onCloudFavoriteRead: (value) =>
+                  userDataSync.observeFavoriteWhilePending(stateId, value),
             );
-            cloudFavorite = wanted;
           } else if (wanted) {
             await _client.userLibraryApi.markFavorite(itemId);
           } else {
@@ -77,11 +73,11 @@ class ItemMutationRepository {
           }
         } catch (error, stackTrace) {
           if (userDataSync.session != session) return;
-          final confirmed = plexChannel
-              ? cloudFavorite
-              : (userDataSync.confirmedFavorite(stateId) ?? !wanted);
+          final confirmed = userDataSync.confirmedFavorite(stateId, observedOnly: plexChannel);
           userDataSync.failFavoriteChange(stateId);
-          throw _FavoriteSyncFailure(error, stackTrace, confirmed: confirmed);
+          throw _FavoriteSyncFailure(
+            error, stackTrace, confirmed: plexChannel ? confirmed : (confirmed ?? !wanted),
+          );
         }
         if (userDataSync.session != session) return;
         userDataSync.confirmFavorite(stateId, wanted);
