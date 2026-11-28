@@ -4,6 +4,7 @@ import 'package:server_core/server_core.dart';
 
 import '../models/aggregated_item.dart';
 import '../services/plex_live_tv_favorites.dart';
+import '../services/user_data_sync.dart';
 import '../utils/blocked_ratings.dart';
 
 class SearchRepository {
@@ -94,11 +95,17 @@ class SearchRepository {
   /// Live TV channels never come back from the recursive items search, so
   /// channel search fetches the lineup and filters by name client-side.
   Future<List<AggregatedItem>> fetchLiveTvChannels() async {
+    final session = userDataSync.session;
+    final userId = _client.userId;
     final response = await _client.liveTvApi.getChannels(
       fields: 'ImageTags',
       enableTotalRecordCount: false,
-      userId: _client.userId,
+      userId: userId,
     );
+    if (session != userDataSync.session || userId != _client.userId) {
+      // Search retries failed lineups. An empty success would be cached.
+      throw StateError('User changed while loading the channel lineup');
+    }
     final items = response['Items'] as List? ?? const [];
     final channels = items.map((item) {
       final data = PlexLiveTvFavorites.applyToItem(

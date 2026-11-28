@@ -242,6 +242,10 @@ void main() {
 
   group('Global Search DVR favorites', () {
     const favorite = {'source': 'server://pms/epg', 'id': '4'};
+    const station = {
+      'Id': 'channel-2-4', 'Type': 'TvChannel', 'Name': 'CBC News',
+      'PlexFavoriteSource': 'server://pms/epg', 'PlexFavoriteId': '4',
+    };
     late _LineupApi api;
     late _LineupClient client;
     late SearchViewModel model;
@@ -259,13 +263,46 @@ void main() {
       api = _LineupApi();
       client = _LineupClient(api)..userId = 'plex-user';
       addTearDown(client.dispose);
-      when(lineup).thenAnswer((_) async => {'Items': [
-        {'Id': 'channel-2-4', 'Type': 'TvChannel', 'Name': 'CBC News',
-         'PlexFavoriteSource': favorite['source'], 'PlexFavoriteId': favorite['id']},
-      ]});
+      when(lineup).thenAnswer((_) async => {'Items': [station]});
       model = SearchViewModel(_ChannelSearch(client), client);
       addTearDown(model.dispose);
     });
+
+    for (final changeUser in [true, false]) {
+      test('a delayed lineup is discarded after a ${changeUser ? 'user change' : 'session reset'}', () async {
+        final originalUser = changeUser ? 'previous-user' : 'plex-user';
+        client.userId = originalUser;
+        final delayed = Completer<Map<String, dynamic>>();
+        when(() => api.getChannels(fields: 'ImageTags', enableTotalRecordCount: false, userId: originalUser))
+            .thenAnswer((_) => delayed.future);
+        model.searchImmediate('CBC');
+        await pumpEventQueue();
+        expect(model.state, SearchState.loading);
+
+        if (changeUser) {
+          client.userId = 'plex-user';
+        } else {
+          userDataSync.reset();
+        }
+        final current = PlexLiveTvFavorites.applyToItem(client, station);
+        final key = current['PlexFavoriteSyncKey'] as String;
+        // The old row lacks a provider and would clear the current mapping.
+        delayed.complete({'Items': [
+          {'Id': station['Id'], 'Type': 'TvChannel', 'Name': 'CBC Old'},
+        ]});
+        await pumpEventQueue();
+        expect(model.results, isEmpty);
+        expect(cloud.requests, isEmpty);
+        await ItemMutationRepository(client).setFavorite(
+          station['Id']!, isFavorite: true, expectedChannelKey: key,
+        );
+        expect(cloud.rows.single, containsPair('source', favorite['source']));
+
+        when(lineup).thenAnswer((_) async => {'Items': [station]});
+        await search('CBC News');
+        expect(model.results.single.items.single.isFavorite, isTrue);
+      });
+    }
 
     test('a refresh on another server updates Search and preserves a pending local edit', () async {
       final other = _plex()..baseUrl = 'https://other-pms.example';
