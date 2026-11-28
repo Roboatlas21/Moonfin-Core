@@ -653,10 +653,15 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void setChannelQuery(String text) {
     final query = text.trim().toLowerCase();
     if (_channelQuery == query) return;
-    _windowRequest++;
-    _finishPendingWindow();
+    final deniedRows = listingsAccessDenied ? _pageChannels : null;
     _channelQuery = query;
     _updatePageRows();
+    if (deniedRows != null && GuideChannel.sameStationOrder(deniedRows, _pageChannels)) {
+      _notifyListeners();
+      return;
+    }
+    _windowRequest++;
+    _finishPendingWindow();
     final openingCategory = _categoryFetchInFlight && _categoryLoadedFor != _filter;
     _resetPageCursor(advancePage: !openingCategory);
     if (openingCategory) {

@@ -138,7 +138,10 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
 
   @override
   Widget build(BuildContext context) {
-    final last = widget.labels.length - 1;
+    final rightStep = Directionality.of(context) == TextDirection.rtl ? -1 : 1;
+    VoidCallback? focusChip(int index) => index < 0 || index >= widget.labels.length
+        ? null
+        : () => widget.focusNodeFor(index).requestFocus();
     final row = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -154,12 +157,8 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
               onSelect: () => widget.onSelect(i),
               // A null handler at either end leaves the key to the default
               // traversal instead of trapping focus in the rail.
-              onNavigateLeft: i > 0
-                  ? () => widget.focusNodeFor(i - 1).requestFocus()
-                  : null,
-              onNavigateRight: i < last
-                  ? () => widget.focusNodeFor(i + 1).requestFocus()
-                  : null,
+              onNavigateLeft: focusChip(i - rightStep),
+              onNavigateRight: focusChip(i + rightStep),
               onNavigateDown: widget.onNavigateDown,
               child: Builder(builder: (context) => _chip(context, i)),
             ),

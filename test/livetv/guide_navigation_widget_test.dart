@@ -1828,6 +1828,17 @@ void main() {
     expect(title.hitTestable(), findsOneWidget);
   });
 
+  testWidgets('Left reaches channel search through the Hebrew TV filter rail', (tester) async {
+    useTvLayout();
+    await pumpGuide(tester, surface: const Size(1280, 720), locale: const Locale('he'));
+    final rail = tester.widget<EpgFilterRail>(find.byType(EpgFilterRail));
+    await focusGuideNode(tester, 'GuideFilter:0');
+    for (var i = 1; i < rail.labels.length; i++) {
+      await expectFocusAfter(tester, LogicalKeyboardKey.arrowLeft, rail.focusNodeFor(i).debugLabel!);
+    }
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowLeft, 'GuideSearch');
+  });
+
   testWidgets('TV arrows follow the visible Hebrew Browse header', (tester) async {
     useTvLayout();
     await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);

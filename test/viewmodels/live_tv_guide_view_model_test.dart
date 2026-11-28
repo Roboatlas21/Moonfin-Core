@@ -202,6 +202,30 @@ void main() {
     }, skip: type == ServerType.jellyfin && kIsWeb); // The plugin endpoint is native-only.
   }
 
+  test('refining a search with the same denied stations does not fetch again', () async {
+    _stubChannels(liveTv, [_channel('news HD'), _channel('sports')]);
+    var requests = 0;
+    when(() => _guide(liveTv)).thenAnswer((_) async {
+      requests++;
+      final request = RequestOptions();
+      throw DioException(requestOptions: request, response: Response(requestOptions: request, statusCode: 403));
+    });
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    await vm.load();
+    vm.setChannelQuery('news');
+    await pumpEventQueue();
+    expect(requests, 2);
+    expect(vm.listingsAccessDenied, isTrue);
+    vm.setChannelQuery('news HD');
+    expect(vm.listingsAccessDenied, isTrue);
+    await pumpEventQueue();
+    expect(requests, 2);
+    vm.setChannelQuery('sports');
+    await pumpEventQueue();
+    expect(requests, 3);
+  });
+
   group('group membership on guide reload', () {
     late _GroupedLiveTvApi api;
     setUp(() {
