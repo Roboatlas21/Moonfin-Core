@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
@@ -198,7 +199,7 @@ void main() {
       } else {
         expect(channels['news']!.number, isNull);
       }
-    });
+    }, skip: type == ServerType.jellyfin && kIsWeb); // The plugin endpoint is native-only.
   }
 
   group('group membership on guide reload', () {
@@ -300,6 +301,10 @@ void main() {
     expect(vm.hasMorePrograms, false);
     expect(pages.map((p) => p.length), [50, 50, 12]);
     expect(pages.last.first, 'c150');
+    for (final channel in vm.filteredChannels) {
+      expect(vm.programsForChannel(channel.id).map((p) => p.name),
+          ['news-${channel.id}', 'sport-${channel.id}']);
+    }
   });
   test('load() fetches only the first batch; loadMorePrograms() paginates the rest', () async {
     // 120 channels → batches of 50 (never one giant all-channels request).
@@ -1235,7 +1240,7 @@ void main() {
   test('a lineup from before a user switch is dropped and reloaded on entry', () async {
     final reply = Completer<Map<String, dynamic>>();
     when(() => _channelsRequest(liveTv)).thenAnswer((_) => reply.future);
-    final vm = LiveTvGuideViewModel(client);
+    final vm = LiveTvGuideViewModel(client, now: () => DateTime(2026, 9, 11, 10, 10));
     final loading = vm.load();
     await pumpEventQueue();
 
@@ -1252,6 +1257,7 @@ void main() {
 
     expect(userDataSync.favoriteFor(serverChannelKey(client.baseUrl, 'c1')), isNull);
     expect(vm.state, GuideState.ready);
+    expect(vm.playbackChannels, isEmpty);
     _stubChannels(liveTv, [_channel('new')]);
     await vm.reloadIfStale();
     expect(vm.filteredChannels.map((channel) => channel.id), ['new']);

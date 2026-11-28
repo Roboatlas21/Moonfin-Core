@@ -90,6 +90,7 @@ class LiveTvGuideBackController {
 }
 
 class LiveTvGuideScreen extends StatefulWidget {
+  final DateTime Function() now;
   final bool miniPlayerMode;
   final GuideChannel? currentChannel;
   final GuideFilterChoice initialFilter;
@@ -121,6 +122,7 @@ class LiveTvGuideScreen extends StatefulWidget {
 
   const LiveTvGuideScreen({
     super.key,
+    this.now = DateTime.now,
     this.miniPlayerMode = false,
     this.currentChannel,
     this.initialFilter = (GuideFilter.all, null),
@@ -288,6 +290,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _categoryDisplay = _prefs.get(UserPreferences.liveTvCategoryDisplay);
     _vm = LiveTvGuideViewModel(
       _client,
+      now: widget.now,
       initialSortBy: _prefs.get(UserPreferences.liveTvChannelSortBy),
       initialFilter: widget.initialFilter,
     );
@@ -331,7 +334,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       unawaited(
         _vm.load(
           window: profile.guideWindow,
-          windowStart: guideLeftEdge(DateTime.now()),
+          windowStart: guideLeftEdge(widget.now()),
           livePosition: true,
         ),
       );
@@ -341,7 +344,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) return;
-    final now = DateTime.now();
+    final now = widget.now();
     _scheduleReanchor();
     unawaited(_resumeGuide(now));
   }
@@ -578,6 +581,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         !_mayTakeFocus ||
         _browseFocus.hasFocus ||
         _categoryRetryFocus.hasFocus ||
+        _guideErrorRetryFocus.hasFocus ||
         _channelSearchFocus.hasFocus) {
       return false;
     }
@@ -924,6 +928,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       _focusMiniPlayer();
       return;
     }
+    if (_windowBarFocusNodes[_lastWindowBarIndex]?.context?.mounted != true &&
+        _channelSearchFocus.context?.mounted == true) {
+      _channelSearchFocus.requestFocus();
+      return;
+    }
     _focusWindowBar(_lastWindowBarIndex);
   }
 
@@ -971,8 +980,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       final picked = await showDatePicker(
         context: context,
         initialDate: _vm.guideDate,
-        firstDate: DateTime.now().subtract(const Duration(days: 7)),
-        lastDate: DateTime.now().add(const Duration(days: 14)),
+        firstDate: widget.now().subtract(const Duration(days: 7)),
+        lastDate: widget.now().add(const Duration(days: 14)),
         builder: (context, child) {
           return FocusTraversalGroup(
             policy: OrderedTraversalPolicy(),
@@ -1144,7 +1153,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final programs = _vm.programsForChannel(channelId);
     if (programs.isEmpty) return null;
 
-    final now = DateTime.now();
+    final now = widget.now();
     for (final program in programs) {
       if (!now.isBefore(program.startDate) && now.isBefore(program.endDate)) {
         return program;
@@ -1553,7 +1562,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       ]),
       builder: (context, _) {
         final (:channel, program: preview) = _currentPreview();
-        final now = DateTime.now();
+        final now = widget.now();
         final isLive =
             preview != null &&
             now.isAfter(preview.startDate) &&
@@ -2369,7 +2378,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         final nowNext = _vm.nowNextForChannel(channel.id);
         final now = nowNext.now;
         final next = nowNext.next;
-        final t = DateTime.now();
+        final t = widget.now();
         final logoUrl = channel.imageTag == null
             ? null
             : _vm.imageApi.getPrimaryImageUrl(
@@ -3065,7 +3074,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (cells.isEmpty || rowState == null || _cellsAreLoading(cells)) return;
 
     final current = _selection;
-    final rawAnchor = current?.anchorTime ?? DateTime.now();
+    final rawAnchor = current?.anchorTime ?? widget.now();
     final anchor = rawAnchor.isBefore(_vm.windowStart)
         ? _vm.windowStart
         : rawAnchor.isAfter(_vm.windowEnd)
@@ -3135,7 +3144,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _onNavigationKey() {
     _pendingPickerRestore = null;
     _pendingChannelRebindId = null;
-    _lastDpadEventAt = DateTime.now();
+    _lastDpadEventAt = widget.now();
     _cancelPendingVerticalMove();
   }
 
@@ -3143,14 +3152,14 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// only moves on the half hour [guideLeftEdge] floors to.
   void _scheduleReanchor() {
     _reanchorTimer?.cancel();
-    final now = DateTime.now();
+    final now = widget.now();
     final next = floorToHalfHour(now).add(const Duration(minutes: 30));
     _reanchorTimer = Timer(next.difference(now), _onReanchorTick);
   }
 
   void _onReanchorTick() {
     if (!mounted) return;
-    final now = DateTime.now();
+    final now = widget.now();
     final lastInput = _lastDpadEventAt;
     if (lastInput != null) {
       final quiet = _kReanchorInputQuiet - now.difference(lastInput);
@@ -3244,7 +3253,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final oldStart = _vm.windowStart;
     final oldEnd = _vm.windowEnd;
     final target = oldStart.add(amount);
-    final liveStart = guideLeftEdge(DateTime.now());
+    final liveStart = guideLeftEdge(widget.now());
     // Only the back chevron may look at history, and only as far as the
     // server realistically keeps it. Every other backward path exists to
     // return toward live after paging ahead.
@@ -3379,7 +3388,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Future<void> _goToNow() async {
     _cancelPendingVerticalMove();
-    await _vm.goToNow(windowStart: guideLeftEdge(DateTime.now()));
+    await _vm.goToNow(windowStart: guideLeftEdge(widget.now()));
     if (!mounted) return;
     if (_vm.state == GuideState.ready && _vm.atLivePosition) {
       _failedLiveReset = false;
@@ -3427,7 +3436,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _resettingToEntryState = true;
     try {
       _cancelPendingVerticalMove();
-      final liveStart = guideLeftEdge(DateTime.now());
+      final liveStart = guideLeftEdge(widget.now());
       if (_vm.listingsAccessDenied) {
         // Back can restore focus locally at live time. Returning from another
         // window needs a fresh request because the denial blocks paging.
@@ -3550,7 +3559,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   /// Anchor for the first focused cell: now while the window covers it, and
   /// the window start otherwise.
   DateTime _seedAnchorInto(GuideCell cell) {
-    final now = DateTime.now();
+    final now = widget.now();
     final base = !now.isBefore(_vm.windowStart) && now.isBefore(_vm.windowEnd)
         ? now
         : _vm.windowStart;
@@ -3642,7 +3651,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   void _onProgramLeftEdge(int rowIndex) {
-    final liveStart = guideLeftEdge(DateTime.now());
+    final liveStart = guideLeftEdge(widget.now());
     if (_vm.windowStart.isAfter(liveStart)) {
       unawaited(_shiftGuideWindow(const Duration(minutes: -30)));
       return;
@@ -3695,7 +3704,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
     final index = channels.indexWhere((channel) => channel.id == channelId);
     if (index < 0) return;
-    _vm.resetWindowOnExit(windowStart: guideLeftEdge(DateTime.now()));
+    _vm.resetWindowOnExit(windowStart: guideLeftEdge(widget.now()));
     // With the setting off nothing is awaited, so the built-in player still
     // opens on this frame.
     final external =
@@ -3711,7 +3720,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (!mounted) return;
     await _vm.reloadIfStale(
       window: _layoutProfile.guideWindow,
-      windowStart: guideLeftEdge(DateTime.now()),
+      windowStart: guideLeftEdge(widget.now()),
     );
     if (!mounted) return;
     _vm.scheduleBoundaryRefresh();
@@ -3737,7 +3746,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final isFavoriteChannel = channel?.isFavorite ?? false;
     final hasTimer = program.hasTimer;
     final hasSeriesTimer = program.hasSeriesTimer;
-    final now = DateTime.now();
+    final now = widget.now();
     // That airing is over. Only a future or currently-airing showing can still be recorded.
     final isEnded = now.isAfter(program.endDate);
     final isFuture = now.isBefore(program.startDate);

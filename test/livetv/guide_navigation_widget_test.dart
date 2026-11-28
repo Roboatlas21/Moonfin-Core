@@ -286,6 +286,7 @@ void main() {
     Size surface = const Size(900, 700),
     List<NavigatorObserver> observers = const [],
     LiveTvGuideBackController? backController,
+    DateTime Function() now = DateTime.now,
   }) async {
     // Wide enough for a multi-hour window and tall enough for a dozen rows.
     // The guide sizes its own time density to whatever surface it is given.
@@ -302,6 +303,7 @@ void main() {
         // supplies it. Stand in for that host here.
         home: _hosted(
           LiveTvGuideScreen(
+            now: now,
             miniPlayerMode: miniPlayerMode,
             embedded: embedded ?? miniPlayerMode,
             currentChannel: currentChannel,
@@ -450,11 +452,15 @@ void main() {
   ) async {
     useTvLayout();
     guideFailure = Exception('Guide unavailable');
-    await pumpGuide(tester);
+    await openGuideRoute(tester);
     expect(find.text('Retry'), findsOneWidget);
     await focusGuideNode(tester, 'GuideWindowBar:0');
     await expectFocusAfter(tester, LogicalKeyboardKey.arrowDown, 'GuideErrorRetry');
     await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideWindowBar:0');
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowDown, 'GuideErrorRetry');
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('open guide'), findsOneWidget);
   });
 
   // A wider guide needs more time slots than the 900-point fixture.
@@ -503,9 +509,10 @@ void main() {
 
   testWidgets('paging back at the history limit cancels an unfinished forward page', (tester) async {
     useTvLayout();
-    await pumpGuide(tester);
+    final now = DateTime(2026, 9, 11, 10, 10);
+    await pumpGuide(tester, now: () => now);
     final vm = guideModel(tester);
-    final floor = guideLeftEdge(DateTime.now()).subtract(const Duration(hours: 24));
+    final floor = guideLeftEdge(now).subtract(const Duration(hours: 24));
     await vm.setWindowStart(floor);
     await _pumpFrames(tester);
     deferredChannelId = 'ch0';
@@ -1582,6 +1589,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Up from category Retry returns to search above a tall keyboard', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    channelCount = 2;
+    stubGroups(const ChannelGroupLineup({}, programmeCategories: {'sports'}));
+    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
+      final ids = inv.namedArguments[#channelIds] as List;
+      return {
+        'Items': [for (final id in ids.where((id) => id != 'ch0')) ..._programsFor(id, sports: true)],
+        if (inv.namedArguments[#isSports] == true) 'FailedChannelIds': ['ch0'],
+      };
+    });
+    await pumpGuide(tester, surface: const Size(640, 360));
+    guideModel(tester).setFilter(GuideFilter.sports);
+    await _pumpFrames(tester);
+    final field = find.byType(TextField);
+    await tester.tap(field);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await _pumpFrames(tester);
+    await focusGuideNode(tester, 'GuideCategoryRetry');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowUp);
+    expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
+  });
+
   testWidgets('landscape phone search and Clear have full touch targets', (tester) async {
     useLayout(InterfaceLayout.phone);
     await pumpGuide(tester, surface: const Size(900, 430));
@@ -1836,6 +1866,7 @@ void main() {
         }
         await back(tester);
         expect(find.byType(LiveTvGuideScreen), findsOneWidget);
+        expect(guideModel(tester).atLivePosition, isTrue);
         expect(_focusedLabel(), lastChannel == null ? 'GuideChannel:0' : 'GuideChannel:2');
       });
     }
