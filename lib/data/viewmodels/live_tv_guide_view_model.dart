@@ -33,9 +33,11 @@ class GuideChannel {
     required this.rawData,
   });
 
-  GuideChannel withSyncedUserData() {
+  GuideChannel withSyncedUserData({
+    bool? Function(GuideChannel)? favoriteFallback,
+  }) {
     final stateId = channelFavoriteKey(rawData) ?? id;
-    final synced = userDataSync.favoriteFor(stateId);
+    final synced = userDataSync.favoriteFor(stateId) ?? favoriteFallback?.call(this);
     if (synced == null || synced == isFavorite) return this;
     final current = rawData['UserData'];
     return GuideChannel(
@@ -55,8 +57,11 @@ class GuideChannel {
   static List<GuideChannel>? withSyncedUserDataAll(
     List<GuideChannel> channels, {
     bool favoritesFirst = false,
+    bool? Function(GuideChannel)? favoriteFallback,
   }) {
-    final updated = [for (final c in channels) c.withSyncedUserData()];
+    final updated = [
+      for (final c in channels) c.withSyncedUserData(favoriteFallback: favoriteFallback),
+    ];
     for (var i = 0; i < updated.length; i++) {
       if (!identical(updated[i], channels[i])) {
         if (favoritesFirst) {
@@ -843,9 +848,19 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   bool _publishingFetchedUserData = false;
 
+  bool? _cachedPlexFavorite(GuideChannel channel) {
+    final key = channel.rawData['PlexFavoriteSyncKey'];
+    return key is String
+        ? PlexLiveTvFavorites.cachedFavoriteFor(_client, channel.id, key)
+        : null;
+  }
+
   void syncChannelUserData() {
     if (_publishingFetchedUserData) return;
-    final updated = GuideChannel.withSyncedUserDataAll(_channels);
+    final updated = GuideChannel.withSyncedUserDataAll(
+      _channels,
+      favoriteFallback: _cachedPlexFavorite,
+    );
     if (updated == null) return;
     if (_sortReadsFavorite) updated.sort(comparatorFor(_sortBy));
     _channels = updated;

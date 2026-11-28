@@ -332,6 +332,46 @@ void main() {
     expect(guide.state, GuideState.ready);
   });
 
+  test('Guide keeps the Plex heart current when a large account lineup fills the sync cache', () async {
+    const provider = 'server://pms/epg';
+    final api = _LineupApi();
+    final client = _LineupClient(api)..userId = 'plex-user';
+    addTearDown(client.dispose);
+    when(() => api.getChannelGroups(userId: 'plex-user')).thenAnswer((_) async {
+      return ChannelGroupLineup({}, channels: [
+        for (var i = 0; i < 4001; i++)
+          {
+            'Id': 'channel-2-$i',
+            'Type': 'TvChannel',
+            'Name': 'Station $i',
+            'PlexFavoriteSource': provider,
+            'PlexFavoriteId': '$i',
+          },
+      ]);
+    });
+    when(() => api.getGuide(
+      startDate: any(named: 'startDate'), endDate: any(named: 'endDate'),
+      channelIds: any(named: 'channelIds'), fields: any(named: 'fields'),
+      enableTotalRecordCount: false, enableImages: false, enableUserData: false, userId: 'plex-user',
+    )).thenAnswer((_) async => {'Items': []});
+    final guide = LiveTvGuideViewModel(client);
+    userDataSync.addListener(guide.syncChannelUserData);
+    addTearDown(() {
+      userDataSync.removeListener(guide.syncChannelUserData);
+      guide.dispose();
+    });
+    await guide.load();
+    await pumpEventQueue();
+    const id = 'channel-2-0';
+    expect(guide.channelForId(id)!.isFavorite, isFalse);
+
+    cloud.rows = [{'source': provider, 'id': '0'}];
+    await PlexLiveTvFavorites.refresh(client);
+    final key = channelFavoriteKey(guide.channelForId(id)!.rawData)!;
+    expect(userDataSync.favoriteFor(key), isNull);
+    expect(guide.channelForId(id)!.isFavorite, isTrue);
+  });
+
   group('Global Search DVR favorites', () {
     const favorite = {'source': 'server://pms/epg', 'id': '4'};
     const station = {
