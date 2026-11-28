@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
@@ -227,7 +228,7 @@ class PlexLiveTvFavorites {
       _checkAccount(client, token, session: session);
       if (persisted) {
         _unpersisted.remove(userId);
-        _lastRefresh[userId] = DateTime.now();
+        _lastRefresh[userId] = clock.now();
       } else {
         _unpersisted[userId] = (session: userDataSync.session, keys: favorites);
         _lastRefresh.remove(userId);
@@ -282,7 +283,7 @@ class PlexLiveTvFavorites {
       final last = _lastRefresh[account.id];
       if (ifStale &&
           last != null &&
-          DateTime.now().difference(last) < _browseRefreshAge) {
+          clock.now().difference(last) < _browseRefreshAge) {
         return _publishCached(client, account.token);
       }
       final remote = await _read(client, account.token);

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:clock/clock.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
@@ -55,6 +56,17 @@ bool _saved(MediaServerClient client, String id) =>
     })['UserData'] as Map)['IsFavorite'] == true;
 
 class _LineupApi extends Mock implements LiveTvApi, DirectChannelGroupApi {}
+
+class _ChannelSearch extends SearchRepository {
+  _ChannelSearch(super.client);
+
+  @override
+  Future<List<AggregatedItem>> searchPeople(String query, {int limit = 24}) async => [];
+
+  @override
+  Future<List<AggregatedItem>> searchGroups(String query, List<List<String>> groups,
+      {required int perGroup, required int limit}) async => [];
+}
 
 class _LineupClient extends PlexMediaServerClient {
   _LineupClient(this.liveTvApi) : super(baseUrl: 'https://pms.example', deviceInfo: _device);
@@ -218,7 +230,7 @@ void main() {
     final reply = Completer<void>();
     cloud.holdGet = reply.future;
     cloud.rows = [{'source': _source, 'id': 'free123'}];
-    final model = SearchViewModel(SearchRepository(client), client);
+    final model = SearchViewModel(_ChannelSearch(client), client);
     addTearDown(model.dispose);
     model.searchImmediate('Free Channel');
     await pumpEventQueue();
@@ -226,6 +238,81 @@ void main() {
     reply.complete();
     await pumpEventQueue();
     expect(model.results.single.items.single.isFavorite, isTrue);
+  });
+
+  group('Global Search DVR favorites', () {
+    const favorite = {'source': 'server://pms/epg', 'id': '4'};
+    late _LineupApi api;
+    late _LineupClient client;
+    late SearchViewModel model;
+
+    Future<Map<String, dynamic>> lineup() =>
+        api.getChannels(fields: 'ImageTags', enableTotalRecordCount: false, userId: 'plex-user');
+
+    Future<void> search(String query) async {
+      model.searchImmediate(query);
+      await pumpEventQueue();
+      expect(model.state, SearchState.ready);
+    }
+
+    setUp(() {
+      api = _LineupApi();
+      client = _LineupClient(api)..userId = 'plex-user';
+      addTearDown(client.dispose);
+      when(lineup).thenAnswer((_) async => {'Items': [
+        {'Id': 'channel-2-4', 'Type': 'TvChannel', 'Name': 'CBC News',
+         'PlexFavoriteSource': favorite['source'], 'PlexFavoriteId': favorite['id']},
+      ]});
+      model = SearchViewModel(_ChannelSearch(client), client);
+      addTearDown(model.dispose);
+    });
+
+    test('a refresh on another server updates Search and preserves a pending local edit', () async {
+      final other = _plex()..baseUrl = 'https://other-pms.example';
+      await search('CBC');
+      final row = model.results.single.items.single;
+      final key = row.rawData['PlexFavoriteSyncKey'] as String;
+      expect(row.isFavorite, isFalse);
+
+      cloud.rows = [favorite];
+      await PlexLiveTvFavorites.refresh(other);
+      expect(model.results.single.items.single.isFavorite, isTrue);
+      expect(userDataSync.favoriteFor(key), isTrue);
+      expect(cloud.requests, hasLength(2));
+
+      userDataSync.requestFavorite(key, false);
+      cloud.rows.add({'source': favorite['source'], 'id': '7'});
+      await PlexLiveTvFavorites.refresh(other);
+      expect(model.results.single.items.single.isFavorite, isFalse);
+      expect(userDataSync.pendingFavorite(key), isFalse);
+      expect(cloud.requests, hasLength(3));
+    });
+
+    for (final failed in [false, true]) {
+      test('cached lineup refreshes favorites after ${failed ? 'failure' : 'expiry'}', () async {
+        var now = DateTime.utc(2026);
+        await withClock(Clock(() => now), () async {
+          cloud.getError = failed ? 503 : null;
+          await search('CBC');
+          expect(model.results.single.items.single.isFavorite, isFalse);
+          expect(cloud.requests, hasLength(1));
+
+          cloud.getError = null;
+          cloud.rows = [favorite];
+          if (!failed) {
+            now = now.add(const Duration(seconds: 29));
+            await search('News');
+            expect(cloud.requests, hasLength(1));
+            expect(model.results.single.items.single.isFavorite, isFalse);
+            now = now.add(const Duration(seconds: 1));
+          }
+          await search('CBC News');
+          expect(model.results.single.items.single.isFavorite, isTrue);
+          expect(cloud.requests, hasLength(2));
+          verify(lineup).called(1);
+        });
+      });
+    }
   });
 
   group('two DVRs with channel 4', () {

@@ -124,7 +124,7 @@ class SearchViewModel extends ChangeNotifier {
                ? scopedParentId
                : null {
     userDataSync.addListener(_onUserDataChanged);
-    PlexLiveTvFavorites.favoriteListChanged.addListener(_onUserDataChanged);
+    PlexLiveTvFavorites.favoriteListChanged.addListener(_onPlexFavoritesChanged);
   }
 
   void setSeerrRepository(SeerrRepository repo) {
@@ -176,6 +176,19 @@ class SearchViewModel extends ChangeNotifier {
     if (identical(updated, _results)) return;
     _results = updated;
     notifyListeners();
+  }
+
+  List<MediaServerClient> _plexChannelClients = const [];
+
+  void _onPlexFavoritesChanged() {
+    for (final client in _plexChannelClients) {
+      try {
+        PlexLiveTvFavorites.applyCachedToClient(client);
+      } on StateError {
+        // A signed-out connection can lose its token while Search is open.
+      }
+    }
+    _onUserDataChanged();
   }
 
   List<SeerrDiscoverItem> _seerrResults = const [];
@@ -394,7 +407,10 @@ class SearchViewModel extends ChangeNotifier {
           .timeout(_peopleTimeout),
       label: 'people search',
     ).then(_interleave).catchError((_) => <AggregatedItem>[]);
-    final channelsFuture = _channelMatches(query);
+    final channelsFuture = _channelMatches(
+      query,
+      sessions?.map((session) => session.client) ?? [_client],
+    );
     List<List<AggregatedItem>> perServerItems;
     try {
       perServerItems = await _searchEachServer(
@@ -499,11 +515,22 @@ class SearchViewModel extends ChangeNotifier {
     return perServer.expand((channels) => channels).toList();
   }
 
-  Future<List<AggregatedItem>> _channelMatches(String query) async {
+  Future<List<AggregatedItem>> _channelMatches(
+    String query,
+    Iterable<MediaServerClient> clients,
+  ) async {
     // Channels come back wholesale rather than through a search the server
     // answers, so the folding it would have done has to happen here.
     final q = foldForSearch(query.trim());
     if (q.isEmpty || q.startsWith('studio:')) return const [];
+    _plexChannelClients = clients.where((c) => c.serverType == ServerType.plex).toList();
+    if (_channelsFuture != null) {
+      // The initial lineup fetch refreshes favorites. A cached lineup can
+      // outlive that refresh or succeed even when the cloud request failed.
+      for (final client in _plexChannelClients) {
+        unawaited(PlexLiveTvFavorites.refreshForBrowse(client));
+      }
+    }
     _channelsFuture ??= _loadChannelLineup();
     try {
       final all = await _channelsFuture!;
@@ -601,7 +628,7 @@ class SearchViewModel extends ChangeNotifier {
   @override
   void dispose() {
     userDataSync.removeListener(_onUserDataChanged);
-    PlexLiveTvFavorites.favoriteListChanged.removeListener(_onUserDataChanged);
+    PlexLiveTvFavorites.favoriteListChanged.removeListener(_onPlexFavoritesChanged);
     _debounceTimer?.cancel();
     // Keeps searches that answer after the screen closed from landing on it.
     _searchRun++;
