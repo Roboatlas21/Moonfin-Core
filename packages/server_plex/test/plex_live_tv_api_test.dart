@@ -450,7 +450,7 @@ void main() {
       final metadataRequested = Completer<void>();
       final release = Completer<void>();
       dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
-        if (request.uri.path == '/') {
+        if (request.uri.path == '/' && !metadataRequested.isCompleted) {
           metadataRequested.complete();
           await release.future;
         }
@@ -473,7 +473,9 @@ void main() {
       } else {
         await expectLater(guide, _httpError(status));
         server.failWhen = null;
-        expect((await api.getChannelGroups()).channels, hasLength(2));
+        final restored = await api.getChannelGroups();
+        expect(restored.channels, hasLength(2));
+        expect(restored.partial, isFalse);
       }
     });
   }
