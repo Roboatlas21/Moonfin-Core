@@ -1313,9 +1313,7 @@ void main() {
       bool appKeyboardHandler(KeyEvent event) {
         if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.goBack) return false;
         DialogBackSuppressor.newBackPress();
-        if (!DialogBackSuppressor.dismissKeyboardFor(event)) return false;
-        DialogBackSuppressor.markDismissed();
-        return true;
+        return DialogBackSuppressor.handleAppKeyboardBack(event, isAndroid: true);
       }
       HardwareKeyboard.instance.addHandler(appKeyboardHandler);
       addTearDown(() => HardwareKeyboard.instance.removeHandler(appKeyboardHandler));
@@ -1557,6 +1555,12 @@ void main() {
         expect(_focusedLabel(), 'GuideWindowBar:1');
       }
     }
+    await focusGuideNode(tester, 'GuideProgramRow0:0');
+    final first = _nodeLabelled(tester, 'GuideProgramRow0:0').rect;
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowLeft, 'GuideProgramRow0:1');
+    expect(_nodeLabelled(tester, 'GuideProgramRow0:1').rect.center.dx, lessThan(first.center.dx));
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowRight, 'GuideProgramRow0:0');
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowRight, 'GuideChannel:0');
   });
 
   for (final action in ['wait', 'move up', 'open details']) {
@@ -1690,9 +1694,9 @@ void main() {
     await tester.tap(field);
     tester.view.viewInsets = const FakeViewPadding(bottom: 300);
     await _pumpFrames(tester);
-    await tester.enterText(field, 'Channel 4');
-    await _pumpFrames(tester);
     expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
+    tester.testTextInput.enterText('Channel 4');
+    await _pumpFrames(tester);
     expect(find.widgetWithText(ListTile, 'Channel 4').hitTestable(), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

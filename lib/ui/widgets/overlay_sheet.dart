@@ -26,6 +26,12 @@ class DialogBackSuppressor {
     return true;
   }
 
+  static bool handleAppKeyboardBack(KeyDownEvent event, {required bool isAndroid}) {
+    if (!dismissKeyboardFor(event)) return false;
+    if (isAndroid && event.logicalKey == LogicalKeyboardKey.goBack) markDismissed();
+    return true;
+  }
+
   static void markDismissed() => _count++;
 
   /// Drops a mark the last press never used. Before Android 13, popRoute only

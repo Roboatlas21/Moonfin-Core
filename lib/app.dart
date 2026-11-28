@@ -816,10 +816,7 @@ class _GlobalShortcutScopeState extends State<_GlobalShortcutScope>
       // than navigate. This runs ahead of the focus tree and the field has no
       // key handling of its own, so without it the route pops out from under
       // an open keyboard.
-      if (DialogBackSuppressor.dismissKeyboardFor(event)) {
-        if (PlatformDetection.isAndroid && key == LogicalKeyboardKey.goBack) {
-          DialogBackSuppressor.markDismissed();
-        }
+      if (DialogBackSuppressor.handleAppKeyboardBack(event, isAndroid: PlatformDetection.isAndroid)) {
         return true;
       }
       // Dismiss a receiving phone's keyboard before leaving its page.

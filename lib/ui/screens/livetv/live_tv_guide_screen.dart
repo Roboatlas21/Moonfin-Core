@@ -3589,6 +3589,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   Widget _buildProgramRow(String channelId, int rowIndex) {
     return _GuideProgramRow(
       now: widget.now,
+      timelineDirection: _pickerRowDirection,
       cells: _cellsForChannel(channelId),
       rowIndex: rowIndex,
       rowStates: _rowStates,
@@ -4266,6 +4267,7 @@ class _GuideFocusableSurfaceState extends State<_GuideFocusableSurface> {
 }
 
 class _GuideProgramRow extends StatefulWidget {
+  final TextDirection timelineDirection;
   final DateTime Function() now;
   final List<GuideCell> cells;
   final int rowIndex;
@@ -4307,6 +4309,7 @@ class _GuideProgramRow extends StatefulWidget {
 
   const _GuideProgramRow({
     required this.now,
+    required this.timelineDirection,
     required this.cells,
     required this.rowIndex,
     required this.rowStates,
@@ -4445,7 +4448,7 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
     if (key.isLeftKey || key.isRightKey || key.isUpKey || key.isDownKey) {
       widget.onNavigationKey();
     }
-    if (key.isLeftKey) {
+    if (key.isTowardStart(widget.timelineDirection)) {
       if (index > 0) {
         _focusNodes[index - 1].requestFocus();
         _notifyHorizontalMove(index - 1);
@@ -4457,7 +4460,7 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
       }
       return KeyEventResult.ignored;
     }
-    if (key.isRightKey) {
+    if (key.isTowardEnd(widget.timelineDirection)) {
       if (index < _focusNodes.length - 1) {
         _focusNodes[index + 1].requestFocus();
         _notifyHorizontalMove(index + 1);
@@ -4580,13 +4583,14 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
       ),
     );
 
-    return Positioned(
-      left: left,
+    return Positioned.directional(
+      textDirection: widget.timelineDirection,
+      start: left,
       width: width,
       top: 2,
       bottom: 2,
       child: Padding(
-        padding: const EdgeInsets.only(right: 1),
+        padding: const EdgeInsetsDirectional.only(end: 1).resolve(widget.timelineDirection),
         child: cellWidget,
       ),
     );
