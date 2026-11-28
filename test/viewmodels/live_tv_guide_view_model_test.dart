@@ -1277,6 +1277,7 @@ void main() {
     await loading;
 
     expect(userDataSync.favoriteFor(serverChannelKey(client.baseUrl, 'c1')), isNull);
+    expect(userDataSync.favoriteFor('c1'), isNull);
     expect(vm.state, GuideState.ready);
     expect(vm.playbackChannels, isEmpty);
     _stubChannels(liveTv, [_channel('new')]);

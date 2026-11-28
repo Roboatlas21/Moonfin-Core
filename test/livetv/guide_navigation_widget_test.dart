@@ -288,9 +288,11 @@ void main() {
     Size surface = const Size(900, 700),
     List<NavigatorObserver> observers = const [],
     LiveTvGuideBackController? backController,
-    DateTime Function() now = DateTime.now,
+    DateTime Function()? now,
     Locale? locale,
   }) async {
+    final openedAt = (now ?? DateTime.now)();
+    _fixtureWindowStart = guideLeftEdge(openedAt);
     // Wide enough for a multi-hour window and tall enough for a dozen rows.
     // The guide sizes its own time density to whatever surface it is given.
     tester.view.physicalSize = surface;
@@ -307,7 +309,7 @@ void main() {
         // supplies it. Stand in for that host here.
         home: _hosted(
           LiveTvGuideScreen(
-            now: now,
+            now: now ?? () => openedAt,
             miniPlayerMode: miniPlayerMode,
             embedded: embedded ?? miniPlayerMode,
             currentChannel: currentChannel,
@@ -700,7 +702,6 @@ void main() {
 
   testWidgets('the grid marks the program airing at the Guide time as live', (tester) async {
     final now = DateTime(2026, 9, 11, 10, 10);
-    _fixtureWindowStart = guideLeftEdge(now);
     await pumpGuide(tester, now: () => now);
     final cell = tester.widgetList<EpgProgramCell>(find.byType(EpgProgramCell))
         .firstWhere((cell) => cell.title == 'ch0 show 0');
