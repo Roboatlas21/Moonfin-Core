@@ -64,14 +64,14 @@ class _EpgFilterRailState extends State<EpgFilterRail> {
       _chipKeys.removeWhere((node, _) => !_focusListeners.containsKey(node));
       if (focused != null && _focusListeners.containsKey(focused)) {
         chipToReveal = focused;
-      } else if (hadFocus) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted || widget.selectedIndex < 0 || widget.selectedIndex >= widget.labels.length) return;
-          FocusManager.instance.applyFocusChangesIfNeeded();
-          if (!mounted || FocusManager.instance.primaryFocus != FocusScope.of(context)) return;
-          final node = widget.focusNodeFor(widget.selectedIndex);
-          if (node.context?.mounted == true) node.requestFocus();
-        });
+      } else if (hadFocus &&
+          focused!.enclosingScope?.focusedChild == focused &&
+          widget.selectedIndex >= 0 &&
+          widget.selectedIndex < widget.labels.length &&
+          ModalRoute.isCurrentOf(context) != false) {
+        // Set the replacement before detachment falls back to an older control.
+        // A newly inserted chip receives the request when it attaches.
+        widget.focusNodeFor(widget.selectedIndex).requestFocus();
       }
     }
     if (chipToReveal != null) _revealChip(chipToReveal);

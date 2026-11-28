@@ -449,9 +449,13 @@ void main() {
       await _pumpFrames(tester);
     }
     await show(original);
+    sibling.requestFocus();
+    await _pumpFrames(tester);
     original.first.requestFocus();
     await _pumpFrames(tester);
     expect(original.first.hasFocus, isTrue);
+    await show([replacement.first, ...original.skip(1)]);
+    expect(original[2].hasPrimaryFocus, isTrue);
     await show(replacement);
     expect(replacement[2].hasFocus, isTrue);
     WidgetsBinding.instance.addPostFrameCallback((_) => sibling.requestFocus());

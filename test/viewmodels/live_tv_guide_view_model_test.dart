@@ -351,7 +351,9 @@ void main() {
         verify(() => _guide(liveTv, captureChannelIds: true)).captured;
     expect(oldRequests, hasLength(1));
     expect(oldRequests.single as List<String>, containsAll(['c0', 'c49']));
-    when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+    when(() => _guide(liveTv)).thenAnswer((inv) async => {
+      'Items': [if (_requestedIds(inv).contains('c1')) _program('current', 'c1', start: later)],
+    });
     expect(await vm.setWindowStart(later, paging: true), isTrue);
     clearInteractions(liveTv);
     // The first window's reply lands last and must not overwrite the second.
@@ -361,7 +363,8 @@ void main() {
     await superseded;
     verifyNever(() => _guide(liveTv));
 
-    expect(vm.programsForChannel('c1'), isEmpty);
+    expect(vm.windowStart, later);
+    expect(vm.programsForChannel('c1').single.id, 'current');
   });
 
   test('paging during an outage keeps the old window until at least one batch recovers', () async {
@@ -685,7 +688,7 @@ void main() {
       final second = vm.refreshCarouselPrograms();
 
       expect(second, same(first));
-      verify(() => _guide(liveTv, category: GuideFilter.all)).called(2);
+      verify(() => _guide(liveTv)).called(2);
       reply.complete({
         'Items': [_span('new', 'c0', at(-10), at(90))],
       });
