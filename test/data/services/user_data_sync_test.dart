@@ -342,6 +342,21 @@ void main() {
       return (client: client, itemsApi: itemsApi);
     }
 
+    test('a LiveTvChannel refresh applies its server-scoped favorite', () async {
+      final fake = clientReturning([
+        {'Id': 'news', 'Type': 'LiveTvChannel', 'UserData': {'IsFavorite': true}},
+      ]);
+      const server = 'http://media.test';
+      when(() => fake.client.baseUrl).thenReturn(server);
+      final channel = AggregatedItem(id: 'news', serverId: server, rawData: {
+        'Type': 'LiveTvChannel', 'UserData': {'IsFavorite': false},
+      });
+      await sync.refreshFromServer(fake.client, ['news']);
+      expect(sync.favoriteFor(serverChannelKey(server, 'news')), isTrue);
+      sync.publish('news', {'IsFavorite': false});
+      expect(sync.apply(channel).isFavorite, isTrue);
+    });
+
     for (final previous in [false, true]) {
       test('a full cache retains a refreshed channel favorite (previous: $previous)', () async {
         final fake = clientReturning([

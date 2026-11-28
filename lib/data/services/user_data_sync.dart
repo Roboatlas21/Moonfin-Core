@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:get_it/get_it.dart';
+import 'package:playback_core/playback_core.dart' show MediaStreamResolver;
 import 'package:server_core/server_core.dart';
 
 import '../models/aggregated_item.dart';
@@ -182,7 +183,7 @@ class UserDataSync extends ChangeNotifier {
   }) {
     final original = _userData[item.id];
     final scopedKey = channelFavoriteKey(item.rawData) ??
-        (item.type == 'TvChannel' && item.serverId.isNotEmpty
+        (item.serverId.isNotEmpty && MediaStreamResolver.isLiveTvItem(item.rawData)
             ? serverChannelKey(item.serverId, item.id)
             : null);
     final scopedFavorite = scopedKey is String
@@ -271,7 +272,7 @@ class UserDataSync extends ChangeNotifier {
             final userData = raw['UserData'];
             if (id == null || id.isEmpty || userData is! Map) continue;
             changes[id] = Map<String, dynamic>.from(userData);
-            if (raw['Type'] == 'TvChannel' && userData['IsFavorite'] is bool) {
+            if (userData['IsFavorite'] is bool && MediaStreamResolver.isLiveTvItem(raw)) {
               final key = serverChannelKeyFor(client, id);
               changes[key] = {'IsFavorite': userData['IsFavorite']};
             }

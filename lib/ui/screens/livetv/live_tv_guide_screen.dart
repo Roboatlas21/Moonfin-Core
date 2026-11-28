@@ -1260,7 +1260,11 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
             }
           });
         }
-        if (landscape) _scheduleGuideWindowUpdate(profile.guideWindow);
+        if (landscape) {
+          _scheduleGuideWindowUpdate(profile.guideWindow);
+        } else {
+          _lastLayoutWindow = null;
+        }
         // A tall phone keyboard can leave less than one toolbar and one row.
         // Keep both the focused search field and its matches within reach.
         if (compactSearch && area.height < kMinInteractiveDimension + profile.timeHeaderHeight + profile.rowHeight) {
@@ -1736,7 +1740,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _cancelPendingVerticalMove();
     _pendingPickerFocus = null;
     _pendingPickerRestore = null;
-    _pendingChannelRebindId = null;
     _suppressPickerRestorePrefetch = false;
     final panel = _sidePanel;
     final width = _panelWidth;
@@ -1749,7 +1752,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final channels = _vm.filteredChannels;
     final previousChannelId = previousRow == null
         ? null
-        : _focusedChannel.value?.id ?? channels.elementAtOrNull(previousRow)?.id;
+        : _pendingChannelRebindId ?? channels.elementAtOrNull(previousRow)?.id;
+    _pendingChannelRebindId = null;
     // Clear channel search before browsing groups; the picker has its own search.
     _clearChannelSearch();
     var closedWithRight = false;

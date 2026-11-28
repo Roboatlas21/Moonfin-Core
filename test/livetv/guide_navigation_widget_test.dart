@@ -1078,6 +1078,27 @@ void main() {
     expect(_focusedLabel(), 'GuideChannel:47');
   });
 
+  testWidgets('closing Browse restores the card selected after a lineup change', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.both);
+    await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
+    stubGroups(const ChannelGroupLineup({'ch3': {'Local'}}));
+    await pumpGuide(tester, surface: phone);
+    final vm = guideModel(tester);
+    vm.setChannelQuery('Channel 2');
+    await _pumpFrames(tester);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    vm.setChannelQuery('');
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideChannel:2');
+    await focusGuideNode(tester, 'GuideChannel:3');
+    await tapAndPump(tester, find.byTooltip('Filters'));
+    Navigator.of(tester.element(picker)).pop();
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideChannel:3');
+  });
+
   testWidgets('leaving a channel cancels a held Select even after focus returns', (tester) async {
     useTvLayout();
     userDataSync.reset();
@@ -1527,6 +1548,24 @@ void main() {
     await tester.tap(find.descendant(of: field, matching: find.byType(IconButton)));
     await tester.pump();
     expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+  });
+
+  testWidgets('landscape width is restored after a stale portrait resume', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    const wide = Size(1500, 700);
+    await pumpGuide(tester, surface: wide);
+    final vm = guideModel(tester);
+    final landscapeWindow = vm.guideWindow;
+    tester.view.physicalSize = phone;
+    await _pumpFrames(tester);
+    await vm.setWindowStart(vm.windowStart.subtract(const Duration(days: 1)));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await _pumpFrames(tester);
+    expect(vm.guideWindow, lessThan(landscapeWindow));
+    tester.view.physicalSize = wide;
+    await _pumpFrames(tester);
+    expect(vm.guideWindow, landscapeWindow);
   });
 
   testWidgets('landscape search keeps its field and matches above a tall keyboard', (tester) async {
