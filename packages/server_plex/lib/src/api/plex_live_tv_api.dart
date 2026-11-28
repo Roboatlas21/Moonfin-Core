@@ -290,7 +290,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
 
   Future<void> _readDvrChannels() async {
     final request = ++_dvrLineupRequest;
-    final next = <_Dvr, _Channels>{};
+    var next = <_Dvr, _Channels>{};
+    final fallbackTuners = <_Dvr>{};
     final unresolved = <String>{};
     var partial = false;
     var unknownIds = false;
@@ -312,26 +313,6 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       }
       final hasDvrRows = dvrs.isNotEmpty || (incomplete && _lastDvrChannels.isNotEmpty);
       final machineIdFuture = hasDvrRows ? _machineIdForFavorites() : null;
-      Future<_Channels> retainedChannels(_Dvr dvr) async {
-        final retained = _lastDvrChannels[dvr] ?? [];
-        if (retained.isEmpty || machineIdFuture == null) return retained;
-        final machine = await machineIdFuture;
-        // Another channel read may have published while identity was loading.
-        final rows = _lastDvrChannels[dvr] ?? [];
-        final source = machine == null ? null : 'server://$machine/${dvr.epg}';
-        return [
-          for (final row in rows)
-            if (row['PlexFavoriteSource'] == null || row['PlexFavoriteSource'] == source) row
-            else Map.of(row)..remove('PlexFavoriteSource')..remove('PlexFavoriteId'),
-        ];
-      }
-      if (incomplete) {
-        final found = {for (final dvr in dvrs) dvr.key};
-        for (final dvr in _lastDvrChannels.keys.where((dvr) => !found.contains(dvr.key))) {
-          next[dvr] = await retainedChannels(dvr);
-        }
-        unavailable(next.values.expand((rows) => rows).toList());
-      }
       for (final dvr in dvrs) {
         try {
           final lineup = await _dvrContainer('/${dvr.epg}/lineups/dvr/channels');
@@ -354,10 +335,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             );
           }).toList();
           if (size != null && int.tryParse('$size') != rows.length) {
-            final found = {for (final channel in channels) channel['Id']};
-            final missing = (await retainedChannels(dvr)).where((c) => !found.contains(c['Id'])).toList();
-            unavailable(missing);
-            channels.addAll(missing);
+            fallbackTuners.add(dvr);
           }
           next[dvr] = channels;
         } catch (error) {
@@ -366,10 +344,38 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
           // Discovery still advertised this tuner. Recheck it on the next read.
           if (status == 404 && request == _dvrLineupRequest) _dvrs = null;
           if (status == 404 || _temporaryLineupFailure(error)) {
-            final retained = await retainedChannels(dvr);
-            next[dvr] = retained;
-            unavailable(retained);
+            next[dvr] = [];
+            fallbackTuners.add(dvr);
           }
+        }
+      }
+      if (incomplete || fallbackTuners.isNotEmpty) {
+        final machine = await machineIdFuture;
+        // Use the last published rows after all tuner and identity reads finish.
+        _Channels retainedChannels(_Dvr dvr) {
+          final source = machine == null ? null : 'server://$machine/${dvr.epg}';
+          return [
+            for (final row in _lastDvrChannels[dvr] ?? const [])
+              if (row['PlexFavoriteSource'] == null || row['PlexFavoriteSource'] == source) row
+              else Map.of(row)..remove('PlexFavoriteSource')..remove('PlexFavoriteId'),
+          ];
+        }
+
+        if (incomplete) {
+          final found = {for (final dvr in dvrs) dvr.key};
+          final missing = {
+            for (final dvr in _lastDvrChannels.keys)
+              if (!found.contains(dvr.key)) dvr: retainedChannels(dvr),
+          };
+          unavailable(missing.values.expand((rows) => rows).toList());
+          next = {...missing, ...next};
+        }
+        for (final dvr in fallbackTuners) {
+          final verified = next[dvr]!;
+          final found = {for (final row in verified) row['Id']};
+          final missing = retainedChannels(dvr).where((row) => !found.contains(row['Id'])).toList();
+          unavailable(missing);
+          next[dvr] = [...verified, ...missing];
         }
       }
     } catch (error) {

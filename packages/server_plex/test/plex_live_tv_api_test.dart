@@ -662,6 +662,54 @@ void main() {
     expect((await browse)['Items'].first, newer);
   });
 
+  test('a guide outage retains the tuner rows Browse verified during the refresh', () async {
+    final (dio, _) = _server(secondDvr: true);
+    final api = PlexLiveTvApi(dio);
+    await api.getChannelGroups();
+    final browseAtFirstTuner = Completer<void>();
+    final guideAtSecondTuner = Completer<void>();
+    final releaseBrowse = Completer<void>();
+    final releaseGuide = Completer<void>();
+    const firstTuner = '/tv.plex.providers.epg.xmltv:2/lineups/dvr/channels';
+    const secondTuner = '/tv.plex.providers.epg.xmltv:3/lineups/dvr/channels';
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
+      if (request.path == firstTuner) {
+        if (browseAtFirstTuner.isCompleted) {
+          handler.reject(DioException(
+            requestOptions: request,
+            type: DioExceptionType.badResponse,
+            response: Response(requestOptions: request, statusCode: 503),
+          ));
+          return;
+        }
+        browseAtFirstTuner.complete();
+        await releaseBrowse.future;
+        handler.resolve(Response(requestOptions: request, data: _channels([{'id': '6'}])));
+        return;
+      }
+      if (request.path == secondTuner && !guideAtSecondTuner.isCompleted) {
+        guideAtSecondTuner.complete();
+        await releaseGuide.future;
+        handler.resolve(Response(requestOptions: request, data: _channels([{'id': '8'}])));
+        return;
+      }
+      handler.next(request);
+    }));
+
+    final browse = api.getChannels();
+    await browseAtFirstTuner.future;
+    final guide = api.getChannelGroups();
+    await guideAtSecondTuner.future;
+    releaseBrowse.complete();
+    final browseRows = (await browse)['Items'] as List;
+    releaseGuide.complete();
+    final lineup = await guide;
+    expect(browseRows.map((row) => row['Id']), contains('channel-2-6'));
+    expect(lineup.channels!.map((row) => row['Id']), containsAll(['channel-2-6', 'channel-3-8']));
+    expect(lineup.groupsByChannelId, isNot(contains(tuner)));
+    expect(lineup.unresolvedChannelIds, {'channel-2-6'});
+  });
+
   test('replacing a PMS or losing contact with it cannot bind favorites to an old tuner', () async {
     var machine = 'first';
     final (dio, server) = _server(secondDvr: true, machineId: () => machine);
