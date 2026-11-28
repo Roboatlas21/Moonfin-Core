@@ -485,6 +485,28 @@ void main() {
       verify(lineup).called(2);
     });
 
+    test('overlapping searches use the same replacement Plex lineup', () async {
+      final oldStation = Map<String, dynamic>.of(station)
+        ..remove('PlexFavoriteSource')
+        ..remove('PlexFavoriteId');
+      when(lineup).thenAnswer((_) async => {'Items': [oldStation]});
+      await search('CBC');
+      final verified = PlexLiveTvFavorites.applyToItem(client, station);
+      final replacement = Completer<Map<String, dynamic>>();
+      when(lineup).thenAnswer((_) => replacement.future);
+
+      model.searchImmediate('News');
+      model.searchImmediate('CBC News');
+      await pumpEventQueue();
+      replacement.complete({'Items': [station]});
+      await pumpEventQueue();
+
+      expect(model.state, SearchState.ready);
+      final result = model.results.single.items.single;
+      expect(channelFavoriteKey(result.rawData), channelFavoriteKey(verified));
+      verify(lineup).called(2);
+    });
+
     test('a refresh on another server updates Search and preserves a pending local edit', () async {
       final other = _plex()..baseUrl = 'https://other-pms.example';
       await search('CBC');

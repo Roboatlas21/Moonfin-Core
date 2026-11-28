@@ -542,23 +542,33 @@ class SearchViewModel extends ChangeNotifier {
         unawaited(PlexLiveTvFavorites.refreshForBrowse(client));
       }
     }
-    _channelsFuture ??= _loadChannelLineup();
+    var lineup = _channelsFuture ??= _loadChannelLineup();
     List<AggregatedItem> matches(List<AggregatedItem> channels) => channels
         .where((channel) => foldForSearch(channel.name).contains(q))
         .take(_resultLimit)
         .toList();
     try {
-      final rows = matches(await _channelsFuture!);
-      // A lineup read elsewhere can verify a different DVR identity.
-      if (cached != null && identical(cached, _channelsFuture) &&
-          rows.any(_hasStalePlexIdentity)) {
-        return matches(await (_channelsFuture = _loadChannelLineup()));
+      while (true) {
+        final channels = await lineup;
+        final current = _channelsFuture;
+        if (current != null && !identical(current, lineup)) {
+          lineup = current;
+          continue;
+        }
+        final rows = matches(channels);
+        // A lineup read elsewhere can verify a different DVR identity.
+        if (current != null &&
+            identical(cached, lineup) &&
+            rows.any(_hasStalePlexIdentity)) {
+          lineup = _channelsFuture = _loadChannelLineup();
+          continue;
+        }
+        return rows;
       }
-      return rows;
     } catch (_) {
       // A server without Live TV shouldn't break search. Retry next query in
       // case the failure was transient.
-      _channelsFuture = null;
+      if (identical(_channelsFuture, lineup)) _channelsFuture = null;
       return const [];
     }
   }
