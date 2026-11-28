@@ -606,16 +606,23 @@ void main() {
     expect(cloud.requests.where((r) => r.method == 'GET'), hasLength(2));
   });
 
-  for (final partial in [false, true]) {
-    test('a missing DVR channel during a favorite save (partial: $partial)', () async {
+  const id = 'channel-2-4';
+  for (final (partial, unresolved, keepFavorite) in <(bool, Set<String>?, bool)>[
+    (false, null, false),
+    (true, null, true),
+    (true, {id}, true),
+    (true, {'channel-plex-free123'}, false),
+  ]) {
+    test('a missing DVR channel during a favorite save (partial: $partial, unresolved: $unresolved)', () async {
       final api = _LineupApi();
       final client = _LineupClient(api)..userId = 'plex-user'..accessToken = 'pms-token';
       addTearDown(client.dispose);
       when(() => api.getChannelGroups(userId: 'plex-user'))
-          .thenAnswer((_) async => ChannelGroupLineup({}, channels: [], partial: partial));
+          .thenAnswer((_) async => ChannelGroupLineup(
+            {}, channels: [], partial: partial, unresolvedChannelIds: unresolved,
+          ));
       final guide = LiveTvGuideViewModel(client);
       addTearDown(guide.dispose);
-      const id = 'channel-2-4';
       PlexLiveTvFavorites.applyToItem(client, {
         'Id': id, 'Type': 'TvChannel', 'PlexFavoriteSource': 'server://pms/epg', 'PlexFavoriteId': '4',
       });
@@ -628,8 +635,8 @@ void main() {
       await guide.load();
       expect(guide.error, isNull);
       gate.complete();
-      await expectLater(save, partial ? completes : throwsStateError);
-      expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(partial ? 1 : 0));
+      await expectLater(save, keepFavorite ? completes : throwsStateError);
+      expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(keepFavorite ? 1 : 0));
     });
   }
 

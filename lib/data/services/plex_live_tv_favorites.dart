@@ -313,12 +313,15 @@ class PlexLiveTvFavorites {
   }
 
   static void pruneMissingDvrChannels(MediaServerClient client, ChannelGroupLineup? lineup) {
-    final rows = lineup?.channels;
-    if (rows == null || lineup!.partial || !lineup.endpointAvailable) return;
+    if (lineup == null || !lineup.endpointAvailable) return;
+    final rows = lineup.channels;
+    final unresolved = lineup.partial ? lineup.unresolvedChannelIds : const <String>{};
+    if (rows == null || unresolved == null) return;
 
     final present = {for (final row in rows) row['Id']?.toString()};
     _catalog(client).channels.removeWhere(
-      (id, _) => !isPlexFreeTvChannel(client, id) && !present.contains(id),
+      (id, _) => !isPlexFreeTvChannel(client, id) &&
+          !present.contains(id) && !unresolved.contains(id),
     );
   }
 
