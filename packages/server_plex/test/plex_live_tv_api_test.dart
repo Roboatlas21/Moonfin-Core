@@ -442,6 +442,36 @@ void main() {
     });
   }
 
+  test('a fresh cloud guide reports its certificate failure after access was denied', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio, cloudOnly: true);
+    expect((await api.getChannelGroups()).channels, hasLength(2));
+    const path = '/lineups/plex/channels';
+    server.fail(path, 403);
+    await expectLater(api.getChannelGroups(), _httpError(403));
+
+    final certificateFailure = InterceptorsWrapper(onRequest: (request, handler) {
+      if (request.uri.path == path) {
+        handler.reject(DioException(
+          requestOptions: request,
+          type: DioExceptionType.badCertificate,
+        ));
+      } else {
+        handler.next(request);
+      }
+    });
+    dio.interceptors.insert(0, certificateFailure);
+    await expectLater(
+      api.getChannelGroups(),
+      throwsA(isA<DioException>().having((e) => e.type, 'type', DioExceptionType.badCertificate)),
+    );
+    dio.interceptors.remove(certificateFailure);
+    server.fail(path, 503);
+    await expectLater(api.getChannelGroups(), _httpError(503));
+    server.failWhen = null;
+    expect((await api.getChannelGroups()).channels, hasLength(2));
+  });
+
   for (final (status, recovered) in [(401, false), (403, false), (403, true)]) {
     test('pending cloud guide honors catalog denial until recovery ($status, recovered: $recovered)', () async {
       final (dio, server) = _server();

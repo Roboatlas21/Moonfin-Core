@@ -1958,6 +1958,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
 
   Future<void> _openRecordings() async {
     if (isCloudOnlyPlexClient(_client)) return;
+    if (_isCarouselOpen) _dismissChannelCarousel();
     await _leavePlayerFor(Destinations.liveTvRecordings);
   }
 
@@ -2006,10 +2007,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     }
 
     if (event.logicalKey.isRecordingsKey && !_isGuidePickerOpen) {
-      if (event is KeyDownEvent) {
-        if (_isCarouselOpen) _dismissChannelCarousel();
-        unawaited(_openRecordings());
-      }
+      if (event is KeyDownEvent) unawaited(_openRecordings());
       return KeyEventResult.handled;
     }
 

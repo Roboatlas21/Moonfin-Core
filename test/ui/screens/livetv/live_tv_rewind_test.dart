@@ -9,6 +9,7 @@ import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:server_core/server_core.dart';
+import 'package:server_plex/server_plex.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:moonfin/data/models/aggregated_item.dart';
@@ -30,6 +31,8 @@ import 'package:moonfin/ui/widgets/live_tv/channel_carousel.dart';
 import 'package:moonfin/util/platform_detection.dart';
 
 class _Client extends Mock implements MediaServerClient {}
+
+class _PlexClient extends Mock implements PlexMediaServerClient {}
 
 class _Factory extends Mock implements MediaServerClientFactory {}
 
@@ -571,7 +574,9 @@ void main() {
   });
 
   /// The player pushed over [from], as the guide and Home open it.
-  Future<GoRouter> pumpRoutedPlayer(WidgetTester tester, String from) async {
+  Future<GoRouter> pumpRoutedPlayer(WidgetTester tester, String from, {
+    List<GuideChannel> channels = const [ard],
+  }) async {
     // Leaving the player resets orientation, which waits on the platform.
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       SystemChannels.platform,
@@ -583,12 +588,16 @@ void main() {
     final router = GoRouter(
       initialLocation: from,
       routes: [
-        for (final path in [Destinations.home, Destinations.liveTvGuide])
+        for (final path in [
+          Destinations.home,
+          Destinations.liveTvGuide,
+          Destinations.liveTvRecordings,
+        ])
           GoRoute(path: path, builder: (_, _) => Text('page $path')),
         GoRoute(
           path: Destinations.liveTvPlayer,
-          builder: (_, _) => const LiveTvPlayerScreen(
-            channels: [GuideChannel(id: 'ard', name: 'Das Erste', rawData: {})],
+          builder: (_, _) => LiveTvPlayerScreen(
+            channels: channels,
             startIndex: 0,
           ),
         ),
@@ -619,6 +628,34 @@ void main() {
 
   String topLocation(GoRouter router) =>
       router.routerDelegate.currentConfiguration.matches.last.matchedLocation;
+
+  for (final cloudOnly in [true, false]) {
+    testWidgets('Recordings key from the channel carousel (cloud only: $cloudOnly)', (tester) async {
+      final liveTv = GetIt.instance<MediaServerClient>().liveTvApi;
+      final plex = _PlexClient();
+      when(() => plex.cloudOnly).thenReturn(cloudOnly);
+      when(() => plex.serverType).thenReturn(ServerType.plex);
+      when(() => plex.baseUrl).thenReturn(cloudOnly ? 'https://plex.tv' : 'http://server');
+      when(() => plex.userId).thenReturn('user');
+      when(() => plex.liveTvApi).thenReturn(liveTv);
+      when(() => plex.userLibraryApi).thenReturn(userLibrary);
+      await GetIt.instance.unregister<MediaServerClient>();
+      GetIt.instance.registerSingleton<MediaServerClient>(plex);
+      final router = await pumpRoutedPlayer(tester, Destinations.home, channels: [ard, zdf]);
+      await press(tester, LogicalKeyboardKey.arrowUp);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(ChannelCarousel), findsOneWidget);
+
+      await pressUnmapped(tester, LogicalKeyboardKey.dvr);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(
+        topLocation(router),
+        cloudOnly ? Destinations.liveTvPlayer : Destinations.liveTvRecordings,
+      );
+      expect(find.byType(ChannelCarousel), cloudOnly ? findsOneWidget : findsNothing);
+      expect(manager.stops, cloudOnly ? 0 : 1);
+    });
+  }
 
   testWidgets("Guide opens the full guide in the player's place", (
     tester,

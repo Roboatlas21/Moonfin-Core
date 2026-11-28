@@ -611,6 +611,9 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       });
 
   Future<ChannelGroupLineup> _loadLineup() async {
+    // Only a denial observed during this load can override its result.
+    // Earlier denials have already evicted their cached channels.
+    _cloudGuideDenial = null;
     // A full guide load refreshes even a successfully cached catalog.
     _cloudChannels = null;
     _dvrs = null;

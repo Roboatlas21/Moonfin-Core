@@ -138,6 +138,28 @@ void main() {
     await GetIt.instance.reset();
   });
 
+  test('the cloud guide keeps a cached lineup only while the API can supply it', () async {
+    final api = _LineupApi();
+    final client = _LineupClient(api, cloudOnly: true)..userId = 'plex-user';
+    addTearDown(client.dispose);
+    final guide = LiveTvGuideViewModel(client);
+    addTearDown(guide.dispose);
+    when(() => api.getChannelGroups(userId: 'plex-user')).thenAnswer(
+      (_) async => const ChannelGroupLineup({}, channels: [_channel], partial: true),
+    );
+    await guide.load(initialChannelIds: []);
+    expect(guide.playbackChannels.single.id, _channel['Id']);
+
+    final failure = DioException(
+      requestOptions: RequestOptions(),
+      type: DioExceptionType.badCertificate,
+    );
+    when(() => api.getChannelGroups(userId: 'plex-user')).thenThrow(failure);
+    await guide.load();
+    expect(guide.error, same(failure));
+    expect(guide.playbackChannels, isEmpty);
+  });
+
   test('cloud Home drops denied TV rows and reports a temporary outage', () async {
     final api = _LineupApi();
     final client = _LineupClient(api, cloudOnly: true)..userId = 'plex-user';

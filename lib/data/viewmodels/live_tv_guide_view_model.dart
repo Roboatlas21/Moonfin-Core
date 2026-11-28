@@ -11,6 +11,7 @@ import '../../preference/preference_constants.dart';
 import '../../preference/user_preferences.dart';
 import '../../util/settings_save_retry.dart';
 import '../repositories/item_mutation_repository.dart';
+import '../services/media_server_client_factory.dart';
 import '../services/user_data_sync.dart';
 import '../services/plex_live_tv_favorites.dart';
 import '../models/live_tv_recording_state.dart';
@@ -1679,9 +1680,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         );
       } catch (error) {
         if (api is DirectChannelGroupApi) {
-          // Emby's group request already fetched the channel lineup.
-          // Retrying through getChannels would repeat a failed request.
-          if (error is DioException && _accessDenied(error) && current()) {
+          // Free TV returns its cached lineup during an outage when it is
+          // safe to reuse. If the read fails, discard the guide's copy too.
+          if (current() &&
+              (isCloudOnlyPlexClient(_client) || _accessDenied(error))) {
             _discardChannelLineup(error);
           }
           rethrow;
@@ -1754,7 +1756,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     }
   }
 
-  void _discardChannelLineup([DioException? error]) {
+  void _discardChannelLineup([Object? error]) {
     _loadGeneration++;
     cancelBoundaryRefresh();
     _channels = const [];
