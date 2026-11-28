@@ -1250,10 +1250,13 @@ void main() {
     final vm = LiveTvGuideViewModel(client);
     addTearDown(vm.dispose);
     final opening = vm.load();
-    final page = vm.shiftWindow(const Duration(minutes: 30));
+    const shift = Duration(minutes: 30);
+    final shiftedStart = vm.windowStart.add(shift);
+    final page = vm.shiftWindow(shift);
     lineup.complete({'Items': [_channel('c0')]});
     await pumpEventQueue();
     expect(vm.state, GuideState.loading);
+    verify(() => _guide(liveTv, start: shiftedStart)).called(1);
     userDataSync.reset();
     listings.complete({'Items': []});
     expect(await page, isFalse);
