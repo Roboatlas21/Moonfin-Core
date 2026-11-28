@@ -24,6 +24,10 @@ bool isPlexLiveTvChannel(MediaServerClient client, String channelId) =>
     client.serverType == ServerType.plex &&
     channelId.startsWith('channel-');
 
+class PlexDvrIdentityUnavailable extends StateError {
+  PlexDvrIdentityUnavailable() : super('Plex DVR channel has no verified EPG provider identity');
+}
+
 /// Plex owns both Free TV and DVR favorites. Cache source+provider IDs rather
 /// than synthetic guide IDs, which can collide between PMS servers.
 class PlexLiveTvFavorites {
@@ -408,7 +412,7 @@ class PlexLiveTvFavorites {
                 }
               : null);
       if (info == null) {
-        throw StateError('Plex DVR channel has no verified EPG provider identity');
+        throw PlexDvrIdentityUnavailable();
       }
       if (syncKey(client, channelId) != selectedKey) {
         throw StateError('Plex DVR provider changed while waiting to save favorites');

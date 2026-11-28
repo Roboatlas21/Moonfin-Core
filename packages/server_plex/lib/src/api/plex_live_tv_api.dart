@@ -464,6 +464,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     if (identical(previous, lineup)) return lineup;
     if (previous != null && !_sameStationMapping(previous, lineup)) {
       _cloudOnNowRows = null;
+      final featured = _featuredGroup;
+      if (featured != null &&
+          (previous.length != lineup.length || lineup.keys.any((id) => !previous.containsKey(id)))) {
+        _featuredGroup = featured.withExpiredMembership();
+      }
     }
     _invalidateGrids((key, _) {
       final station = lineup[_channelId(plexCloudSource, key.station)];

@@ -276,14 +276,17 @@ void main() {
     });
   }
 
-  test('Featured survives a cold Free TV catalog outage and clears when the catalog is empty', () async {
+  test('Featured survives an outage, refreshes a changed lineup, and clears when empty', () async {
     const featured = PromotedChannelGroup.groupId;
     const free = 'channel-plex-free123';
     var catalogStatus = 503;
+    var stationId = 'free123';
+    var featuredReads = 0;
     final dio = Dio(BaseOptions(baseUrl: 'https://pms.example'));
     addTearDown(dio.close);
     dio.interceptors.add(InterceptorsWrapper(onRequest: (request, handler) {
       final path = request.uri.path;
+      if (path == '/lineups/plex/channels/featured') featuredReads++;
       if (path == '/lineups/plex/channels' && catalogStatus == 503) {
         handler.reject(DioException.badResponse(
           statusCode: 503,
@@ -295,7 +298,7 @@ void main() {
       final data = switch (path) {
         '/lineups/plex/channels' || '/lineups/plex/channels/featured' => {
           'MediaContainer': {
-            'Channel': [if (catalogStatus == 200) {'id': 'free123', 'title': 'Free Channel'}],
+            'Channel': [if (catalogStatus == 200) {'id': stationId, 'title': 'Free Channel'}],
           },
         },
         '/' => {
@@ -325,6 +328,15 @@ void main() {
     expect(guide.selectedGroup, featured);
     expect(guide.state, GuideState.ready);
     expect(guide.filteredChannels.single.id, free);
+
+    await guide.load();
+    expect(featuredReads, 1);
+    stationId = 'replacement';
+    await guide.load();
+    await pumpEventQueue();
+    expect(guide.selectedGroup, featured);
+    expect(guide.filteredChannels.map((channel) => channel.id), ['channel-plex-replacement']);
+    expect(featuredReads, 2);
 
     catalogStatus = 204;
     await guide.load();
@@ -462,6 +474,29 @@ void main() {
       await guide.toggleChannelFavorite(id);
       expect(cloud.rows.single, containsPair('source', favorite['source']));
       expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(1));
+    });
+
+    test('the Guide rechecks a missing DVR identity before the viewer retries a favorite', () async {
+      final id = station['Id']!;
+      var guideRow = {'Id': id, 'Type': 'TvChannel', 'Name': 'CBC News'};
+      when(() => api.getChannelGroups(userId: 'plex-user'))
+          .thenAnswer((_) async => ChannelGroupLineup({}, channels: [guideRow]));
+      when(() => api.getGuide(
+        startDate: any(named: 'startDate'), endDate: any(named: 'endDate'),
+        channelIds: any(named: 'channelIds'), fields: any(named: 'fields'),
+        enableTotalRecordCount: false, enableImages: false, enableUserData: false, userId: 'plex-user',
+      )).thenAnswer((_) async => {'Items': []});
+      final guide = LiveTvGuideViewModel(client);
+      addTearDown(guide.dispose);
+      await guide.load();
+      final initialKey = channelFavoriteKey(guide.channelForId(id)!.rawData);
+
+      guideRow = station;
+      await expectLater(guide.toggleChannelFavorite(id), throwsStateError);
+      expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
+      expect(channelFavoriteKey(guide.channelForId(id)!.rawData), isNot(initialKey));
+      await guide.toggleChannelFavorite(id);
+      expect(cloud.rows.single, containsPair('source', favorite['source']));
     });
 
     test('a new search reloads a DVR row after the Guide verifies its identity', () async {

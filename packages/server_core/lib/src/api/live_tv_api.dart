@@ -32,6 +32,10 @@ class PromotedChannelGroup {
   DateTime? get expiresAt => _expiresAt;
   Future<void>? _pending;
 
+  /// Retains the last verified picks and requires another membership read.
+  PromotedChannelGroup withExpiredMembership() =>
+      PromotedChannelGroup(name, _fetchIds).._ids = _ids;
+
   Future<void> refresh(DateTime Function() now) => _pending ??= _fetchIds()
       .then((ids) {
         _ids = Set.unmodifiable(ids);

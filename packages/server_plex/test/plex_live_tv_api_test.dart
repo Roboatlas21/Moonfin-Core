@@ -569,6 +569,23 @@ void main() {
     });
   }
 
+  test('a changed catalog keeps the old Featured picks until a refresh succeeds', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final now = DateTime.utc(2026, 10, 22);
+    final before = (await api.getChannelGroups()).promoted!;
+    await before.refresh(() => now);
+    server.replies['/lineups/plex/channels'] = (_) => _channels([
+      {'id': 'abc-66635fc0'},
+      {'id': 'replacement'},
+    ]);
+    server.fail('/lineups/plex/channels/featured', 503);
+    final after = (await api.getChannelGroups()).promoted!;
+    expect(after.expiresAt, isNull);
+    await expectLater(after.refresh(() => now), throwsA(isA<DioException>()));
+    expect(after.channelIds, {free});
+  });
+
   test('partial Featured counts preserve the last verified membership', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
