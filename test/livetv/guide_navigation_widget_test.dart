@@ -1219,11 +1219,13 @@ void main() {
     useTvLayout();
     userDataSync.reset();
     addTearDown(userDataSync.reset);
+    final prefs = GetIt.instance<UserPreferences>();
     final api = _MockUserLibrary();
     when(() => client.userLibraryApi).thenReturn(api);
     when(() => api.markFavorite('ch0')).thenAnswer((_) async {});
     await pumpGuide(tester);
     await focusGuideNode(tester, 'GuideChannel:0');
+    await prefs.set(UserPreferences.liveTvLastChannelId, 'ch4');
     await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
     await tester.pump(const Duration(milliseconds: 32));
@@ -1235,6 +1237,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
     await _pumpFrames(tester);
     verifyNever(() => api.markFavorite('ch0'));
+    expect(prefs.get(UserPreferences.liveTvLastChannelId), 'ch4');
+    expect(_alertDialog, findsNothing);
   });
 
   testWidgets('picker shows the first matches after a search with no results', (tester) async {
