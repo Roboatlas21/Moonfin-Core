@@ -631,10 +631,13 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   void _scheduleChannelFocusRebind(String channelId, {bool fromPicker = false}) {
     _pendingChannelRebindId = channelId;
     final binding = WidgetsBinding.instance;
-    bool canRestore() => _mayTakeFocus && !_pickerOpen &&
-        _pendingChannelRebindId == channelId &&
-        (fromPicker ? _browseFocus.hasFocus :
-            _channelRailFocused.value && !_browseFocus.hasFocus && !_channelSearchFocus.hasFocus);
+    bool canRestore() {
+      if (!_mayTakeFocus || _pickerOpen || _pendingChannelRebindId != channelId) return false;
+      if (fromPicker) return _browseFocus.hasFocus;
+      // Focus can briefly be unset while the replacement row mounts.
+      return _channelRailFocused.value &&
+          (FocusManager.instance.primaryFocus == null || _gridHasFocus);
+    }
     binding.addPostFrameCallback((_) {
       if (!canRestore()) {
         if (_pendingChannelRebindId == channelId) {

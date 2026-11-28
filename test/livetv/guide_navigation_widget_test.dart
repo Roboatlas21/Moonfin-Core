@@ -1144,6 +1144,30 @@ void main() {
     expect(_focusedLabel(), 'GuideChannel:3');
   });
 
+  for (final afterFirstFrame in [false, true]) {
+    testWidgets('Shift-Tab keeps header focus while rows move (after first frame: $afterFirstFrame)', (tester) async {
+      useTvLayout();
+      userDataSync.reset();
+      addTearDown(userDataSync.reset);
+      stubFavoriteChannel(5);
+      await openGuideRoute(tester);
+      final vm = guideModel(tester);
+      vm.setFilter(GuideFilter.favorites);
+      await _pumpFrames(tester);
+      await focusGuideNode(tester, 'GuideChannel:0');
+      userDataSync.publish(channelFavoriteKey(vm.channelForId('ch1')!.rawData)!, {'IsFavorite': true});
+      if (afterFirstFrame) await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.idle();
+      final header = FocusManager.instance.primaryFocus;
+      expect(header?.debugLabel, startsWith('GuideWindowBar:'));
+      await _pumpFrames(tester);
+      expect(FocusManager.instance.primaryFocus, same(header));
+    });
+  }
+
   testWidgets('leaving a channel cancels a held Select even after focus returns', (tester) async {
     useTvLayout();
     userDataSync.reset();
