@@ -464,6 +464,27 @@ void main() {
       expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(1));
     });
 
+    test('a new search reloads a DVR row after the Guide verifies its identity', () async {
+      final missingIdentity = Map<String, dynamic>.of(station)
+        ..remove('PlexFavoriteSource')
+        ..remove('PlexFavoriteId');
+      when(lineup).thenAnswer((_) async => {'Items': [missingIdentity]});
+      await search('CBC');
+      final oldKey = channelFavoriteKey(model.results.single.items.single.rawData);
+      expect(model.results.single.items.single.isFavorite, isFalse);
+      cloud.rows = [favorite];
+      final verified = PlexLiveTvFavorites.applyToItem(client, station);
+      await PlexLiveTvFavorites.refresh(client);
+      when(lineup).thenAnswer((_) async => {'Items': [station]});
+
+      await search('News');
+      final result = model.results.single.items.single;
+      expect(channelFavoriteKey(result.rawData), isNot(oldKey));
+      expect(channelFavoriteKey(result.rawData), channelFavoriteKey(verified));
+      expect(result.isFavorite, isTrue);
+      verify(lineup).called(2);
+    });
+
     test('a refresh on another server updates Search and preserves a pending local edit', () async {
       final other = _plex()..baseUrl = 'https://other-pms.example';
       await search('CBC');

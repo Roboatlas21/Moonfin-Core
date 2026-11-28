@@ -149,13 +149,23 @@ class SearchViewModel extends ChangeNotifier {
   List<SearchResultGroup> _results = const [];
   List<SearchResultGroup> get results => _results;
 
+  MediaServerClient? _channelClient(AggregatedItem item) =>
+      _multiServerRepository == null
+          ? _client
+          : GetIt.instance.maybeGet<MediaServerClientFactory>()?.getClientIfExists(item.serverId);
+
   bool? _cachedPlexFavorite(AggregatedItem item) {
     final key = item.rawData['PlexFavoriteSyncKey'];
     if (key is! String) return null;
-    final client = _multiServerRepository == null
-        ? _client
-        : GetIt.instance.maybeGet<MediaServerClientFactory>()?.getClientIfExists(item.serverId);
+    final client = _channelClient(item);
     return client == null ? null : PlexLiveTvFavorites.cachedFavoriteFor(client, item.id, key);
+  }
+
+  bool _hasStalePlexIdentity(AggregatedItem item) {
+    final key = item.rawData['PlexFavoriteSyncKey'];
+    if (key is! String) return false;
+    final client = _channelClient(item);
+    return client != null && PlexLiveTvFavorites.syncKey(client, item.id) != key;
   }
 
   List<SearchResultGroup> _withChannelUserData(List<SearchResultGroup> groups) {
@@ -524,7 +534,8 @@ class SearchViewModel extends ChangeNotifier {
     final q = foldForSearch(query.trim());
     if (q.isEmpty || q.startsWith('studio:')) return const [];
     _plexChannelClients = clients.where((c) => c.serverType == ServerType.plex).toList();
-    if (_channelsFuture != null) {
+    final cached = _channelsFuture;
+    if (cached != null) {
       // The initial lineup fetch refreshes favorites. A cached lineup can
       // outlive that refresh or succeed even when the cloud request failed.
       for (final client in _plexChannelClients) {
@@ -532,12 +543,18 @@ class SearchViewModel extends ChangeNotifier {
       }
     }
     _channelsFuture ??= _loadChannelLineup();
+    List<AggregatedItem> matches(List<AggregatedItem> channels) => channels
+        .where((channel) => foldForSearch(channel.name).contains(q))
+        .take(_resultLimit)
+        .toList();
     try {
-      final all = await _channelsFuture!;
-      return all
-          .where((c) => foldForSearch(c.name).contains(q))
-          .take(_resultLimit)
-          .toList();
+      final rows = matches(await _channelsFuture!);
+      // A lineup read elsewhere can verify a different DVR identity.
+      if (cached != null && identical(cached, _channelsFuture) &&
+          rows.any(_hasStalePlexIdentity)) {
+        return matches(await (_channelsFuture = _loadChannelLineup()));
+      }
+      return rows;
     } catch (_) {
       // A server without Live TV shouldn't break search. Retry next query in
       // case the failure was transient.
