@@ -44,7 +44,8 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
   String? _errorMessage;
   String? _discoveryError;
   Timer? _pollTimer;
-  bool _polling = false;
+  int _pinAttempt = 0;
+  int? _pollingAttempt;
   bool _usePassword = false;
   bool _tvKeyboardVisible = false;
 
@@ -68,45 +69,53 @@ class _PlexSignInScreenState extends State<PlexSignInScreen> {
     }
   }
 
+  bool _isCurrentPinAttempt(int attempt) => mounted && attempt == _pinAttempt;
+
   Future<void> _requestPin() async {
+    final attempt = ++_pinAttempt;
     _pollTimer?.cancel();
     try {
       final pin = await _plexTv.createPin();
-      if (!mounted) return;
+      if (!_isCurrentPinAttempt(attempt)) return;
       setState(() => _pin = pin);
       // plex.tv asks native apps to poll once a second.
-      _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
+      _pollTimer = Timer.periodic(
+        const Duration(seconds: 1),
+        (_) => _poll(pin, attempt),
+      );
     } catch (e) {
-      _showError(e);
+      if (_isCurrentPinAttempt(attempt)) _showError(e);
     }
   }
 
-  Future<void> _poll() async {
-    final pin = _pin;
-    if (_polling || pin == null) return;
+  Future<void> _poll(PlexPin pin, int attempt) async {
+    if (_pollingAttempt == attempt) return;
     if (DateTime.now().isAfter(pin.expiresAt)) {
       await _requestPin();
       return;
     }
 
-    _polling = true;
+    _pollingAttempt = attempt;
     String? token;
     try {
       token = await _plexTv.checkPin(pin.id);
     } on DioException catch (e) {
+      if (!_isCurrentPinAttempt(attempt)) return;
       // Dropped connections, 429 and 5xx usually clear up, so the next tick
       // retries those. Any other answer won't fix itself.
       final status = e.response?.statusCode;
       if (status != null && status < 500 && status != 429) _showError(e);
       return;
     } finally {
-      _polling = false;
+      if (_pollingAttempt == attempt) _pollingAttempt = null;
     }
-    if (token == null || !mounted) return;
+    if (token == null || !_isCurrentPinAttempt(attempt)) return;
     await _signedIn(token);
   }
 
   Future<void> _signedIn(String token) async {
+    // Cancelling the timer still lets an in-flight PIN request finish.
+    _pinAttempt++;
     _pollTimer?.cancel();
     // Show Plex Free TV before server discovery finishes.
     setState(() {

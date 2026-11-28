@@ -17,6 +17,31 @@ class _PlexTv extends Mock implements PlexTvService {}
 class _Repository extends Mock implements PlexRepository {}
 
 void main() {
+  Future<void> pumpSignIn(WidgetTester tester) async {
+    final router = GoRouter(
+      initialLocation: Destinations.plexSignIn,
+      routes: [
+        GoRoute(
+          path: Destinations.plexSignIn,
+          builder: (_, _) => const PlexSignInScreen(),
+        ),
+        GoRoute(
+          path: Destinations.home,
+          builder: (_, _) => const Scaffold(body: Text('Home')),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(
+      MaterialApp.router(
+        routerConfig: router,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+  }
+
   testWidgets(
     'Free TV can reauthorize and open Home without server discovery',
     (tester) async {
@@ -47,28 +72,7 @@ void main() {
       );
       when(() => repo.connectCloud('approved')).thenAnswer((_) async => true);
 
-      final router = GoRouter(
-        initialLocation: Destinations.plexSignIn,
-        routes: [
-          GoRoute(
-            path: Destinations.plexSignIn,
-            builder: (_, _) => const PlexSignInScreen(),
-          ),
-          GoRoute(
-            path: Destinations.home,
-            builder: (_, _) => const Scaffold(body: Text('Home')),
-          ),
-        ],
-      );
-      addTearDown(router.dispose);
-      await tester.pumpWidget(
-        MaterialApp.router(
-          routerConfig: router,
-          localizationsDelegates: AppLocalizations.localizationsDelegates,
-        ),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(seconds: 1));
+      await pumpSignIn(tester);
       await tester.pumpAndSettle();
       final l10n = AppLocalizations.of(
         tester.element(find.byType(PlexSignInScreen)),
@@ -90,67 +94,94 @@ void main() {
     },
   );
 
-  testWidgets('a stale cloud 401 preserves the newer approval', (tester) async {
-    final tv = _PlexTv();
-    final repo = _Repository();
-    GetIt.instance.registerSingleton<PlexTvService>(tv);
-    GetIt.instance.registerSingleton<PlexRepository>(repo);
-    addTearDown(() => GetIt.instance.reset());
+  group('Free TV password sign-in with a PIN check in flight', () {
+    late _PlexTv tv;
+    late _Repository repo;
+    late Completer<String?> oldPin;
+    late Completer<bool> passwordConnection;
 
-    final pinApproval = Completer<String?>();
-    final passwordConnection = Completer<bool>();
-    when(tv.createPin).thenAnswer(
-      (_) async => PlexPin(id: 1, code: 'TEST', expiresAt: DateTime.utc(2100)),
-    );
-    when(() => tv.checkPin(1)).thenAnswer((_) => pinApproval.future);
-    when(() => tv.signIn('viewer', 'password'))
-        .thenAnswer((_) async => 'first');
-    when(() => repo.loadServers(any())).thenAnswer((_) async => []);
-    when(() => repo.connectCloud('first'))
-        .thenAnswer((_) => passwordConnection.future);
-    when(() => repo.connectCloud('second')).thenAnswer((_) async => false);
+    Future<AppLocalizations> selectFreeTv(WidgetTester tester) async {
+      tv = _PlexTv();
+      repo = _Repository();
+      GetIt.instance.registerSingleton<PlexTvService>(tv);
+      GetIt.instance.registerSingleton<PlexRepository>(repo);
+      addTearDown(() => GetIt.instance.reset());
 
-    await tester.pumpWidget(
-      const MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        home: PlexSignInScreen(),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
-    verify(() => tv.checkPin(1)).called(1);
-    final l10n = AppLocalizations.of(
-      tester.element(find.byType(PlexSignInScreen)),
-    );
-    await tester.tap(find.text(l10n.plexSignInWithPassword));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).first, 'viewer');
-    await tester.enterText(find.byType(TextField).last, 'password');
-    await tester.tap(find.widgetWithIcon(OutlinedButton, Icons.login));
-    await tester.pumpAndSettle();
-    final freeTv = find.text(l10n.plexFreeTvCloudTitle);
-    await tester.tap(freeTv);
-    await tester.pump();
-    verify(() => repo.connectCloud('first')).called(1);
+      oldPin = Completer<String?>();
+      passwordConnection = Completer<bool>();
+      var pin = 0;
+      when(tv.createPin).thenAnswer(
+        (_) async =>
+            PlexPin(id: ++pin, code: 'PIN-$pin', expiresAt: DateTime.utc(2100)),
+      );
+      when(() => tv.checkPin(1)).thenAnswer((_) => oldPin.future);
+      when(() => tv.signIn('viewer', 'password'))
+          .thenAnswer((_) async => 'password-token');
+      when(() => repo.loadServers(any())).thenAnswer((_) async => []);
+      when(() => repo.connectCloud('password-token'))
+          .thenAnswer((_) => passwordConnection.future);
 
-    pinApproval.complete('second');
-    await tester.pump();
-    verify(() => repo.loadServers('second')).called(1);
-    final request = RequestOptions(path: 'https://plex.tv/api/v2/user');
-    passwordConnection.completeError(
-      DioException(
+      await pumpSignIn(tester);
+      verify(() => tv.checkPin(1)).called(1);
+      final l10n = AppLocalizations.of(
+        tester.element(find.byType(PlexSignInScreen)),
+      );
+      await tester.tap(find.text(l10n.plexSignInWithPassword));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).first, 'viewer');
+      await tester.enterText(find.byType(TextField).last, 'password');
+      await tester.tap(find.widgetWithIcon(OutlinedButton, Icons.login));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.plexFreeTvCloudTitle));
+      await tester.pump();
+      verify(() => repo.connectCloud('password-token')).called(1);
+      return l10n;
+    }
+
+    testWidgets('opens Home even if the old PIN is approved', (tester) async {
+      await selectFreeTv(tester);
+      oldPin.complete('abandoned-token');
+      await tester.pump();
+      passwordConnection.complete(true);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Home'), findsOneWidget);
+      verifyNever(() => repo.loadServers('abandoned-token'));
+    });
+
+    testWidgets('a late PIN error cannot interrupt reauthorization', (
+      tester,
+    ) async {
+      final l10n = await selectFreeTv(tester);
+      var approved = false;
+      when(() => tv.checkPin(2))
+          .thenAnswer((_) async => approved ? 'fresh-token' : null);
+      when(() => repo.connectCloud('fresh-token')).thenAnswer((_) async => true);
+
+      final request = RequestOptions(path: 'https://plex.tv/api/v2/user');
+      final denied = DioException(
         requestOptions: request,
         response: Response(requestOptions: request, statusCode: 401),
         type: DioExceptionType.badResponse,
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(freeTv, findsOneWidget);
-    expect(find.text(l10n.tryAgain), findsNothing);
-    await tester.tap(freeTv);
-    await tester.pumpAndSettle();
-    verify(() => repo.connectCloud('second')).called(1);
-    verify(tv.createPin).called(1);
+      );
+      passwordConnection.completeError(denied);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.tryAgain));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      verify(() => tv.checkPin(2)).called(1);
+
+      oldPin.completeError(denied);
+      await tester.pump();
+      approved = true;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(l10n.plexFreeTvCloudTitle));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Home'), findsOneWidget);
+      verify(() => repo.connectCloud('fresh-token')).called(1);
+    });
   });
 
   testWidgets('server retry keeps approval after a 503 and renews it after a 401', (
