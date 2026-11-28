@@ -61,6 +61,8 @@ class _IdleScreensaver extends Mock implements ScreensaverController {
   final visible = ValueNotifier(false);
   @override
   bool handleKeyEvent(KeyEvent event) => false;
+  @override
+  bool dismissIfVisible() => false;
 }
 
 /// Deliberately asymmetric row shapes: differing program durations give the
@@ -1431,9 +1433,6 @@ void main() {
       await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);
       await prefs.set(UserPreferences.keyboardStyle, KeyboardStyle.native);
       stubGroups(const ChannelGroupLineup({'ch1': {'Local'}}));
-      final observer = _DialogBackObserver();
-      tester.binding.addObserver(observer);
-      addTearDown(() => tester.binding.removeObserver(observer));
       addTearDown(DialogBackSuppressor.newBackPress);
       final screensaver = _IdleScreensaver();
       GetIt.instance.registerSingleton<AccessScheduleService>(
@@ -1447,6 +1446,7 @@ void main() {
       HardwareKeyboard.instance.addHandler(handleRelease);
       addTearDown(() => HardwareKeyboard.instance.removeHandler(handleRelease));
       await openGuideRoute(tester, builder: (_, child) => GlobalShortcutScope(child: child!));
+      final app = tester.state(find.byType(GlobalShortcutScope)) as WidgetsBindingObserver;
       await focusGuideNode(tester, 'GuideBrowse');
       await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
       final field = find.descendant(of: picker, matching: find.byType(LocalSearchField));
@@ -1458,7 +1458,6 @@ void main() {
       Future<void> pressBack() async {
         const back = LogicalKeyboardKey.goBack;
         const physical = PhysicalKeyboardKey.escape;
-        final suppressed = observer.suppressed;
         await tester.sendKeyDownEvent(back, physicalKey: physical);
         await tester.sendKeyRepeatEvent(back, physicalKey: physical);
         final handledUp = await tester.sendKeyUpEvent(back, physicalKey: physical);
@@ -1466,10 +1465,10 @@ void main() {
         await _pumpFrames(tester);
         final sendsPopRoute = apiLevel >= 33 || !handledUp;
         if (sendsPopRoute) {
-          await tester.binding.handlePopRoute();
+          expect(await app.didPopRoute(), isTrue);
+          expect(DialogBackSuppressor.consume(), isFalse);
           await _pumpFrames(tester);
         }
-        expect(observer.suppressed, suppressed + (sendsPopRoute ? 1 : 0));
       }
 
       await pressBack();

@@ -8,6 +8,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:playback_core/playback_core.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
 import 'package:moonfin/preference/user_preferences.dart';
+import 'package:moonfin/util/platform_detection.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_channel_cell.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_filter_rail.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_hero_preview.dart';
@@ -256,9 +257,7 @@ void main() {
     );
   });
 
-  testWidgets('compact landscape chrome leaves five full guide rows visible', (
-    tester,
-  ) async {
+  Future<void> checkCompactGuide(WidgetTester tester) async {
     const surface = Size(960, 540);
     await pumpGuide(tester, surface: surface);
 
@@ -281,7 +280,8 @@ void main() {
     );
 
     final search = tester.getRect(find.byType(TextField));
-    expect(search.height, greaterThanOrEqualTo(kMinInteractiveDimension));
+    final minimumSearchHeight = PlatformDetection.isTV ? 36.0 : kMinInteractiveDimension;
+    expect(search.height, greaterThanOrEqualTo(minimumSearchHeight));
     expect(hero.height + search.height, closeTo(EpgHeroPreview.compactHeight + 36, 0.1));
     expect(hero.top - rail.bottom, lessThanOrEqualTo(8));
     expect(now.top - hero.bottom, lessThanOrEqualTo(8));
@@ -291,7 +291,15 @@ void main() {
     // The parent row reserves one pixel for its bottom divider.
     expect(fifth.height, closeTo(profile.rowHeight - 1, 0.1));
     expect(fifth.bottom, lessThanOrEqualTo(surface.height - 16));
-  });
+  }
+
+  for (final layout in [InterfaceLayout.phone, InterfaceLayout.tv]) {
+    group('compact landscape on ${layout.name}', () {
+      setUp(() => PlatformDetection.setInterfaceLayout(layout));
+      tearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
+      testWidgets('the search and five full guide rows fit', checkCompactGuide);
+    });
+  }
 
   /// The canvas every television lays out on, and a panel small enough that
   /// the guide has to give something up. It has to hold together on both, and
