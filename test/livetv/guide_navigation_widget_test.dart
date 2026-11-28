@@ -728,7 +728,7 @@ void main() {
       final partialRetry = find.text('Some listings failed to load. Retry');
       expect(partialRetry, findsOneWidget);
       if (layout == InterfaceLayout.tv) {
-        _nodeLabelled(tester, 'GuideWindowBar:0').requestFocus();
+        await focusGuideNode(tester, 'GuideWindowBar:0');
         await expectFocusAfter(tester, LogicalKeyboardKey.arrowDown, 'GuideCategoryRetry');
         await expectFocusAfter(tester, LogicalKeyboardKey.arrowDown, 'GuideChannel:0');
         await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideCategoryRetry');
@@ -1135,6 +1135,7 @@ void main() {
     );
     await focusGuideNode(tester, 'GuideChannel:0');
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+    expect(picker, findsOneWidget);
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
     expect(picker, findsNothing);
 
@@ -1509,6 +1510,20 @@ void main() {
     await tester.tap(find.descendant(of: field, matching: find.byType(IconButton)));
     await tester.pump();
     expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+  });
+
+  testWidgets('landscape search keeps its field and matches above a tall keyboard', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    await pumpGuide(tester, surface: const Size(640, 360));
+    final field = find.byType(TextField);
+    await tester.tap(field);
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await _pumpFrames(tester);
+    await tester.enterText(field, 'Channel 4');
+    await _pumpFrames(tester);
+    expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
+    expect(find.widgetWithText(ListTile, 'Channel 4').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('landscape phone search and Clear have full touch targets', (tester) async {

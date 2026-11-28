@@ -1261,6 +1261,17 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           });
         }
         if (landscape) _scheduleGuideWindowUpdate(profile.guideWindow);
+        // A tall phone keyboard can leave less than one toolbar and one row.
+        // Keep both the focused search field and its matches within reach.
+        if (compactSearch && area.height < kMinInteractiveDimension + profile.timeHeaderHeight + profile.rowHeight) {
+          return Row(
+            children: [
+              Flexible(child: _buildChannelSearchField(compact: true)),
+              const SizedBox(width: 8),
+              Expanded(flex: 2, child: _buildChannelSearchMatches()),
+            ],
+          );
+        }
         return Padding(
           padding: EdgeInsets.only(
             top: topInset,
@@ -2733,6 +2744,31 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   String _filterLabel(GuideFilter filter, [AppLocalizations? labels]) =>
       guideFilterLabel(filter, labels ?? AppLocalizations.of(context));
+
+  Widget _buildChannelSearchMatches() {
+    final channels = _vm.filteredChannels;
+    if (_vm.state == GuideState.loading || channels.isEmpty ||
+        (_vm.state == GuideState.error && !_vm.listingsAccessDenied)) {
+      return SingleChildScrollView(child: _buildBody());
+    }
+    final retry = _vm.hasFailedCategoryListings;
+    return ListView.builder(
+      controller: _channelScrollController,
+      itemCount: channels.length + (retry ? 1 : 0),
+      itemBuilder: (_, index) {
+        if (index == channels.length) return _buildCategoryRetryButton(partial: true);
+        _maybeLoadMore(index);
+        final channel = channels[index];
+        return ListTile(
+          focusNode: _channelFocusNodeFor(index),
+          title: Text(channel.name),
+          trailing: channel.number == null ? null : Text(channel.number!),
+          onTap: () => _watchChannel(channel.id),
+          onLongPress: () => _toggleGuideChannelFavorite(channel.id, index),
+        );
+      },
+    );
+  }
 
   Widget _buildBody() {
     switch (_vm.state) {

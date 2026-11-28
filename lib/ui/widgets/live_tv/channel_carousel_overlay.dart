@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:moonfin_design/moonfin_design.dart';
@@ -65,8 +64,8 @@ class ChannelCarouselPrewarm {
 
   Timer? _timer;
   Timer? _hourlyTimer;
-  ({Timer timer, Set<String> channels})? _failedListingsRetry;
-  final Map<String, DateTime> _failedListingsLastAttempt = {};
+  ({Timer timer, DateTime due})? _failedListingsRetry;
+  final _retryDeadlines = <String, ({DateTime due, bool attempted})>{};
   Set<String>? _visibleChannelIds;
   @visibleForTesting
   static const failedListingsRetryDelay = Duration(seconds: 5);
@@ -113,7 +112,7 @@ class ChannelCarouselPrewarm {
     if (_disposed) return;
     _tunedChannelId = channelId;
     viewModel.usePlaybackLineup(channels);
-    _cancelRetryIfStationsChanged();
+    _scheduleFailedVisibleRetry();
     _timer?.cancel();
     if (channels.isNotEmpty) _timer = Timer(settleDelay, _requestWarm);
   }
@@ -237,17 +236,9 @@ class ChannelCarouselPrewarm {
     if (!_disposed) viewModel.scheduleBoundaryRefresh();
   }
 
-  void _cancelRetryIfStationsChanged() {
-    final retry = _failedListingsRetry;
-    if (retry == null || setEquals(retry.channels, _retryNeighborhood)) return;
-    retry.timer.cancel();
-    _failedListingsRetry = null;
-  }
-
   void clearVisibleChannels() {
     if (_visibleChannelIds == null) return;
     _visibleChannelIds = null;
-    _cancelRetryIfStationsChanged();
     _scheduleFailedVisibleRetry();
   }
 
@@ -268,7 +259,7 @@ class ChannelCarouselPrewarm {
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
     if (_disposed || channelIds.isEmpty) return;
     _visibleChannelIds = channelIds.toSet();
-    _cancelRetryIfStationsChanged();
+    _scheduleFailedVisibleRetry();
     await ensureReady();
     if (_disposed || !isWarm) return;
     try {
@@ -284,31 +275,26 @@ class ChannelCarouselPrewarm {
   }
 
   void _scheduleFailedVisibleRetry() {
-    if (_disposed || !isWarm || viewModel.listingsAccessDenied ||
-        _failedListingsRetry != null) {
-      return;
-    }
+    if (_disposed || !isWarm) return;
     final now = _now();
-    final channels = _retryNeighborhood;
-    final failed = [
-      for (final id in channels)
-        if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed) id,
-    ];
-    if (failed.isEmpty) return;
-
-    // Keep failed visible channels on a cooldown instead of giving up after
-    // the first retry. Schedule the earliest channel that can retry next.
-    DateTime? nextAttempt;
+    final visible = _retryNeighborhood;
+    final failed = {
+      for (final id in visible)
+        if (!viewModel.listingsAccessDenied && viewModel.loadStateFor(id) == GuideChannelLoadState.failed) id,
+    };
+    // Keep an attempted station's cooldown when it briefly leaves view.
+    _retryDeadlines.removeWhere((id, retry) => !failed.contains(id) &&
+        (visible.contains(id) || !retry.attempted || !retry.due.isAfter(now)));
+    DateTime? earliest;
     for (final id in failed) {
-      final last = _failedListingsLastAttempt[id];
-      final due = last == null
-          ? now.add(failedListingsRetryDelay)
-          : last.add(_failedListingsRetryCooldown);
-      if (nextAttempt == null || due.isBefore(nextAttempt)) {
-        nextAttempt = due;
-      }
+      final retry = _retryDeadlines.putIfAbsent(id, () => (due: now.add(failedListingsRetryDelay), attempted: false));
+      if (earliest == null || retry.due.isBefore(earliest)) earliest = retry.due;
     }
-    final scheduledAt = nextAttempt!;
+    if (_failedListingsRetry?.due == earliest) return;
+    _failedListingsRetry?.timer.cancel();
+    _failedListingsRetry = null;
+    if (earliest == null) return;
+    final scheduledAt = earliest;
     final wait = scheduledAt.difference(now);
     final timer = Timer(wait.isNegative ? Duration.zero : wait, () {
       _failedListingsRetry = null;
@@ -316,10 +302,7 @@ class ChannelCarouselPrewarm {
       final eligible = [
         for (final id in _retryNeighborhood)
           if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
-              (_failedListingsLastAttempt[id] == null ||
-                  !_failedListingsLastAttempt[id]!
-                      .add(_failedListingsRetryCooldown)
-                      .isAfter(scheduledAt)))
+              _retryDeadlines[id]?.due.isAfter(scheduledAt) == false)
             id,
       ];
       if (eligible.isEmpty) {
@@ -327,7 +310,7 @@ class ChannelCarouselPrewarm {
         return;
       }
       for (final id in eligible) {
-        _failedListingsLastAttempt[id] = _now();
+        _retryDeadlines[id] = (due: _now().add(_failedListingsRetryCooldown), attempted: true);
       }
       // A completed attempt can still leave channels failed; schedule the
       // next retry after cooldown, but stop on denial or disposal.
@@ -340,7 +323,7 @@ class ChannelCarouselPrewarm {
         }),
       );
     });
-    _failedListingsRetry = (timer: timer, channels: channels);
+    _failedListingsRetry = (timer: timer, due: scheduledAt);
   }
 
   Future<void> ensureReady() async {

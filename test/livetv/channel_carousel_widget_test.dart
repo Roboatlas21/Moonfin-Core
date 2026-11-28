@@ -443,6 +443,28 @@ void main() {
     }
   });
 
+  testWidgets('stations keep independent retry deadlines while visible', (tester) async {
+    final client = _CarouselClient();
+    final vm = _CarouselGuide(client, _guideChannels(3))..failedChannels.add('ch0');
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm, now: tester.binding.clock.now);
+    try {
+      prewarm.tuned(_guideChannels(3), 'ch0');
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
+      await prewarm.ensureVisibleChannels(['ch0', 'ch1']);
+      await tester.pump(const Duration(seconds: 4));
+      await prewarm.ensureVisibleChannels(['ch0', 'ch2']);
+      vm.requests.clear();
+      await tester.pump(const Duration(seconds: 1));
+      expect(vm.requests, [['ch0']]);
+      vm.failedChannels.add('ch2');
+      await prewarm.ensureVisibleChannels(['ch0', 'ch2']);
+      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+      expect(vm.requests, [['ch0'], ['ch2']]);
+    } finally {
+      prewarm.dispose();
+    }
+  });
+
   testWidgets('retuning a closed carousel gives its new station a fresh retry deadline', (tester) async {
     final client = _CarouselClient();
     final channels = _guideChannels(20);
@@ -665,6 +687,8 @@ void main() {
   });
 
   testWidgets('OK selects the newly tuned station after a same-index reorder', (tester) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
     await tester.binding.setSurfaceSize(const Size(1000, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
