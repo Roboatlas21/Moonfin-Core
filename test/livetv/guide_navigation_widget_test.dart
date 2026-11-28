@@ -823,11 +823,12 @@ void main() {
     failRecording = true;
     await vm.recordingChanged();
     await _pumpFrames(tester);
-    final recoveredWidth = vm.guideWindow;
+    expect(vm.guideWindow, resizedGuideWindow(wider));
     held.complete({'Items': []});
     expect(await move, isFalse);
+    await _pumpFrames(tester);
     expect(vm.windowStart, oldStart);
-    expect(recoveredWidth, resizedGuideWindow(wider));
+    expect(vm.guideWindow, resizedGuideWindow(wider));
   });
 
   for (final reloadDuringRequest in [false, true]) {
