@@ -1075,6 +1075,9 @@ class PluginSyncService extends ChangeNotifier {
     required String filter,
     VoidCallback? onLocalChange,
   }) async {
+    if (_prefs.activeProfileScopeSuffix() == null) {
+      throw StateError('Saving a guide shortcut requires an active account');
+    }
     final current = _guidePinAccountCheck(client);
     await _waitForSignInProfile();
     void requireCurrent() {

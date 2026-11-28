@@ -61,7 +61,7 @@ class _PickerPreferences extends UserPreferences {
 
   @override
   Future<void> set<T>(Preference<T> pref, T value) async {
-    if (pref.key == UserPreferences.liveTvSavedFilters.key && save != null) {
+    if (save != null && pref.key == getEffectivePreference(UserPreferences.liveTvSavedFilters).key) {
       await save!.future;
     }
     await super.set(pref, value);
@@ -940,11 +940,12 @@ void main() {
     }
   });
 
-  testWidgets('holding Select pins a group and reports storage errors', (tester) async {
+  testWidgets('holding Select requires an account to pin a group and reports save errors', (tester) async {
     useTvLayout();
     final prefs = _PickerPreferences(GetIt.instance<PreferenceStore>());
     await GetIt.instance.unregister<UserPreferences>();
     GetIt.instance.registerSingleton<UserPreferences>(prefs);
+    await prefs.set(UserPreferences.lastServerId, 'srv');
     await prefs.set(
       UserPreferences.liveTvCategoryDisplay,
       LiveTvCategoryDisplay.both,
@@ -962,6 +963,13 @@ void main() {
     tester.widget<ListTile>(rows().first).focusNode!.requestFocus();
     await _pumpFrames(tester);
     await _holdSelect(tester);
+    expect(find.text("Couldn't save filter. Try again."), findsOneWidget);
+    expect(rows(), findsOneWidget);
+    await prefs.set(UserPreferences.lastUserId, 'user');
+    expect(prefs.get(UserPreferences.liveTvSavedFilters), isEmpty);
+    expect(prefs.get(UserPreferences.liveTvSavedFilterChanges), isEmpty);
+    await _holdSelect(tester);
+    expect(find.text("Couldn't save filter. Try again."), findsNothing);
     expect(rows(), findsNWidgets(2));
     final previous = prefs.get(UserPreferences.liveTvSavedFilters);
     tester.widget<ListTile>(rows().first).focusNode!.requestFocus();
