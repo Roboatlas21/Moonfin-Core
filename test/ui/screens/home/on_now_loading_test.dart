@@ -263,9 +263,9 @@ void main() {
     expect(ids, ['liveTv', 'liveTvOnNow', 'liveTvFavorites']);
     await prefs.set(UserPreferences.kidsModeEnabled, true);
     expect(model.rows, isEmpty);
+    when(() => source.loadOnNow('http://server.test')).thenThrow(Exception('EPG unavailable'));
     await prefs.set(UserPreferences.kidsModeEnabled, false);
     expect(model.rows.map((row) => row.id), ids);
-    when(() => source.loadOnNow('http://server.test')).thenThrow(Exception('EPG unavailable'));
     await model.load();
     expect(model.rows.map((row) => row.id), ['liveTv', 'liveTvFavorites']);
   });

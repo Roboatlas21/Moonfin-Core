@@ -535,11 +535,18 @@ void main() {
     expect(item.isFavorite, isTrue);
     expect(userDataSync.favoriteFor(key), isFalse);
 
-    await ItemMutationRepository(client).setFavorite(
+    Future<void> remove() => ItemMutationRepository(client).setFavorite(
       id, isFavorite: false, isChannel: true, expectedChannelKey: key,
     );
+    cloud.putError = 503;
+    await expectLater(remove(), throwsA(isA<DioException>()));
+    expect(userDataSync.favoriteFor(key), isTrue);
+    expect(cloud.rows.single['id'], '4');
+
+    cloud.putError = null;
+    await remove();
     expect(cloud.rows, isEmpty);
-    expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(1));
+    expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(2));
   });
 
   group('two DVRs with channel 4', () {

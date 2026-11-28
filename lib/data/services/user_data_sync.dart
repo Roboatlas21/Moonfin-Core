@@ -83,6 +83,11 @@ class UserDataSync extends ChangeNotifier {
   /// The flag the server last confirmed for a change still in progress.
   bool? confirmedFavorite(String itemId) => _confirmedFavorites[itemId];
 
+  /// Updates the rollback value without replacing the viewer's pending edit.
+  void observeFavoriteWhilePending(String itemId, bool value) {
+    if (favoriteChangePending(itemId)) _confirmedFavorites[itemId] = value;
+  }
+
   /// The server now holds [value]. The change ends if that's what was asked.
   void confirmFavorite(String itemId, bool value) {
     _confirmedFavorites[itemId] = value;

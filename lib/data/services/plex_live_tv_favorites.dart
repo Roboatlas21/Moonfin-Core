@@ -378,6 +378,7 @@ class PlexLiveTvFavorites {
     String channelId, {
     required bool isFavorite,
     String? expectedSyncKey,
+    void Function(bool)? onCloudFavoriteRead,
   }) async {
     if (!isPlexLiveTvChannel(client, channelId)) {
       throw ArgumentError.value(channelId, 'channelId');
@@ -411,6 +412,7 @@ class PlexLiveTvFavorites {
       }
       final rows = [...remote];
       final hadFavorite = rows.any((row) => _matches(info, row));
+      onCloudFavoriteRead?.call(hadFavorite);
       if (isFavorite && !hadFavorite) {
         rows.add({...info});
       } else if (!isFavorite && hadFavorite) {

@@ -251,18 +251,17 @@ void main() {
       vm.searchImmediate(term);
       while (vm.state == SearchState.loading) { await pumpEventQueue(); }
     }
-    Map<String, bool> favorites() => {
-      for (final item in vm.results.single.items) item.serverId: item.isFavorite,
-    };
-    expect(favorites(), {'a': false, 'b': false});
+    Iterable<(String, bool)> favorites() => vm.results.single.items
+        .map((item) => (item.serverId, item.isFavorite));
+    expect(favorites(), unorderedEquals([('a', false), ('b', false)]));
     final library = _MockUserLibrary();
     when(() => clients['a']!.userLibraryApi).thenReturn(library);
     when(() => library.markFavorite('news')).thenAnswer((_) async {});
     await ItemMutationRepository(clients['a']!).setFavorite('news', isFavorite: true, isChannel: true);
-    expect(favorites(), {'a': true, 'b': false});
+    expect(favorites(), unorderedEquals([('a', true), ('b', false)]));
 
     await searchAgain('News');
-    expect(favorites(), {'a': true, 'b': false});
+    expect(favorites(), unorderedEquals([('a', true), ('b', false)]));
   });
 
   test('with multi-server search off only the active server is searched', () async {

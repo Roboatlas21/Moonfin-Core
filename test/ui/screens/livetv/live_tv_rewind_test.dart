@@ -262,6 +262,8 @@ void main() {
   }
 
   testWidgets('the remote Record key explains that Plex Free TV cannot record', (tester) async {
+    PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
+    addTearDown(() => PlatformDetection.setInterfaceLayout(InterfaceLayout.automatic));
     final client = GetIt.instance<MediaServerClient>();
     when(() => client.serverType).thenReturn(ServerType.plex);
     await pumpPlayer(tester, channels: const [
