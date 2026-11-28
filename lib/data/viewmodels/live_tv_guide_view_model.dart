@@ -1846,12 +1846,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             }).toList()
           : const <GuideChannel>[];
       final rows = requestedRows.isEmpty ? _pageChannels : requestedRows;
-      // A focus restore may have fetched a matching category channel far
-      // beyond the scroll prefix. Retain those targets across window changes.
-      final previouslyShownCategoryRows =
-          category != null && (windowStart != null || _channelQuery.isNotEmpty)
-          ? surfingChannels
-          : const <GuideChannel>[];
+      final keepCategoryRows = category != null && (windowStart != null || _channelQuery.isNotEmpty);
+      final initialCategoryRows = keepCategoryRows ? surfingChannels : const <GuideChannel>[];
       final size = _batchSizeFor(category);
       final fetched = <String, List<GuideProgram>>{};
       final failed = <String>{};
@@ -1880,6 +1876,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         }
       }
       var end = 0;
+      final ids = <String>{};
+      final requestedIds = <String>{};
       try {
         while (end < rows.length && canFetchMore()) {
           final start = end;
@@ -1895,12 +1893,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         // Previously requested rows beyond the cutoff remain available for Retry.
         final reached = windowStart == null ? rows.take(_requestedPageDepth) : requestedRows;
         failed.addAll(reached.skip(end).map((channel) => channel.id));
-        if (previouslyShownCategoryRows.isNotEmpty && samePage()) {
-          final prefixIds = rows.take(end).map((channel) => channel.id).toSet();
+        ids.addAll(rows.take(end).map((channel) => channel.id));
+        requestedIds.addAll(ids);
+        // A focus restore can find a station beyond the scroll prefix while
+        // any batch is in flight. Fetch its new listings before committing.
+        while (keepCategoryRows && samePage()) {
           final extraRows = [
-            for (final channel in previouslyShownCategoryRows)
-              if (!prefixIds.contains(channel.id)) channel,
+            for (final channel in initialCategoryRows.followedBy(surfingChannels))
+              if (requestedIds.add(channel.id)) channel,
           ];
+          if (extraRows.isEmpty) break;
           for (var i = 0; i < extraRows.length; i += size) {
             if (!canFetchMore()) {
               failed.addAll(extraRows.skip(i).map((channel) => channel.id));
@@ -1920,11 +1922,6 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       }
       if (!samePage()) continue;
       final reachedDepth = _requestedPageDepth;
-      final ids = rows.take(end).map((c) => c.id).toSet();
-      final requestedIds = {
-        ...ids,
-        for (final channel in previouslyShownCategoryRows) channel.id,
-      };
       // Keep the current listings and time if every channel request failed.
       if (windowStart != null &&
           requestedIds.isNotEmpty &&

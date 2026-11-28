@@ -1400,6 +1400,31 @@ void main() {
       });
     }
 
+    test('a window move includes an out-of-page Sports station found while it loads', () async {
+      stubNumberedChannels(251);
+      final start = DateTime.utc(2026, 9, 11, 10);
+      final next = start.add(const Duration(hours: 3));
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+      final vm = await loadFilter(GuideFilter.sports, start: start);
+      final firstBatch = Completer<Map<String, dynamic>>();
+      final requests = <List<String>>[];
+      when(() => _guide(liveTv, category: GuideFilter.sports, start: next)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        requests.add(ids);
+        if (requests.length == 1) return firstBatch.future;
+        return {'Items': [for (final id in ids) _program('later-$id', id, start: next, isSports: true)]};
+      });
+      final move = vm.setWindowStart(next);
+      await pumpEventQueue();
+      expect(await vm.ensureCategoryChannel('c250'), isTrue);
+      firstBatch.complete({
+        'Items': [for (var i = 0; i < 24; i++) _program('next$i', 'c$i', start: next, isSports: true)],
+      });
+      expect(await move, isTrue);
+      expect(requests.map((ids) => ids.length), [200, 1]);
+      expect(vm.programsForChannel('c250').single.id, 'later-c250');
+    });
+
     test('an older focus lookup cannot restore a station the next Sports page ruled out', () async {
       stubNumberedChannels(220);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
