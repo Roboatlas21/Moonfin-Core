@@ -616,6 +616,38 @@ void main() {
     );
   });
 
+  testWidgets('OK selects the newly tuned station after a same-index reorder', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1000, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final client = _CarouselClient();
+    var channels = _guideChannels(3, numbered: true);
+    var tuned = channels[0].id;
+    String? selected;
+    final vm = _CarouselGuide(client, channels);
+    late StateSetter update;
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.buildTheme(ThemeRegistry.active),
+      home: StatefulBuilder(builder: (context, setState) {
+        update = setState;
+        return ChannelCarouselOverlay(client: client, channels: channels,
+          currentChannelId: tuned, onChannelSelected: (id) => selected = id,
+          onDismiss: () {}, onShowControls: () {}, viewModelFactory: (_) => vm);
+      }),
+    ));
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(selectedName(tester), 'Channel 1');
+    update(() {
+      tuned = channels[2].id;
+      channels = [channels[0], channels[2], channels[1]];
+    });
+    await tester.pumpAndSettle();
+    await tester.sendKeyEvent(LogicalKeyboardKey.select);
+    await tester.pump();
+    expect(selected, tuned);
+  });
+
   testWidgets('overlay inactivity resets on key down, repeat and key up', (
     tester,
   ) async {

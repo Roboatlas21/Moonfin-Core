@@ -280,7 +280,9 @@ void main() {
       availableHeight: area.height,
     );
 
-    expect(hero.height, closeTo(EpgHeroPreview.compactHeight, 0.1));
+    final search = tester.getRect(find.byType(TextField));
+    expect(search.height, greaterThanOrEqualTo(kMinInteractiveDimension));
+    expect(hero.height + search.height, closeTo(EpgHeroPreview.compactHeight + 36, 0.1));
     expect(hero.top - rail.bottom, lessThanOrEqualTo(8));
     expect(now.top - hero.bottom, lessThanOrEqualTo(8));
     expect(channelCells.evaluate().length, greaterThanOrEqualTo(5));

@@ -369,7 +369,7 @@ void main() {
       Navigator.of(tester.element(guide)).pop(id);
       await tester.pumpAndSettle();
     }
-    await pumpHost([ard]);
+    await pumpHost([ard, zdf]);
     expect(manager.playedServerId, 'plex-cloud-viewer');
     await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).initialFilter, sports);
@@ -389,11 +389,12 @@ void main() {
     );
     manager.failedChannel = zdf.id;
     await leaveGuide(zdf.id);
+    await pumpHost([zdf, ard]);
     manager.failedChannel = null;
     await send({'event': 'messageAction'});
     await send({'event': 'selectChannel', 'channelId': third.id});
     expect(manager.playedChannelIds, [ard.id, zdf.id, zdf.id, third.id]);
-    await pumpHost([ard]);
+    await pumpHost([ard, zdf]);
     await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).currentChannel?.id, third.id);
     expect(tester.widget<LiveTvGuideScreen>(guide).initialFilter, favorites);
@@ -463,6 +464,19 @@ void main() {
     guide.onChannelSelected!(station.id, (channels: [station], filter: selectedFilter));
   }
 
+  testWidgets('reordering the parent lineup preserves the selected player group', (tester) async {
+    const local = (GuideFilter.all, 'Local');
+    await pumpPlayer(tester, channels: const [ard, zdf]);
+    await pickFromGuide(tester, zdf, selectedFilter: local);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await pumpPlayer(tester, channels: const [zdf, ard]);
+    await tester.tap(find.byTooltip(l10n.guide));
+    await tester.pump();
+    final screen = tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen));
+    expect(screen.initialFilter, local);
+  });
+
   for (final needsRetry in [false, true]) {
     testWidgets('selecting the starting station shares its tune (retry: $needsRetry)', (tester) async {
       useSavedPlexAccount();
@@ -501,7 +515,7 @@ void main() {
     await tester.pump();
     expect(manager.playedChannelIds, [ard.id, third.id]);
     final refreshed = GuideChannel(id: third.id, name: 'Third HD', rawData: third.rawData);
-    await pumpPlayer(tester, channels: [ard, refreshed, zdf]);
+    await pumpPlayer(tester, channels: [refreshed, ard, zdf]);
     userDataSync.publish(channelFavoriteKey(third.rawData)!, {'IsFavorite': true});
     manager.failedChannel = null;
     gate.complete();

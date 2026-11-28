@@ -462,6 +462,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
   List<ChannelCarouselEntry> _entries = const [];
   bool _entriesDirty = true;
   late String _centeredId;
+  int _stripSelectionRevision = 0;
   Timer? _headerTimer;
   Timer? _loadTimer;
   Timer? _hideTimer;
@@ -555,6 +556,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
     final tuneChanged =
         oldWidget.currentChannelId != widget.currentChannelId ||
         oldWidget.selectionRevision != widget.selectionRevision;
+    if (tuneChanged) _stripSelectionRevision++;
     if (_channels.isEmpty) {
       _dismiss();
       return;
@@ -1053,7 +1055,7 @@ class _ChannelCarouselOverlayState extends State<ChannelCarouselOverlay>
                       child: ChannelCarousel(
                         focusNode: _carouselFocus,
                         channels: _currentEntries,
-                        selectionRevision: widget.selectionRevision,
+                        selectionRevision: _stripSelectionRevision,
                         initialIndex: math.max(
                           0,
                           _channels.indexWhere(

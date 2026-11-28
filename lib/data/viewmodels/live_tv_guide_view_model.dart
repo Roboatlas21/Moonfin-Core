@@ -76,16 +76,10 @@ class GuideChannel {
     return true;
   }
 
-  /// A rebuild of the original group can refresh station data while the player
-  /// is surfing a different group selected in its guide.
-  static List<GuideChannel> updatePlayerLineup(
-    List<GuideChannel> active,
-    List<GuideChannel> incoming, {
-    required bool keepGroup,
-  }) {
-    if (!keepGroup) return [for (final c in incoming) c.withSyncedUserData()];
-    final byId = {for (final c in incoming) c.id: c};
-    return [for (final c in active) (byId[c.id] ?? c).withSyncedUserData()];
+  static bool sameStations(List<GuideChannel> a, List<GuideChannel> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    return setEquals({for (final c in a) c.id}, {for (final c in b) c.id});
   }
 
   factory GuideChannel.fromRawItem(Map<String, dynamic> raw) => GuideChannel(
@@ -273,15 +267,21 @@ extension GuidePlaybackLineupUpdates on GuidePlaybackLineup {
     List<GuideChannel> before,
     List<GuideChannel> after, {
     required bool favoritesFirst,
+    required GuideFilterChoice parentFilter,
   }) {
+    final previous = {for (final c in before) c.id: c};
     final refreshed = <String, GuideChannel>{
       if (!identical(before, after))
-        for (var i = 0; i < after.length; i++)
-          if (!identical(before.elementAtOrNull(i), after[i])) after[i].id: after[i],
+        for (final c in after)
+          if (!identical(previous[c.id], c)) c.id: c,
     };
-    final updated = [
-      for (final station in channels) (refreshed[station.id] ?? station).withSyncedUserData(),
-    ];
+    var stations = channels;
+    if (filter == parentFilter && !GuideChannel.sameStationOrder(before, after) &&
+        GuideChannel.sameStations(channels, after)) {
+      final active = {for (final c in channels) c.id: c};
+      stations = [for (final c in after) active[c.id]!];
+    }
+    final updated = [for (final c in stations) (refreshed[c.id] ?? c).withSyncedUserData()];
     if (favoritesFirst) {
       updated.sort(LiveTvGuideViewModel.comparatorFor(ChannelSortBy.favoritesFirst));
     }
@@ -470,6 +470,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void setSortBy(ChannelSortBy value) {
     if (_sortBy == value) return;
     _windowRequest++;
+    _finishPendingWindow();
     _programGeneration++;
     _advancePage();
     _sortBy = value;
@@ -1152,6 +1153,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       _categoryLoadedFor = null;
     }
     _windowRequest++;
+    _finishPendingWindow();
     final scopeChanged =
         queryChanged ||
         _selectedGroup != group ||

@@ -114,6 +114,7 @@ const _remoteHoldDuration = Duration(milliseconds: 500);
 /// repeats and release for this physical key until the original press ends.
 class FocusedKeyHold {
   PhysicalKeyboardKey? _key;
+  FocusNode? _origin;
   Timer? _timer;
   VoidCallback? _tap;
 
@@ -121,6 +122,7 @@ class FocusedKeyHold {
   /// triggers [onHold] instead. [stillFocused] guards callbacks.
   KeyEventResult start(
     KeyEvent event, {
+    required FocusNode origin,
     required bool Function() stillFocused,
     VoidCallback? onPress,
     VoidCallback? onTap,
@@ -131,6 +133,7 @@ class FocusedKeyHold {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     dispose();
     _key = event.physicalKey;
+    _origin = origin..addListener(_onFocusChange);
     if (onTap != null) {
       _tap = () {
         if (stillFocused()) onTap();
@@ -145,6 +148,13 @@ class FocusedKeyHold {
     return KeyEventResult.handled;
   }
 
+  void _onFocusChange() {
+    if (_origin?.hasFocus == true) return;
+    // Consume the key-up even if focus returns to this station.
+    _timer?.cancel();
+    _tap = null;
+  }
+
   KeyEventResult _finish(KeyEvent event) {
     if (event.physicalKey != _key) return KeyEventResult.ignored;
     if (event is KeyRepeatEvent) return KeyEventResult.handled;
@@ -156,6 +166,8 @@ class FocusedKeyHold {
   }
 
   void dispose() {
+    _origin?.removeListener(_onFocusChange);
+    _origin = null;
     if (_key != null) FocusManager.instance.removeEarlyKeyEventHandler(_finish);
     _key = null;
     _timer?.cancel();

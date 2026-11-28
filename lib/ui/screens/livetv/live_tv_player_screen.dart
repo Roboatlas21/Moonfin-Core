@@ -836,19 +836,23 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   void didUpdateWidget(covariant LiveTvPlayerScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     final sameGroup = widget.guideFilter == oldWidget.guideFilter &&
-        GuideChannel.sameStationOrder(oldWidget.channels, widget.channels);
+        GuideChannel.sameStations(oldWidget.channels, widget.channels);
     if (!sameGroup) {
       _guideFilter = widget.guideFilter;
       _retryGuideLineup = null;
+      _syncedChannels = [for (final c in widget.channels) c.withSyncedUserData()];
     } else if (!identical(oldWidget.channels, widget.channels)) {
+      final active = (channels: _syncedChannels, filter: _guideFilter);
+      _syncedChannels = active.afterPlayerUpdate(
+        oldWidget.channels, widget.channels,
+        favoritesFirst: _favoritesFirst, parentFilter: widget.guideFilter,
+      ).channels;
       _retryGuideLineup = _retryGuideLineup?.afterPlayerUpdate(
-        oldWidget.channels, widget.channels, favoritesFirst: _favoritesFirst,
+        oldWidget.channels, widget.channels,
+        favoritesFirst: _favoritesFirst, parentFilter: widget.guideFilter,
       );
     }
     if (!sameGroup || !identical(oldWidget.channels, widget.channels)) {
-      _syncedChannels = GuideChannel.updatePlayerLineup(
-        _syncedChannels, widget.channels, keepGroup: sameGroup,
-      );
       _currentChannel = _syncedChannels.firstWhere(
         (channel) => channel.id == _currentChannel.id,
         orElse: () => _currentChannel,
@@ -1895,18 +1899,24 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
       final originalFilter = widget.guideFilter;
       final succeeded = await _switchChannel(channels[index].withSyncedUserData());
       if (!mounted || _isStopping || originalFilter != widget.guideFilter ||
-          !GuideChannel.sameStationOrder(originalChannels, widget.channels)) {
+          !GuideChannel.sameStations(originalChannels, widget.channels)) {
         return;
       }
       if (!succeeded) {
-        _retryGuideLineup = lineup.afterPlayerUpdate(originalChannels, widget.channels, favoritesFirst: _favoritesFirst);
+        _retryGuideLineup = lineup.afterPlayerUpdate(
+          originalChannels, widget.channels,
+          favoritesFirst: _favoritesFirst, parentFilter: widget.guideFilter,
+        );
         return;
       }
     }
     setState(() {
       _retryGuideLineup = null;
       _guideFilter = lineup.filter;
-      _syncedChannels = lineup.afterPlayerUpdate(originalChannels, widget.channels, favoritesFirst: _favoritesFirst).channels;
+      _syncedChannels = lineup.afterPlayerUpdate(
+        originalChannels, widget.channels,
+        favoritesFirst: _favoritesFirst, parentFilter: widget.guideFilter,
+      ).channels;
       _currentChannel = _syncedChannels.firstWhere((channel) => channel.id == channelId);
     });
     _warmChannelCarousel();

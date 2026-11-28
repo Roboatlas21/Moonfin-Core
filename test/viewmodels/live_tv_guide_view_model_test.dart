@@ -1384,23 +1384,30 @@ void main() {
       expect(vm.surfingChannels.single.id, 'c1');
     });
 
-    test('a search releases a resize waiting for the cancelled page', () async {
-      stubNumberedChannels(3);
-      final vm = await loadFilter(GuideFilter.all);
-      final held = pendingGuide(GuideFilter.all);
-      final page = vm.setWindowStart(vm.windowEnd, paging: true);
-      await pumpEventQueue();
-      final width = vm.guideWindow + const Duration(hours: 1);
-      final resize = vm.setWindow(width);
-      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
-      vm.setChannelQuery('c1');
-      await pumpEventQueue();
-      final widthBeforeOldReply = vm.guideWindow;
-      held.complete({'Items': []});
-      expect(await page, isFalse);
-      await resize;
-      expect(widthBeforeOldReply, width);
-    });
+    final changes = <String, void Function(LiveTvGuideViewModel)>{
+      'search': (vm) => vm.setChannelQuery('c1'),
+      'sort': (vm) => vm.setSortBy(ChannelSortBy.name),
+      'filter': (vm) => vm.setFilter(GuideFilter.favorites),
+    };
+    for (final change in changes.entries) {
+      test('a ${change.key} change releases a resize waiting for the cancelled page', () async {
+        stubNumberedChannels(3);
+        final vm = await loadFilter(GuideFilter.all);
+        final held = pendingGuide(GuideFilter.all);
+        final page = vm.setWindowStart(vm.windowEnd, paging: true);
+        await pumpEventQueue();
+        final width = vm.guideWindow + const Duration(hours: 1);
+        final resize = vm.setWindow(width);
+        when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+        change.value(vm);
+        await pumpEventQueue();
+        final widthBeforeOldReply = vm.guideWindow;
+        held.complete({'Items': []});
+        expect(await page, isFalse);
+        await resize;
+        expect(widthBeforeOldReply, width);
+      });
+    }
 
     test('search removes a stale Sports match when the failed station returns no listings', () async {
       stubNumberedChannels(2);

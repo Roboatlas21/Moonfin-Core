@@ -1005,6 +1005,48 @@ void main() {
     expect(find.text('Channel 47'), findsOneWidget);
   });
 
+  testWidgets('closing Browse restores the offscreen Now/Next station', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.both);
+    await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
+    stubGroups(const ChannelGroupLineup({'ch47': {'Local'}}));
+    await pumpGuide(tester, surface: phone);
+    await tester.enterText(find.byType(TextField), 'Channel 47');
+    await tester.pump(const Duration(milliseconds: 250));
+    await _pumpFrames(tester);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    final cardName = find.descendant(of: find.byType(EpgNowNextCard), matching: find.text('Channel 47')).hitTestable();
+    expect(cardName, findsOneWidget);
+    await tapAndPump(tester, find.byTooltip('Filters'));
+    Navigator.of(tester.element(picker)).pop();
+    await _pumpFrames(tester);
+    expect(cardName, findsOneWidget);
+    expect(_focusedLabel(), 'GuideChannel:47');
+  });
+
+  testWidgets('leaving a channel cancels a held Select even after focus returns', (tester) async {
+    useTvLayout();
+    userDataSync.reset();
+    addTearDown(userDataSync.reset);
+    final api = _MockUserLibrary();
+    when(() => client.userLibraryApi).thenReturn(api);
+    when(() => api.markFavorite('ch0')).thenAnswer((_) async {});
+    await pumpGuide(tester);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    await tester.pump(const Duration(milliseconds: 32));
+    expect(_focusedLabel(), 'GuideChannel:1');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump(const Duration(milliseconds: 32));
+    expect(_focusedLabel(), 'GuideChannel:0');
+    await tester.pump(const Duration(milliseconds: 550));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+    await _pumpFrames(tester);
+    verifyNever(() => api.markFavorite('ch0'));
+  });
+
   testWidgets('picker shows the first matches after a search with no results', (tester) async {
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvCategoryDisplay,
