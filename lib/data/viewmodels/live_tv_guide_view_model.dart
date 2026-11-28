@@ -1268,9 +1268,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (!current()) return false;
     final firstResult = _categoryQueriedIds.add(channelId);
     _advanceCategoryCursor();
+    // A concurrent page may already have confirmed a match or an empty row.
+    if (!firstResult && !_categoryFailedIds.contains(channelId)) {
+      return _categoryPrograms.containsKey(channelId);
+    }
     if (reply.failedChannelIds.contains(channelId)) {
-      // A concurrent page may already have confirmed a match or an empty row.
-      if (firstResult && _categoryFailedIds.add(channelId)) _notifyListeners();
+      if (_categoryFailedIds.add(channelId)) _notifyListeners();
       return _categoryPrograms.containsKey(channelId);
     }
     final recovered = _categoryFailedIds.remove(channelId);
@@ -1930,7 +1933,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       } else {
         fetched.removeWhere((id, _) => failed.contains(id));
         _categoryPrograms
-          ..clear()
+          ..removeWhere((id, _) => !failed.contains(id))
           ..addAll(fetched);
         _categoryFetchInFlight = false;
         _categoryFailedIds

@@ -40,6 +40,7 @@ class EpgProgramCell extends StatelessWidget {
   final String? placeholderLabel;
   final bool loading;
   final bool failed;
+  final IconData failureIcon;
   final double textLeftPadding;
   final double textRightPadding;
 
@@ -63,6 +64,7 @@ class EpgProgramCell extends StatelessWidget {
     this.placeholderLabel,
     this.loading = false,
     this.failed = false,
+    this.failureIcon = Icons.refresh,
     this.textLeftPadding = 0,
     this.textRightPadding = 0,
     this.startsBeforeWindow = false,
@@ -120,7 +122,7 @@ class EpgProgramCell extends StatelessWidget {
               focusBorder ??
               Border.all(color: errorColor.withValues(alpha: 0.4)),
         ),
-        child: Center(child: Icon(Icons.refresh, size: 16, color: errorColor)),
+        child: Center(child: Icon(failureIcon, size: 16, color: errorColor)),
       );
     }
 

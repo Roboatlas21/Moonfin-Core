@@ -1395,6 +1395,21 @@ void main() {
       });
     }
 
+    test('an older focus lookup cannot restore a station the next Sports page ruled out', () async {
+      stubNumberedChannels(220);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+      final vm = await loadFilter(GuideFilter.sports);
+      final held = pendingGuide(GuideFilter.sports);
+      final lookup = vm.ensureCategoryChannel('c200');
+      await pumpEventQueue();
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {'Items': []});
+      await vm.loadMorePrograms();
+      expect(vm.surfingChannels.any((c) => c.id == 'c200'), isFalse);
+      held.complete({'Items': [_program('old-match', 'c200', isSports: true)]});
+      expect(await lookup, isFalse);
+      expect(vm.surfingChannels.any((c) => c.id == 'c200'), isFalse);
+    });
+
     test('targeted focus retries a failed category channel and skips known nonmatches', () async {
       stubNumberedChannels(3);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {
@@ -2123,7 +2138,7 @@ void main() {
     }
 
     test('recording recovery refreshes the Sports surfing lineup behind a search', () async {
-      stubNumberedChannels(3);
+      stubNumberedChannels(4);
       when(() => _guide(liveTv, category: GuideFilter.sports))
           .thenAnswer(_serverFiltered((_) => true));
       final vm = await loadFilter(GuideFilter.sports);
@@ -2138,13 +2153,16 @@ void main() {
         }
         return {'Items': [
           for (final id in _requestedIds(inv))
-            if (id != 'c2') recorded(_program('updated-$id', id, isSports: true)),
-        ]};
+            if (id != 'c2' && id != 'c3') recorded(_program('updated-$id', id, isSports: true)),
+        ], 'FailedChannelIds': _requestedIds(inv).where((id) => id == 'c3').toList()};
       });
       await vm.recordingChanged();
       expect(vm.filteredChannels.single.id, 'c1');
-      expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
+      expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1', 'c3']);
       expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+      vm.setChannelQuery('');
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c1', 'c3']);
+      expect(vm.hasFailedCategoryListings, isTrue);
     });
 
     test('a recording refresh keeps cached shows and stops after two consecutive timeouts', () async {

@@ -1441,7 +1441,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   Widget _buildMobile() {
-    final l10n = AppLocalizations.of(context);
     return Column(
       children: [
         _buildMobileHeader(),
@@ -1467,13 +1466,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         if (_mobileView == EpgMobileView.list &&
             _vm.listingsAccessDenied &&
             _vm.filteredChannels.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              l10n.failedToLoadGuide(describeError(_vm.error!, l10n)),
-              textAlign: TextAlign.center,
-            ),
-          ),
+          _buildListingsDeniedNotice(),
         Expanded(child: _buildMobileBody()),
       ],
     );
@@ -2263,6 +2256,17 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _prefs.set(UserPreferences.epgMobileView, next);
   }
 
+  Widget _buildListingsDeniedNotice() {
+    final l10n = AppLocalizations.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Text(
+        l10n.failedToLoadGuide(describeError(_vm.error!, l10n)),
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
   Widget _buildGuideError() {
     final l10n = AppLocalizations.of(context);
     return Center(
@@ -2818,7 +2822,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
     return Column(
       children: [
-        HorizontalScrollSection(
+        if (_vm.listingsAccessDenied)
+          _buildListingsDeniedNotice()
+        else HorizontalScrollSection(
           title: '',
           scrollController: _timeHeaderHorizontalScrollController,
           onScrollPastStart: () =>
@@ -3594,6 +3600,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     return _GuideProgramRow(
       now: widget.now,
       timelineDirection: _pickerRowDirection,
+      listingsAccessDenied: _vm.listingsAccessDenied,
       cells: _cellsForChannel(channelId),
       rowIndex: rowIndex,
       rowStates: _rowStates,
@@ -4272,6 +4279,7 @@ class _GuideFocusableSurfaceState extends State<_GuideFocusableSurface> {
 
 class _GuideProgramRow extends StatefulWidget {
   final TextDirection timelineDirection;
+  final bool listingsAccessDenied;
   final DateTime Function() now;
   final List<GuideCell> cells;
   final int rowIndex;
@@ -4314,6 +4322,7 @@ class _GuideProgramRow extends StatefulWidget {
   const _GuideProgramRow({
     required this.now,
     required this.timelineDirection,
+    required this.listingsAccessDenied,
     required this.cells,
     required this.rowIndex,
     required this.rowStates,
@@ -4582,6 +4591,7 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
               : null,
           loading: cell.kind == GuideCellKind.loading,
           failed: cell.kind == GuideCellKind.failed,
+          failureIcon: widget.listingsAccessDenied ? Icons.info_outline : Icons.refresh,
           textLeftPadding: widget.timelineDirection == TextDirection.ltr ? _clippedStart(left, width) : 0,
           textRightPadding: widget.timelineDirection == TextDirection.rtl ? _clippedStart(left, width) : 0,
         ),

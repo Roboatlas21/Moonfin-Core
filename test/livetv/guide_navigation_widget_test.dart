@@ -663,6 +663,21 @@ void main() {
     expect(find.text('Playing ch0'), findsOneWidget);
   });
 
+  testWidgets('the TV grid explains missing listings and keeps the station selectable', (tester) async {
+    useTvLayout();
+    const reason = 'Programme listings are restricted for this viewer';
+    final request = RequestOptions();
+    when(() => _guideRequest(liveTvApi)).thenThrow(DioException(
+      requestOptions: request,
+      response: Response(requestOptions: request, statusCode: 403, data: {'message': reason}),
+    ));
+    await pumpGuide(tester);
+    expect(find.textContaining(reason), findsOneWidget);
+    expect(find.descendant(of: find.byType(EpgProgramCell), matching: find.byIcon(Icons.refresh)), findsNothing);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    expect(_focusedLabel(), 'GuideChannel:0');
+  });
+
   testWidgets('a failed same-day picker request names the selected date', (tester) async {
     final now = DateTime(2026, 9, 11, 10, 30);
     await pumpGuide(tester, surface: phone, now: () => now);
