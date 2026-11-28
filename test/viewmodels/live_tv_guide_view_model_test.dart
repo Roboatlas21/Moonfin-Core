@@ -749,9 +749,10 @@ void main() {
         requestedChannelIds.add(ids);
         requestedFrom.add(inv.namedArguments[#startDate] as DateTime);
         requestedTo.add(inv.namedArguments[#endDate] as DateTime);
+        final retry = !ids.contains('c0');
         return {
-          'Items': [for (final id in ids) _span(id, id, at(720), at(810))],
-          if (ids.contains('c0')) 'FailedChannelIds': ['c1'],
+          'Items': [for (final id in ids) _span(retry ? 'recovered-$id' : id, id, at(720), at(810))],
+          if (!retry) 'FailedChannelIds': ['c1'],
         };
       });
       await vm.refreshCarouselPrograms();
@@ -762,7 +763,8 @@ void main() {
       expect(requestedChannelIds.last, ['c1']);
       expect(requestedFrom.last, clock.subtract(LiveTvGuideViewModel.rollingRefreshLookback));
       expect(requestedTo.last, clock.add(LiveTvGuideViewModel.rollingRefreshHorizon));
-      expect(vm.programsForChannel('c1').single.id, 'c1');
+      expect(vm.programsForChannel('c1').single.id, 'recovered-c1');
+      expect(vm.loadStateFor('c1'), GuideChannelLoadState.loaded);
     });
 
     test('scheduled retry fetches a channel that never loaded', () async {
@@ -1319,6 +1321,35 @@ void main() {
   });
 
   group('category filters', () {
+    test('Sports Retry leaves the next page to the scroll already loading it', () async {
+      stubNumberedChannels(401);
+      final nextPage = Completer<Map<String, dynamic>>();
+      var pageReads = 0;
+      var recovering = false;
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        if (ids.contains('c400')) {
+          pageReads++;
+          return pageReads == 1 ? await nextPage.future : {'Items': []};
+        }
+        if (ids.contains('c200') && !recovering) throw TimeoutException('Unavailable');
+        return {'Items': [if (ids.contains('c0')) _program('first', 'c0', isSports: true)]};
+      });
+      final vm = await loadFilter(GuideFilter.sports);
+      expect(vm.hasFailedCategoryListings, isTrue);
+      expect(vm.filteredChannels.map((c) => c.id), ['c0']);
+      final scrolling = vm.loadMorePrograms();
+      await pumpEventQueue();
+      recovering = true;
+      final retry = vm.retryFailedCategoryListings();
+      await pumpEventQueue();
+      nextPage.complete({'Items': [_program('next', 'c400', isSports: true)]});
+      await Future.wait([scrolling, retry]);
+      expect(pageReads, 1);
+      expect(vm.filteredChannels.map((c) => c.id), ['c0', 'c400']);
+      expect(vm.hasFailedCategoryListings, isFalse);
+    });
+
     test('Sports Retry asks for the station in the current search', () async {
       stubNumberedChannels(201);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async => {

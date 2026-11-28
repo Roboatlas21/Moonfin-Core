@@ -1426,7 +1426,9 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _categoryPrograms.addAll(reply.programs);
         _notifyListeners();
       }
-      if (hasMorePrograms && programsHighWater < _categoryMinRowsPerPage) {
+      // Scrolling may already own the next category page.
+      if (_loadingMorePage != (filter, request) &&
+          hasMorePrograms && programsHighWater < _categoryMinRowsPerPage) {
         await _walkCategory(recordingRevision: recordingRevision);
       }
     } catch (_) {
