@@ -56,6 +56,7 @@ void main() {
   late _ItemsApi otherItems;
   late _MultiServer multiServer;
   Completer<void>? marvelRequest;
+  late bool marvelEmpty;
 
   setUpAll(
     () => registerFallbackValue(HomeSectionPluginSource.collections),
@@ -91,6 +92,7 @@ void main() {
     source = _DataSource();
     otherItems = _ItemsApi();
     marvelRequest = null;
+    marvelEmpty = false;
     when(
       () => otherItems.getItems(
         parentId: any(named: 'parentId'),
@@ -104,7 +106,7 @@ void main() {
         imageTypeLimit: any(named: 'imageTypeLimit'),
       ),
     ).thenAnswer((call) async {
-      if (call.namedArguments[#parentId] != 'marvel') {
+      if (call.namedArguments[#parentId] != 'marvel' || marvelEmpty) {
         return {'Items': [], 'TotalRecordCount': 0};
       }
       await marvelRequest?.future;
@@ -248,8 +250,7 @@ void main() {
     verifyActiveServerUnused();
   });
 
-  test('a pending collection cannot reappear after multi-server is switched off', () async {
-    await prefs.set(UserPreferences.enableMultiServerLibraries, true);
+  Future<HomeSectionConfig> deferMarvel() async {
     final marvel = prefs.homeSectionsConfig.singleWhere((c) => c.isPluginDynamic);
     await prefs.setHomeSectionsConfig([
       for (final cfg in prefs.homeSectionsConfig.where((c) => c.isBuiltin)) cfg,
@@ -257,6 +258,19 @@ void main() {
         marvel.copyWith(pluginAdditionalData: 'collection-$i', order: i),
       marvel.copyWith(order: 8),
     ]);
+    return marvel;
+  }
+
+  Future<void> switchLibraryUser() async {
+    final previous = (await multiServer.getLoggedInServers()).single;
+    when(() => multiServer.getLoggedInServers()).thenAnswer((_) async => [
+      ServerUserSession(server: previous.server, userId: 'new-user', client: previous.client),
+    ]);
+  }
+
+  test('a pending collection cannot reappear after multi-server is switched off', () async {
+    await prefs.set(UserPreferences.enableMultiServerLibraries, true);
+    final marvel = await deferMarvel();
     final vm = model(cloud: true);
     await vm.load();
     final pending = vm.rows.singleWhere((r) => r.id == marvel.stableId);
@@ -270,5 +284,53 @@ void main() {
     marvelRequest!.complete();
     await pumpEventQueue();
     expect(vm.rows.map((r) => r.id), ['liveTv']);
+  });
+
+  test('a deferred collection empty for one viewer can load for another', () async {
+    await prefs.set(UserPreferences.enableMultiServerLibraries, true);
+    final marvel = await deferMarvel();
+    final vm = model(cloud: true);
+    marvelEmpty = true;
+    await vm.load();
+    vm.loadSectionsNear(vm.rows.where((r) => r.id == marvel.stableId));
+    await pumpEventQueue();
+    expect(vm.rows.map((r) => r.id), isNot(contains(marvel.stableId)));
+
+    await switchLibraryUser();
+    marvelEmpty = false;
+    await vm.refresh();
+    final placeholder = vm.rows.singleWhere((r) => r.id == marvel.stableId);
+    expect(placeholder.isLoading, isTrue);
+    vm.loadSectionsNear([placeholder]);
+    await pumpEventQueue();
+    expect(vm.rows.singleWhere((r) => r.id == marvel.stableId).items.single.id, 'iron-man');
+  });
+
+  test('a new viewer gets a fresh merged resume while the old request is pending', () async {
+    await prefs.set(UserPreferences.enableMultiServerLibraries, true);
+    await prefs.set(UserPreferences.mergeContinueWatchingNextUp, true);
+    await prefs.setHomeSectionsConfig([
+      for (final cfg in HomeSectionConfig.defaults())
+        cfg.copyWith(enabled: cfg.type == HomeSectionType.resume),
+    ]);
+    HomeRow resume(String id) => HomeRow(
+      id: 'resume', title: 'Continue Watching', rowType: HomeRowType.resume,
+      items: [AggregatedItem(id: id, serverId: 'other-id', rawData: {'Type': 'Movie'})],
+    );
+    final old = Completer<HomeRow>();
+    when(() => multiServer.getAggregatedResume()).thenAnswer((_) => old.future);
+    when(() => multiServer.getAggregatedNextUp()).thenAnswer((_) async =>
+        const HomeRow(id: 'nextUp', title: 'Next Up', rowType: HomeRowType.nextUp));
+    final vm = model(cloud: true);
+    await vm.load();
+    await switchLibraryUser();
+    when(() => multiServer.getAggregatedResume()).thenAnswer((_) async => resume('new'));
+    await vm.refresh();
+    await pumpEventQueue();
+    String visibleMovie() => vm.rows.singleWhere((r) => r.id == 'resume').items.single.id;
+    expect(visibleMovie(), 'new');
+    old.complete(resume('old'));
+    await pumpEventQueue();
+    expect(visibleMovie(), 'new');
   });
 }

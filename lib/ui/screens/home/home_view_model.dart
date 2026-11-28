@@ -203,6 +203,7 @@ class HomeViewModel extends ChangeNotifier {
 
   // Cloud Home can reuse cached library rows only for the same signed-in accounts.
   Map<String, String> _cloudLibraryUsers = const {};
+  int _cloudLibraryGeneration = 0;
   bool get _hasCloudHomeLibrary =>
       _multiServerEnabled && _cloudLibraryUsers.isNotEmpty;
 
@@ -481,6 +482,9 @@ class HomeViewModel extends ChangeNotifier {
         final previousUsers = _cloudLibraryUsers;
         await _resolveOtherServerRows(_prefs.activeHomeSectionConfigs);
         if (!mapEquals(previousUsers, _cloudLibraryUsers)) {
+          _cloudLibraryGeneration++;
+          _bgMergeInFlight = false;
+          _emptySectionIds.clear();
           _rows = [];
           newSectionsOnly = false;
         }
@@ -2836,7 +2840,10 @@ class HomeViewModel extends ChangeNotifier {
   }
 
   Future<void> _loadResumeAndNextUpInBackground() {
-    if (_bgMergeInFlight) return Future<void>.value();
+    if (_bgMergeInFlight || (_cloudOnlyPlex && !_hasCloudHomeLibrary)) {
+      return Future<void>.value();
+    }
+    final libraryGeneration = _cloudLibraryGeneration;
     _bgMergeInFlight = true;
     return _bgMerge = () async {
       try {
@@ -2853,7 +2860,10 @@ class HomeViewModel extends ChangeNotifier {
             'next up',
             () => _multiServerRepo.getAggregatedNextUp(),
           );
-          _applyMergedResumeRows(await resumeFuture, await nextUpFuture);
+          final resume = await resumeFuture;
+          final nextUp = await nextUpFuture;
+          if (_disposed || libraryGeneration != _cloudLibraryGeneration) return;
+          _applyMergedResumeRows(resume, nextUp);
         } else {
           final resumeFuture = _loadRowOrNull(
             'resume',
@@ -2868,7 +2878,9 @@ class HomeViewModel extends ChangeNotifier {
       } catch (e) {
         debugPrint('[Home] Merged resume and next up load failed: $e');
       } finally {
-        _bgMergeInFlight = false;
+        if (libraryGeneration == _cloudLibraryGeneration) {
+          _bgMergeInFlight = false;
+        }
       }
     }();
   }
