@@ -152,11 +152,11 @@ class LiveTvGuideScreen extends StatefulWidget {
 /// most one is held. It is superseded by the next navigation key and cancelled
 /// outright by anything that invalidates the destination.
 class _PendingVerticalMove {
-  final int targetRowIndex;
+  final String channelId;
   final DateTime anchorTime;
 
   const _PendingVerticalMove({
-    required this.targetRowIndex,
+    required this.channelId,
     required this.anchorTime,
   });
 }
@@ -726,6 +726,8 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   void _rebindSelectionAfterLineupChange() {
+    // Let an unfinished page move reach the station the viewer chose.
+    if (_pendingVerticalMove != null) return;
     final selection = _selection;
     final channels = _vm.filteredChannels;
     if (selection == null || channels.isEmpty) return;
@@ -3086,12 +3088,6 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     loadState: _vm.loadStateFor(channelId),
   );
 
-  List<GuideCell> _cellsForRow(int rowIndex) {
-    final channels = _vm.filteredChannels;
-    if (rowIndex < 0 || rowIndex >= channels.length) return const [];
-    return _cellsForChannel(channels[rowIndex].id);
-  }
-
   /// True while a row's cells are nothing but the placeholder the loading
   /// state produces, so there is no real cell to land on yet.
   static bool _cellsAreLoading(List<GuideCell> cells) =>
@@ -3130,14 +3126,16 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     final selection = _selection;
     if (selection == null) return;
     final target = fromRowIndex + delta;
-    if (target < 0 || target >= _vm.filteredChannels.length) return;
-    final cells = _cellsForRow(target);
+    final channels = _vm.filteredChannels;
+    if (target < 0 || target >= channels.length) return;
+    final channelId = channels[target].id;
+    final cells = _cellsForChannel(channelId);
     if (cells.isEmpty) return;
 
     final rowState = _rowStates[target];
     if (rowState == null || _cellsAreLoading(cells)) {
       _pendingVerticalMove = _PendingVerticalMove(
-        targetRowIndex: target,
+        channelId: channelId,
         anchorTime: selection.anchorTime,
       );
       return;
@@ -3154,10 +3152,19 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     // the meantime. The move is theirs to finish when they come back, not
     // something to take the remote for now.
     if (!_mayTakeFocus) return;
-    final cells = _cellsForRow(pending.targetRowIndex);
+    final index = _vm.filteredChannels.indexWhere((channel) => channel.id == pending.channelId);
+    if (index < 0) {
+      _cancelPendingVerticalMove();
+      _rebindSelectionAfterLineupChange();
+      return;
+    }
+    final cells = _cellsForChannel(pending.channelId);
     if (cells.isEmpty || _cellsAreLoading(cells)) return;
-    final rowState = _rowStates[pending.targetRowIndex];
-    if (rowState == null) return;
+    final rowState = _rowStates[index];
+    if (rowState == null) {
+      _scrollToRow(index, animate: false);
+      return;
+    }
 
     _pendingVerticalMove = null;
     rowState.focusCellAt(resolveCellIndexAt(cells, pending.anchorTime));

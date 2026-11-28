@@ -956,6 +956,47 @@ void main() {
     });
   }
 
+  testWidgets('paging the program grid keeps its target station when a Sports retry inserts a row', (tester) async {
+    useTvLayout();
+    channelCount = 48;
+    stubGroups(const ChannelGroupLineup({}, programmeCategories: {'sports'}));
+    Completer<void>? retry;
+    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
+      final ids = (inv.namedArguments[#channelIds] as List).cast<String>();
+      final sports = inv.namedArguments[#isSports] == true;
+      if (sports && retry != null) await retry.future;
+      final missing = sports && retry == null && ids.contains('ch0');
+      return {
+        'Items': [for (final id in ids)
+          if (!missing || id != 'ch0') ..._programsFor(id, sports: true)],
+        if (missing) 'FailedChannelIds': ['ch0'],
+      };
+    });
+    await pumpGuide(tester, surface: const Size(1920, 1080));
+    final vm = guideModel(tester)..setFilter(GuideFilter.sports);
+    await _pumpFrames(tester);
+    expect(vm.filteredChannels.first.id, 'ch1');
+    retry = Completer<void>();
+    await tester.tap(find.text('Some listings failed to load. Retry'));
+    await _pumpFrames(tester);
+    expect(vm.retryingCategoryListings, isTrue);
+    await focusGuideNode(tester, 'GuideProgramRow0:0');
+    await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
+    await tester.pump();
+    // The first page is mounted. The second is still scrolling into view.
+    final pageRows = _focusedCell()!.row;
+    expect(pageRows, greaterThan(0));
+    final targetId = vm.filteredChannels[2 * pageRows].id;
+    await tester.sendKeyEvent(LogicalKeyboardKey.mediaFastForward);
+    await tester.pump();
+    expect(_focusedCell()!.row, pageRows, reason: 'the second page is still offscreen');
+    retry.complete();
+    await _pumpFrames(tester);
+    expect(vm.filteredChannels.first.id, 'ch0');
+    final focused = _focusedCell();
+    expect(focused == null ? _focusedLabel() : vm.filteredChannels[focused.row].id, targetId);
+  });
+
   testWidgets('category Retry retains focus when paging completes', (tester) async {
     useTvLayout();
     channelCount = 2;
