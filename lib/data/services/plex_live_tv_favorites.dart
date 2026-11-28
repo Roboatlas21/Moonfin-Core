@@ -233,7 +233,7 @@ class PlexLiveTvFavorites {
         _unpersisted[userId] = (session: userDataSync.session, keys: favorites);
         _lastRefresh.remove(userId);
       }
-      _publishCached(client, token);
+      _publishCached(client, token, serverObservation: true);
       if (!setEquals(previous, favorites)) {
         favoriteListChanged.value = (userId: userId, revision: ++_favoriteListRevision);
       }
@@ -255,7 +255,11 @@ class PlexLiveTvFavorites {
     _publishCached(client, _account(client).token);
   }
 
-  static bool _publishCached(MediaServerClient client, String token) {
+  static bool _publishCached(
+    MediaServerClient client,
+    String token, {
+    bool serverObservation = false,
+  }) {
     _checkAccount(client, token);
     final userId = client.userId!;
     final favorites = _cachedKeys(userId)!.toSet();
@@ -268,10 +272,12 @@ class PlexLiveTvFavorites {
     final changed = changes.entries.any(
       (entry) => userDataSync.favoriteFor(entry.key) != entry.value['IsFavorite'],
     );
-    for (final entry in changes.entries) {
-      userDataSync.observeFavoriteWhilePending(
-        entry.key, entry.value['IsFavorite'] as bool,
-      );
+    if (serverObservation) {
+      for (final entry in changes.entries) {
+        userDataSync.observeFavoriteWhilePending(
+          entry.key, entry.value['IsFavorite'] as bool,
+        );
+      }
     }
     userDataSync.publishAll(changes);
     return changed;

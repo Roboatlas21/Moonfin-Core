@@ -1066,6 +1066,8 @@ void main() {
       }
     }));
     final api = PlexLiveTvApi(dio, now: () => now);
+    final before = await api.getRecommendedPrograms(limit: 1);
+    expect(before['Items'].map((row) => row['ChannelId']), [tuner]);
     final response = api.getRecommendedPrograms(limit: 2);
     await entered.future;
     now = start.add(const Duration(seconds: 1));

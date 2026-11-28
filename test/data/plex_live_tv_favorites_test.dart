@@ -603,6 +603,25 @@ void main() {
     expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
   });
 
+  test('replaying a cached heart cannot confirm a queued favorite edit', () async {
+    final client = _plex();
+    const id = 'channel-plex-free123';
+    PlexLiveTvFavorites.applyToItem(client, _channel);
+    cloud.rows = [{'source': _source, 'id': 'free123'}];
+    await PlexLiveTvFavorites.refresh(client);
+    cloud.rows = [];
+    cloud.getError = 503;
+
+    final mutations = ItemMutationRepository(client);
+    final remove = mutations.setFavorite(id, isFavorite: false);
+    final add = mutations.setFavorite(id, isFavorite: true);
+    final failedRemove = expectLater(remove, throwsA(isA<DioException>()));
+    final failedAdd = expectLater(add, throwsA(isA<DioException>()));
+    await PlexLiveTvFavorites.refreshForBrowse(client);
+    await Future.wait([failedRemove, failedAdd]);
+    expect(cloud.requests.map((request) => request.method), ['GET', 'GET']);
+  });
+
   group('two DVRs with channel 4', () {
     late PlexMediaServerClient first, second;
     late Map<String, dynamic> a, b;
