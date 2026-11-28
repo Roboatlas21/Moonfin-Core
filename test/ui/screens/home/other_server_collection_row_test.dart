@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
@@ -53,6 +55,7 @@ void main() {
   late _DataSource source;
   late _ItemsApi otherItems;
   late _MultiServer multiServer;
+  Completer<void>? marvelRequest;
 
   setUpAll(
     () => registerFallbackValue(HomeSectionPluginSource.collections),
@@ -87,9 +90,10 @@ void main() {
 
     source = _DataSource();
     otherItems = _ItemsApi();
+    marvelRequest = null;
     when(
       () => otherItems.getItems(
-        parentId: 'marvel',
+        parentId: any(named: 'parentId'),
         sortBy: any(named: 'sortBy'),
         sortOrder: any(named: 'sortOrder'),
         recursive: any(named: 'recursive'),
@@ -99,14 +103,18 @@ void main() {
         enableImageTypes: any(named: 'enableImageTypes'),
         imageTypeLimit: any(named: 'imageTypeLimit'),
       ),
-    ).thenAnswer(
-      (_) async => {
+    ).thenAnswer((call) async {
+      if (call.namedArguments[#parentId] != 'marvel') {
+        return {'Items': [], 'TotalRecordCount': 0};
+      }
+      await marvelRequest?.future;
+      return {
         'Items': [
           {'Id': 'iron-man', 'Name': 'Iron Man', 'Type': 'Movie'},
         ],
         'TotalRecordCount': 1,
-      },
-    );
+      };
+    });
     final otherClient = _Client();
     when(() => otherClient.serverType).thenReturn(ServerType.jellyfin);
     when(() => otherClient.baseUrl).thenReturn('http://other');
@@ -238,5 +246,29 @@ void main() {
     verifyNever(() => vm.mediaBarViewModel.load(force: any(named: 'force')));
     verifyNever(() => source.loadResume(any()));
     verifyActiveServerUnused();
+  });
+
+  test('a pending collection cannot reappear after multi-server is switched off', () async {
+    await prefs.set(UserPreferences.enableMultiServerLibraries, true);
+    final marvel = prefs.homeSectionsConfig.singleWhere((c) => c.isPluginDynamic);
+    await prefs.setHomeSectionsConfig([
+      for (final cfg in prefs.homeSectionsConfig.where((c) => c.isBuiltin)) cfg,
+      for (var i = 0; i < 8; i++)
+        marvel.copyWith(pluginAdditionalData: 'collection-$i', order: i),
+      marvel.copyWith(order: 8),
+    ]);
+    final vm = model(cloud: true);
+    await vm.load();
+    final pending = vm.rows.singleWhere((r) => r.id == marvel.stableId);
+    expect(pending.isLoading, isTrue);
+    marvelRequest = Completer<void>();
+    vm.loadSectionsNear([pending]);
+    await pumpEventQueue();
+    await prefs.set(UserPreferences.enableMultiServerLibraries, false);
+    await vm.refresh();
+    expect(vm.rows.map((r) => r.id), ['liveTv']);
+    marvelRequest!.complete();
+    await pumpEventQueue();
+    expect(vm.rows.map((r) => r.id), ['liveTv']);
   });
 }

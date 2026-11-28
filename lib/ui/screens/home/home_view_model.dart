@@ -125,6 +125,7 @@ class HomeViewModel extends ChangeNotifier {
   Future<void>? _returnCloudFavorites;
   bool _liveTvFavoritesReloadPending = false;
   int _homeLoadGeneration = 0;
+  int _lastFullHomeLoadGeneration = 0;
   Future<void> _bgMerge = Future<void>.value();
   bool _bgMergeInFlight = false;
   bool _bgResumeRefreshInFlight = false;
@@ -469,7 +470,7 @@ class HomeViewModel extends ChangeNotifier {
     }
     newSectionsOnly = newSectionsOnly && _rows.isNotEmpty;
     if (newSectionsOnly) preserveExisting = true;
-    _homeLoadGeneration++;
+    final generation = ++_homeLoadGeneration;
     _isLoading = true;
     final done = Completer<void>();
     _loadDone = done.future;
@@ -485,6 +486,7 @@ class HomeViewModel extends ChangeNotifier {
         }
       }
       if (!newSectionsOnly) {
+        _lastFullHomeLoadGeneration = generation;
         _rowOffsets.clear();
         _multiServerRepo.clearOffsets();
         _rowsPagedThisLoad.clear();
@@ -724,6 +726,13 @@ class HomeViewModel extends ChangeNotifier {
           } else {
             sectionRows = const <HomeRow>[];
           }
+        }
+        // A deferred collection can finish after its server was switched off
+        // or its viewer changed. Its saved section is still enabled then.
+        if (_cloudOnlyPlex &&
+            cfg.isPluginDynamic &&
+            (!_hasCloudHomeLibrary || generation < _lastFullHomeLoadGeneration)) {
+          return;
         }
         final currentConfigs = _prefs.activeHomeSectionConfigs;
         final isStillActive =
