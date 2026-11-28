@@ -1770,7 +1770,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     _pendingChannelRebindId = null;
     // Clear channel search before browsing groups; the picker has its own search.
     _clearChannelSearch();
-    var closedWithRight = false;
+    var closedWithArrow = false;
     setState(() => _pickerOpen = true);
     final choice = await showGeneralDialog<GuideFilterChoice>(
       context: context,
@@ -1783,7 +1783,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           includeCategories: _categoryDisplay == LiveTvCategoryDisplay.both,
           filterLabel: (filter) => _filterLabel(filter, l10n),
           sidePanel: panel,
-          onRightClose: () => closedWithRight = true,
+          onDirectionalClose: () => closedWithArrow = true,
         );
         return panel
             ? Align(
@@ -1800,7 +1800,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (!mounted) return;
     setState(() => _pickerOpen = false);
     if (choice == null || !_usesPicker) {
-      if (closedWithRight || previousChannelId != null) {
+      if (closedWithArrow || previousChannelId != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!_mayTakeFocus) return;
           final rows = _vm.filteredChannels;
@@ -1944,7 +1944,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     List<GuideFilterChoice> choices,
     int index,
   ) {
-    if (event.isActionable && event.logicalKey.isRightKey) {
+    if (!event.isActionable) return KeyEventResult.ignored;
+    final direction = Directionality.of(context);
+    if (event.logicalKey.isTowardEnd(direction)) {
       _pendingPickerRestore = null;
       if (!PlatformDetection.isTV) {
         _channelSearchFocus.requestFocus();
@@ -1956,8 +1958,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       target.requestFocus();
       return KeyEventResult.handled;
     }
-    if (!event.isActionable) return KeyEventResult.ignored;
-    if (event.logicalKey.isLeftKey && PlatformDetection.isTV) {
+    if (event.logicalKey.isTowardStart(direction) && PlatformDetection.isTV) {
       if (index < 0) {
         unawaited(_openFilterPicker());
         return KeyEventResult.handled;
@@ -2149,7 +2150,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       onChanged: _searchChannels,
       onTvKeyEvent: (_, event) {
         if (!event.isActionable) return KeyEventResult.ignored;
-        if (event.logicalKey.isLeftKey) {
+        if (event.logicalKey.isTowardStart(Directionality.of(context))) {
           if (_usesPicker) {
             return _focusShortcutOrBrowse(_shortcuts.lastOrNull);
           }
@@ -3585,6 +3586,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   Widget _buildProgramRow(String channelId, int rowIndex) {
     return _GuideProgramRow(
+      now: widget.now,
       cells: _cellsForChannel(channelId),
       rowIndex: rowIndex,
       rowStates: _rowStates,
@@ -4262,6 +4264,7 @@ class _GuideFocusableSurfaceState extends State<_GuideFocusableSurface> {
 }
 
 class _GuideProgramRow extends StatefulWidget {
+  final DateTime Function() now;
   final List<GuideCell> cells;
   final int rowIndex;
 
@@ -4301,6 +4304,7 @@ class _GuideProgramRow extends StatefulWidget {
   final String noProgramDataLabel;
 
   const _GuideProgramRow({
+    required this.now,
     required this.cells,
     required this.rowIndex,
     required this.rowStates,
@@ -4509,7 +4513,7 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
+    final now = widget.now();
 
     return Container(
       decoration: BoxDecoration(

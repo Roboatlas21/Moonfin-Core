@@ -1365,9 +1365,8 @@ void main() {
       await vm.retryFailedCategoryListings();
       final recovered = vm.programsForChannel('c250').single.id;
       final countAfterRecovery = requestsForLast;
-      while (vm.hasMorePrograms) {
-        await vm.loadMorePrograms();
-      }
+      await vm.loadMorePrograms();
+      expect(vm.hasMorePrograms, isFalse);
       expect(requestsForLast, countAfterRecovery);
       expect(vm.programsForChannel('c250').single.id, recovered);
     });

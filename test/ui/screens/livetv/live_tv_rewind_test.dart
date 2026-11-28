@@ -22,6 +22,7 @@ import 'package:moonfin/playback/native_apple_player_backend.dart';
 import 'package:moonfin/preference/preference_constants.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:moonfin/ui/navigation/destinations.dart';
+import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_channel_cell.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_player_screen.dart';
 import 'package:moonfin/ui/screens/playback/appletv_livetv_player_host_screen.dart';
@@ -34,6 +35,8 @@ class _Client extends Mock implements MediaServerClient {}
 class _Factory extends Mock implements MediaServerClientFactory {}
 
 class _LiveTvApi extends Mock implements LiveTvApi {}
+
+class _GroupedLiveTvApi extends _LiveTvApi implements ChannelGroupApi {}
 
 class _UserLibraryApi extends Mock implements UserLibraryApi {}
 
@@ -149,7 +152,7 @@ class _Manager extends PlaybackManager {
           itemId: id,
         ),
       );
-    state.setPlaying(true);
+    state.setPlaying(id != failedChannel);
   }
 
   @override
@@ -379,6 +382,16 @@ void main() {
   });
 
   testWidgets('native guide shares the starting tune and adopts the selected lineup after Retry', (tester) async {
+    const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
+    final api = _GroupedLiveTvApi();
+    when(() => GetIt.instance<MediaServerClient>().liveTvApi).thenReturn(api);
+    when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => ChannelGroupLineup(
+      {ard.id: {'Sports'}},
+      channels: [
+        for (final channel in [ard, zdf, third])
+          {'Id': channel.id, 'Name': channel.name, 'UserData': {'IsFavorite': channel.id != ard.id}},
+      ],
+    ));
     final metadata = prepareNativePlayer(tester);
     const favorites = (GuideFilter.favorites, null);
     Future<void> pumpHost(List<GuideChannel> channels) => pumpNativeHost(tester, channels);
@@ -390,30 +403,31 @@ void main() {
       await send({'event': 'openGuide'});
       await tester.pumpAndSettle();
     }
-    Future<void> leaveGuide([String? id]) async {
-      Navigator.of(tester.element(guide)).pop(id);
+    Future<void> selectStation(GuideChannel channel) async {
+      await tester.tap(find.byWidgetPredicate((w) => w is EpgChannelCell && w.name == channel.name));
+      await tester.pumpAndSettle();
+      expect(guide, findsNothing);
+    }
+    Future<void> leaveGuide() async {
+      Navigator.of(tester.element(guide)).pop();
       await tester.pumpAndSettle();
     }
     await pumpHost([ard, zdf]);
     expect(manager.playedServerId, 'plex-cloud-viewer');
     await openGuide();
     expect(tester.widget<LiveTvGuideScreen>(guide).initialFilter, sports);
-    tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(
-      ard.id, (channels: const [ard], filter: sports),
-    );
-    await leaveGuide(ard.id);
+    await selectStation(ard);
     manager.failedChannel = null;
     manager.failedTune!.complete();
     await tester.pumpAndSettle();
     expect(manager.playedChannelIds, [ard.id]);
 
     await openGuide();
-    const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
-    tester.widget<LiveTvGuideScreen>(guide).onChannelSelected!(
-      zdf.id, (channels: const [zdf, third], filter: favorites),
-    );
+    final vm = (tester.state(guide) as dynamic).debugGuideViewModel as LiveTvGuideViewModel;
+    vm.setFilter(GuideFilter.favorites);
+    await tester.pumpAndSettle();
     manager.failedChannel = zdf.id;
-    await leaveGuide(zdf.id);
+    await selectStation(zdf);
     await pumpHost([zdf, ard]);
     manager.failedChannel = null;
     await send({'event': 'messageAction'});

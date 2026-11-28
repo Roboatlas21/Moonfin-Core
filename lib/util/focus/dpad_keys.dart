@@ -54,6 +54,10 @@ extension DpadKeyExtension on LogicalKeyboardKey {
   bool get isDownKey => this == LogicalKeyboardKey.arrowDown;
   bool get isLeftKey => this == LogicalKeyboardKey.arrowLeft;
   bool get isRightKey => this == LogicalKeyboardKey.arrowRight;
+  bool isTowardStart(TextDirection direction) =>
+      direction == TextDirection.ltr ? isLeftKey : isRightKey;
+  bool isTowardEnd(TextDirection direction) =>
+      direction == TextDirection.ltr ? isRightKey : isLeftKey;
   bool get isSelectKey => _selectKeys.contains(this);
   bool get isBackKey => _backKeys.contains(this);
   bool get isContextMenuKey => _contextMenuKeys.contains(this);

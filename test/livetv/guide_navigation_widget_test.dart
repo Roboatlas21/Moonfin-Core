@@ -20,6 +20,7 @@ import 'package:moonfin/ui/screens/livetv/guide/guide_filter_picker.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_filter_rail.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_channel_cell.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_now_next_card.dart';
+import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_program_cell.dart';
 import 'package:moonfin/ui/screens/livetv/epg/widgets/epg_hero_preview.dart';
 import 'package:moonfin/ui/screens/livetv/guide/guide_window.dart';
 import 'package:moonfin/ui/screens/livetv/guide/guide_layout_profile.dart';
@@ -287,6 +288,7 @@ void main() {
     List<NavigatorObserver> observers = const [],
     LiveTvGuideBackController? backController,
     DateTime Function() now = DateTime.now,
+    Locale? locale,
   }) async {
     // Wide enough for a multi-hour window and tall enough for a dozen rows.
     // The guide sizes its own time density to whatever surface it is given.
@@ -297,6 +299,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         navigatorObservers: observers,
+        locale: locale,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         // Embedded mode drops the guide's own Scaffold because the host
@@ -650,6 +653,16 @@ void main() {
     final date = MaterialLocalizations.of(context).formatMediumDate(start);
     expect(find.text(AppLocalizations.of(context).guideWindowLoadFailed(date)), findsOneWidget);
     expect(vm.windowStart, start);
+  });
+
+  testWidgets('the grid marks the program airing at the Guide time as live', (tester) async {
+    final now = DateTime(2026, 9, 11, 10, 10);
+    _fixtureWindowStart = guideLeftEdge(now);
+    await pumpGuide(tester, now: () => now);
+    final cell = tester.widgetList<EpgProgramCell>(find.byType(EpgProgramCell))
+        .firstWhere((cell) => cell.title == 'ch0 show 0');
+    expect(cell.isLive, isTrue);
+    expect(cell.isPast, isFalse);
   });
 
   for (final reloadDuringRequest in [false, true]) {
@@ -1418,6 +1431,7 @@ void main() {
   }
 
   testWidgets('browsing down the guide and back up keeps the same time in view', (tester) async {
+    useTvLayout();
     await pumpGuide(tester);
     final anchor = await establishAnchor(tester);
     final offset = _horizontalOffsets(tester);
@@ -1441,6 +1455,7 @@ void main() {
   /// the last loaded row (49), and leaves row 50's request outstanding.
   /// Returns the anchor's offset in minutes from the window start.
   Future<int> reachLoadedEdge(WidgetTester tester) async {
+    useTvLayout();
     channelCount = _deferredChannelCount;
     deferredChannelId = _firstDeferredChannelId;
 
@@ -1512,6 +1527,23 @@ void main() {
       }
     });
   }
+
+  testWidgets('TV arrows follow the visible Hebrew Browse header', (tester) async {
+    useTvLayout();
+    await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);
+    stubGroups(const ChannelGroupLineup({'ch0': {'Sports'}}));
+    await pumpGuide(tester, surface: const Size(1280, 720), locale: const Locale('he'));
+    await focusGuideNode(tester, 'GuideBrowse');
+    const favorite = 'GuideShortcut:category:favorites';
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowLeft, favorite);
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowLeft, 'GuideSearch');
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowRight, favorite);
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowRight, 'GuideBrowse');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+    expect(picker, findsOneWidget);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+    expect(picker, findsNothing);
+  });
 
   for (final action in ['wait', 'move up', 'open details']) {
     testWidgets('a loading row respects the viewer’s next action: $action', (tester) async {

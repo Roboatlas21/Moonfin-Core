@@ -22,14 +22,14 @@ class GuideFilterPicker extends StatefulWidget {
     required this.includeCategories,
     required this.filterLabel,
     required this.sidePanel,
-    this.onRightClose,
+    this.onDirectionalClose,
   });
 
   final LiveTvGuideViewModel vm;
   final bool includeCategories;
   final String Function(GuideFilter) filterLabel;
   final bool sidePanel;
-  final VoidCallback? onRightClose;
+  final VoidCallback? onDirectionalClose;
 
   @override
   State<GuideFilterPicker> createState() => _GuideFilterPickerState();
@@ -173,6 +173,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final direction = Directionality.of(context);
     final keyboard = MediaQuery.viewInsetsOf(context).bottom;
     final compact =
         !widget.sidePanel &&
@@ -228,8 +229,8 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
         if (widget.sidePanel &&
             (PlatformDetection.isTV || !_searchFocus.hasFocus) &&
             event is KeyDownEvent &&
-            event.logicalKey.isRightKey) {
-          widget.onRightClose?.call();
+            event.logicalKey.isTowardEnd(direction)) {
+          widget.onDirectionalClose?.call();
           Navigator.of(context).pop();
           return KeyEventResult.handled;
         }
@@ -372,7 +373,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                       spacing: 16,
                       children: [
                         _remoteHint(l10n.ok, l10n.select),
-                        if (widget.sidePanel) _remoteHint('→', l10n.close),
+                        if (widget.sidePanel) _remoteHint(direction == TextDirection.ltr ? '→' : '←', l10n.close),
                       ],
                     ),
                   ),
