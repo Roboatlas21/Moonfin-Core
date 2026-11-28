@@ -324,6 +324,19 @@ void main() {
     await _pumpFrames(tester);
   }
 
+  Future<void> pumpRoutedGuide(WidgetTester tester, Size size, GoRouter router) async {
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      routerConfig: router,
+    ));
+    await _pumpFrames(tester);
+  }
+
   void stubGroups(ChannelGroupLineup lineup) =>
       when(() => liveTvApi.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
 
@@ -635,10 +648,19 @@ void main() {
       requestOptions: request,
       response: Response(requestOptions: request, statusCode: 403, data: {'message': reason}),
     ));
-    await pumpGuide(tester, surface: phone);
+    final router = GoRouter(routes: [
+      GoRoute(path: '/', builder: (_, _) => const LiveTvGuideScreen()),
+      GoRoute(path: Destinations.liveTvPlayer, builder: (_, state) {
+        final extra = state.extra as Map;
+        final channels = extra['channels'] as List<GuideChannel>;
+        return Text('Playing ${channels[extra['startIndex'] as int].id}');
+      }),
+    ]);
+    await pumpRoutedGuide(tester, phone, router);
     expect(find.textContaining(reason), findsOneWidget);
-    expect(find.text('Channel 0').hitTestable(), findsOneWidget);
     expect(find.text('Retry'), findsNothing);
+    await tapAndPump(tester, find.text('Channel 0'));
+    expect(find.text('Playing ch0'), findsOneWidget);
   });
 
   testWidgets('a failed same-day picker request names the selected date', (tester) async {
@@ -846,9 +868,6 @@ void main() {
     tester,
   ) async {
     useTvLayout();
-    tester.view.physicalSize = const Size(900, 700);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
     await GetIt.instance<UserPreferences>().set(
       UserPreferences.liveTvCategoryDisplay,
       LiveTvCategoryDisplay.both,
@@ -890,15 +909,7 @@ void main() {
         ),
       ],
     );
-    addTearDown(router.dispose);
-    await tester.pumpWidget(
-      MaterialApp.router(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        routerConfig: router,
-      ),
-    );
-    await _pumpFrames(tester);
+    await pumpRoutedGuide(tester, const Size(900, 700), router);
     await tapAndPump(tester, find.byTooltip('Filters'));
     await tapAndPump(tester, pickerOption('Local'));
     // The TV field's internal TextField is read-only outside its keyboard.
@@ -1293,6 +1304,7 @@ void main() {
         LogicalKeyboardKey.goBack,
         physicalKey: PhysicalKeyboardKey.escape,
       );
+      expect(handledKeyUp, isFalse);
       await _pumpFrames(tester);
       expect(picker, findsNothing);
       final popsBefore = observer.suppressed;
@@ -1306,8 +1318,8 @@ void main() {
     }
   });
 
-  for (final apiLevel in [32, 33]) {
-    testWidgets('Back dismisses the native search keyboard before the picker on API $apiLevel', (tester) async {
+  for (final (apiLevel, consumeRelease) in [(32, false), (32, true), (33, false), (33, true)]) {
+    testWidgets('Back dismisses the native search keyboard before the picker on API $apiLevel (handled release: $consumeRelease)', (tester) async {
       useTvLayout();
       final prefs = GetIt.instance<UserPreferences>();
       await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);
@@ -1318,7 +1330,9 @@ void main() {
       addTearDown(() => tester.binding.removeObserver(observer));
       addTearDown(DialogBackSuppressor.newBackPress);
       bool appKeyboardHandler(KeyEvent event) {
-        if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.goBack) return false;
+        if (event.logicalKey != LogicalKeyboardKey.goBack) return false;
+        if (event is KeyUpEvent) return consumeRelease;
+        if (event is! KeyDownEvent) return false;
         DialogBackSuppressor.newBackPress();
         return DialogBackSuppressor.handleAppKeyboardBack(event, isAndroid: true);
       }
@@ -1336,16 +1350,18 @@ void main() {
       Future<void> pressBack() async {
         const back = LogicalKeyboardKey.goBack;
         const physical = PhysicalKeyboardKey.escape;
+        final suppressed = observer.suppressed;
         await tester.sendKeyDownEvent(back, physicalKey: physical);
         await tester.sendKeyRepeatEvent(back, physicalKey: physical);
         final handledUp = await tester.sendKeyUpEvent(back, physicalKey: physical);
+        expect(handledUp, consumeRelease);
         await _pumpFrames(tester);
-        if (apiLevel >= 33 || !handledUp) {
-          final suppressed = observer.suppressed;
+        final sendsPopRoute = apiLevel >= 33 || !handledUp;
+        if (sendsPopRoute) {
           await tester.binding.handlePopRoute();
           await _pumpFrames(tester);
-          expect(observer.suppressed, suppressed + 1);
         }
+        expect(observer.suppressed, suppressed + (sendsPopRoute ? 1 : 0));
       }
 
       await pressBack();
