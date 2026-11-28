@@ -1021,10 +1021,16 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
             (dvr
                 ? error.requestOptions.path == '/livetv/dvrs'
                 : error.requestOptions.uri.path == '/lineups/plex/channels');
-        if (_accessDenied(error) && !(dvr && _tunerGridForbidden(error)) &&
-            !catalogForbidden) {
-          rethrow;
+        if (catalogForbidden && failedOnError.isNotEmpty) {
+          // A page containing only this source can still retry its channels.
+          return (
+            items: <Map<String, dynamic>>[],
+            failedChannelIds: failedOnError,
+            error: null,
+            stack: null,
+          );
         }
+        if (_accessDenied(error) && !(dvr && _tunerGridForbidden(error))) rethrow;
         return (
           items: <Map<String, dynamic>>[],
           failedChannelIds: failedOnError,

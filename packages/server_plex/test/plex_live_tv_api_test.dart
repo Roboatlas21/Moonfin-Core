@@ -754,8 +754,8 @@ void main() {
   for (final (path, denied, healthy, program) in [
     ('/tv.plex.providers.epg.xmltv:3/grid', [other], [tuner, free], 'airing-3-1792699380-9'),
     ('/grid', [free], [tuner, extra], 'airing-plex-1792699200-abc-66635fc0'),
-    ('/livetv/dvrs', [tuner, 'channel-2-9'], [free], null),
-    ('/lineups/plex/channels', [free, extra], [tuner], null),
+    ('/livetv/dvrs', [tuner, 'channel-2-9'], [free], 'airing-2-1792699380-4'),
+    ('/lineups/plex/channels', [free, extra], [tuner], 'airing-plex-1792699200-abc-66635fc0'),
   ]) {
     test('guide scopes a 403 from $path and propagates a 401', () async {
       final (dio, server) = _server(secondDvr: true);
@@ -779,17 +779,15 @@ void main() {
         expect((await api.testGuide([tuner])).containsKey('FailedChannelIds'), isFalse);
         expect(failedReads, before);
       }
-      if (program == null) {
-        if (path == '/lineups/plex/channels') {
-          expect(server.requests.where((r) => r.uri.path == '/grid'), isEmpty);
-        }
-        await expectLater(api.testGuide(denied), _httpError(403));
-      } else {
-        final partial = await api.testGuide(denied);
-        expect(partial['Items'], isEmpty);
-        expect(partial['FailedChannelIds'], denied);
-        await expectLater(api.getProgram(program), _httpError(403));
+      final partial = await api.testGuide(denied);
+      expect(partial['Items'], isEmpty);
+      expect(partial['FailedChannelIds'], unorderedEquals(denied));
+      if (path == '/lineups/plex/channels') {
+        expect(server.reads('/grid'), 0);
+        expect((await api.testGuide([tuner]))['Items'], isNotEmpty);
       }
+      if (path == '/livetv/dvrs') await expectLater(api.testGuide(), _httpError(403));
+      await expectLater(api.getProgram(program), _httpError(403));
       server.failureStatus = () => 401;
       if (path == '/livetv/dvrs') await expectLater(api.getChannelGroups(), _httpError(401));
       await expectLater(api.testGuide([...healthy, ...denied]), _httpError(401));
@@ -812,12 +810,10 @@ void main() {
         server.failureStatus = () => forbidden ? 403 : 503;
         return forbidden || path.endsWith('/grid');
       };
-      final result = PlexLiveTvApi(dio).testGuide(catalogDenied ? [tuner, free, extra] : [other, free]);
-      if (catalogDenied) {
-        await expectLater(result, _httpError(403));
-      } else {
-        expect((await result)['FailedChannelIds'], unorderedEquals([other, free]));
-      }
+      final channels = catalogDenied ? [tuner, free, extra] : [other, free];
+      final result = await PlexLiveTvApi(dio).testGuide(channels);
+      expect(result['Items'], isEmpty);
+      expect(result['FailedChannelIds'], unorderedEquals(channels));
     });
   }
 
