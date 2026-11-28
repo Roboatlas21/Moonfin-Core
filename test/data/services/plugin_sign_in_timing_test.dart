@@ -118,6 +118,7 @@ void main() {
   tearDown(() => GetIt.instance.reset());
 
   test('sign-in finishes without waiting on the settings stream', () async {
+    await prefs.set(UserPreferences.use24HourClock, false);
     await service
         .syncOnLogin(client, serverId: 'srv1')
         .timeout(const Duration(seconds: 2));
