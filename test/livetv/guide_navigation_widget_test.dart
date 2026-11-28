@@ -2113,6 +2113,39 @@ void main() {
     expect(vm.atLivePosition, isTrue);
   });
 
+  for (final recovers in [true, false]) {
+    testWidgets('Back after a failed live reset follows the resume result (recovered: $recovers)', (tester) async {
+      useTvLayout();
+      channelCount = 8;
+      await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvLastChannelId, 'ch3');
+      await openGuideRoute(tester);
+      final vm = guideModel(tester);
+      expect(await vm.setDate(DateUtils.addDaysToDate(vm.guideDate, -1)), isTrue);
+      await focusGuideNode(tester, 'GuideChannel:4');
+      guideFailure = TimeoutException('offline');
+      await tester.binding.handlePopRoute();
+      await _pumpFrames(tester);
+      expect(vm.atLivePosition, isFalse);
+
+      if (recovers) {
+        guideFailure = null;
+      } else {
+        when(() => _channelsRequest(liveTvApi)).thenThrow(StateError('offline'));
+      }
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await _pumpFrames(tester);
+      expect(vm.state, recovers ? GuideState.ready : GuideState.error);
+      if (recovers) {
+        expect(vm.atLivePosition, isTrue);
+        await focusGuideNode(tester, 'GuideChannel:4');
+      }
+      await back(tester);
+      expect(find.byType(LiveTvGuideScreen), recovers ? findsOneWidget : findsNothing);
+      if (recovers) expect(_focusedLabel(), 'GuideChannel:3');
+    });
+  }
+
   testWidgets('Back returns to live after the picker recovers from a failed live reset', (tester) async {
     useTvLayout();
     channelCount = 8;

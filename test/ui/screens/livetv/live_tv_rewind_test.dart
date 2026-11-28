@@ -29,6 +29,7 @@ import 'package:moonfin/ui/screens/livetv/live_tv_player_screen.dart';
 import 'package:moonfin/ui/screens/playback/appletv_livetv_player_host_screen.dart';
 import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
 import 'package:moonfin/ui/widgets/live_tv/channel_carousel.dart';
+import 'package:moonfin/ui/widgets/live_tv/channel_carousel_card.dart';
 import 'package:moonfin/util/platform_detection.dart';
 
 class _Client extends Mock implements MediaServerClient {}
@@ -597,6 +598,35 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
   }
+
+  testWidgets('a held arrow stops when the guide tune removes the highlighted station', (tester) async {
+    const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
+    const last = GuideChannel(id: 'last', name: 'Last', rawData: {});
+    manager.failedChannel = ard.id;
+    final starting = manager.failedTune = Completer<void>();
+    await pumpPlayer(tester, channels: const [ard, zdf, third]);
+    await tester.tap(find.byTooltip(l10n.guide));
+    await tester.pump();
+    final guide = tester.widget<LiveTvGuideScreen>(find.byType(LiveTvGuideScreen));
+    guide.onChannelSelected!(ard.id, (channels: const [third, ard, last], filter: sports));
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.arrowUp);
+    await tester.pump(const Duration(milliseconds: 200));
+    String? centered() => tester.widget<ChannelCarouselCard>(
+      find.byWidgetPredicate((widget) => widget is ChannelCarouselCard && widget.centered),
+    ).channelName;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pump();
+    expect(centered(), zdf.name);
+    manager.failedChannel = null;
+    starting.complete();
+    await tester.pump();
+    expect(centered(), ard.name);
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowRight);
+    expect(centered(), ard.name);
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('a favorite update during a guide tune changes the next surfing station', (tester) async {
     const third = GuideChannel(

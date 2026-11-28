@@ -352,11 +352,15 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   Future<void> _resumeGuide(DateTime now) async {
+    final liveStart = guideLeftEdge(now);
     await _vm.reloadIfStale(
       window: _layoutProfile.guideWindow,
-      windowStart: guideLeftEdge(now),
+      windowStart: liveStart,
     );
     if (!mounted) return;
+    if (_vm.state == GuideState.ready && _vm.atLivePosition && _vm.windowStart == liveStart) {
+      _failedLiveReset = false;
+    }
     _vm.scheduleBoundaryRefresh();
     await _vm.refreshAtQuarterHour();
   }
