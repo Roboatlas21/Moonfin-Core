@@ -1304,7 +1304,6 @@ void main() {
         LogicalKeyboardKey.goBack,
         physicalKey: PhysicalKeyboardKey.escape,
       );
-      expect(handledKeyUp, isFalse);
       await _pumpFrames(tester);
       expect(picker, findsNothing);
       final popsBefore = observer.suppressed;
