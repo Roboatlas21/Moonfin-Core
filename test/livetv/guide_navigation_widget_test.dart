@@ -10,6 +10,9 @@ import 'package:go_router/go_router.dart';
 import 'package:jellyfin_preference/jellyfin_preference.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:playback_core/playback_core.dart';
+import 'package:moonfin/app.dart' show GlobalShortcutScope;
+import 'package:moonfin/data/services/access_schedule_service.dart';
+import 'package:moonfin/ui/screensaver/screensaver_controller.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/l10n/app_localizations.dart';
@@ -52,6 +55,13 @@ class _MockLiveTvApi extends Mock implements LiveTvApi, ChannelGroupApi {}
 class _MockUserLibrary extends Mock implements UserLibraryApi {}
 
 class _MockPlaybackManager extends Mock implements PlaybackManager {}
+
+class _IdleScreensaver extends Mock implements ScreensaverController {
+  @override
+  final visible = ValueNotifier(false);
+  @override
+  bool handleKeyEvent(KeyEvent event) => false;
+}
 
 /// Deliberately asymmetric row shapes: differing program durations give the
 /// rows differing cell counts and boundaries, which is what makes a drifting
@@ -365,12 +375,13 @@ void main() {
   void useTvLayout() => useLayout(InterfaceLayout.tv);
 
   /// Open the guide through a host route so Back and focus restoration are real.
-  Future<void> openGuideRoute(WidgetTester tester) async {
+  Future<void> openGuideRoute(WidgetTester tester, {TransitionBuilder? builder}) async {
     tester.view.physicalSize = const Size(900, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
       MaterialApp(
+        builder: builder,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: Builder(
@@ -631,6 +642,42 @@ void main() {
       expect(vm.guideWindow, window);
     });
   }
+
+  testWidgets('Browse takes the focused filter’s place when a reload adds channel groups', (tester) async {
+    useTvLayout();
+    var now = DateTime(2026, 11, 28, 10);
+    await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.both);
+    stubGroups(const ChannelGroupLineup({}, programmeCategories: {'sports'}));
+    await pumpGuide(tester, now: () => now);
+    await focusGuideNode(tester, 'GuideFilter:${GuideFilter.sports.index}');
+    now = now.add(const Duration(hours: 2));
+    stubGroups(const ChannelGroupLineup({'ch0': {'Local'}}, programmeCategories: {'sports'}));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await _pumpFrames(tester);
+    expect(find.byType(EpgFilterRail), findsNothing);
+    expect(_focusedLabel(), 'GuideBrowse');
+  });
+
+  testWidgets('Left returns to the station when a future window loses listings access', (tester) async {
+    useTvLayout();
+    await pumpGuide(tester);
+    final vm = guideModel(tester);
+    await vm.setWindowStart(vm.windowEnd);
+    final futureStart = vm.windowStart;
+    final request = RequestOptions();
+    when(() => _guideRequest(liveTvApi)).thenThrow(DioException(
+      requestOptions: request, response: Response(requestOptions: request, statusCode: 403),
+    ));
+    await vm.recordingChanged();
+    await _pumpFrames(tester);
+    expect(vm.listingsAccessDenied, isTrue);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
+    expect(_focusedCell()?.row, 0);
+    await expectFocusAfter(tester, LogicalKeyboardKey.arrowLeft, 'GuideChannel:0');
+    expect(vm.windowStart, futureStart);
+  });
 
   testWidgets('choosing a date shows a notice when listings access is denied', (tester) async {
     final request = RequestOptions();
@@ -1388,16 +1435,18 @@ void main() {
       tester.binding.addObserver(observer);
       addTearDown(() => tester.binding.removeObserver(observer));
       addTearDown(DialogBackSuppressor.newBackPress);
-      bool appKeyboardHandler(KeyEvent event) {
-        if (event.logicalKey != LogicalKeyboardKey.goBack) return false;
-        if (event is KeyUpEvent) return consumeRelease;
-        if (event is! KeyDownEvent) return false;
-        DialogBackSuppressor.newBackPress();
-        return DialogBackSuppressor.handleAppKeyboardBack(event, isAndroid: true);
-      }
-      HardwareKeyboard.instance.addHandler(appKeyboardHandler);
-      addTearDown(() => HardwareKeyboard.instance.removeHandler(appKeyboardHandler));
-      await openGuideRoute(tester);
+      final screensaver = _IdleScreensaver();
+      GetIt.instance.registerSingleton<AccessScheduleService>(
+        AccessScheduleService(loadSchedules: (_) async => [], onBlocked: () async {}),
+        dispose: (service) => service.dispose(),
+      );
+      GetIt.instance.registerSingleton<ScreensaverController>(screensaver);
+      addTearDown(screensaver.visible.dispose);
+      bool handleRelease(KeyEvent event) =>
+          consumeRelease && event is KeyUpEvent && event.logicalKey == LogicalKeyboardKey.goBack;
+      HardwareKeyboard.instance.addHandler(handleRelease);
+      addTearDown(() => HardwareKeyboard.instance.removeHandler(handleRelease));
+      await openGuideRoute(tester, builder: (_, child) => GlobalShortcutScope(child: child!));
       await focusGuideNode(tester, 'GuideBrowse');
       await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
       final field = find.descendant(of: picker, matching: find.byType(LocalSearchField));

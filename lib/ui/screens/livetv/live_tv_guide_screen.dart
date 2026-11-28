@@ -426,6 +426,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       return;
     }
     if (_vm.state == GuideState.ready) _vm.scheduleBoundaryRefresh();
+    if (_usesPicker && _mayTakeFocus &&
+        _filterFocusNodes.containsValue(FocusManager.instance.primaryFocus)) {
+      _browseFocus.requestFocus();
+    }
     final channelIds = _vm.filteredChannels
         .map((channel) => channel.id)
         .toList();
@@ -3678,7 +3682,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   void _onProgramLeftEdge(int rowIndex) {
     final liveStart = guideLeftEdge(widget.now());
-    if (_vm.windowStart.isAfter(liveStart)) {
+    if (!_vm.listingsAccessDenied && _vm.windowStart.isAfter(liveStart)) {
       unawaited(_shiftGuideWindow(const Duration(minutes: -30)));
       return;
     }

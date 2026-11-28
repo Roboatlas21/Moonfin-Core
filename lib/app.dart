@@ -357,7 +357,7 @@ class _MoonfinAppState extends State<MoonfinApp> {
                         // the same focus subtree.
                         return GamepadNavigationScope(
                           child: InputModeTracker(
-                            child: _GlobalShortcutScope(
+                            child: GlobalShortcutScope(
                               child: Material(
                                 type: MaterialType.transparency,
                                 child: CupertinoTheme(
@@ -416,16 +416,16 @@ class _MoonfinAppState extends State<MoonfinApp> {
   }
 }
 
-class _GlobalShortcutScope extends StatefulWidget {
+class GlobalShortcutScope extends StatefulWidget {
   final Widget child;
 
-  const _GlobalShortcutScope({required this.child});
+  const GlobalShortcutScope({super.key, required this.child});
 
   @override
-  State<_GlobalShortcutScope> createState() => _GlobalShortcutScopeState();
+  State<GlobalShortcutScope> createState() => _GlobalShortcutScopeState();
 }
 
-class _GlobalShortcutScopeState extends State<_GlobalShortcutScope>
+class _GlobalShortcutScopeState extends State<GlobalShortcutScope>
     with WindowListener, WidgetsBindingObserver {
   static const _maxRouteHistoryEntries = 200;
   static const _mouseThumbNavDebounce = Duration(milliseconds: 180);
