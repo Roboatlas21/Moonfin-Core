@@ -198,6 +198,10 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
         if (PlatformDetection.isTV &&
             id != null &&
             _nodes[id]?.hasFocus == true) {
+          if (isActivateKey(event)) {
+            Navigator.of(context).pop(id);
+            return KeyEventResult.handled;
+          }
           if (event.isActionable && event.logicalKey.isUpKey) {
             final previous = _visibleRows
                 .takeWhile((row) => row.id != id)

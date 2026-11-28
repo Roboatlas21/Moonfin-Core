@@ -1092,13 +1092,14 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final initial = loadInitialPrograms(channelIds: initialChannelIds);
       listingsPage = _pageGeneration;
       _listingsStatePage = listingsPage;
-      await initial;
+      try {
+        await initial;
+      } finally {
+        if (session != userDataSync.session && current()) _discardChannelLineup();
+      }
       if (!current()) return;
       _listingsStatePage = null;
-      if (session != userDataSync.session) {
-        _reloadOnEntry = true;
-        _state = GuideState.ready;
-      } else if (_isCategory(_filter)) {
+      if (_isCategory(_filter)) {
         await _loadCategoryPrograms();
       } else {
         _state = GuideState.ready;

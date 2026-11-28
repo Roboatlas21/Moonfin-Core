@@ -1254,26 +1254,36 @@ void main() {
 
   test('re-entering All reloads the lineup after a session change during the first listings', () async {
     final now = DateTime(2026, 9, 11, 10);
-    _stubChannels(liveTv, [_channel('old')]);
+    final grouped = _GroupedLiveTvApi();
+    when(() => client.liveTvApi).thenReturn(grouped);
+    when(() => grouped.getChannelGroups(userId: 'user')).thenAnswer(
+      (_) async => ChannelGroupLineup({'old': {'Old group'}}, channels: [_channel('old')]),
+    );
     final pending = Completer<Map<String, dynamic>>();
-    when(() => _guide(liveTv)).thenAnswer((_) => pending.future);
+    when(() => _guide(grouped)).thenAnswer((_) => pending.future);
     final vm = LiveTvGuideViewModel(client, now: () => now);
     addTearDown(vm.dispose);
     final opening = vm.load();
     await pumpEventQueue();
-    verify(() => _guide(liveTv)).called(1);
+    verify(() => _guide(grouped)).called(1);
+    expect(vm.availableGroups, ['Old group']);
 
     userDataSync.reset();
     pending.complete({'Items': [_program('old-show', 'old', start: now)]});
     await opening;
     expect(vm.programsForChannel('old'), isEmpty);
+    expect(vm.filteredChannels, isEmpty);
+    expect(vm.availableGroups, isEmpty);
 
-    _stubChannels(liveTv, [_channel('new')]);
-    when(() => _guide(liveTv)).thenAnswer((_) async => {
+    when(() => grouped.getChannelGroups(userId: 'user')).thenAnswer(
+      (_) async => ChannelGroupLineup({'new': {'New group'}}, channels: [_channel('new')]),
+    );
+    when(() => _guide(grouped)).thenAnswer((_) async => {
       'Items': [_program('new-show', 'new', start: now)],
     });
     await vm.reloadIfStale();
     expect(vm.filteredChannels.map((channel) => channel.id), ['new']);
+    expect(vm.availableGroups, ['New group']);
     expect(vm.programsForChannel('new').single.id, 'new-show');
   });
 

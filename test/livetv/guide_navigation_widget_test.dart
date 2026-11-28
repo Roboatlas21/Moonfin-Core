@@ -1045,6 +1045,19 @@ void main() {
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
     expect(picker, findsNothing);
 
+    await focusGuideNode(tester, 'GuideBrowse');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
+    tester.widget<ListTile>(find.widgetWithText(ListTile, 'Favorites')).focusNode!.requestFocus();
+    await _pumpFrames(tester);
+    await tester.sendKeyEvent(
+      LogicalKeyboardKey.accept,
+      platform: 'windows',
+      physicalKey: PhysicalKeyboardKey.enter,
+    );
+    await _pumpFrames(tester);
+    expect(picker, findsNothing);
+    expect(guideModel(tester).filter, GuideFilter.favorites);
+
     for (final apiLevel in [32, 33]) {
       await focusGuideNode(tester, 'GuideBrowse');
       await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
