@@ -2165,8 +2165,12 @@ void main() {
       expect(reads, 4);
       expect(vm.programsForChannel('c50').single.id, 'new-c50');
       expect(vm.programsForChannel('c299').single.id, 'old-c299');
-      when(() => _guide(liveTv)).thenAnswer((inv) async => {
-        'Items': [for (final id in _requestedIds(inv)) _program('retry-$id', id)],
+      when(() => _guide(liveTv)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        if (int.parse(ids.first.substring(1)) < 200) {
+          throw TimeoutException('Early stations still unavailable');
+        }
+        return {'Items': [for (final id in ids) _program('retry-$id', id)]};
       });
       await vm.handleBoundaryElapsed();
       expect(vm.programsForChannel('c299').single.id, 'retry-c299');

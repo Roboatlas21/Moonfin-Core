@@ -2499,17 +2499,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     DateTime now, {
     bool includeAll = false,
   }) {
-    final ids = [
-      for (final id in {..._failedReplacementIds, if (includeAll) ..._failedProgramIds})
-        if (!_programsLoadedIds.contains(id)) id,
+    final ids = <String>{
+      ..._failedReplacementIds,
+      if (includeAll) ..._failedProgramIds,
       for (final id in _programsLoadedIds)
         if (includeAll ||
             _failedReplacementIds.isEmpty ||
-            _failedReplacementIds.contains(id) ||
             (_programsByChannel[id]?.isNotEmpty == true &&
                 !_programsByChannel[id]!.any((p) => p.endDate.isAfter(now))))
           id,
-    ];
+    }.toList();
     if (_retryRollingRange && !includeAll && _failedReplacementIds.isNotEmpty) {
       return replacePrograms(
         channelIds: ids,
@@ -2571,8 +2570,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             (error is TimeoutException || isTransientTransportFailure(error))) {
           failed.addAll(chunk);
           if (++consecutiveTransportFailures >= 2) {
-            failed.addAll(ids.skip(i + chunk.length));
-            break;
+            // Let untouched stations go first on the next retry.
+            return (programs: replacements, failedChannelIds: {...ids.skip(i + chunk.length), ...failed});
           }
           continue;
         }

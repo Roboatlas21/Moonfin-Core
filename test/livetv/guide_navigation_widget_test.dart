@@ -1890,6 +1890,25 @@ void main() {
     });
   }
 
+  testWidgets('closing Browse keeps the focused station when another favorite appears above it', (tester) async {
+    useTvLayout();
+    await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);
+    userDataSync.reset();
+    addTearDown(userDataSync.reset);
+    stubFavoriteChannel(5);
+    stubGroups(const ChannelGroupLineup({'ch1': {'Local'}}));
+    await pumpGuide(tester, initialFilter: (GuideFilter.favorites, null));
+    await focusGuideNode(tester, 'GuideChannel:0');
+    final vm = guideModel(tester);
+    userDataSync.publish(channelFavoriteKey(vm.channelForId('ch1')!.rawData)!, {'IsFavorite': true});
+    expect(vm.filteredChannels.map((c) => c.id), ['ch1', 'ch5']);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+    expect(picker, findsOneWidget);
+    Navigator.of(tester.element(picker)).pop();
+    await _pumpFrames(tester);
+    expect(_focusedLabel(), 'GuideChannel:1');
+  });
+
   testWidgets('the TV preview follows the focused row when its station disappears during a rebind', (tester) async {
     useTvLayout();
     userDataSync.reset();

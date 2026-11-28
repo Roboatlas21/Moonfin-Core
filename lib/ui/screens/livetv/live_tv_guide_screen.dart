@@ -3019,7 +3019,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           return KeyEventResult.handled;
         }
         if (key.isTowardStart(_pickerRowDirection)) {
-          _onNavigationKey();
+          _onNavigationKey(keepChannelRebind: _usesPicker);
           if (_usesPicker) {
             unawaited(_openFilterPicker());
           } else {
@@ -3154,9 +3154,9 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
 
   /// Records the input so a re-anchor can stay out of the way, then drops the
   /// deferred move.
-  void _onNavigationKey() {
+  void _onNavigationKey({bool keepChannelRebind = false}) {
     _pendingPickerRestore = null;
-    _pendingChannelRebindId = null;
+    if (!keepChannelRebind) _pendingChannelRebindId = null;
     _lastDpadEventAt = widget.now();
     _cancelPendingVerticalMove();
   }
