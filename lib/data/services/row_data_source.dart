@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import 'package:collection/collection.dart';
 
 import 'plex_live_tv_favorites.dart';
+import 'user_data_sync.dart';
 
 import '../../preference/home_section_config.dart';
 import '../../preference/user_preferences.dart';
@@ -192,9 +193,15 @@ class RowDataSource {
   Future<HomeRow> loadFavoritesChannels(String serverId) async {
     // Show cached hearts as soon as the channel lineup arrives. Home starts
     // the cloud refresh separately and updates this row when it finishes.
+    final session = userDataSync.session;
+    final userId = _client.userId;
     final response = await _client.liveTvApi.getChannels(
       fields: 'ImageTags,UserData',
     );
+    // Parsing registers DVR identities for the current viewer.
+    if (session != userDataSync.session || userId != _client.userId) {
+      throw StateError('User changed while loading the channel lineup');
+    }
     final pairs = <(GuideChannel, AggregatedItem)>[];
     for (final item in _parseItems(response, serverId)) {
       if (!item.isFavorite) continue;

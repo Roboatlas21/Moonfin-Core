@@ -12,6 +12,7 @@ import 'package:moonfin/data/models/aggregated_item.dart';
 import 'package:moonfin/data/repositories/item_mutation_repository.dart';
 import 'package:moonfin/data/repositories/search_repository.dart';
 import 'package:moonfin/data/services/plex_live_tv_favorites.dart';
+import 'package:moonfin/data/services/row_data_source.dart';
 import 'package:moonfin/data/services/user_data_sync.dart';
 import 'package:moonfin/data/viewmodels/live_tv_guide_view_model.dart';
 import 'package:moonfin/data/viewmodels/search_view_model.dart';
@@ -239,6 +240,40 @@ void main() {
     await pumpEventQueue();
     expect(model.results.single.items.single.isFavorite, isTrue);
   });
+
+  for (final changeUser in [true, false]) {
+    test('Home discards a delayed lineup after a ${changeUser ? 'user change' : 'session reset'}', () async {
+      const id = 'channel-2-4';
+      const station = {'Id': id, 'Type': 'TvChannel', 'Name': 'CBC'};
+      const currentStation = {
+        ...station, 'PlexFavoriteSource': 'server://current/epg', 'PlexFavoriteId': '4',
+      };
+      final api = _LineupApi();
+      final client = _LineupClient(api)..userId = changeUser ? 'previous-user' : 'plex-user';
+      addTearDown(client.dispose);
+      final home = RowDataSource(client);
+      final delayed = Completer<Map<String, dynamic>>();
+      Future<Map<String, dynamic>> lineup() => api.getChannels(fields: 'ImageTags,UserData');
+      when(lineup).thenAnswer((_) => delayed.future);
+      final oldLoad = home.loadFavoritesChannels('pms');
+      if (changeUser) {
+        client.userId = 'plex-user';
+      } else {
+        userDataSync.reset();
+      }
+      final current = PlexLiveTvFavorites.applyToItem(client, currentStation);
+      delayed.complete({'Items': [station]});
+      await expectLater(oldLoad, throwsStateError);
+
+      await ItemMutationRepository(client).setFavorite(
+        id, isFavorite: true, expectedChannelKey: current['PlexFavoriteSyncKey'] as String,
+      );
+      expect(cloud.rows.single['source'], currentStation['PlexFavoriteSource']);
+      when(lineup).thenAnswer((_) async => {'Items': [currentStation]});
+      final refreshed = await home.loadFavoritesChannels('pms');
+      expect(refreshed.items.single.id, id);
+    });
+  }
 
   group('Global Search DVR favorites', () {
     const favorite = {'source': 'server://pms/epg', 'id': '4'};
