@@ -1580,8 +1580,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final loadGeneration = ++_loadGeneration;
     _finishPendingWindow();
     final depth = _requestedPageDepth;
+    final retryTargets = _categoryFailedIds.toSet();
     // The replacement also refetches known category stations outside the search.
     _resetPrograms(keepCategoryListings: _isCategory(_filter) && _channelQuery.isNotEmpty);
+    _categoryFailedIds.addAll(retryTargets);
     _reloadDepth = depth;
     final page = _pageGeneration;
     _listingsStatePage = page;

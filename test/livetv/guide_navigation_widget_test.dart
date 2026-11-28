@@ -338,7 +338,7 @@ void main() {
     await _pumpFrames(tester);
   }
 
-  Future<void> pumpRoutedGuide(WidgetTester tester, Size size, GoRouter router) async {
+  Future<void> pumpRoutedGuide(WidgetTester tester, Size size, GoRouter router, {TransitionBuilder? builder}) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -347,6 +347,7 @@ void main() {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
+      builder: builder,
     ));
     await _pumpFrames(tester);
   }
@@ -377,13 +378,12 @@ void main() {
   void useTvLayout() => useLayout(InterfaceLayout.tv);
 
   /// Open the guide through a host route so Back and focus restoration are real.
-  Future<void> openGuideRoute(WidgetTester tester, {TransitionBuilder? builder}) async {
+  Future<void> openGuideRoute(WidgetTester tester) async {
     tester.view.physicalSize = const Size(900, 700);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(
       MaterialApp(
-        builder: builder,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: Builder(
@@ -1087,9 +1087,14 @@ void main() {
     final prefs = GetIt.instance<UserPreferences>();
     await prefs.set(UserPreferences.epgMobileView, EpgMobileView.list);
     final requests = <List<String>>[];
+    final firstRetry = Completer<void>();
     when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
       final ids = (inv.namedArguments[#channelIds] as List).cast<String>();
       requests.add(ids);
+      if (ids.length == 1 && !firstRetry.isCompleted) {
+        await firstRetry.future;
+        throw TimeoutException('Listings unavailable');
+      }
       if (ids.length == 1) return {'Items': _programsFor(ids.single)};
       return {'Items': _programsFor('ch1'), 'FailedChannelIds': ['ch0']};
     });
@@ -1106,10 +1111,19 @@ void main() {
     expect(node.hasPrimaryFocus, isTrue);
     await tester.pump(const Duration(milliseconds: 550));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+    await _pumpFrames(tester);
     verifyNever(() => api.markFavorite('ch0'));
     requests.clear();
     await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
     expect(requests, [['ch0']]);
+    firstRetry.complete();
+    await _pumpFrames(tester);
+    final retryAgain = Focus.of(tester.element(retry));
+    expect(retryAgain.hasPrimaryFocus || _focusedLabel() == 'GuideChannel:0', isTrue);
+    if (!retryAgain.hasPrimaryFocus) await _sendKeyAndPump(tester, LogicalKeyboardKey.tab);
+    expect(retryAgain.hasPrimaryFocus, isTrue);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
+    expect(requests, [['ch0'], ['ch0']]);
     expect(retry, findsNothing);
   });
 
@@ -1266,6 +1280,51 @@ void main() {
     await tester.drag(find.byType(EpgNowNextCard).first, const Offset(0, -120));
     await _pumpFrames(tester);
     expect(vm.filteredChannels.map((c) => c.id), contains('ch800'));
+  });
+
+  testWidgets('leaving Browse during a station lookup resumes Sports paging', (tester) async {
+    useTvLayout();
+    channelCount = 601;
+    await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.both);
+    stubGroups(const ChannelGroupLineup({'ch0': {'Local'}}, programmeCategories: {'sports'}));
+    final firstPage = Completer<void>();
+    final lookup = Completer<void>();
+    var reloading = false;
+    var checkingStation = false;
+    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
+      final ids = inv.namedArguments[#channelIds] as List<String>;
+      if (inv.namedArguments[#isSports] != true) return {'Items': []};
+      if (reloading) {
+        if (ids.contains('ch0')) await firstPage.future;
+        if (ids.contains('ch200')) throw TimeoutException('No listings');
+        if (ids.length == 1 && ids.single == 'ch600') {
+          checkingStation = true;
+          await lookup.future;
+        }
+      }
+      final matches = reloading ? ['ch0', 'ch400'] : ['ch600'];
+      return {'Items': [for (final id in matches.where(ids.contains)) ..._programsFor(id, sports: true)]};
+    });
+    await pumpGuide(tester, initialFilter: (GuideFilter.sports, null));
+    final vm = guideModel(tester);
+    expect(vm.filteredChannels.single.id, 'ch600');
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
+    expect(picker, findsOneWidget);
+    reloading = true;
+    final reload = vm.load();
+    await _pumpFrames(tester);
+    Navigator.of(tester.element(picker)).pop();
+    await _pumpFrames(tester);
+    firstPage.complete();
+    await reload;
+    await _pumpFrames(tester);
+    expect(checkingStation, isTrue);
+    expect(_focusedLabel(), 'GuideBrowse');
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
+    lookup.complete();
+    await _pumpFrames(tester);
+    expect(vm.filteredChannels.map((c) => c.id), contains('ch400'));
   });
 
   testWidgets('closing Browse restores the card selected after a lineup change', (tester) async {
@@ -1453,8 +1512,13 @@ void main() {
           consumeRelease && event is KeyUpEvent && event.logicalKey == LogicalKeyboardKey.goBack;
       HardwareKeyboard.instance.addHandler(handleRelease);
       addTearDown(() => HardwareKeyboard.instance.removeHandler(handleRelease));
-      await openGuideRoute(tester, builder: (_, child) => GlobalShortcutScope(child: child!));
-      final app = tester.state(find.byType(GlobalShortcutScope)) as WidgetsBindingObserver;
+      final router = GoRouter(initialLocation: '/guide', routes: [
+        GoRoute(path: '/', builder: (_, _) => const SizedBox(), routes: [
+          GoRoute(path: 'guide', builder: (_, _) => const LiveTvGuideScreen()),
+        ]),
+      ]);
+      await pumpRoutedGuide(tester, const Size(900, 700), router,
+          builder: (_, child) => GlobalShortcutScope(child: child!));
       await focusGuideNode(tester, 'GuideBrowse');
       await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
       final field = find.descendant(of: picker, matching: find.byType(LocalSearchField));
@@ -1473,7 +1537,7 @@ void main() {
         await _pumpFrames(tester);
         final sendsPopRoute = apiLevel >= 33 || !handledUp;
         if (sendsPopRoute) {
-          expect(await app.didPopRoute(), isTrue);
+          await tester.binding.handlePopRoute();
           expect(DialogBackSuppressor.consume(), isFalse);
           await _pumpFrames(tester);
         }

@@ -1942,6 +1942,12 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         () => FocusNode(debugLabel: 'GuideShortcut:category:${choice.$1.name}'),
       );
 
+  void _cancelPickerRestore() {
+    if (_pendingPickerRestore == null) return;
+    _pendingPickerRestore = null;
+    _resumePickerRestorePrefetch();
+  }
+
   KeyEventResult _headerKey(
     KeyEvent event,
     List<GuideFilterChoice> choices,
@@ -1950,7 +1956,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
     if (!event.isActionable) return KeyEventResult.ignored;
     final direction = Directionality.of(context);
     if (event.logicalKey.isTowardEnd(direction)) {
-      _pendingPickerRestore = null;
+      _cancelPickerRestore();
       if (!PlatformDetection.isTV) {
         _channelSearchFocus.requestFocus();
         return KeyEventResult.handled;
@@ -1969,7 +1975,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
       return _focusShortcutOrBrowse(index == 0 ? null : choices[index - 1]);
     }
     if (event.logicalKey.isDownKey && _sidePanel) {
-      _pendingPickerRestore = null;
+      _cancelPickerRestore();
       _focusWindowBarFromGenres();
       return KeyEventResult.handled;
     }

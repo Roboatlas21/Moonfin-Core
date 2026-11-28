@@ -1641,7 +1641,12 @@ void main() {
 
     test('clearing a category search restores Retry for an off-page failure', () async {
       stubNumberedChannels(600);
+      var malformed = false;
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        if (malformed) {
+          malformed = false;
+          throw const FormatException('Bad recording response');
+        }
         final ids = _requestedIds(inv);
         return {
           'Items': [for (final id in ids) if (id != 'c599') _program('p-$id', id, isSports: true)],
@@ -1656,6 +1661,8 @@ void main() {
       await pumpEventQueue();
       expect(vm.hasFailedCategoryListings, isFalse);
       expect(await vm.setWindowStart(vm.windowEnd), isTrue);
+      malformed = true;
+      await vm.recordingChanged();
       vm.setChannelQuery('');
       await pumpEventQueue();
       expect(vm.hasFailedCategoryListings, isTrue);
