@@ -652,6 +652,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final query = text.trim().toLowerCase();
     if (_channelQuery == query) return;
     _windowRequest++;
+    _finishPendingWindow();
     _channelQuery = query;
     _updatePageRows();
     final openingCategory = _categoryFetchInFlight && _categoryLoadedFor != _filter;

@@ -991,7 +991,10 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
           () => _vm.setDate(picked),
           dateOnly: true,
         );
-        if (moved && mounted) _anchorToWindowStart();
+        if (moved && mounted) {
+          _failedLiveReset = false;
+          _anchorToWindowStart();
+        }
       }
     } finally {
       _isShowingDatePicker = false;
@@ -1408,6 +1411,7 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
   }
 
   Widget _buildMobile() {
+    final l10n = AppLocalizations.of(context);
     return Column(
       children: [
         _buildMobileHeader(),
@@ -1430,6 +1434,16 @@ class _LiveTvGuideScreenState extends State<LiveTvGuideScreen>
         const SizedBox(height: 8),
         if (_vm.hasFailedCategoryListings && _vm.filteredChannels.isNotEmpty)
           _buildCategoryRetryButton(partial: true),
+        if (_mobileView == EpgMobileView.list &&
+            _vm.listingsAccessDenied &&
+            _vm.filteredChannels.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(
+              l10n.failedToLoadGuide(describeError(_vm.error!, l10n)),
+              textAlign: TextAlign.center,
+            ),
+          ),
         Expanded(child: _buildMobileBody()),
       ],
     );

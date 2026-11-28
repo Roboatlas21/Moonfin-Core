@@ -1349,24 +1349,57 @@ void main() {
 
     test('search keeps category stations for surfing until their listings change', () async {
       stubNumberedChannels(3);
-      var matching = {'c0', 'c1'};
+      final vm = await loadFilter(GuideFilter.all);
+      final next = vm.windowEnd;
+      final following = next.add(vm.guideWindow);
+      final offSearchWindows = <(DateTime, DateTime)>{};
       when(() => _guide(liveTv, category: GuideFilter.sports))
-          .thenAnswer(_serverFiltered((id) => matching.contains(id)));
-      final vm = await loadFilter(GuideFilter.sports);
+          .thenAnswer((call) async {
+        final from = call.namedArguments[#startDate] as DateTime;
+        final to = call.namedArguments[#endDate] as DateTime;
+        final ids = _requestedIds(call);
+        if (ids.contains('c0')) offSearchWindows.add((from, to));
+        return {'Items': [
+          for (final id in ids)
+            if (id == 'c1' || (id == 'c0' && from.isBefore(following)))
+              _program('p-$id', id, start: from, isSports: true),
+        ]};
+      });
+      vm.setFilter(GuideFilter.sports);
+      await pumpEventQueue();
       vm.setChannelQuery('c1');
       await pumpEventQueue();
       expect(vm.filteredChannels.single.id, 'c1');
       expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
       expect(vm.programsHighWater, 1);
-      final next = vm.windowEnd;
+      offSearchWindows.clear();
       expect(await vm.setWindowStart(next), isTrue);
       expect(vm.windowStart, next);
+      expect(offSearchWindows, {(next, following)});
       expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
-      matching = {'c1'};
-      final following = vm.windowEnd;
+      offSearchWindows.clear();
       expect(await vm.setWindowStart(following), isTrue);
       expect(vm.windowStart, following);
+      expect(offSearchWindows, {(following, following.add(vm.guideWindow))});
       expect(vm.surfingChannels.single.id, 'c1');
+    });
+
+    test('a search releases a resize waiting for the cancelled page', () async {
+      stubNumberedChannels(3);
+      final vm = await loadFilter(GuideFilter.all);
+      final held = pendingGuide(GuideFilter.all);
+      final page = vm.setWindowStart(vm.windowEnd, paging: true);
+      await pumpEventQueue();
+      final width = vm.guideWindow + const Duration(hours: 1);
+      final resize = vm.setWindow(width);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      vm.setChannelQuery('c1');
+      await pumpEventQueue();
+      final widthBeforeOldReply = vm.guideWindow;
+      held.complete({'Items': []});
+      expect(await page, isFalse);
+      await resize;
+      expect(widthBeforeOldReply, width);
     });
 
     test('search removes a stale Sports match when the failed station returns no listings', () async {

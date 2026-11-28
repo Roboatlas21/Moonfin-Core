@@ -147,7 +147,7 @@ class _LocalSearchFieldState extends State<LocalSearchField> {
 
     final targetSize = PlatformDetection.useMobileUi ? kMinInteractiveDimension : 36.0;
     final compactConstraints = widget.compact
-        ? BoxConstraints(minWidth: targetSize, minHeight: targetSize)
+        ? BoxConstraints.tightFor(width: targetSize, height: targetSize)
         : null;
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: widget.controller,
@@ -165,6 +165,7 @@ class _LocalSearchFieldState extends State<LocalSearchField> {
               size: widget.compact ? 18 : null,
             ),
             prefixIconConstraints: compactConstraints,
+            suffixIconConstraints: compactConstraints,
             suffixIcon: value.text.isEmpty
                 ? null
                 : IconButton(

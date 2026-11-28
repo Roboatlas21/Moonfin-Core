@@ -592,6 +592,21 @@ void main() {
     expect(find.textContaining(' ${target.day} listings.'), findsOneWidget);
   });
 
+  testWidgets('Now/Next shows the listings denial reason alongside tunable channels', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    await GetIt.instance<UserPreferences>().set(UserPreferences.epgMobileView, EpgMobileView.list);
+    final request = RequestOptions();
+    const reason = 'Programme listings are restricted for this viewer';
+    when(() => _guideRequest(liveTvApi)).thenThrow(DioException(
+      requestOptions: request,
+      response: Response(requestOptions: request, statusCode: 403, data: {'message': reason}),
+    ));
+    await pumpGuide(tester, surface: phone);
+    expect(find.textContaining(reason), findsOneWidget);
+    expect(find.text('Channel 0').hitTestable(), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
+  });
+
   testWidgets('a failed same-day picker request names the selected date', (tester) async {
     await pumpGuide(tester, surface: phone);
     final vm = guideModel(tester);
@@ -1352,6 +1367,19 @@ void main() {
     },
   );
 
+  testWidgets('compact desktop search keeps its height when Clear appears', (tester) async {
+    useLayout(InterfaceLayout.desktop);
+    await pumpGuide(tester, surface: const Size(900, 430));
+    final field = find.byType(TextField);
+    expect(tester.getSize(field).height, 36);
+    await tester.enterText(field, 'ch1');
+    await _pumpFrames(tester);
+    expect(tester.getSize(field).height, 36);
+    await tester.tap(find.descendant(of: field, matching: find.byType(IconButton)));
+    await tester.pump();
+    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+  });
+
   testWidgets('landscape phone search and Clear have full touch targets', (tester) async {
     useLayout(InterfaceLayout.phone);
     await pumpGuide(tester, surface: const Size(900, 430));
@@ -1405,6 +1433,33 @@ void main() {
 
     expect(vm.windowStart, tomorrow);
     await back(tester);
+    expect(find.byType(LiveTvGuideScreen), findsOneWidget);
+    expect(vm.atLivePosition, isTrue);
+  });
+
+  testWidgets('Back returns to live after the picker recovers from a failed live reset', (tester) async {
+    useTvLayout();
+    channelCount = 8;
+    await openGuideRoute(tester);
+    final vm = guideModel(tester);
+    final day = DateUtils.addDaysToDate(vm.guideDate, -1);
+    expect(await vm.setDate(day), isTrue);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    guideFailure = TimeoutException('offline');
+    await tester.binding.handlePopRoute();
+    await _pumpFrames(tester);
+    expect(vm.atLivePosition, isFalse);
+
+    guideFailure = null;
+    final target = DateUtils.addDaysToDate(day, day.day == 1 ? 1 : -1);
+    await tapAndPump(tester, find.byIcon(Icons.calendar_today));
+    final calendar = find.byType(CalendarDatePicker);
+    await tapAndPump(tester, find.descendant(of: calendar, matching: find.text('${target.day}')));
+    await tapAndPump(tester, find.text('OK'));
+    expect(DateUtils.isSameDay(vm.guideDate, target), isTrue);
+    await focusGuideNode(tester, 'GuideChannel:0');
+    await tester.binding.handlePopRoute();
+    await _pumpFrames(tester);
     expect(find.byType(LiveTvGuideScreen), findsOneWidget);
     expect(vm.atLivePosition, isTrue);
   });
