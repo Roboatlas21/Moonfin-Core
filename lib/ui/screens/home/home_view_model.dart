@@ -200,27 +200,75 @@ class HomeViewModel extends ChangeNotifier {
   /// loads and pages from, by row id.
   Map<String, ServerUserSession> _otherServerRows = const {};
 
-  Future<Map<String, ServerUserSession>> _findOtherServerRows(
-    List<HomeSectionConfig> configs,
-  ) async {
-    final foreign = configs.where(
-      (c) =>
-          c.pluginSource == HomeSectionPluginSource.collections &&
-          !_isThisServer(c.serverId),
-    );
-    if (foreign.isEmpty) return const {};
+  // Cloud Home can reuse cached library rows only for the same signed-in accounts.
+  Map<String, String> _cloudLibraryUsers = const {};
+  bool get _hasCloudHomeLibrary =>
+      _multiServerEnabled && _cloudLibraryUsers.isNotEmpty;
+
+  Future<Map<String, ServerUserSession>> _otherLibrarySessions() async {
     try {
-      final sessions = {
-        for (final s in await _multiServerRepo.getLoggedInServers())
-          normalizeServerBaseUrl(s.client.baseUrl): s,
-      };
       return {
-        for (final c in foreign)
-          c.stableId: ?sessions[normalizeServerBaseUrl(c.serverId ?? '')],
+        for (final s in await _multiServerRepo.getLoggedInServers())
+          if (!s.server.cloudOnly && !_isThisServer(s.client.baseUrl))
+            normalizeServerBaseUrl(s.client.baseUrl): s,
       };
     } catch (_) {
       return const {};
     }
+  }
+
+  Future<void> _resolveOtherServerRows(List<HomeSectionConfig> configs) async {
+    final foreign = configs.where(
+      (c) =>
+          c.isPluginDynamic &&
+          c.pluginSource == HomeSectionPluginSource.collections &&
+          !_isThisServer(c.serverId),
+    );
+    final needsSessions = _cloudOnlyPlex ? _multiServerEnabled : foreign.isNotEmpty;
+    final sessions = needsSessions
+        ? await _otherLibrarySessions()
+        : const <String, ServerUserSession>{};
+    if (_cloudOnlyPlex) {
+      _cloudLibraryUsers = {
+        for (final url in sessions.keys.sorted()) url: sessions[url]!.userId,
+      };
+    }
+    _otherServerRows = {
+      for (final c in foreign)
+        c.stableId: ?sessions[normalizeServerBaseUrl(c.serverId ?? '')],
+    };
+  }
+
+  bool _canShowOnCloudHome(HomeSectionConfig config, bool kidsMode) {
+    if (config.isPluginDynamic) {
+      return _otherServerRows.containsKey(config.stableId);
+    }
+    final type = config.type;
+    if ((!kidsMode && type == HomeSectionType.onNow) ||
+        _isSeerrSectionType(type) ||
+        _isTmdbSectionType(type) ||
+        externalCharts.containsKey(type) ||
+        type == HomeSectionType.mdblistWatchingNow) {
+      return true;
+    }
+    // Only these built-ins have a multi-server loader. The media bar and
+    // other active-server sections have no library to query on plex.tv.
+    if (!_hasCloudHomeLibrary) return false;
+    return _isFavoriteSectionType(type) ||
+        _isAudioSectionType(type) ||
+        switch (type) {
+          HomeSectionType.resume ||
+          HomeSectionType.resumeAudio ||
+          HomeSectionType.nextUp ||
+          HomeSectionType.latestMedia ||
+          HomeSectionType.playlists ||
+          HomeSectionType.collections ||
+          HomeSectionType.genres ||
+          HomeSectionType.studios ||
+          HomeSectionType.libraryTilesSmall ||
+          HomeSectionType.libraryButtons => true,
+          _ => false,
+        };
   }
 
   String _homeCacheKey() {
@@ -233,7 +281,10 @@ class HomeViewModel extends ChangeNotifier {
     // an offline home (and vice versa).
     final offline = _isOffline;
     final shape = RowDataSource.fieldShapeToken;
-    return '$_serverId|$userId|$sections|$multiServer|$merge|$blocked|offline:$offline|fields:$shape';
+    final cloudSources = _cloudLibraryUsers.isEmpty
+        ? ''
+        : '|sources:${jsonEncode(_cloudLibraryUsers)}|kids:${_prefs.get(UserPreferences.kidsModeEnabled)}';
+    return '$_serverId|$userId|$sections|$multiServer|$merge|$blocked|offline:$offline|fields:$shape$cloudSources';
   }
 
   /// Called again when the resume and next up rows refresh on their own, or
@@ -422,14 +473,22 @@ class HomeViewModel extends ChangeNotifier {
     _isLoading = true;
     final done = Completer<void>();
     _loadDone = done.future;
-    if (!newSectionsOnly) {
-      if (!_cloudOnlyPlex) _mediaBarViewModel.load(force: forceRefresh);
-      _rowOffsets.clear();
-      _multiServerRepo.clearOffsets();
-      _rowsPagedThisLoad.clear();
-    }
+    if (!newSectionsOnly && !_cloudOnlyPlex) _mediaBarViewModel.load(force: forceRefresh);
     notifyListeners();
     try {
+      if (_cloudOnlyPlex) {
+        final previousUsers = _cloudLibraryUsers;
+        await _resolveOtherServerRows(_prefs.activeHomeSectionConfigs);
+        if (!mapEquals(previousUsers, _cloudLibraryUsers)) {
+          _rows = [];
+          newSectionsOnly = false;
+        }
+      }
+      if (!newSectionsOnly) {
+        _rowOffsets.clear();
+        _multiServerRepo.clearOffsets();
+        _rowsPagedThisLoad.clear();
+      }
       var hydratedFromCache = false;
       if (_rows.isEmpty) {
         final cached = await _cacheStore.read(_homeCacheKey());
@@ -446,7 +505,6 @@ class HomeViewModel extends ChangeNotifier {
           ? _prefs.get(UserPreferences.kidsModeEnabled)
           : null;
       _cloudKidsModeAtLoad = cloudKidsMode;
-      // Cloud Home can show Live TV and external charts, but not library rows.
       final configs = cloudKidsMode != null
           ? <HomeSectionConfig>[
               if (!cloudKidsMode)
@@ -456,14 +514,7 @@ class HomeViewModel extends ChangeNotifier {
                   order: 0,
                 ),
               for (final config in activeConfigs)
-                if (config.isBuiltin &&
-                    config.type != HomeSectionType.liveTv &&
-                    ((!cloudKidsMode && config.type == HomeSectionType.onNow) ||
-                        _isSeerrSectionType(config.type) ||
-                        _isTmdbSectionType(config.type) ||
-                        externalCharts.containsKey(config.type) ||
-                        config.type == HomeSectionType.mdblistWatchingNow))
-                  config,
+                if (_canShowOnCloudHome(config, cloudKidsMode)) config,
             ]
           : fallbackUsed
           ? const [
@@ -484,7 +535,7 @@ class HomeViewModel extends ChangeNotifier {
               ),
             ]
           : activeConfigs;
-      _otherServerRows = await _findOtherServerRows(configs);
+      if (!_cloudOnlyPlex) await _resolveOtherServerRows(configs);
       final showFavoritesRows = _prefs.get(
         UserPreferences.displayFavoritesRows,
       );
@@ -1196,7 +1247,7 @@ class HomeViewModel extends ChangeNotifier {
       await _loadDone;
     }
     await Future.wait([
-      if (!_cloudOnlyPlex) _refreshResumeRows(),
+      if (!_cloudOnlyPlex || _hasCloudHomeLibrary) _refreshResumeRows(),
       _refreshOnNowRows(),
       if (!_disposed &&
           (_client.userId ?? '') == _ownerUserId &&
@@ -1478,6 +1529,7 @@ class HomeViewModel extends ChangeNotifier {
       final section = cfg.pluginSection;
       if (section == null || section.isEmpty) return const [];
       final other = _otherServerRows[cfg.stableId];
+      if (_cloudOnlyPlex && (other == null || !_multiServerEnabled)) return [];
       final row = await _dataSourceFor(other).loadDynamicSection(
         rowId: cfg.stableId,
         section: section,

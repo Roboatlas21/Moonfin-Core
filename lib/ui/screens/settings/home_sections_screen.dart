@@ -166,7 +166,17 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
     }
 
     for (final section in _sections) {
-      if (_cloudOnlyPlex && _isCollectionSection(section)) continue;
+      if (_cloudOnlyPlex) {
+        // A library probe against plex.tv cannot tell whether a row supplied
+        // by another server has content. Live TV still uses the active client.
+        final liveTv = section.type == HomeSectionType.liveTv ||
+            section.type == HomeSectionType.onNow ||
+            section.type == HomeSectionType.activeRecordings;
+        if (_isCollectionSection(section) ||
+            (_otherServerNames.isNotEmpty && !liveTv)) {
+          continue;
+        }
+      }
       final stableId = section.stableId;
       if (section.isBuiltin) {
         switch (section.type) {
@@ -625,12 +635,20 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
 
     final hiddenByFavorites =
         !showFavoritesRows && _isFavoriteSectionType(section.type);
+    final multiServer = _prefs.get(UserPreferences.enableMultiServerLibraries);
+    final hasCollectionSource =
+        !_cloudOnlyPlex ||
+        (multiServer &&
+            (section.isBuiltin
+                ? _otherServerNames.isNotEmpty
+                : _otherServerName(section) != null));
     final hiddenByCollections =
-        (_cloudOnlyPlex || !showCollectionsRows) && _isCollectionSection(section);
+        (!showCollectionsRows || !hasCollectionSource) &&
+        _isCollectionSection(section);
     final hiddenByServer =
         section.pluginSource == HomeSectionPluginSource.collections &&
         _otherServerName(section) != null &&
-        !_prefs.get(UserPreferences.enableMultiServerLibraries);
+        !multiServer;
     final hiddenByGenres =
         !showGenresRows &&
         ((section.isBuiltin && _isGenresSectionType(section.type)) ||
@@ -955,7 +973,11 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
   /// server that couldn't be reached is left out, so its rows are kept.
   Future<Map<String, List<_DiscoveredCollectionRow>>>
   _fetchCollectionsPerServer() async {
-    if (_cloudOnlyPlex) return const {};
+    final multiServer = _prefs.get(UserPreferences.enableMultiServerLibraries);
+    if (_cloudOnlyPlex && !multiServer) {
+      _otherServerNames = const {};
+      return const {};
+    }
     final active = GetIt.instance<MediaServerClient>();
     var others = const <ServerUserSession>[];
     try {
@@ -972,10 +994,13 @@ class _HomeSectionsScreenState extends State<HomeSectionsScreen> {
       for (final session in others)
         normalizeServerBaseUrl(session.client.baseUrl): session.server.name,
     };
+    if (_cloudOnlyPlex && !_prefs.get(UserPreferences.displayCollectionsRows)) {
+      return const {};
+    }
 
     final clients = [
-      active,
-      if (_prefs.get(UserPreferences.enableMultiServerLibraries))
+      if (!_cloudOnlyPlex) active,
+      if (multiServer)
         for (final session in others) session.client,
     ];
     final found = await Future.wait(

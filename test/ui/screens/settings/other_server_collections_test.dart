@@ -149,7 +149,7 @@ void main() {
     );
   });
 
-  testWidgets('Free TV hides saved collections until the media server is active again', (
+  testWidgets('Free TV offers saved collections while their server can supply them', (
     tester,
   ) async {
     await prefs.set(UserPreferences.enableMultiServerLibraries, true);
@@ -166,7 +166,6 @@ void main() {
 
     final mediaServer = GetIt.instance<MediaServerClient>();
     final multiServer = GetIt.instance<MultiServerRepository>();
-    clearInteractions(multiServer);
     final cloud = _MockPlexClient();
     when(() => cloud.cloudOnly).thenReturn(true);
     when(() => cloud.userId).thenReturn('user');
@@ -174,15 +173,32 @@ void main() {
     await GetIt.instance.unregister<MediaServerClient>();
     GetIt.instance.registerSingleton<MediaServerClient>(cloud);
     await pump(tester, openCollections: false);
+    expect(find.text('Marvel'), findsOneWidget);
+    expect(find.text('Collections row from Other'), findsOneWidget);
+    expect(find.text('Local'), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await prefs.set(UserPreferences.enableMultiServerLibraries, false);
+    clearInteractions(multiServer);
+    await pump(tester, openCollections: false);
     expect(find.text('Collections'), findsNothing);
     expect(find.text('Marvel'), findsNothing);
     verifyNever(multiServer.getLoggedInServers);
+
+    await tester.pumpWidget(const SizedBox());
+    await prefs.set(UserPreferences.enableMultiServerLibraries, true);
+    final sessions = await multiServer.getLoggedInServers();
+    when(multiServer.getLoggedInServers).thenAnswer((_) async => []);
+    await pump(tester, openCollections: false);
+    expect(find.text('Collections'), findsNothing);
+    expect(find.text('Marvel'), findsNothing);
     expect(
       prefs.homeSectionsConfig.singleWhere((s) => s.stableId == marvel).enabled,
       isTrue,
     );
 
     await tester.pumpWidget(const SizedBox());
+    when(multiServer.getLoggedInServers).thenAnswer((_) async => sessions);
     await GetIt.instance.unregister<MediaServerClient>();
     GetIt.instance.registerSingleton<MediaServerClient>(mediaServer);
     await pump(tester, openCollections: false);
