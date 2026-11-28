@@ -243,6 +243,15 @@ class ChannelCarouselPrewarm {
     _scheduleFailedVisibleRetry();
   }
 
+  void updateVisibleChannels(List<String> channelIds) {
+    if (channelIds.isEmpty) {
+      clearVisibleChannels();
+      return;
+    }
+    _visibleChannelIds = channelIds.toSet();
+    _scheduleFailedVisibleRetry();
+  }
+
   Set<String> get _retryNeighborhood =>
       _visibleChannelIds ??
       carouselNeighborhood(
@@ -259,8 +268,8 @@ class ChannelCarouselPrewarm {
 
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
     if (_disposed || channelIds.isEmpty) return;
-    final visible = _visibleChannelIds = channelIds.toSet();
-    _scheduleFailedVisibleRetry();
+    updateVisibleChannels(channelIds);
+    final visible = _visibleChannelIds;
     await ensureReady();
     if (_disposed || !isWarm || !identical(visible, _visibleChannelIds)) return;
     try {

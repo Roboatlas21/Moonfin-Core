@@ -285,7 +285,9 @@ void main() {
   const events = MethodChannel('moonfin/native_apple_player_events');
   const sports = (GuideFilter.all, 'Sports');
 
-  Map<dynamic, dynamic> prepareNativePlayer(WidgetTester tester) {
+  Map<dynamic, dynamic> prepareNativePlayer(WidgetTester tester, {
+    Future<void> Function(List<String>)? beforeListings,
+  }) {
     useSavedPlexAccount();
     final messenger = tester.binding.defaultBinaryMessenger;
     const control = MethodChannel('moonfin/native_apple_player_control');
@@ -303,13 +305,17 @@ void main() {
       channelIds: any(named: 'channelIds'), startDate: any(named: 'startDate'),
       endDate: any(named: 'endDate'), userId: any(named: 'userId'),
       fields: 'Overview', enableTotalRecordCount: false, enableImages: false, enableUserData: false,
-    )).thenAnswer((inv) async => {'Items': [
-      for (final id in inv.namedArguments[#channelIds] as List<String>) {
-        'Id': 'program-$id', 'Name': 'Now on $id', 'ChannelId': id,
-        'StartDate': now.subtract(const Duration(minutes: 10)).toIso8601String(),
-        'EndDate': now.add(const Duration(hours: 1)).toIso8601String(),
-      },
-    ]});
+    )).thenAnswer((inv) async {
+      final ids = inv.namedArguments[#channelIds] as List<String>;
+      if (beforeListings != null) await beforeListings(ids);
+      return {'Items': [
+        for (final id in ids) {
+          'Id': 'program-$id', 'Name': 'Now on $id', 'ChannelId': id,
+          'StartDate': now.subtract(const Duration(minutes: 10)).toIso8601String(),
+          'EndDate': now.add(const Duration(hours: 1)).toIso8601String(),
+        },
+      ]};
+    });
     final native = NativeApplePlayerBackend(GetIt.instance<UserPreferences>());
     GetIt.instance.registerSingleton<NativeApplePlayerBackend>(native);
     addTearDown(() {
@@ -353,6 +359,29 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
     final cards = (metadata['channelList'] as List).cast<Map>();
     expect(cards.singleWhere((card) => card['id'] == 'ch15')['programName'], 'Now on ch15');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('native carousel skips a browsed-away station when warmup finishes during debounce', (tester) async {
+    final warmup = Completer<void>();
+    final requests = <List<String>>[];
+    prepareNativePlayer(tester, beforeListings: (ids) async {
+      requests.add(ids);
+      if (ids.length > 1) await warmup.future;
+    });
+    await pumpNativeHost(tester, [
+      ard,
+      for (var i = 1; i <= 30; i++) GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {}),
+    ]);
+    await sendNativeAction(tester, {'event': 'visibleChannelsChanged', 'channelIds': ['ch15']});
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(requests.any((ids) => ids.length > 1), isTrue);
+    await sendNativeAction(tester, {'event': 'visibleChannelsChanged', 'channelIds': ['ch20']});
+    warmup.complete();
+    await tester.pump();
+    expect(requests.expand((ids) => ids), isNot(contains('ch15')));
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(requests.last, ['ch20']);
     await tester.pumpWidget(const SizedBox());
   });
 

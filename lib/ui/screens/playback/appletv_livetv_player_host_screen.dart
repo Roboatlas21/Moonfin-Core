@@ -595,10 +595,8 @@ class _AppleTvLiveTvPlayerHostScreenState
     final prewarm = _carouselPrewarm;
     if (prewarm == null) return; // The first tune will pick up the latest IDs.
     final ids = _visibleChannelIds;
-    if (ids.isEmpty) {
-      prewarm.clearVisibleChannels();
-      return;
-    }
+    prewarm.updateVisibleChannels(ids);
+    if (ids.isEmpty) return;
     _carouselBrowseDebounce = Timer(const Duration(milliseconds: 150), () async {
       try {
         await prewarm.ensureVisibleChannels(ids);
