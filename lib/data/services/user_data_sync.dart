@@ -48,6 +48,9 @@ class UserDataSync extends ChangeNotifier {
   static const _maxTrackedItems = 2000;
 
   final Map<String, Map<String, dynamic>> _userData = {};
+  // Socket updates can carry a favorite before the guide knows the item's type.
+  // Give these server-scoped observations their own bounded cache.
+  final Map<String, Map<String, dynamic>> _channelFavorites = {};
   final Map<String, int> _itemRevisions = {};
   final _activeFavoriteReads = <({int start, bool Function(String) includes})>[];
   final Map<String, bool> _pendingFavorites = {};
@@ -67,7 +70,7 @@ class UserDataSync extends ChangeNotifier {
       return await read(pending.start);
     } finally {
       _activeFavoriteReads.remove(pending);
-      _evictOverflow();
+      _evictOverflow(_channelFavorites);
     }
   }
 
@@ -114,7 +117,8 @@ class UserDataSync extends ChangeNotifier {
 
   /// The synced favorite flag, or null when none is known.
   bool? favoriteFor(String itemId) =>
-      _pendingFavorites[itemId] ?? _userData[itemId]?['IsFavorite'] as bool?;
+      _pendingFavorites[itemId] ??
+      (_channelFavorites[itemId] ?? _userData[itemId])?['IsFavorite'] as bool?;
 
   /// Records this client's own change before the server confirms it. Merges, so
   /// a patch that only carries `Played` leaves a known play count alone.
@@ -134,15 +138,15 @@ class UserDataSync extends ChangeNotifier {
     var changed = false;
     changes.forEach((itemId, patch) {
       if (itemId.isEmpty || patch.isEmpty) return;
-      final readAt = channelReadRevision != null && _isServerChannelKey(itemId)
-          ? channelReadRevision
-          : null;
+      final scoped = _isServerChannelKey(itemId);
+      final cache = scoped ? _channelFavorites : _userData;
+      final readAt = scoped ? channelReadRevision : null;
       if (readAt != null) {
         if (favoriteChangePending(itemId) || revisionFor(itemId) > readAt) return;
         // An unchanged reply also supersedes reads that started earlier.
         _itemRevisions[itemId] = readAt;
       }
-      final existing = _userData[itemId];
+      final existing = cache[itemId];
       // The server leaves out a percentage it has cleared, and a missing key
       // would keep the old progress bar on the item it is merged into. Only a
       // whole user data record says that, and every server's record carries
@@ -158,13 +162,16 @@ class UserDataSync extends ChangeNotifier {
       if (_pendingFavorites.containsKey(itemId)) {
         merged['IsFavorite'] = _pendingFavorites[itemId];
       }
+      // Even an unchanged confirmation renews this favorite in eviction order.
+      if (scoped) cache.remove(itemId);
+      cache[itemId] = merged;
       if (existing != null && mapEquals(existing, merged)) return;
-      _userData[itemId] = merged;
       if (readAt == null) _itemRevisions[itemId] = ++_revision;
       changed = true;
     });
     if (!changed) return;
-    _evictOverflow();
+    _evictOverflow(_userData);
+    _evictOverflow(_channelFavorites);
     notifyListeners();
   }
 
@@ -210,7 +217,7 @@ class UserDataSync extends ChangeNotifier {
   List<AggregatedItem> applyAll(List<AggregatedItem> items, {
     bool? Function(AggregatedItem)? favoriteFallback,
   }) {
-    if (_userData.isEmpty && favoriteFallback == null) return items;
+    if (_userData.isEmpty && _channelFavorites.isEmpty && favoriteFallback == null) return items;
     List<AggregatedItem>? patched;
     for (var i = 0; i < items.length; i++) {
       final updated = apply(items[i], favoriteFallback: favoriteFallback);
@@ -317,8 +324,9 @@ class UserDataSync extends ChangeNotifier {
     _socketSubscription = null;
     _session++;
     _activeFavoriteReads.clear();
-    if (_userData.isEmpty && _pendingFavorites.isEmpty) return;
+    if (_userData.isEmpty && _channelFavorites.isEmpty && _pendingFavorites.isEmpty) return;
     _userData.clear();
+    _channelFavorites.clear();
     _itemRevisions.clear();
     _pendingFavorites.clear();
     _confirmedFavorites.clear();
@@ -326,18 +334,16 @@ class UserDataSync extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _evictOverflow() {
-    if (_userData.length <= _maxTrackedItems) return;
-    // Insertion ordered, so the front is what has gone longest without a
-    // change. Anything still on screen is refreshed on the next visit.
-    final excess = _userData.length - _maxTrackedItems;
-    final removable = _userData.keys.where((key) {
+  void _evictOverflow(Map<String, Map<String, dynamic>> cache) {
+    final excess = cache.length - _maxTrackedItems;
+    if (excess <= 0) return;
+    final removable = cache.keys.where((key) {
       if (favoriteChangePending(key)) return false;
       return !_isServerChannelKey(key) ||
           !_activeFavoriteReads.any((read) => revisionFor(key) > read.start && read.includes(key));
     });
     for (final key in removable.take(excess).toList()) {
-      _userData.remove(key);
+      cache.remove(key);
       _itemRevisions.remove(key);
     }
   }

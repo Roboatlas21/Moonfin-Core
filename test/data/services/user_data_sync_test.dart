@@ -55,6 +55,17 @@ void main() {
   tearDown(() => sync.dispose());
 
   group('patching items', () {
+    test('a channel-only update patches lists until reset', () {
+      final items = [AggregatedItem(id: 'news', serverId: 'srv', rawData: {
+        'Id': 'news', 'Type': 'TvChannel', 'UserData': {'IsFavorite': false},
+      })];
+      sync.publish(serverChannelKey('srv', 'news'), {'IsFavorite': true});
+      expect(sync.applyAll(items).single.isFavorite, isTrue);
+      sync.reset();
+      expect(sync.applyAll(items), same(items));
+      expect(sync.favoriteFor(serverChannelKey('srv', 'news')), isNull);
+    });
+
     test('an item nothing is known about comes back untouched', () {
       final item = _episode();
       expect(identical(sync.apply(item), item), isTrue);
@@ -144,6 +155,27 @@ void main() {
   });
 
   group('the socket feed', () {
+    test('socket favorites preserve the full watched-state cache', () {
+      final events = StreamController<ServerWebSocketMessage>(sync: true);
+      addTearDown(events.close);
+      sync.bindTo(events.stream, serverId: 'srv');
+      void updateEpisodes(int start, int end) {
+        events.add(UserDataChangedMessage(userId: 'viewer', userDataList: [
+          for (var i = start; i < end; i++)
+            {'ItemId': 'ep$i', 'Played': true, 'IsFavorite': false},
+        ]));
+      }
+
+      updateEpisodes(0, 1001);
+      expect(sync.apply(_episode(id: 'ep0')).isPlayed, isTrue);
+      updateEpisodes(1001, 2000);
+      expect(sync.apply(_episode(id: 'ep0')).isPlayed, isTrue);
+      updateEpisodes(2000, 2001);
+      expect(sync.apply(_episode(id: 'ep0')).isPlayed, isFalse);
+      expect(sync.apply(_episode(id: 'ep1')).isPlayed, isTrue);
+      expect(sync.favoriteFor(serverChannelKey('srv', 'ep0')), isNull);
+    });
+
     test('carries the values the server sent, not just the ids', () {
       final message = WebSocketMessageParser.parseJson({
         'MessageType': 'UserDataChanged',
@@ -310,6 +342,26 @@ void main() {
       return (client: client, itemsApi: itemsApi);
     }
 
+    for (final previous in [false, true]) {
+      test('a full cache retains a refreshed channel favorite (previous: $previous)', () async {
+        final fake = clientReturning([
+          for (final id in ['news', 'sports'])
+            {'Id': id, 'Type': 'TvChannel', 'UserData': {'IsFavorite': true}},
+        ]);
+        when(() => fake.client.baseUrl).thenReturn('http://media.test');
+        String key(String id) => serverChannelKeyFor(fake.client, id);
+        sync.publishAll({
+          key('news'): {'IsFavorite': previous},
+          for (var i = 0; i < 1999; i++) key('ch$i'): {'IsFavorite': false},
+        });
+        await sync.refreshFromServer(fake.client, ['news', 'sports']);
+        expect(sync.favoriteFor(key('news')), isTrue);
+        expect(sync.favoriteFor(key('sports')), isTrue);
+        expect(sync.favoriteFor(key('ch0')), isNull);
+        expect(sync.favoriteFor(key('ch1')), isFalse);
+      });
+    }
+
     test('an earlier refresh preserves a confirmed channel favorite', () async {
       final fake = clientReturning([]);
       when(() => fake.client.baseUrl).thenReturn('http://media.test');
@@ -324,7 +376,9 @@ void main() {
       sync.confirmFavorite(key, true);
       // The channel is the oldest cache entry. Pressure from a library refresh
       // must not evict its newer favorite while this earlier read is pending.
-      sync.publishAll({for (var i = 0; i < 2100; i++) 'ep$i': {'Played': true}});
+      sync.publishAll({
+        for (var i = 0; i < 2100; i++) serverChannelKeyFor(fake.client, 'ch$i'): {'IsFavorite': false},
+      });
       reply.complete({'Items': [
         for (final id in ['news', 'sports'])
           {'Id': id, 'Type': 'TvChannel', 'UserData': {'IsFavorite': false}},
