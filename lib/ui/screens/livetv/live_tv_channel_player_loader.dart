@@ -5,6 +5,7 @@ import 'package:server_core/server_core.dart';
 
 import '../../../data/models/aggregated_item.dart';
 import '../../../data/services/plex_live_tv_favorites.dart';
+import '../../../data/services/user_data_sync.dart';
 import '../../../data/viewmodels/live_tv_guide_view_model.dart';
 import '../../../playback/apple_player_ui.dart';
 import '../../../playback/external_player_policy.dart';
@@ -54,14 +55,25 @@ class _LiveTvChannelPlayerLoaderState extends State<LiveTvChannelPlayerLoader> {
 
   Future<void> _load() async {
     final client = GetIt.instance<MediaServerClient>();
+    final session = userDataSync.session;
+    final userId = client.userId;
+
+    bool acceptReply() {
+      if (!mounted) return false;
+      if (session == userDataSync.session && userId == client.userId) return true;
+      // The player route can outlive the viewer who opened it.
+      setState(() => _channels = const []);
+      return false;
+    }
 
     var channels = const <GuideChannel>[];
     try {
       final response = await client.liveTvApi.getChannels(
         fields: 'ImageTags,UserData',
         enableTotalRecordCount: false,
-        userId: client.userId,
+        userId: userId,
       );
+      if (!acceptReply()) return;
       final items = (response['Items'] as List?) ?? const [];
       final sortBy =
           GetIt.instance<UserPreferences>().get(UserPreferences.liveTvChannelSortBy);
@@ -74,7 +86,9 @@ class _LiveTvChannelPlayerLoaderState extends State<LiveTvChannelPlayerLoader> {
           )
           .toList()
         ..sort(LiveTvGuideViewModel.comparatorFor(sortBy));
-    } catch (_) {}
+    } catch (_) {
+      if (!acceptReply()) return;
+    }
 
     var index = channels.indexWhere((c) => c.id == widget.channelId);
     if (index < 0) {
@@ -82,6 +96,7 @@ class _LiveTvChannelPlayerLoaderState extends State<LiveTvChannelPlayerLoader> {
       // just this channel without zapping.
       try {
         final raw = await client.userLibraryApi.getItem(widget.channelId);
+        if (!acceptReply()) return;
         channels = [
           GuideChannel.fromRawItem(
             PlexLiveTvFavorites.applyToItem(client, raw, fromLineup: true),
@@ -89,7 +104,7 @@ class _LiveTvChannelPlayerLoaderState extends State<LiveTvChannelPlayerLoader> {
         ];
         index = 0;
       } catch (_) {
-        if (!mounted) return;
+        if (!mounted || !acceptReply()) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unable to open channel')),
         );
@@ -102,11 +117,11 @@ class _LiveTvChannelPlayerLoaderState extends State<LiveTvChannelPlayerLoader> {
     // gets its answer when the external player host closes it.
     if (ExternalPlayerPolicy.isEnabled &&
         await queueChannelForExternalPlayer(channels[index])) {
-      if (mounted) setState(() => _external = true);
+      if (acceptReply()) setState(() => _external = true);
       return;
     }
 
-    if (!mounted) return;
+    if (!acceptReply()) return;
     setState(() {
       _channels = channels;
       _startIndex = index;
@@ -121,6 +136,12 @@ class _LiveTvChannelPlayerLoaderState extends State<LiveTvChannelPlayerLoader> {
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (channels.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(),
+        body: const Center(child: Text('Unable to open channel')),
       );
     }
     return useNativeApplePlayer()
