@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:moonfin_design/moonfin_design.dart';
@@ -65,9 +65,9 @@ class ChannelCarouselPrewarm {
 
   Timer? _timer;
   Timer? _hourlyTimer;
-  Timer? _failedListingsTimer;
+  ({Timer timer, Set<String> channels})? _failedListingsRetry;
   final Map<String, DateTime> _failedListingsLastAttempt = {};
-  List<String>? _visibleChannelIds;
+  Set<String>? _visibleChannelIds;
   @visibleForTesting
   static const failedListingsRetryDelay = Duration(seconds: 5);
   static const _failedListingsRetryCooldown = Duration(seconds: 30);
@@ -111,15 +111,9 @@ class ChannelCarouselPrewarm {
   /// After the viewer stops changing channels, load nearby guide listings.
   void tuned(List<GuideChannel> channels, String channelId) {
     if (_disposed) return;
-    final pendingIds = _failedListingsTimer != null && _visibleChannelIds == null
-        ? _retryNeighborhood
-        : null;
     _tunedChannelId = channelId;
     viewModel.usePlaybackLineup(channels);
-    if (pendingIds != null && !listEquals(pendingIds, _retryNeighborhood)) {
-      _failedListingsTimer?.cancel();
-      _failedListingsTimer = null;
-    }
+    _cancelRetryIfStationsChanged();
     _timer?.cancel();
     if (channels.isNotEmpty) _timer = Timer(settleDelay, _requestWarm);
   }
@@ -156,7 +150,8 @@ class ChannelCarouselPrewarm {
 
   Future<void> _warmPrograms(List<String> ids) async {
     if (isWarm) {
-      await viewModel.ensureProgramsForChannels(ids);
+      final missing = _missingProgramIds(ids);
+      if (missing.isNotEmpty) await viewModel.ensureProgramsForChannels(missing);
       return;
     }
     await viewModel.load(
@@ -242,44 +237,42 @@ class ChannelCarouselPrewarm {
     if (!_disposed) viewModel.scheduleBoundaryRefresh();
   }
 
-  /// Load listings for visible carousel channels even when another channel
-  /// is playing.
-  void _setVisibleChannels(List<String> ids) {
-    if (listEquals(_visibleChannelIds, ids)) return;
-    _visibleChannelIds = List.of(ids);
-    // Cancel the previous retry timer when the visible channels change.
-    _failedListingsTimer?.cancel();
-    _failedListingsTimer = null;
+  void _cancelRetryIfStationsChanged() {
+    final retry = _failedListingsRetry;
+    if (retry == null || setEquals(retry.channels, _retryNeighborhood)) return;
+    retry.timer.cancel();
+    _failedListingsRetry = null;
   }
 
   void clearVisibleChannels() {
     if (_visibleChannelIds == null) return;
     _visibleChannelIds = null;
-    _failedListingsTimer?.cancel();
-    _failedListingsTimer = null;
+    _cancelRetryIfStationsChanged();
     _scheduleFailedVisibleRetry();
   }
 
-  List<String> get _retryNeighborhood =>
+  Set<String> get _retryNeighborhood =>
       _visibleChannelIds ??
       carouselNeighborhood(
         viewModel.playbackChannels,
         _tunedChannelId,
         _defaultVisibleCards,
-      );
+      ).toSet();
+
+  // The retry timer owns failed stations. Immediate loads only fill missing listings.
+  List<String> _missingProgramIds(List<String> ids) => [
+    for (final id in ids)
+      if (viewModel.loadStateFor(id) == GuideChannelLoadState.loading) id,
+  ];
 
   Future<void> ensureVisibleChannels(List<String> channelIds) async {
     if (_disposed || channelIds.isEmpty) return;
-    _setVisibleChannels(channelIds);
+    _visibleChannelIds = channelIds.toSet();
+    _cancelRetryIfStationsChanged();
     await ensureReady();
     if (_disposed || !isWarm) return;
     try {
-      // Only missing, not failed, programs get an immediate top-up. Retrying
-      // a failed channel waits for the bounded backoff below.
-      final ids = channelIds
-          .where((id) =>
-              viewModel.loadStateFor(id) == GuideChannelLoadState.loading)
-          .toList();
+      final ids = _missingProgramIds(channelIds);
       if (ids.isNotEmpty) {
         await viewModel.ensureProgramsForChannels(ids);
         if (!_disposed) viewModel.scheduleBoundaryRefresh();
@@ -292,12 +285,13 @@ class ChannelCarouselPrewarm {
 
   void _scheduleFailedVisibleRetry() {
     if (_disposed || !isWarm || viewModel.listingsAccessDenied ||
-        _failedListingsTimer != null) {
+        _failedListingsRetry != null) {
       return;
     }
     final now = _now();
+    final channels = _retryNeighborhood;
     final failed = [
-      for (final id in _retryNeighborhood)
+      for (final id in channels)
         if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed) id,
     ];
     if (failed.isEmpty) return;
@@ -316,8 +310,8 @@ class ChannelCarouselPrewarm {
     }
     final scheduledAt = nextAttempt!;
     final wait = scheduledAt.difference(now);
-    _failedListingsTimer = Timer(wait.isNegative ? Duration.zero : wait, () {
-      _failedListingsTimer = null;
+    final timer = Timer(wait.isNegative ? Duration.zero : wait, () {
+      _failedListingsRetry = null;
       if (_disposed || !isWarm || viewModel.listingsAccessDenied) return;
       final eligible = [
         for (final id in _retryNeighborhood)
@@ -346,6 +340,7 @@ class ChannelCarouselPrewarm {
         }),
       );
     });
+    _failedListingsRetry = (timer: timer, channels: channels);
   }
 
   Future<void> ensureReady() async {
@@ -372,7 +367,7 @@ class ChannelCarouselPrewarm {
     liveTvRecordingRevision.removeListener(_onRecordingsChanged);
     userDataSync.removeListener(viewModel.syncChannelUserData);
     _timer?.cancel();
-    _failedListingsTimer?.cancel();
+    _failedListingsRetry?.timer.cancel();
     _hourlyTimer?.cancel();
     _hourlyTimer = null;
     _hourlyDueAt = null;

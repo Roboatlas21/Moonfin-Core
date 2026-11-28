@@ -395,6 +395,54 @@ void main() {
     expect(vm.listening, isFalse);
   });
 
+  for (final open in [true, false]) {
+    testWidgets('station reordering keeps the ${open ? 'open' : 'closed'} carousel retry deadline', (tester) async {
+      final client = _CarouselClient();
+      final channels = _guideChannels(2);
+      final vm = _CarouselGuide(client, channels)..failedChannels.add('ch0');
+      final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm, now: tester.binding.clock.now);
+      try {
+        prewarm.tuned(channels, 'ch0');
+        await tester.pump(ChannelCarouselPrewarm.settleDelay);
+        if (open) await prewarm.ensureVisibleChannels(['ch0', 'ch1']);
+        await tester.pump(const Duration(seconds: 4));
+        if (open) {
+          await prewarm.ensureVisibleChannels(['ch1', 'ch0']);
+        } else {
+          prewarm.tuned(channels, 'ch1');
+        }
+        vm.requests.clear();
+        await tester.pump(const Duration(seconds: 1));
+        expect(vm.requests, contains(equals(['ch0'])));
+      } finally {
+        prewarm.dispose();
+      }
+    });
+  }
+
+  testWidgets('retuning loads new neighbors while a failed station waits for its retry', (tester) async {
+    final client = _CarouselClient();
+    final channels = _guideChannels(20);
+    final vm = _CarouselGuide(client, channels)..failedChannels.add('ch0');
+    final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm, now: tester.binding.clock.now);
+    try {
+      prewarm.tuned(channels, 'ch0');
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
+      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+      expect(vm.requests.last, ['ch0']);
+      vm.requests.clear();
+
+      prewarm.tuned(channels, 'ch1');
+      await tester.pump(ChannelCarouselPrewarm.settleDelay);
+      expect(vm.requests.single, contains('ch5'));
+      expect(vm.requests.single, isNot(contains('ch0')));
+      await tester.pump(const Duration(seconds: 29));
+      expect(vm.requests.last, ['ch0']);
+    } finally {
+      prewarm.dispose();
+    }
+  });
+
   testWidgets('retuning a closed carousel gives its new station a fresh retry deadline', (tester) async {
     final client = _CarouselClient();
     final channels = _guideChannels(20);
