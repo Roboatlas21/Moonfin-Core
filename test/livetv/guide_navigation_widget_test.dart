@@ -1983,10 +1983,21 @@ void main() {
     expect(tester.widget<TextField>(field).controller!.text, isEmpty);
   });
 
-  testWidgets('moving into the mini player skips hero artwork', (tester) async {
+  testWidgets('the full Guide loads artwork and the mini Guide skips it on both focus targets', (tester) async {
     useTvLayout();
+    channelCount = 1;
+    await pumpGuide(tester);
+    await focusGuideNode(tester, 'GuideProgramRow0:0');
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(EpgHeroPreview), findsOneWidget);
+    verify(() => liveTvApi.getProgram(any(), userId: any(named: 'userId'))).called(greaterThan(0));
+    await tester.pumpWidget(const SizedBox());
+    clearInteractions(liveTvApi);
     await pumpGuide(tester, miniPlayerMode: true);
     await focusGuideNode(tester, 'GuideProgramRow0:0');
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(EpgHeroPreview), findsNothing);
+    verifyNever(() => liveTvApi.getProgram(any(), userId: any(named: 'userId')));
     await expectFocusAfter(tester, LogicalKeyboardKey.arrowUp, 'GuideMiniPlayer');
     await tester.pump(const Duration(seconds: 1));
     verifyNever(() => liveTvApi.getProgram(any(), userId: any(named: 'userId')));

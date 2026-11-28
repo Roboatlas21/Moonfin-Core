@@ -387,6 +387,7 @@ void main() {
   });
 
   testWidgets('browsing native cards keeps the server’s listings denial', (tester) async {
+    await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvChannelSortBy, ChannelSortBy.favoritesFirst);
     final request = RequestOptions();
     var listingRequests = 0;
     prepareNativePlayer(tester, beforeListings: (_) async {
@@ -396,8 +397,12 @@ void main() {
     await pumpNativeHost(tester, [ard, zdf]);
     await tester.pump(const Duration(seconds: 1));
     expect(listingRequests, 1);
+    userDataSync.publish(channelFavoriteKey(zdf.rawData)!, {'IsFavorite': true});
     await sendNativeAction(tester, {'event': 'visibleChannelsChanged', 'channelIds': [zdf.id]});
     await tester.pump(const Duration(milliseconds: 150));
+    expect(listingRequests, 1);
+    await pumpNativeHost(tester, [zdf, ard]);
+    await tester.pump(const Duration(seconds: 1));
     expect(listingRequests, 1);
     await tester.pumpWidget(const SizedBox());
   });
@@ -405,17 +410,20 @@ void main() {
   testWidgets('a recreated native player gets the full lineup after a partial update', (tester) async {
     final metadata = prepareNativePlayer(tester);
     const third = GuideChannel(id: 'third', name: 'Third', rawData: {});
-    final lineup = [ard, zdf, third];
+    final lineup = [ard, zdf, third, for (var i = 3; i < 18; i++) GuideChannel(id: 'ch$i', name: 'Channel $i', rawData: const {})];
     List<dynamic> cardIds() => [for (final card in metadata['channelList'] as List) card['id']];
     await pumpNativeHost(tester, lineup);
     await tester.pump(const Duration(seconds: 1));
     await tester.pump(const Duration(milliseconds: 500));
     expect(metadata['partialChannelList'], isTrue);
-    expect(cardIds(), [ard.id]);
+    expect(cardIds(), containsAll([ard.id, zdf.id, third.id]));
+    expect(cardIds(), isNot(contains('ch9')));
+    final warmed = (metadata['channelList'] as List).cast<Map>();
+    expect(warmed.singleWhere((card) => card['id'] == zdf.id)['programName'], 'Now on zdf');
 
     await sendNativeAction(tester, {'event': 'requestChannelList'});
     expect(metadata.containsKey('partialChannelList'), isFalse);
-    expect(cardIds(), [ard.id, zdf.id, third.id]);
+    expect(cardIds(), lineup.map((channel) => channel.id));
     final cards = (metadata['channelList'] as List).cast<Map>();
     expect(cards.singleWhere((card) => card['selected'] == true)['id'], ard.id);
     expect(cards.singleWhere((card) => card['id'] == third.id)['programName'], 'Now on ${third.id}');
@@ -571,6 +579,10 @@ void main() {
       await pumpPlayer(tester);
       expect(manager.playedServerId, 'plex-cloud-viewer');
       await pickFromGuide(tester, ard);
+      await tester.pump();
+      await tester.tap(find.byTooltip(l10n.guide));
+      await tester.pump();
+      expect(find.byType(LiveTvGuideScreen), findsNothing);
       if (!needsRetry) manager.failedChannel = null;
       manager.failedTune!.complete();
       await tester.pump();

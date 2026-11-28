@@ -149,6 +149,7 @@ class ChannelCarouselPrewarm {
   }
 
   Future<void> _warmPrograms(List<String> ids) async {
+    if (viewModel.listingsAccessDenied) return;
     if (isWarm) {
       final missing = _missingProgramIds(ids);
       if (missing.isNotEmpty) await viewModel.ensureProgramsForChannels(missing);
@@ -252,7 +253,7 @@ class ChannelCarouselPrewarm {
     _scheduleFailedVisibleRetry();
   }
 
-  Set<String> get _retryNeighborhood =>
+  Set<String> get visibleOrNearbyChannelIds =>
       _visibleChannelIds ??
       carouselNeighborhood(
         viewModel.playbackChannels,
@@ -288,7 +289,7 @@ class ChannelCarouselPrewarm {
   void _scheduleFailedVisibleRetry() {
     if (_disposed || !isWarm) return;
     final now = _now();
-    final visible = _retryNeighborhood;
+    final visible = visibleOrNearbyChannelIds;
     final failed = {
       for (final id in visible)
         if (!viewModel.listingsAccessDenied && viewModel.loadStateFor(id) == GuideChannelLoadState.failed) id,
@@ -312,7 +313,7 @@ class ChannelCarouselPrewarm {
       _failedListingsRetry = null;
       if (_disposed || !isWarm || viewModel.listingsAccessDenied) return;
       final eligible = [
-        for (final id in _retryNeighborhood)
+        for (final id in visibleOrNearbyChannelIds)
           if (!_retriesInFlight.contains(id) &&
               viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
               _retryDeadlines[id]?.due.isAfter(scheduledAt) == false)

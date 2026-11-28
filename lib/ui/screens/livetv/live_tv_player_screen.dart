@@ -1862,7 +1862,7 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
   // the single existing video surface can be shrunk into the mini-player box
   // and shown for BOTH the media_kit and Media3 engines. See [_buildVideoSurface].
   Future<void> _showChannelPicker() async {
-    if (_isGuidePickerOpen) return;
+    if (_isGuidePickerOpen || _isSwitching) return;
     _hideTimer?.cancel();
     _suppressBackNavigation();
     setState(() => _isGuidePickerOpen = true);
@@ -1889,8 +1889,8 @@ class _LiveTvPlayerScreenState extends State<LiveTvPlayerScreen>
     String channelId,
     GuidePlaybackLineup lineup,
   ) async {
-    _closeGuideOverlay();
     if (_isSwitching) return;
+    _closeGuideOverlay();
     final channels = lineup.channels;
     final index = channels.indexWhere((channel) => channel.id == channelId);
     if (index < 0) return;

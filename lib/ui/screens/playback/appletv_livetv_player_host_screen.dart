@@ -620,7 +620,7 @@ class _AppleTvLiveTvPlayerHostScreenState
         }
       }
       final visible = [
-        for (final id in {_currentChannel.id, ..._visibleChannelIds})
+        for (final id in {_currentChannel.id, ...?_carouselPrewarm?.visibleOrNearbyChannelIds})
           ?_channelsById[id],
       ];
       _readSchedule(visible);

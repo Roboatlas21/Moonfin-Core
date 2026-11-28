@@ -561,6 +561,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   void usePlaybackLineup(List<GuideChannel> channels) {
     if (_usesPlaybackLineup && identical(_channels, channels)) return;
     final sameStations = _usesPlaybackLineup && GuideChannel.sameStationOrder(_channels, channels);
+    final keepDenial = listingsAccessDenied && GuideChannel.sameStations(_channels, channels);
     _usesPlaybackLineup = true;
     if (!sameStations) _programGeneration++;
     _channels = channels;
@@ -571,7 +572,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _failedProgramIds.retainAll(ids);
     _failedReplacementIds.retainAll(ids);
     if (_failedReplacementIds.isEmpty) _retryRollingRange = false;
-    _resetPageCursor(advancePage: !sameStations);
+    _resetPageCursor(advancePage: !sameStations && !keepDenial);
   }
 
   final Map<String, List<GuideProgram>> _programsByChannel = {};
@@ -872,7 +873,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _updatePageRows();
     if (_sortReadsFavorite || _filter == GuideFilter.favorites) {
       // Reordering favorites shouldn't restart a program category that's still loading.
-      _resetPageCursor(advancePage: !_isCategory(_filter));
+      _resetPageCursor(advancePage: !_isCategory(_filter) && !(_usesPlaybackLineup && listingsAccessDenied));
     }
   }
 
