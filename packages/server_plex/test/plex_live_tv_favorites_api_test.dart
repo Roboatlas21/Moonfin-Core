@@ -11,10 +11,10 @@ void main() {
     ];
     const device = DeviceInfo(id: 'device', name: 'Test', appName: 'Moonfin', appVersion: '1');
     Map<String, dynamic> container = {'FavoriteChannel': rows};
-    final methods = <String>[];
+    final requests = <RequestOptions>[];
     final writes = <Object?>[];
     final dio = Dio()..interceptors.add(InterceptorsWrapper(onRequest: (request, handler) {
-      methods.add(request.method);
+      requests.add(request);
       expect(request.uri.toString(), 'https://epg.provider.plex.tv/settings/favoriteChannels');
       expect(request.headers['X-Plex-Token'], 'account-token');
       if (request.method == 'PUT') writes.add(request.data);
@@ -24,7 +24,8 @@ void main() {
     final api = PlexLiveTvFavoritesApi(dio: dio);
     Future<List<Map<String, dynamic>>> read() => api.readFavorites(deviceInfo: device, accountToken: 'account-token');
     await api.writeFavorites(deviceInfo: device, accountToken: 'account-token', rows: await read());
-    expect(methods, ['GET', 'PUT']);
+    expect(requests.map((r) => r.method), ['GET', 'PUT']);
+    expect(requests.map((r) => r.followRedirects), everyElement(isFalse));
     Future<void> write(List<Map<String, dynamic>> list) =>
         api.writeFavorites(deviceInfo: device, accountToken: 'account-token', rows: list);
     for (final field in ['source', 'id']) {

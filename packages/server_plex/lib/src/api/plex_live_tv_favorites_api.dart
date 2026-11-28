@@ -36,7 +36,10 @@ class PlexLiveTvFavoritesApi {
   }) async {
     final response = await _dio.get<Map<String, dynamic>>(
       _url,
-      options: Options(headers: _headers(deviceInfo, accountToken)),
+      options: Options(
+        headers: _headers(deviceInfo, accountToken),
+        followRedirects: false,
+      ),
     );
     final container = response.data?['MediaContainer'];
     if (container is! Map) {
@@ -72,6 +75,7 @@ class PlexLiveTvFavoritesApi {
       _url,
       data: rows,
       options: Options(
+        followRedirects: false,
         headers: {
           ..._headers(deviceInfo, accountToken),
           'Content-Type': 'application/json',

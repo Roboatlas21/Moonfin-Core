@@ -91,6 +91,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   }) : _gridCacheNow = gridCacheNow, _now = now;
 
   static final _cloudOptions = Options(
+    // Native redirects would forward X-Plex-Token to the redirect target.
+    followRedirects: false,
     headers: {'X-Plex-Provider-Version': '7.2'},
   );
 

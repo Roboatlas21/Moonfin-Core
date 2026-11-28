@@ -800,6 +800,22 @@ void main() {
     });
   }
 
+  test('Plex Cloud guide requests disable automatic redirects', () async {
+    final (dio, server) = _server();
+    final api = PlexLiveTvApi(dio);
+    final lineup = await api.getChannelGroups();
+    await lineup.promoted!.refresh(DateTime.now);
+    await api.testGuide([free]);
+    await api.getRecommendedPrograms(limit: 1);
+
+    final cloud = server.requests.where((r) => r.uri.host == 'epg.provider.plex.tv');
+    expect(cloud.map((r) => r.uri.path).toSet(), {
+      '/', '/lineups/plex/channels', '/lineups/plex/channels/featured',
+      '/grid', '/hubs/sections/home/whatsOnNow',
+    });
+    expect(cloud.map((r) => r.followRedirects), everyElement(isFalse));
+  });
+
   test('opening the guide during a genre outage keeps sources and loads Featured after recovery', () async {
     final (dio, server) = _server();
     final api = PlexLiveTvApi(dio);
