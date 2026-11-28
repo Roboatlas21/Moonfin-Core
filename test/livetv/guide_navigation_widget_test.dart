@@ -1548,6 +1548,24 @@ void main() {
     });
   }
 
+  testWidgets('scrolling a Hebrew channel group keeps the program title visible', (tester) async {
+    useLayout(InterfaceLayout.phone);
+    final prefs = GetIt.instance<UserPreferences>();
+    await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);
+    await prefs.set(UserPreferences.epgMobileView, EpgMobileView.grid);
+    stubGroups(const ChannelGroupLineup({'ch4': {'Sports'}}));
+    await pumpGuide(tester, surface: const Size(1800, 800), locale: const Locale('he'),
+        initialFilter: (GuideFilter.all, 'Sports'));
+    tester.view.physicalSize = phone;
+    await _pumpFrames(tester);
+    final title = find.descendant(of: find.byType(EpgProgramCell), matching: find.text('ch4 show 0'));
+    final scroll = Scrollable.of(tester.element(title), axis: Axis.horizontal);
+    expect(scroll.position.maxScrollExtent, greaterThan(95));
+    scroll.position.jumpTo(95);
+    await _pumpFrames(tester);
+    expect(title.hitTestable(), findsOneWidget);
+  });
+
   testWidgets('TV arrows follow the visible Hebrew Browse header', (tester) async {
     useTvLayout();
     await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);

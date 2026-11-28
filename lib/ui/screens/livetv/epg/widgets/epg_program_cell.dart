@@ -41,6 +41,7 @@ class EpgProgramCell extends StatelessWidget {
   final bool loading;
   final bool failed;
   final double textLeftPadding;
+  final double textRightPadding;
 
   /// Program started before the visible window's left edge. Shows a compact
   /// double-chevron continuation marker that survives even when the title has
@@ -63,6 +64,7 @@ class EpgProgramCell extends StatelessWidget {
     this.loading = false,
     this.failed = false,
     this.textLeftPadding = 0,
+    this.textRightPadding = 0,
     this.startsBeforeWindow = false,
   });
 
@@ -185,11 +187,11 @@ class EpgProgramCell extends StatelessWidget {
               // A marker cell this narrow gives up its inset so the continuation
               // glyph still fits.
               final padding = showMarker && cell.maxWidth < 48
-                  ? EdgeInsets.fromLTRB(2 + textLeftPadding, 4, 2, 4)
+                  ? EdgeInsets.fromLTRB(2 + textLeftPadding, 4, 2 + textRightPadding, 4)
                   : EdgeInsets.fromLTRB(
                       (apple ? 10 : 12) + textLeftPadding,
                       4,
-                      8,
+                      8 + textRightPadding,
                       4,
                     );
 

@@ -30,6 +30,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   int programLookups = 0;
   bool ready = false;
   bool failTopUp = false;
+  bool recoverOnTopUp = false;
   Completer<void>? nextTopUpGate;
   final Set<String> failedChannels = {};
   bool get listening => hasListeners;
@@ -51,6 +52,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   @override
   List<GuideProgram> unfilteredProgramsForChannel(String channelId) {
     programLookups++;
+    if (failedChannels.contains(channelId)) return [];
     final now = DateTime.now();
     return [
       GuideProgram(
@@ -95,6 +97,10 @@ class _CarouselGuide extends LiveTvGuideViewModel {
     if (failTopUp) {
       failedChannels.addAll(channelIds);
       throw StateError('Optional top-up failed');
+    }
+    if (recoverOnTopUp) {
+      failedChannels.removeAll(channelIds);
+      notifyListeners();
     }
   }
 
@@ -210,7 +216,7 @@ void main() {
     VoidCallback? onShowControls,
     Duration inactivity = const Duration(seconds: 5),
     ChannelCarouselPrewarm? prewarm,
-    String? failedChannel,
+    _CarouselGuide? coldGuide,
     double surfaceWidth = 1000,
   }) async {
     PlatformDetection.setInterfaceLayout(InterfaceLayout.tv);
@@ -221,8 +227,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final client = _CarouselClient();
     final channels = _guideChannels(20, numbered: true);
-    final vm = prewarm?.viewModel as _CarouselGuide? ?? _CarouselGuide(client, channels);
-    if (failedChannel != null) vm.failedChannels.add(failedChannel);
+    final vm = prewarm?.viewModel as _CarouselGuide? ?? coldGuide ?? _CarouselGuide(client, channels);
     prewarm?.tuned(channels, 'ch10');
     await tester.pumpWidget(
       MaterialApp(
@@ -252,15 +257,23 @@ void main() {
   testWidgets('a cold carousel retries a failed visible channel at a stable width', (
     tester,
   ) async {
-    final vm = await pumpOverlay(
+    final reply = Completer<void>();
+    final vm = _CarouselGuide(_CarouselClient(), _guideChannels(20, numbered: true))
+      ..failedChannels.add('ch10')
+      ..nextTopUpGate = reply
+      ..recoverOnTopUp = true;
+    await pumpOverlay(
       tester,
-      failedChannel: 'ch10',
+      coldGuide: vm,
       surfaceWidth: ChannelCarouselCard.cardPitch * 5 + 66,
       inactivity: const Duration(minutes: 1),
     );
-    await tester.pump(const Duration(seconds: 3));
-    await tester.pump(const Duration(milliseconds: 500));
+    final card = find.byWidgetPredicate((w) => w is ChannelCarouselCard && w.channelName == 'Channel 10');
+    expect(tester.widget<ChannelCarouselCard>(card).programTitle, isNull);
     expect(vm.requests.where((ids) => ids.contains('ch10')), hasLength(2));
+    reply.complete();
+    await tester.pump();
+    expect(tester.widget<ChannelCarouselCard>(card).programTitle, 'Show ch10');
     await tester.pumpWidget(const SizedBox.shrink());
   });
 

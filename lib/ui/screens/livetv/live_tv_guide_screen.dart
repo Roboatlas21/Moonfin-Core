@@ -4582,7 +4582,8 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
               : null,
           loading: cell.kind == GuideCellKind.loading,
           failed: cell.kind == GuideCellKind.failed,
-          textLeftPadding: _textLeftPadding(left, width),
+          textLeftPadding: widget.timelineDirection == TextDirection.ltr ? _clippedStart(left, width) : 0,
+          textRightPadding: widget.timelineDirection == TextDirection.rtl ? _clippedStart(left, width) : 0,
         ),
       ),
     );
@@ -4600,7 +4601,7 @@ class _GuideProgramRowState extends State<_GuideProgramRow> {
     );
   }
 
-  double _textLeftPadding(double left, double width) {
+  double _clippedStart(double left, double width) {
     if (!widget.horizontalController.hasClients) return 0;
     final maxInset = (width - 20).clamp(0.0, width);
     return (widget.horizontalController.offset - left).clamp(0.0, maxInset);
