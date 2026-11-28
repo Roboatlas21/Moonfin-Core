@@ -125,6 +125,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
   Future<String?>? _favoriteMachineId;
   Future<_FreeChannels>? _cloudChannels;
   Future<_FreeChannels>? _latestFreeRead;
+  Object? _freeCatalogError;
   // The read that supplied the grid keys in _lastFreeLineup.
   Future<_FreeChannels>? _publishedFreeRead;
   _FreeChannels? _lastFreeLineup;
@@ -430,11 +431,14 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     read = _fetchFreeChannels().then((lineup) {
       if (!identical(read, _latestFreeRead)) return _latestFreeRead!;
       _publishedFreeRead = read;
+      _freeCatalogError = null;
       return _publishFreeChannels(lineup);
     }, onError: (Object error, StackTrace stack) {
       if (!identical(read, _latestFreeRead)) return _latestFreeRead!;
       _cloudChannels = null;
-      if (_accessDenied(error)) {
+      final denied = _accessDenied(error);
+      _freeCatalogError = denied ? null : error;
+      if (denied) {
         _publishedFreeRead = null;
         _lastFreeLineup = null;
         _cloudOnNowRows = null;
@@ -624,6 +628,10 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final currentFree = _lastFreeLineup?.values ?? const [];
     final metadataUnavailable = currentFree.isNotEmpty && catalog == null;
     final freeUnavailable = _cloudChannels == null;
+    final promoted = currentFree.isEmpty ? null : _featuredGroup;
+    final promotedError = currentFree.isEmpty
+        ? _freeCatalogError
+        : (metadataUnavailable ? providerError : null);
     final unresolved = _dvrLineup.unresolved;
     return ChannelGroupLineup(
       {
@@ -638,8 +646,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       },
       channels: [...dvr, ...currentFree],
       sources: dvr.isEmpty ? const [] : currentFree.isEmpty ? const [ChannelGroupSource.dvr] : ChannelGroupSource.values,
-      promoted: currentFree.isEmpty ? null : _featuredGroup,
-      promotedError: metadataUnavailable && _featuredGroup == null ? providerError : null,
+      promoted: promoted,
+      promotedError: promoted == null ? promotedError : null,
       partial: metadataUnavailable || _dvrLineup.partial || freeUnavailable,
       unresolvedChannelIds: freeUnavailable || (_dvrLineup.partial && unresolved == null)
           ? null

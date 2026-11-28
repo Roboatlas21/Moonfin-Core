@@ -19,6 +19,7 @@ import 'package:moonfin/data/viewmodels/search_view_model.dart';
 import 'package:moonfin/preference/user_preferences.dart';
 import 'package:server_core/server_core.dart';
 import 'package:server_plex/server_plex.dart';
+import 'package:server_plex/src/api/plex_live_tv_api.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 const _device = DeviceInfo(id: 'device', name: 'Test', appName: 'Moonfin', appVersion: '1');
@@ -274,6 +275,62 @@ void main() {
       expect(refreshed.items.single.id, id);
     });
   }
+
+  test('Featured survives a cold Free TV catalog outage and clears when the catalog is empty', () async {
+    const featured = PromotedChannelGroup.groupId;
+    const free = 'channel-plex-free123';
+    var catalogStatus = 503;
+    final dio = Dio(BaseOptions(baseUrl: 'https://pms.example'));
+    addTearDown(dio.close);
+    dio.interceptors.add(InterceptorsWrapper(onRequest: (request, handler) {
+      final path = request.uri.path;
+      if (path == '/lineups/plex/channels' && catalogStatus == 503) {
+        handler.reject(DioException.badResponse(
+          statusCode: 503,
+          requestOptions: request,
+          response: Response(requestOptions: request, statusCode: 503),
+        ));
+        return;
+      }
+      final data = switch (path) {
+        '/lineups/plex/channels' || '/lineups/plex/channels/featured' => {
+          'MediaContainer': {
+            'Channel': [if (catalogStatus == 200) {'id': 'free123', 'title': 'Free Channel'}],
+          },
+        },
+        '/' => {
+          'MediaProvider': {'Feature': [
+            {'type': 'grid', 'PromotedGridChannelFilter': [
+              {'key': '/lineups/plex/channels/featured', 'title': 'Featured'},
+            ]},
+          ]},
+        },
+        '/livetv/dvrs' => {'MediaContainer': {'Dvr': []}},
+        _ => {'MediaContainer': {'Metadata': []}},
+      };
+      handler.resolve(Response(requestOptions: request, data: data));
+    }));
+    final client = _LineupClient(PlexLiveTvApi(dio))..userId = 'plex-user';
+    addTearDown(client.dispose);
+    final guide = LiveTvGuideViewModel(client, initialFilter: (GuideFilter.all, featured));
+    addTearDown(guide.dispose);
+
+    await guide.load();
+    expect(guide.selectedGroup, featured);
+    expect(guide.state, GuideState.error);
+
+    catalogStatus = 200;
+    await guide.load();
+    await pumpEventQueue();
+    expect(guide.selectedGroup, featured);
+    expect(guide.state, GuideState.ready);
+    expect(guide.filteredChannels.single.id, free);
+
+    catalogStatus = 204;
+    await guide.load();
+    expect(guide.selectedGroup, isNull);
+    expect(guide.state, GuideState.ready);
+  });
 
   group('Global Search DVR favorites', () {
     const favorite = {'source': 'server://pms/epg', 'id': '4'};
