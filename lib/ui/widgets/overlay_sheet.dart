@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:custom_tv_text_field/custom_tv_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:moonfin_design/moonfin_design.dart';
@@ -15,6 +16,15 @@ class DialogBackSuppressor {
   DialogBackSuppressor._();
 
   static int _count = 0;
+  static KeyDownEvent? _keyboardBack;
+
+  /// The app and the focused dialog can receive the same hardware event.
+  static bool dismissKeyboardFor(KeyDownEvent event) {
+    if (identical(_keyboardBack, event)) return true;
+    if (!CustomTVTextField.closeTopKeyboard()) return false;
+    _keyboardBack = event;
+    return true;
+  }
 
   static void markDismissed() => _count++;
 

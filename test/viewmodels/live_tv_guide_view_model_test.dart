@@ -1294,6 +1294,30 @@ void main() {
   });
 
   group('category filters', () {
+    for (final timeout in [false, true]) {
+      test('Retry recovers a failed off-page category lookup (timeout: $timeout)', () async {
+        stubNumberedChannels(201);
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+        final vm = await loadFilter(GuideFilter.sports);
+        final requested = <List<String>>[];
+        when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+          requested.add(_requestedIds(inv));
+          if (requested.length == 1) {
+            if (timeout) throw TimeoutException('station listings');
+            return {'Items': [], 'FailedChannelIds': ['c200']};
+          }
+          return {'Items': [_program('recovered', 'c200', isSports: true)]};
+        });
+        expect(vm.hasFailedCategoryListings, isFalse);
+        expect(await vm.ensureCategoryChannel('c200'), isFalse);
+        expect(vm.hasFailedCategoryListings, isTrue);
+        await vm.retryFailedCategoryListings();
+        expect(requested, [['c200'], ['c200']]);
+        expect(vm.programsForChannel('c200').single.id, 'recovered');
+        expect(vm.hasFailedCategoryListings, isFalse);
+      });
+    }
+
     test('targeted focus retries a failed category channel and skips known nonmatches', () async {
       stubNumberedChannels(3);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {
@@ -1394,6 +1418,7 @@ void main() {
       'search': (vm) => vm.setChannelQuery('c1'),
       'sort': (vm) => vm.setSortBy(ChannelSortBy.name),
       'filter': (vm) => vm.setFilter(GuideFilter.favorites),
+      'Guide exit': (vm) => vm.resetWindowOnExit(),
     };
     for (final change in changes.entries) {
       test('a ${change.key} change releases a resize waiting for the cancelled page', () async {
@@ -1404,6 +1429,8 @@ void main() {
         await pumpEventQueue();
         final width = vm.guideWindow + const Duration(hours: 1);
         final resize = vm.setWindow(width);
+        expect(vm.pendingWindowResult, isNotNull);
+        expect(vm.guideWindow, isNot(width));
         when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
         change.value(vm);
         await pumpEventQueue();

@@ -1256,11 +1256,18 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         category == _filter &&
         recordingRevision == liveTvRecordingRevision.value &&
         _pageChannels.any((c) => c.id == channelId);
-    final reply = await _fetchPrograms([channel], category: category, current: current);
+    final reply = await _fetchPrograms([channel], category: category, current: current).onError<Object>(
+      (_, _) => (programs: <String, List<GuideProgram>>{}, failedChannelIds: {channelId}),
+      test: _temporaryCategoryFailure,
+    );
     if (!current()) return false;
-    if (reply.failedChannelIds.contains(channelId)) return false;
-    _categoryQueriedIds.add(channelId);
+    final firstResult = _categoryQueriedIds.add(channelId);
     _advanceCategoryCursor();
+    if (reply.failedChannelIds.contains(channelId)) {
+      // A concurrent page may already have confirmed a match or an empty row.
+      if (firstResult && _categoryFailedIds.add(channelId)) _notifyListeners();
+      return _categoryPrograms.containsKey(channelId);
+    }
     final recovered = _categoryFailedIds.remove(channelId);
     final matches = reply.programs[channelId];
     if (matches != null) _categoryPrograms[channelId] = matches;
@@ -1588,6 +1595,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   /// date, so the next entry starts live instead of wherever it wandered to.
   void resetWindowOnExit({DateTime? windowStart}) {
     _windowRequest++;
+    _finishPendingWindow();
     final now = _now();
     final nextStart =
         windowStart ?? DateTime(now.year, now.month, now.day, now.hour);

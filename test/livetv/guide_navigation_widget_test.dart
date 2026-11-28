@@ -1178,6 +1178,59 @@ void main() {
     }
   });
 
+  for (final apiLevel in [32, 33]) {
+    testWidgets('Back dismisses the native search keyboard before the picker on API $apiLevel', (tester) async {
+      useTvLayout();
+      final prefs = GetIt.instance<UserPreferences>();
+      await prefs.set(UserPreferences.liveTvCategoryDisplay, LiveTvCategoryDisplay.groups);
+      await prefs.set(UserPreferences.keyboardStyle, KeyboardStyle.native);
+      stubGroups(const ChannelGroupLineup({'ch1': {'Local'}}));
+      final observer = _DialogBackObserver();
+      tester.binding.addObserver(observer);
+      addTearDown(() => tester.binding.removeObserver(observer));
+      addTearDown(DialogBackSuppressor.newBackPress);
+      bool appKeyboardHandler(KeyEvent event) {
+        if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.goBack) return false;
+        DialogBackSuppressor.newBackPress();
+        if (!DialogBackSuppressor.dismissKeyboardFor(event)) return false;
+        DialogBackSuppressor.markDismissed();
+        return true;
+      }
+      HardwareKeyboard.instance.addHandler(appKeyboardHandler);
+      addTearDown(() => HardwareKeyboard.instance.removeHandler(appKeyboardHandler));
+      await openGuideRoute(tester);
+      await focusGuideNode(tester, 'GuideBrowse');
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.enter);
+      final field = find.descendant(of: picker, matching: find.byType(LocalSearchField));
+      tester.widget<LocalSearchField>(field).focusNode.requestFocus();
+      await _pumpFrames(tester);
+      await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
+      expect(CustomTVTextField.isKeyboardVisibleNotifier.value, isTrue);
+
+      Future<void> pressBack() async {
+        const back = LogicalKeyboardKey.goBack;
+        const physical = PhysicalKeyboardKey.escape;
+        await tester.sendKeyDownEvent(back, physicalKey: physical);
+        await tester.sendKeyRepeatEvent(back, physicalKey: physical);
+        final handledUp = await tester.sendKeyUpEvent(back, physicalKey: physical);
+        await _pumpFrames(tester);
+        if (apiLevel >= 33 || !handledUp) {
+          final suppressed = observer.suppressed;
+          await tester.binding.handlePopRoute();
+          await _pumpFrames(tester);
+          expect(observer.suppressed, suppressed + 1);
+        }
+      }
+
+      await pressBack();
+      expect(CustomTVTextField.isKeyboardVisibleNotifier.value, isFalse);
+      expect(picker, findsOneWidget);
+      await pressBack();
+      expect(picker, findsNothing);
+      expect(find.byType(LiveTvGuideScreen), findsOneWidget);
+    });
+  }
+
   testWidgets('holding Select updates Favorites and rolls back failures', (tester) async {
     useTvLayout();
     userDataSync.reset();

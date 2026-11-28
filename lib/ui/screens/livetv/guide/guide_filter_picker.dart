@@ -220,7 +220,9 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
             event.logicalKey.isBackKey &&
             !(event.logicalKey == LogicalKeyboardKey.backspace &&
                 _searchFocus.hasFocus)) {
-          closeOnBack();
+          if (event is KeyDownEvent && !DialogBackSuppressor.dismissKeyboardFor(event)) {
+            closeOnBack();
+          }
           return KeyEventResult.handled;
         }
         if (widget.sidePanel &&
