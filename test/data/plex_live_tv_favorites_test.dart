@@ -138,26 +138,53 @@ void main() {
     await GetIt.instance.reset();
   });
 
-  test('the cloud guide keeps a cached lineup only while the API can supply it', () async {
+  test('Free TV clears an unusable lineup and keeps Favorites on same-viewer retry', () async {
     final api = _LineupApi();
     final client = _LineupClient(api, cloudOnly: true)..userId = 'plex-user';
     addTearDown(client.dispose);
     final guide = LiveTvGuideViewModel(client);
     addTearDown(guide.dispose);
-    when(() => api.getChannelGroups(userId: 'plex-user')).thenAnswer(
-      (_) async => const ChannelGroupLineup({}, channels: [_channel], partial: true),
-    );
+    DioException? failure;
+    when(() => api.getChannelGroups(userId: any(named: 'userId'))).thenAnswer((_) async {
+      if (failure case final error?) throw error;
+      return const ChannelGroupLineup({}, channels: [_channel], partial: true);
+    });
     await guide.load(initialChannelIds: []);
     expect(guide.playbackChannels.single.id, _channel['Id']);
 
-    final failure = DioException(
+    guide.setFilter(GuideFilter.favorites);
+    final certificateError = DioException(
       requestOptions: RequestOptions(),
       type: DioExceptionType.badCertificate,
     );
-    when(() => api.getChannelGroups(userId: 'plex-user')).thenThrow(failure);
+    failure = certificateError;
     await guide.load();
     expect(guide.error, same(failure));
     expect(guide.playbackChannels, isEmpty);
+
+    failure = null;
+    await guide.load(initialChannelIds: []);
+    expect(guide.playbackChannels.single.id, _channel['Id']);
+    expect(guide.filter, GuideFilter.favorites);
+
+    final request = RequestOptions();
+    failure = DioException(
+      requestOptions: request,
+      response: Response(requestOptions: request, statusCode: 403),
+    );
+    await guide.load();
+    expect(guide.playbackChannels, isEmpty);
+    expect(guide.filter, GuideFilter.all);
+
+    failure = null;
+    await guide.load(initialChannelIds: []);
+    guide.setFilter(GuideFilter.favorites);
+    failure = certificateError;
+    await guide.load();
+    client.userId = 'next-viewer';
+    failure = null;
+    await guide.load(initialChannelIds: []);
+    expect(guide.filter, GuideFilter.all);
   });
 
   test('cloud Home drops denied TV rows and reports a temporary outage', () async {

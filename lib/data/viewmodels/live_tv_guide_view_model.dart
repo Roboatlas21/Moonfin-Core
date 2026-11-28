@@ -1650,7 +1650,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (account != _groupAccount) {
       // Keep the launching guide's group on the first load. A later account
       // change must discard it along with that account's group membership.
-      if (_groupAccount != null) _selectedGroup = null;
+      if (_groupAccount != null) {
+        _selectedGroup = null;
+        if (isCloudOnlyPlexClient(_client) && _filter == GuideFilter.favorites) {
+          _filter = GuideFilter.all;
+        }
+      }
       _groupAccount = account;
       _setGroupSources(const [], null);
       _programmeCategories = null;
@@ -1763,7 +1768,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     _programmeCategories = null;
     _channelGroups = {};
     _setGroupSources(const [], null);
-    _filter = GuideFilter.all;
+    // Favorites can be reapplied to fresh channels after a same-viewer retry.
+    if (error == null || _accessDenied(error) || _filter != GuideFilter.favorites) {
+      _filter = GuideFilter.all;
+    }
     _rebuildGroupChoices(complete: true);
     _resetPrograms();
     _error = error;
