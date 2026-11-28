@@ -22,7 +22,7 @@ String guideGroupLabel(
 ) => switch (vm.sourceForGroup(group)) {
   ChannelGroupSource.dvr => l10n.guideDvrChannels,
   ChannelGroupSource.plexFreeTv => l10n.guidePlexFreeTv,
-  null => vm.groupLabel(group),
+  null => vm.groupLabel(group, featuredFallback: l10n.bookDiscoverFeatured),
 };
 
 class GuideFilterPicker extends StatefulWidget {

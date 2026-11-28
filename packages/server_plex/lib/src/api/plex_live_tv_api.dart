@@ -600,14 +600,16 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     _dvrs = null;
     await _readChannelSources();
     _CloudGroups? catalog;
+    Object? providerError;
     // Browse can replace the lineup while its genre metadata is in flight.
     // Retry once for the replacement, then leave the groups unresolved.
     for (var attempt = 0; attempt < 2 && _lastFreeLineup?.isNotEmpty == true; attempt++) {
       final lineup = _lastFreeLineup;
       try {
         catalog = await _providerGroups();
-      } catch (_) {
+      } catch (error) {
         catalog = null;
+        providerError = error;
       }
       if (_cloudChannels != null) await _freeLineupForBrowse();
       if (identical(lineup, _lastFreeLineup)) {
@@ -615,6 +617,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         break;
       }
       catalog = null;
+      providerError = StateError('Plex lineup changed during the provider lookup');
     }
     // Read rows and their failure scope together after the last network wait.
     final dvr = _currentDvrChannels;
@@ -636,6 +639,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       channels: [...dvr, ...currentFree],
       sources: dvr.isEmpty ? const [] : currentFree.isEmpty ? const [ChannelGroupSource.dvr] : ChannelGroupSource.values,
       promoted: currentFree.isEmpty ? null : _featuredGroup,
+      promotedError: metadataUnavailable && _featuredGroup == null ? providerError : null,
       partial: metadataUnavailable || _dvrLineup.partial || freeUnavailable,
       unresolvedChannelIds: freeUnavailable || (_dvrLineup.partial && unresolved == null)
           ? null

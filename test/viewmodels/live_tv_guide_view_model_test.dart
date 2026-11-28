@@ -343,6 +343,30 @@ void main() {
       expect(vm.selectedGroup, 'News');
     });
 
+    test('opening Featured retries unavailable provider metadata without switching to All', () async {
+      when(() => client.serverType).thenReturn(ServerType.plex);
+      const featured = PromotedChannelGroup.groupId;
+      final channels = [_channel('one'), _channel('two')];
+      final outage = StateError('Provider unavailable');
+      var lineup = ChannelGroupLineup({}, channels: channels, partial: true, promotedError: outage);
+      when(() => api.getChannelGroups(userId: 'user')).thenAnswer((_) async => lineup);
+      final vm = LiveTvGuideViewModel(client, initialFilter: (GuideFilter.all, featured));
+      addTearDown(vm.dispose);
+      await vm.load();
+      expect(vm.selectedGroup, featured);
+      expect(vm.error, same(outage));
+      expect(vm.state, GuideState.error);
+      expect(vm.filteredChannels, isEmpty);
+
+      lineup = ChannelGroupLineup({}, channels: channels,
+          promoted: PromotedChannelGroup('Featured', () async => {'two'}));
+      await vm.load();
+      await pumpEventQueue();
+      expect(vm.selectedGroup, featured);
+      expect(vm.state, GuideState.ready);
+      expect(vm.filteredChannels.map((c) => c.id), ['two']);
+    });
+
     test('removing Featured clears its selection even if a tuner is unresolved', () async {
       when(() => client.serverType).thenReturn(ServerType.plex);
       final membership = Completer<Set<String>>();

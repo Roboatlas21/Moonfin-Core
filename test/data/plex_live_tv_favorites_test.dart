@@ -339,6 +339,34 @@ void main() {
       });
     }
 
+    test('the Guide refreshes a stale DVR identity before the viewer retries a favorite', () async {
+      const id = 'channel-2-4';
+      var guideRow = {'Id': id, 'Type': 'TvChannel', 'Name': 'CBC'};
+      when(() => api.getChannelGroups(userId: 'plex-user'))
+          .thenAnswer((_) async => ChannelGroupLineup({}, channels: [guideRow]));
+      when(() => api.getGuide(
+        startDate: any(named: 'startDate'), endDate: any(named: 'endDate'),
+        channelIds: any(named: 'channelIds'), fields: any(named: 'fields'),
+        enableTotalRecordCount: false, enableImages: false, enableUserData: false, userId: 'plex-user',
+      )).thenAnswer((_) async => {'Items': []});
+      final guide = LiveTvGuideViewModel(client);
+      addTearDown(guide.dispose);
+      await guide.load();
+
+      guideRow = station;
+      await search('CBC');
+      final key = channelFavoriteKey(model.results.single.items.single.rawData);
+      expect(channelFavoriteKey(guide.channelForId(id)!.rawData), isNot(key));
+      await expectLater(guide.toggleChannelFavorite(id), throwsStateError);
+      expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
+      expect(channelFavoriteKey(guide.channelForId(id)!.rawData), key);
+      expect(guide.channelForId(id)!.name, 'CBC News');
+
+      await guide.toggleChannelFavorite(id);
+      expect(cloud.rows.single, containsPair('source', favorite['source']));
+      expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(1));
+    });
+
     test('a refresh on another server updates Search and preserves a pending local edit', () async {
       final other = _plex()..baseUrl = 'https://other-pms.example';
       await search('CBC');

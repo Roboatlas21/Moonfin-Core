@@ -599,14 +599,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
   ChannelGroupSource? sourceForGroup(String group) =>
       _sources.where((source) => source.groupId == group).firstOrNull;
   PromotedChannelGroup? _promoted;
-  String? get _promotedGroupId => _promoted == null ? null : PromotedChannelGroup.groupId;
-  String groupLabel(String id) => id == _promotedGroupId ? _promoted!.name : id;
+  String? get _promotedGroupId => _promoted != null || _promotedError != null
+      ? PromotedChannelGroup.groupId : null;
+  String groupLabel(String id, {String? featuredFallback}) =>
+      id == _promotedGroupId ? (_promoted?.name ?? featuredFallback ?? id) : id;
   Set<String>? _promotedIds;
   Object? _promotedError;
   Timer? _promotedTimer;
   bool _guideVisible = true;
   bool get isPromotedGroupSelected =>
-      _promoted != null && _selectedGroup == _promotedGroupId;
+      _selectedGroup != null && _selectedGroup == _promotedGroupId;
   bool get _awaitingGroupIds => isPromotedGroupSelected && _promotedIds == null;
   Set<String>? _programmeCategories;
   Iterable<GuideFilter> get availableProgrammeCategories => filters.where(
@@ -874,6 +876,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     if (index < 0) return;
 
     final current = _channels[index];
+    final expectedKey = channelFavoriteKey(current.rawData);
+    final session = userDataSync.session;
     final next = !current.isFavorite;
 
     final optimisticRaw = Map<String, dynamic>.from(current.rawData);
@@ -897,9 +901,17 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       await ItemMutationRepository(
         _client,
       ).setFavorite(channelId, isFavorite: next, isChannel: true,
-          expectedChannelKey: channelFavoriteKey(current.rawData));
+          expectedChannelKey: expectedKey);
     } catch (_) {
-      if (identical(channelForId(channelId), updated)) _applyChannelUpdate(current);
+      if (_disposed || session != userDataSync.session) rethrow;
+      final row = channelForId(channelId);
+      if (identical(row, updated)) _applyChannelUpdate(current);
+      if (row != null && expectedKey != null && channelFavoriteKey(row.rawData) == expectedKey &&
+          isPlexLiveTvChannel(_client, channelId) &&
+          expectedKey != PlexLiveTvFavorites.syncKey(_client, channelId)) {
+        // Get the current station before the viewer retries the edit.
+        await load(windowStart: _windowStart, livePosition: _atLivePosition);
+      }
       rethrow;
     }
   }
@@ -2003,9 +2015,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       for (final source in _sources)
         if (!lineup.sources.contains(source)) source.groupId,
     };
-    final removedPromoted = _selectedGroup == PromotedChannelGroup.groupId &&
-        _client.serverType == ServerType.plex && lineup.promoted == null;
-    _setGroupSources(lineup.sources, lineup.promoted);
+    final selectedPromoted = _selectedGroup == PromotedChannelGroup.groupId;
+    final removedPromoted = selectedPromoted && _client.serverType == ServerType.plex &&
+        lineup.promoted == null && lineup.promotedError == null;
+    _setGroupSources(lineup.sources, lineup.promoted,
+        promotedError: selectedPromoted ? lineup.promotedError : null);
     final unresolved = lineup.unresolvedChannelIds;
     final partial = lineup.partial;
     final updated = <String, Set<String>>{};
@@ -2031,12 +2045,13 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   void _setGroupSources(
     List<ChannelGroupSource> sources,
-    PromotedChannelGroup? promoted,
-  ) {
+    PromotedChannelGroup? promoted, {
+    Object? promotedError,
+  }) {
     _sources = sources;
-    if (!identical(_promoted, promoted)) {
+    if (!identical(_promoted, promoted) || promoted == null) {
       _promotedTimer?.cancel();
-      _promotedError = null;
+      _promotedError = promotedError;
     }
     _promoted = promoted;
     _promotedIds = promoted?.channelIds;

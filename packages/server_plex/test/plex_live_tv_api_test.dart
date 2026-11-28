@@ -839,6 +839,8 @@ void main() {
     server.fail('/', 503);
     final incomplete = await api.getChannelGroups();
     expect(incomplete.channels, hasLength(3));
+    expect(incomplete.promoted, isNull);
+    expect((incomplete.promotedError as DioException).response?.statusCode, 503);
     expect(incomplete.partial, isTrue);
     expect(incomplete.unresolvedChannelIds, {free, extra});
     expect(incomplete.groupsByChannelId[tuner], {'source:dvr'});
@@ -846,6 +848,7 @@ void main() {
     server.failWhen = null;
     final lineup = await api.getChannelGroups();
     expect(lineup.partial, isFalse);
+    expect(lineup.promotedError, isNull);
     expect(lineup.unresolvedChannelIds, isNull);
     expect(lineup.groupsByChannelId, {
       'channel-2-4': {'source:dvr'},

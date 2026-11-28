@@ -45,6 +45,9 @@ class ChannelGroupLineup {
   final List<ChannelGroupSource> sources;
   final PromotedChannelGroup? promoted;
 
+  /// The provider couldn't determine whether the promoted group exists.
+  final Object? promotedError;
+
   /// Channels this viewer can access, or null if Moonbase doesn't provide them.
   final List<Map<String, dynamic>>? channels;
   final bool partial;
@@ -63,6 +66,7 @@ class ChannelGroupLineup {
     this.channels,
     this.sources = const [],
     this.promoted,
+    this.promotedError,
     this.partial = false,
     this.endpointAvailable = true,
     this.unresolvedChannelIds,
