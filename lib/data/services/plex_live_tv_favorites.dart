@@ -268,6 +268,11 @@ class PlexLiveTvFavorites {
     final changed = changes.entries.any(
       (entry) => userDataSync.favoriteFor(entry.key) != entry.value['IsFavorite'],
     );
+    for (final entry in changes.entries) {
+      userDataSync.observeFavoriteWhilePending(
+        entry.key, entry.value['IsFavorite'] as bool,
+      );
+    }
     userDataSync.publishAll(changes);
     return changed;
   }

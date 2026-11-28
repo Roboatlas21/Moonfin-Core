@@ -549,6 +549,31 @@ void main() {
     expect(cloud.requests.where((r) => r.method == 'PUT'), hasLength(2));
   });
 
+  test('a failed favorite check rolls back to the last completed browse read', () async {
+    final client = _plex();
+    const id = 'channel-plex-free123';
+    PlexLiveTvFavorites.applyToItem(client, _channel);
+    await PlexLiveTvFavorites.refresh(client);
+    final key = PlexLiveTvFavorites.syncKey(client, id);
+    expect(userDataSync.favoriteFor(key), isFalse);
+
+    cloud.rows = [{'source': _source, 'id': 'free123'}];
+    final release = Completer<void>();
+    cloud.holdGet = release.future;
+    final browse = PlexLiveTvFavorites.refresh(client);
+    await pumpEventQueue();
+    expect(cloud.requests, hasLength(2));
+    final edit = ItemMutationRepository(client).setFavorite(id, isFavorite: true);
+    final rejected = expectLater(edit, throwsA(isA<DioException>()));
+    expect(userDataSync.pendingFavorite(key), isTrue);
+    cloud.getError = 503;
+    release.complete();
+    await browse;
+    await rejected;
+    expect(userDataSync.favoriteFor(key), isTrue);
+    expect(cloud.requests.where((r) => r.method == 'PUT'), isEmpty);
+  });
+
   group('two DVRs with channel 4', () {
     late PlexMediaServerClient first, second;
     late Map<String, dynamic> a, b;

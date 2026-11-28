@@ -313,9 +313,11 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       final hasDvrRows = dvrs.isNotEmpty || (incomplete && _lastDvrChannels.isNotEmpty);
       final machineIdFuture = hasDvrRows ? _machineIdForFavorites() : null;
       Future<_Channels> retainedChannels(_Dvr dvr) async {
-        final rows = _lastDvrChannels[dvr] ?? [];
-        if (rows.isEmpty || machineIdFuture == null) return rows;
+        final retained = _lastDvrChannels[dvr] ?? [];
+        if (retained.isEmpty || machineIdFuture == null) return retained;
         final machine = await machineIdFuture;
+        // Another channel read may have published while identity was loading.
+        final rows = _lastDvrChannels[dvr] ?? [];
         final source = machine == null ? null : 'server://$machine/${dvr.epg}';
         return [
           for (final row in rows)

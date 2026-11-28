@@ -376,6 +376,47 @@ void main() {
     });
   }
 
+  test('the guide retains the latest tuner rows when identity is still loading', () async {
+    const path = '/tv.plex.providers.epg.xmltv:2/lineups/dvr/channels';
+    const replacement = 'channel-2-5';
+    final (dio, _) = _server();
+    final api = PlexLiveTvApi(dio);
+    await api.getChannelGroups();
+    final browseStarted = Completer<void>();
+    final releaseBrowse = Completer<void>();
+    final guideFailed = Completer<void>();
+    final releaseIdentity = Completer<void>();
+    dio.interceptors.insert(0, InterceptorsWrapper(onRequest: (request, handler) async {
+      if (request.uri.path == '/identity') await releaseIdentity.future;
+      if (request.uri.path != path) return handler.next(request);
+      if (!browseStarted.isCompleted) {
+        browseStarted.complete();
+        await releaseBrowse.future;
+        return handler.resolve(Response(
+          requestOptions: request,
+          data: _channels([{'id': '5', 'title': 'News'}]),
+        ));
+      }
+      handler.reject(DioException.badResponse(
+        statusCode: 503,
+        requestOptions: request,
+        response: Response(requestOptions: request, statusCode: 503),
+      ));
+      guideFailed.complete();
+    }));
+    final browse = api.getChannels();
+    await browseStarted.future;
+    final guide = api.getChannelGroups();
+    await guideFailed.future;
+    await Future<void>.delayed(Duration.zero);
+    releaseBrowse.complete();
+    expect((await browse)['Items'].map((row) => row['Id']), contains(replacement));
+    releaseIdentity.complete();
+    final lineup = await guide;
+    expect(lineup.channels!.map((row) => row['Id']), contains(replacement));
+    expect(lineup.unresolvedChannelIds, {replacement});
+  });
+
   test('an older cloud denial cannot erase the lineup retained by a newer outage', () async {
     const path = '/lineups/plex/channels';
     final (dio, server) = _server();
