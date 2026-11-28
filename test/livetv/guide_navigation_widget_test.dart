@@ -27,6 +27,7 @@ import 'package:moonfin/ui/screens/livetv/guide/guide_layout_profile.dart';
 import 'package:moonfin/ui/screens/livetv/live_tv_guide_screen.dart';
 import 'package:moonfin/ui/widgets/local_search_field.dart';
 import 'package:moonfin/ui/widgets/overlay_sheet.dart' show DialogBackSuppressor;
+import 'package:moonfin/util/clock_format.dart';
 import 'package:moonfin/util/platform_detection.dart';
 import 'package:server_core/server_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -494,18 +495,23 @@ void main() {
       cell.requestFocus();
       await _pumpFrames(tester);
       final range = _windowRangeText(tester);
-      final notice = find.textContaining('Couldn’t load');
+      final target = _fixtureWindowStart.add(const Duration(minutes: 30));
+      final context = tester.element(find.byType(LiveTvGuideScreen));
+      final label = DateUtils.isSameDay(target, _fixtureWindowStart)
+          ? formatClockTime(target, use24Hour: GetIt.instance<UserPreferences>().get(UserPreferences.use24HourClock))
+          : MaterialLocalizations.of(context).formatMediumDate(target);
+      final notice = find.text(AppLocalizations.of(context).guideWindowLoadFailed(label));
 
       guideFailure = Exception('offline');
       await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
       expect(_windowRangeText(tester), range);
       expect(FocusManager.instance.primaryFocus, same(cell));
-      final message = tester.widget<Text>(notice).data!;
-      expect(message, matches(hour == 12 ? r'Couldn’t load \d{1,2}:\d{2}' : r'Couldn’t load [A-Z][a-z]{2},'));
+      expect(notice, findsOneWidget);
 
       guideFailure = null;
       await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowRight);
       expect(_windowRangeText(tester), isNot(range));
+      expect(guideModel(tester).windowStart, target);
       expect(notice, findsNothing);
     });
   }
@@ -1066,7 +1072,8 @@ void main() {
     await tester.enterText(find.byType(TextField), 'Channel 4');
     await tester.pump(const Duration(milliseconds: 220));
     await _pumpFrames(tester);
-    expect(find.byType(EpgNowNextCard), findsWidgets);
+    expect(guideModel(tester).filteredChannels.map((c) => c.id),
+        unorderedEquals(['ch4', for (var i = 40; i <= 47; i++) 'ch$i']));
 
     await tapAndPump(tester, find.byTooltip('Filters'));
     expect(picker, findsOneWidget);

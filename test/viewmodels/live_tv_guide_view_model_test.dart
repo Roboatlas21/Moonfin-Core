@@ -1300,6 +1300,27 @@ void main() {
   });
 
   group('category filters', () {
+    test('Sports Retry asks for the station in the current search', () async {
+      stubNumberedChannels(201);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async => {
+        'Items': [], 'FailedChannelIds': _requestedIds(inv),
+      });
+      final vm = await loadFilter(GuideFilter.sports);
+      vm.setChannelQuery('c200');
+      await pumpEventQueue();
+      expect(vm.hasFailedCategoryListings, isTrue);
+      final reads = <String>[];
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((inv) async {
+        final ids = _requestedIds(inv);
+        reads.addAll(ids);
+        if (ids.contains('c0')) throw const FormatException('Bad listing');
+        return {'Items': [_program('recovered', 'c200', isSports: true)]};
+      });
+      await vm.retryFailedCategoryListings();
+      expect(reads, ['c200']);
+      expect(vm.programsForChannel('c200').single.id, 'recovered');
+    });
+
     for (final timeout in [false, true]) {
       test('Retry recovers a failed off-page category lookup (timeout: $timeout)', () async {
         stubNumberedChannels(201);
@@ -2070,6 +2091,28 @@ void main() {
       expect(vm.filteredChannels.single.id, 'c1');
       expect(vm.surfingChannels.map((c) => c.id), ['c0', 'c1']);
       expect(vm.programsForChannel('c0').single.hasTimer, isTrue);
+    });
+
+    test('a recording recovery stops after two timeouts and retains the reached rows for Retry', () async {
+      stubNumberedChannels(650);
+      final vm = await loadFilter(GuideFilter.all);
+      for (var page = 1; page < 12; page++) {
+        await vm.loadMorePrograms();
+      }
+      expect(vm.programsHighWater, 600);
+      var reads = 0;
+      when(() => _guide(liveTv)).thenAnswer((_) async {
+        if (++reads == 1) throw const FormatException('Invalid recording refresh');
+        throw TimeoutException('Listings unavailable');
+      });
+      await vm.recordingChanged();
+      expect(reads, 3);
+      expect(vm.state, GuideState.ready);
+      expect(vm.loadStateFor('c599'), GuideChannelLoadState.failed);
+      expect(vm.loadStateFor('c600'), GuideChannelLoadState.loading);
+      when(() => _guide(liveTv)).thenAnswer((_) async => {'Items': []});
+      await vm.retryFailedPrograms();
+      expect(vm.loadStateFor('c599'), GuideChannelLoadState.loaded);
     });
 
     test('a failed recording reload is retried on re-entry until listings recover', () async {

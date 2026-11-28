@@ -1385,7 +1385,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     final session = userDataSync.session;
     final recordingRevision = liveTvRecordingRevision.value;
     final filter = _filter;
-    final failed = _categoryFailedIds.toList();
+    final failed = _channelQuery.isEmpty ? _categoryFailedIds.toList() : [
+      for (final channel in _pageChannels)
+        if (_categoryFailedIds.contains(channel.id)) channel.id,
+    ];
     bool current() =>
         !_disposed &&
         request == _categoryRequest &&
@@ -1820,7 +1823,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       final fetched = <String, List<GuideProgram>>{};
       final failed = <String>{};
       var consecutiveTransportFailures = 0;
-      bool canFetchMore() => windowStart == null || consecutiveTransportFailures < 2;
+      bool canFetchMore() => consecutiveTransportFailures < 2;
       Future<void> fetchBatch(List<GuideChannel> batch) async {
         try {
           final reply = await _fetchPrograms(
@@ -1857,7 +1860,8 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           }
         }
         // Previously requested rows beyond the cutoff remain available for Retry.
-        failed.addAll(requestedRows.skip(end).map((channel) => channel.id));
+        final reached = windowStart == null ? rows.take(_requestedPageDepth) : requestedRows;
+        failed.addAll(reached.skip(end).map((channel) => channel.id));
         if (previouslyShownCategoryRows.isNotEmpty && samePage()) {
           final prefixIds = rows.take(end).map((channel) => channel.id).toSet();
           final extraRows = [

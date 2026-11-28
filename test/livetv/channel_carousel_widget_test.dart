@@ -487,6 +487,29 @@ void main() {
     }
   });
 
+  for (final close in [false, true]) {
+    testWidgets('warm-up skips a station after browsing away or closing (close: $close)', (tester) async {
+      final client = _CarouselClient();
+      final channels = _guideChannels(30);
+      final vm = _CarouselGuide(client, channels)..initialLoadGate = Completer<void>();
+      final prewarm = ChannelCarouselPrewarm(client, viewModelFactory: (_) => vm);
+      try {
+        prewarm.tuned(channels, 'ch0');
+        await tester.pump(ChannelCarouselPrewarm.settleDelay);
+        final old = prewarm.ensureVisibleChannels(['ch15']);
+        final latest = close ? null : prewarm.ensureVisibleChannels(['ch20']);
+        if (close) prewarm.clearVisibleChannels();
+        vm.initialLoadGate!.complete();
+        await old;
+        await latest;
+        expect(vm.requests.expand((ids) => ids), isNot(contains('ch15')));
+        if (!close) expect(vm.requests.last, ['ch20']);
+      } finally {
+        prewarm.dispose();
+      }
+    });
+  }
+
   testWidgets('carousel retries only failed visible cards, including after a top-up error', (tester) async {
     final client = _CarouselClient();
     final channels = _guideChannels(20);
