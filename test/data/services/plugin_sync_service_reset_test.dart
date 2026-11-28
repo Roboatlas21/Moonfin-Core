@@ -269,12 +269,23 @@ void main() {
     expect(postCount(), 1);
   });
 
-  for (final editClock in [false, true]) {
-    test('missing profile after reset uploads only a synced edit (clock edit: $editClock)', () async {
+  for (final (found, remoteClock, editClock, slow) in [
+    (false, null, false, true),
+    (false, null, true, true),
+    (true, false, true, false),
+    (true, false, true, true),
+    (true, true, true, false),
+    (true, null, true, false),
+  ]) {
+    test('reset merges edits (found: $found, inherited clock: $remoteClock, edit: $editClock, slow: $slow)', () async {
       final profile = service.syncProfile;
       final loading = Completer<void>();
       final release = Completer<void>();
-      adapter.failResolved = true;
+      adapter.failResolved = !found;
+      adapter.resolvedProfile = {
+        'detailShowFullDate': true,
+        if (remoteClock != null) 'use24HourClock': remoteClock,
+      };
       adapter.beforeResponse = (method, path) async {
         if (path == '/Moonfin/Settings/Resolved/$profile') {
           loading.complete();
@@ -285,13 +296,16 @@ void main() {
       await loading.future;
       await prefs.set(UserPreferences.lastSonarrCalendarFetchTime, 123456);
       if (editClock) await prefs.set(UserPreferences.use24HourClock, true);
-      await settle();
+      if (slow) await settle();
       expect(postCount(), 0);
       release.complete();
       expect(await reset, isTrue);
       await settle();
-      expect(postCount(), editClock ? 1 : 0);
-      if (editClock) expect(adapter.postedProfile?['use24HourClock'], isTrue);
+      final needsUpload = editClock && remoteClock != true;
+      expect(postCount(), needsUpload ? 1 : 0);
+      if (needsUpload) expect(adapter.postedProfile, {'use24HourClock': true});
+      expect(prefs.get(UserPreferences.use24HourClock), editClock || remoteClock == true);
+      expect(prefs.get(UserPreferences.detailShowFullDate), found);
     });
   }
 

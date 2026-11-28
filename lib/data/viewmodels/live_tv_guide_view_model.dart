@@ -608,11 +608,12 @@ class LiveTvGuideViewModel extends ChangeNotifier {
     ];
   }
 
-  Future<void> toggleSavedFilter(GuideFilterChoice choice) async {
+  Future<void> toggleSavedFilter(GuideFilterChoice choice, {bool? pinned}) async {
     if (!choice.canFavorite) return;
     await GetIt.instance<PluginSyncService>().changePinnedGuideFilter(
       _client,
       filter: choice.preferenceKey,
+      pinned: pinned,
       onLocalChange: _notifyListeners,
     );
     _notifyListeners();

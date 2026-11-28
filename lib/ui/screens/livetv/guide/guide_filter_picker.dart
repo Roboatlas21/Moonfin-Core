@@ -53,6 +53,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
   ScrollController? _scroll;
   String _query = '';
   List<_Row> _visibleRows = const [];
+  Set<GuideFilterChoice> _visiblePins = const {};
   bool _saveErrorVisible = false;
   Timer? _saveErrorTimer;
 
@@ -102,7 +103,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
 
   Future<void> _toggle(GuideFilterChoice choice) async {
     try {
-      await widget.vm.toggleSavedFilter(choice);
+      await widget.vm.toggleSavedFilter(choice, pinned: !_visiblePins.contains(choice));
       if (mounted && _saveErrorVisible) {
         _saveErrorTimer?.cancel();
         setState(() => _saveErrorVisible = false);
@@ -348,7 +349,7 @@ class _GuideFilterPickerState extends State<GuideFilterPicker> {
                   child: ListenableBuilder(
                     listenable: Listenable.merge([widget.vm, _prefs]),
                     builder: (context, _) {
-                      final saved = _saved.toSet();
+                      final saved = _visiblePins = _saved.toSet();
                       _restoreRemovedPinFocus(saved);
                       final rows = _visibleRows = _rows(l10n, saved);
                       final rowHeight = _rowHeight;

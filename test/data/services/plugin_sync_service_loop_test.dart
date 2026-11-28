@@ -901,30 +901,43 @@ void main() {
     expect(adapter.pinActions, ['add', 'add']);
   });
 
-  for (final edit in [false, true]) {
-    test('a ${edit ? 'pin edit' : 'settings event'} during sign-in waits for the server snapshot', () async {
+  for (final pinned in [null, true, false]) {
+    test('sign-in orders settings events and preserves the displayed pin action ($pinned)', () async {
       final active = _MockConnectivityAwareClient();
       when(() => active.onlineClient).thenReturn(client);
       await GetIt.instance.unregister<MediaServerClient>();
       GetIt.instance.registerSingleton<MediaServerClient>(active);
       adapter.resolvedProfile = {'use24HourClock': true};
-      adapter.savedPins = ['group:Sports'];
+      const sports = 'group:Sports';
+      const news = 'group:News';
+      if (pinned == false) await prefs.set(UserPreferences.liveTvSavedFilters, [sports]);
+      adapter.savedPins = [news, if (pinned != false) sports];
       await prefs.set(UserPreferences.pluginSyncInitializedForServer('srv1'), true);
       adapter.pauseResponses();
       final signingIn = service.syncOnLogin(client, serverId: 'srv1');
       await adapter.responseReady!.future;
-      final remove = edit ? togglePin('group:Sports') : null;
-      final event = edit ? null : settingsUpdated();
-      await Future<void>.delayed(Duration.zero);
+      var notified = false;
+      final edit = pinned == null ? null : service.changePinnedGuideFilter(
+        client, filter: sports, pinned: pinned, onLocalChange: () => notified = true,
+      );
+      final event = pinned == null ? settingsUpdated() : null;
+      await pumpEventQueue();
       expect(resolvedCount(), 1);
       expect(adapter.pinActions, isEmpty);
+      if (pinned != null) {
+        expect(notified, isTrue);
+        expect(getPins().contains(sports), pinned);
+        expect(pendingPins(), [pinned ? 'add:$sports' : 'remove:$sports']);
+      }
       adapter.responseGate!.complete();
       await signingIn;
       await event;
-      if (edit) expect(await remove, isEmpty);
+      await edit;
       expect(prefs.get(UserPreferences.use24HourClock), isTrue);
-      expect(adapter.pinActions, edit ? ['remove'] : isEmpty);
-      expect(getPins(), edit ? isEmpty : ['group:Sports']);
+      expect(adapter.pinActions, [if (pinned != null) pinned ? 'add' : 'remove']);
+      expect(getPins(), [news, if (pinned != false) sports]);
+      expect(adapter.savedPins, getPins());
+      expect(pendingPins(), isEmpty);
       service.resetState();
     });
   }

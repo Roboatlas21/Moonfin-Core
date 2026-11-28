@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
@@ -225,8 +226,8 @@ class PluginSyncService extends ChangeNotifier {
   int _sessionGeneration = 0;
   int _profileSelectionRevision = 0;
   int _profileResetRevision = 0;
-  final _restoringResetAccounts = <bool Function()>{};
-  bool get _restoringResetProfile => _restoringResetAccounts.any((current) => current());
+  bool Function()? _restoringResetAccount;
+  bool get _restoringResetProfile => _restoringResetAccount?.call() ?? false;
   late int _lastNonPinChange;
   // A tap awaiting its turn owns the upload (and any rejection) for that pin.
   final _pendingGuidePinTaps = <String, Object>{};
@@ -1076,13 +1077,13 @@ class PluginSyncService extends ChangeNotifier {
   Future<List<String>?> changePinnedGuideFilter(
     MediaServerClient client, {
     required String filter,
+    bool? pinned,
     VoidCallback? onLocalChange,
   }) async {
     if (_prefs.activeProfileScopeSuffix() == null) {
       throw StateError('Saving a guide shortcut requires an active account');
     }
     final current = _guidePinAccountCheck(client);
-    await _waitForSignInProfile();
     void requireCurrent() {
       if (!current()) {
         throw StateError(
@@ -1103,7 +1104,7 @@ class PluginSyncService extends ChangeNotifier {
       final previousPins = _prefs.get(UserPreferences.liveTvSavedFilters);
       final previousChanges = _prefs.get(UserPreferences.liveTvSavedFilterChanges);
       final pins = previousPins.toSet();
-      final add = !pins.remove(filter);
+      final add = pinned ?? !pins.contains(filter);
       final length = switch (client.serverType) {
         ServerType.plex || ServerType.silo => utf8.encode(filter).length,
         _ => filter.length,
@@ -1111,7 +1112,11 @@ class PluginSyncService extends ChangeNotifier {
       if (add && length > 1024) {
         throw const FormatException('Guide shortcut is too long');
       }
-      if (add) pins.add(filter);
+      if (add) {
+        pins.add(filter);
+      } else {
+        pins.remove(filter);
+      }
       final changes = [
         for (final change in previousChanges)
           if (change != 'add:$filter' && change != 'remove:$filter') change,
@@ -1139,6 +1144,7 @@ class PluginSyncService extends ChangeNotifier {
       return true;
     });
     if (!upload) return null;
+    await _waitForSignInProfile();
     return _guidePinSync.synchronized(() async {
       try {
         requireCurrent();
@@ -1391,11 +1397,7 @@ class PluginSyncService extends ChangeNotifier {
       final json = jsonEncode(payload);
       if (!force && _lastSyncedProfileJson[key] == json) return ProfilePushResult.saved;
 
-      await _dio.post(
-        '${ep.base}/Moonfin/Settings/Profile/$profile',
-        data: {'profile': payload, 'clientId': 'moonfin-flutter'},
-        options: Options(headers: {...ep.headers, 'Content-Type': 'application/json'}),
-      );
+      await _postProfile(ep, profile, payload);
       if (!current()) return ProfilePushResult.failed;
       _lastSyncedProfileJson[key] = json;
       if (force && _prefs.get(UserPreferences.liveTvSavedFilterChanges).isNotEmpty) {
@@ -1420,6 +1422,14 @@ class PluginSyncService extends ChangeNotifier {
     } catch (_) {
       return ProfilePushResult.failed;
     }
+  }
+
+  Future<void> _postProfile(MoonbaseEndpoint ep, String profile, Map<String, dynamic> payload) async {
+    await _dio.post(
+      '${ep.base}/Moonfin/Settings/Profile/$profile',
+      data: {'profile': payload, 'clientId': 'moonfin-flutter'},
+      options: Options(headers: {...ep.headers, 'Content-Type': 'application/json'}),
+    );
   }
 
   Future<void> pushNotificationPrefs(MediaServerClient client) async {
@@ -1714,30 +1724,28 @@ class PluginSyncService extends ChangeNotifier {
 
     final current = _guidePinAccountCheck(client);
     final selection = _profileSelectionRevision;
-    late int resetRevision;
-    late String clearedProfileJson;
+    final editProfile = syncProfile;
+    bool canRestore() => current() && _syncEnabled && selection == _profileSelectionRevision;
+    late MoonbaseEndpoint endpoint;
     Future<bool> deleteAndClear() async {
-      if (!_syncEnabled || !current()) return false;
+      if (!canRestore()) return false;
       final ep = await moonbaseEndpoint(client, _dio);
-      if (ep == null || !_syncEnabled || !current()) return false;
+      if (ep == null || !canRestore()) return false;
+      endpoint = ep;
 
-      try {
-        await _dio.delete(
-          profile == 'global'
-              ? '${ep.base}/Moonfin/Settings'
-              : '${ep.base}/Moonfin/Settings/Profile/$profile',
-          options: Options(headers: ep.headers),
-        );
-      } catch (_) {
-        return false;
-      }
-      if (!current()) return false;
+      await _dio.delete(
+        profile == 'global'
+            ? '${ep.base}/Moonfin/Settings'
+            : '${ep.base}/Moonfin/Settings/Profile/$profile',
+        options: Options(headers: ep.headers),
+      );
+      if (!canRestore()) return false;
 
       // Cancel the timer and invalidate uploads it already queued behind DELETE.
       // The next automatic upload must start with the restored preferences.
       _pushDebounceTimer?.cancel();
-      resetRevision = ++_profileResetRevision;
-      _restoringResetAccounts.add(current);
+      _profileResetRevision++;
+      _restoringResetAccount = current;
 
       if (profile == 'global') {
         _lastSyncedProfileJson.clear();
@@ -1745,30 +1753,52 @@ class PluginSyncService extends ChangeNotifier {
         _lastSyncedProfileJson.remove(_snapshotKey(client, profile));
       }
       await _restoreLocalDefaults(global: profile == 'global');
-      clearedProfileJson = jsonEncode(_buildProfileFromLocal());
       return true;
     }
 
-    bool restored;
-    try {
-      final reset = await _guidePinSync.synchronized(
-        () => _profileWrites.synchronized(
-          () => _localGuidePins.synchronized(deleteAndClear),
-        ),
-      );
-      if (!reset || !current()) return false;
-      restored = await pullSettingsForProfile(client, profile: profile, replayPendingPins: false);
-    } finally {
-      _restoringResetAccounts.remove(current);
+    Future<bool> reset() async {
+      if (!await _localGuidePins.synchronized(deleteAndClear) || !canRestore()) return false;
+      final cleared = _buildProfileFromLocal();
+      await _refreshCustomThemes(client);
+      if (!canRestore()) return false;
+      final inherited = await _fetchResolvedProfile(client, profile, allowSync: canRestore);
+      if (!canRestore()) return false;
+
+      // Only preferences changed since the local clear can override inherited values.
+      // Moonbase merges partial profile writes, so other defaults stay inherited.
+      const equality = DeepCollectionEquality();
+      final edits = _buildProfileFromLocal()
+        ..removeWhere((key, value) =>
+            equality.equals(value, cleared[key]) ||
+            (inherited != null && equality.equals(value, _readValue(inherited, key))));
+      if (inherited != null) {
+        await _applyServerSettings(client, profile, {...inherited, ...edits});
+      }
+      if (edits.isEmpty || !canRestore()) return true;
+
+      // Let later edits queue behind this write. Only acknowledge the state
+      // captured before the POST, and let a failed write be retried.
+      _restoringResetAccount = null;
+      _lastSyncedProfileJson.remove(_snapshotKey(client, profile));
+      final key = _snapshotKey(client, editProfile);
+      _lastSyncedProfileJson.remove(key);
+      final snapshot = jsonEncode(_buildProfileFromLocal());
+      await _postProfile(endpoint, editProfile, edits);
+      if (canRestore()) _lastSyncedProfileJson[key] = snapshot;
+      return true;
     }
-    // With no inherited profile, a real edit made during the read is still local.
-    // Comparing the wire payload excludes background bookkeeping such as calendar refreshes.
-    if (!restored && current() && _syncEnabled &&
-        resetRevision == _profileResetRevision && selection == _profileSelectionRevision &&
-        clearedProfileJson != jsonEncode(_buildProfileFromLocal())) {
-      await pushSettings(client);
-    }
-    return true;
+
+    return _guidePinSync.synchronized(
+      () => _profileWrites.synchronized(() async {
+        try {
+          return await reset();
+        } catch (_) {
+          return false;
+        } finally {
+          _restoringResetAccount = null;
+        }
+      }),
+    );
   }
 
   /// Drops the stored value of every setting a profile carries so each one
