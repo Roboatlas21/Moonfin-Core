@@ -1655,9 +1655,13 @@ void main() {
       vm.setChannelQuery('c1');
       await pumpEventQueue();
       expect(vm.hasFailedCategoryListings, isFalse);
+      expect(await vm.setWindowStart(vm.windowEnd), isTrue);
       vm.setChannelQuery('');
       await pumpEventQueue();
       expect(vm.hasFailedCategoryListings, isTrue);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {'Items': []});
+      await vm.retryFailedCategoryListings();
+      expect(vm.hasFailedCategoryListings, isFalse);
     });
 
     for (final reload in [false, true]) {
@@ -2120,6 +2124,28 @@ void main() {
         verifyNever(() => _guide(liveTv));
       });
     }
+
+    test('an obsolete Sports recording error leaves a newer All time change running', () async {
+      stubNumberedChannels(1);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+      final vm = await loadFilter(GuideFilter.sports);
+      final sports = pendingGuide(GuideFilter.sports);
+      final recording = vm.recordingChanged();
+      await pumpEventQueue();
+      vm.setFilter(GuideFilter.all);
+      await pumpEventQueue();
+      final next = vm.windowEnd;
+      final page = pendingGuide(GuideFilter.all);
+      final moving = vm.setWindowStart(next);
+      await pumpEventQueue();
+      sports.completeError(const FormatException('Bad Sports listing'));
+      await pumpEventQueue();
+      page.complete({'Items': [_program('next', 'c0', start: next)]});
+      await recording;
+      expect(await moving, isTrue);
+      expect(vm.windowStart, next);
+      expect(vm.programsForChannel('c0').single.id, 'next');
+    });
 
     final deniedRequest = RequestOptions();
     final denied = DioException(requestOptions: deniedRequest,

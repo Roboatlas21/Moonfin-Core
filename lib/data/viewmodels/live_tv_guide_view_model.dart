@@ -930,6 +930,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
       return;
     }
     final recordingRevision = liveTvRecordingRevision.value;
+    final categoryRequest = _categoryRequest;
     try {
       final categoryResult = _isCategory(_filter)
           ? await _refreshCategoryRows(recordingRevision)
@@ -944,7 +945,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         _loadedRecordingRevision = recordingRevision;
       }
     } catch (error) {
-      if (recordingRevision == liveTvRecordingRevision.value &&
+      if (categoryRequest == _categoryRequest && recordingRevision == liveTvRecordingRevision.value &&
           !_accessDenied(error)) {
         await _reloadPrograms();
       }
@@ -1921,6 +1922,10 @@ class LiveTvGuideViewModel extends ChangeNotifier {
           requestedIds.every(failed.contains)) {
         _failedWindowMoveRevision++;
         return false;
+      }
+      if (category != null) {
+        // Stations outside this search still need Retry until a request checks them.
+        failed.addAll(_categoryFailedIds.difference(requestedIds));
       }
       if (windowStart != null) {
         // Invalidate old-window reads and commit without an intermediate notification.
