@@ -1056,6 +1056,24 @@ void main() {
     expect(await onNow(), isEmpty);
   });
 
+  test('Home surfaces a partial tuner outage only when no source has a live program', () async {
+    final (dio, server) = _server(secondDvr: true);
+    final api = PlexLiveTvApi(dio, now: () => DateTime.utc(2026, 10, 22, 20, 30));
+    Future<List> onNow() async => (await api.getRecommendedPrograms(limit: 1))['Items'] as List;
+    server.fail('/tv.plex.providers.epg.xmltv:2/grid', 503);
+    server.replies['/hubs/sections/home/whatsOnNow'] = (_) =>
+        _schedule('Free TV', [{..._airing, 'channelIdentifier': 'abc-66635fc0'}]);
+    expect((await onNow()).single['ChannelId'], free);
+
+    server.replies['/lineups/plex/channels'] = (_) => _channels([], size: 0);
+    await api.getChannelGroups();
+    await expectLater(onNow(), _httpError(503));
+
+    server.replies['/tv.plex.providers.epg.xmltv:3/grid'] = (_) =>
+        _schedule('Tuner', [{..._airing, 'channelIdentifier': '7'}]);
+    expect((await onNow()).single['ChannelId'], 'channel-3-7');
+  });
+
   test('recording from the guide targets the selected channel, showing and time', () async {
     final (dio, server) = _server(secondDvr: true);
     final api = PlexLiveTvApi(dio);

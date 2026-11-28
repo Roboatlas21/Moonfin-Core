@@ -643,6 +643,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime end, {
     Set<String>? channelIds,
     bool reportGuideFailures = false,
+    void Function(Object, StackTrace)? onTunerError,
   }) async {
     final showings = <({_Dvr dvr, Map item, Map media})>[];
     final failedIds = <String>{};
@@ -713,6 +714,7 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
         succeeded++;
       } catch (error, stack) {
         if (error is DioException && error.response?.statusCode == 401) rethrow;
+        onTunerError?.call(error, stack);
         failedIds.addAll(requested ?? [
           for (final row in _lastDvrChannels[dvr] ?? const []) row['Id'] as String,
         ]);
@@ -789,10 +791,15 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     DateTime end, {
     Set<String>? channelIds,
     bool reportGuideFailures = false,
+    void Function(Object, StackTrace)? onTunerError,
   }) async {
     final grabs = _grabs().catchError((_) => <_Grab>[]);
-    final grid = await _dvrGrid(start, end,
-        channelIds: channelIds, reportGuideFailures: reportGuideFailures);
+    final grid = await _dvrGrid(
+      start, end,
+      channelIds: channelIds,
+      reportGuideFailures: reportGuideFailures,
+      onTunerError: onTunerError,
+    );
     final scheduled = {
       for (final grab in await grabs)
         if (grab.op['status'] != 'error') grab.program['Id']: grab.op,
@@ -1364,16 +1371,22 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
     final now = _now();
     final programs = <Map<String, dynamic>>[];
     (Object, StackTrace)? tunerFailure;
+    void rememberTunerFailure(Object error, StackTrace stack) {
+      if (_temporaryLineupFailure(error)) tunerFailure ??= (error, stack);
+    }
     try {
-      final airings = await _dvrAirings(now, now.add(const Duration(seconds: 1)));
+      final airings = await _dvrAirings(
+        now, now.add(const Duration(seconds: 1)),
+        onTunerError: rememberTunerFailure,
+      );
       programs.addAll(airings.items);
     } on DioException catch (error, stack) {
       if (_accessDenied(error) && !_tunerGridForbidden(error)) rethrow;
-      if (_temporaryLineupFailure(error)) tunerFailure = (error, stack);
+      rememberTunerFailure(error, stack);
     } on TypeError catch (error, stack) {
-      tunerFailure = (error, stack);
+      tunerFailure ??= (error, stack);
     } on FormatException catch (error, stack) {
-      tunerFailure = (error, stack);
+      tunerFailure ??= (error, stack);
     }
     void removeEnded() {
       final at = _now();
@@ -1384,8 +1397,8 @@ class PlexLiveTvApi implements LiveTvApi, DirectChannelGroupApi {
       programs.addAll(await _freeOnNow());
       removeEnded();
     }
-    if (programs.isEmpty && tunerFailure != null) {
-      Error.throwWithStackTrace(tunerFailure.$1, tunerFailure.$2);
+    if (tunerFailure case final failure? when programs.isEmpty) {
+      Error.throwWithStackTrace(failure.$1, failure.$2);
     }
     return plexItemsResult(limit == null ? programs : programs.take(limit).toList());
   }
