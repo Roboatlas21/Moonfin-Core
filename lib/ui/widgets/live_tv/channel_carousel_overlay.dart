@@ -66,6 +66,7 @@ class ChannelCarouselPrewarm {
   Timer? _hourlyTimer;
   ({Timer timer, DateTime due})? _failedListingsRetry;
   final _retryDeadlines = <String, ({DateTime due, bool attempted})>{};
+  final _retriesInFlight = <String>{};
   Set<String>? _visibleChannelIds;
   @visibleForTesting
   static const failedListingsRetryDelay = Duration(seconds: 5);
@@ -287,6 +288,7 @@ class ChannelCarouselPrewarm {
         (visible.contains(id) || !retry.attempted || !retry.due.isAfter(now)));
     DateTime? earliest;
     for (final id in failed) {
+      if (_retriesInFlight.contains(id)) continue;
       final retry = _retryDeadlines.putIfAbsent(id, () => (due: now.add(failedListingsRetryDelay), attempted: false));
       if (earliest == null || retry.due.isBefore(earliest)) earliest = retry.due;
     }
@@ -301,7 +303,8 @@ class ChannelCarouselPrewarm {
       if (_disposed || !isWarm || viewModel.listingsAccessDenied) return;
       final eligible = [
         for (final id in _retryNeighborhood)
-          if (viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
+          if (!_retriesInFlight.contains(id) &&
+              viewModel.loadStateFor(id) == GuideChannelLoadState.failed &&
               _retryDeadlines[id]?.due.isAfter(scheduledAt) == false)
             id,
       ];
@@ -312,11 +315,14 @@ class ChannelCarouselPrewarm {
       for (final id in eligible) {
         _retryDeadlines[id] = (due: _now().add(_failedListingsRetryCooldown), attempted: true);
       }
+      _retriesInFlight.addAll(eligible);
+      _scheduleFailedVisibleRetry();
       // A completed attempt can still leave channels failed; schedule the
       // next retry after cooldown, but stop on denial or disposal.
       unawaited(
         viewModel.ensureProgramsForChannels(eligible).catchError((Object _) {})
             .whenComplete(() {
+          _retriesInFlight.removeAll(eligible);
           if (_disposed) return;
           viewModel.scheduleBoundaryRefresh();
           _scheduleFailedVisibleRetry();

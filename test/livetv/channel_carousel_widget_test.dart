@@ -30,6 +30,7 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   int programLookups = 0;
   bool ready = false;
   bool failTopUp = false;
+  Completer<void>? nextTopUpGate;
   final Set<String> failedChannels = {};
   bool get listening => hasListeners;
   String titleSuffix = '';
@@ -88,6 +89,9 @@ class _CarouselGuide extends LiveTvGuideViewModel {
   @override
   Future<void> ensureProgramsForChannels(List<String> channelIds) async {
     requests.add(channelIds);
+    final gate = nextTopUpGate;
+    nextTopUpGate = null;
+    if (gate != null) await gate.future;
     if (failTopUp) {
       failedChannels.addAll(channelIds);
       throw StateError('Optional top-up failed');
@@ -454,14 +458,18 @@ void main() {
       await tester.pump(ChannelCarouselPrewarm.settleDelay);
       await prewarm.ensureVisibleChannels(['ch0', 'ch1']);
       await tester.pump(const Duration(seconds: 4));
-      await prewarm.ensureVisibleChannels(['ch0', 'ch2']);
-      vm.requests.clear();
-      await tester.pump(const Duration(seconds: 1));
-      expect(vm.requests, [['ch0']]);
       vm.failedChannels.add('ch2');
       await prewarm.ensureVisibleChannels(['ch0', 'ch2']);
-      await tester.pump(ChannelCarouselPrewarm.failedListingsRetryDelay);
+      vm.requests.clear();
+      final firstRetry = vm.nextTopUpGate = Completer<void>();
+      await tester.pump(const Duration(seconds: 1));
+      expect(vm.requests, [['ch0']]);
+      await tester.pump(const Duration(seconds: 4));
       expect(vm.requests, [['ch0'], ['ch2']]);
+      await tester.pump(const Duration(seconds: 27));
+      expect(vm.requests.where((ids) => ids.contains('ch0')).length, 1);
+      firstRetry.complete();
+      await tester.pump();
     } finally {
       prewarm.dispose();
     }

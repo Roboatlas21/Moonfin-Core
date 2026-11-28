@@ -1086,7 +1086,11 @@ class LiveTvGuideViewModel extends ChangeNotifier {
             }
             return;
           }
-          if (!current() || session != userDataSync.session) return;
+          if (!current()) return;
+          if (session != userDataSync.session) {
+            _discardChannelLineup();
+            return;
+          }
           move = _pendingWindow;
         } while (move != null && move.current());
       }

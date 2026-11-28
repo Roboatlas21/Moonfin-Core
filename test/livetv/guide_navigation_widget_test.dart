@@ -1853,6 +1853,7 @@ void main() {
     testWidgets('filtering out the entry channel updates the hero and lets Back exit on ${layout.name}', (tester) async {
       useLayout(layout);
       stubFavoriteChannel(5);
+      await GetIt.instance<UserPreferences>().set(UserPreferences.liveTvLastChannelId, 'ch0');
       await openGuideRoute(tester);
       await focusGuideNode(tester, 'GuideChannel:0');
       String? hero() => tester.widget<EpgHeroPreview>(find.byType(EpgHeroPreview)).title;

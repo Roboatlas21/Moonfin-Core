@@ -1237,6 +1237,25 @@ void main() {
     vm.dispose();
   });
 
+  test('canceling a queued page during sign-out ends the opening loading state', () async {
+    final lineup = Completer<Map<String, dynamic>>();
+    final listings = Completer<Map<String, dynamic>>();
+    when(() => _channelsRequest(liveTv)).thenAnswer((_) => lineup.future);
+    when(() => _guide(liveTv)).thenAnswer((_) => listings.future);
+    final vm = LiveTvGuideViewModel(client);
+    addTearDown(vm.dispose);
+    final opening = vm.load();
+    final page = vm.shiftWindow(const Duration(minutes: 30));
+    lineup.complete({'Items': [_channel('c0')]});
+    await pumpEventQueue();
+    expect(vm.state, GuideState.loading);
+    userDataSync.reset();
+    listings.complete({'Items': []});
+    expect(await page, isFalse);
+    await opening;
+    expect(vm.state, GuideState.ready);
+  });
+
   test('a lineup from before a user switch is dropped and reloaded on entry', () async {
     final reply = Completer<Map<String, dynamic>>();
     when(() => _channelsRequest(liveTv)).thenAnswer((_) => reply.future);
