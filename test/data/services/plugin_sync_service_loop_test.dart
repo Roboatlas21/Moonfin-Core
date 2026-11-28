@@ -467,6 +467,31 @@ void main() {
     expect(adapter.lastPushedProfile?['liveTvCategoryDisplay'], 'groups');
   });
 
+  test('first sign-in restores the newly created profile after a partial pin replay', () async {
+    when(() => client.serverType).thenReturn(ServerType.emby);
+    const sports = 'group:Sports';
+    const news = 'group:News';
+    adapter.missingProfileUntilPins = true;
+    adapter.unavailablePin = news;
+    adapter.resolvedProfile = {'use24HourClock': true};
+    await prefs.set(UserPreferences.liveTvSavedFilters, [sports, news]);
+    await prefs.set(UserPreferences.liveTvSavedFilterChanges, ['add:$sports', 'add:$news']);
+
+    await service.syncOnLogin(client, serverId: 'srv1');
+    expect(resolvedCount(), 2);
+    expect(service.isSyncInitializedForServer(client, serverId: 'srv1'), isTrue);
+    expect(prefs.get(UserPreferences.use24HourClock), isTrue);
+    expect(adapter.savedPins, [sports]);
+    expect(getPins(), [sports, news]);
+    expect(pendingPins(), ['add:$news']);
+
+    adapter.unavailablePin = null;
+    await service.retryPendingGuidePins(client, serverId: 'srv1');
+    expect(adapter.pinActions, ['add', 'add']);
+    expect(adapter.savedPins, [sports, news]);
+    expect(pendingPins(), isEmpty);
+  });
+
   for (final pending in [false, true]) {
     test('manual Save during sign-in with ${pending ? 'a queued pin' : 'no queued pins'}', () async {
       when(() => client.serverType).thenReturn(ServerType.emby);

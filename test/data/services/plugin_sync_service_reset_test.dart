@@ -23,6 +23,7 @@ class _MockSessionRepository extends Mock implements SessionRepository {}
 /// assert exactly which calls the reset made.
 class _RecordingAdapter implements HttpClientAdapter {
   final List<String> requests = [];
+  Map<String, dynamic>? postedProfile;
 
   /// Body returned for the Resolved endpoint, replaceable per test.
   Map<String, dynamic> resolvedProfile = {};
@@ -72,6 +73,7 @@ class _RecordingAdapter implements HttpClientAdapter {
     } else if (path.contains('/Moonfin/Settings/Resolved/')) {
       body = failResolved ? null : resolvedProfile;
     } else if (path.contains('/Moonfin/Settings/Profile/')) {
+      if (options.method == 'POST') postedProfile = options.data['profile'];
       body = {};
     }
 
@@ -266,6 +268,32 @@ void main() {
 
     expect(postCount(), 1);
   });
+
+  for (final editClock in [false, true]) {
+    test('missing profile after reset uploads only a synced edit (clock edit: $editClock)', () async {
+      final profile = service.syncProfile;
+      final loading = Completer<void>();
+      final release = Completer<void>();
+      adapter.failResolved = true;
+      adapter.beforeResponse = (method, path) async {
+        if (path == '/Moonfin/Settings/Resolved/$profile') {
+          loading.complete();
+          await release.future;
+        }
+      };
+      final reset = service.resetProfileToDefaults(client, profile: profile);
+      await loading.future;
+      await prefs.set(UserPreferences.lastSonarrCalendarFetchTime, 123456);
+      if (editClock) await prefs.set(UserPreferences.use24HourClock, true);
+      await settle();
+      expect(postCount(), 0);
+      release.complete();
+      expect(await reset, isTrue);
+      await settle();
+      expect(postCount(), editClock ? 1 : 0);
+      if (editClock) expect(adapter.postedProfile?['use24HourClock'], isTrue);
+    });
+  }
 
   test('the snapshot of the deleted profile stops suppressing', () async {
     // Pushed while everything is still at its default, so the payload the

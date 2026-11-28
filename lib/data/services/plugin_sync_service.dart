@@ -1194,6 +1194,7 @@ class PluginSyncService extends ChangeNotifier {
     String? editedFilter,
     bool reportRejections = false,
     bool Function()? allowSync,
+    VoidCallback? onPinSaved,
   }) async {
     final current = _guidePinAccountCheck(client, serverId: serverId);
     bool canSend() => current() && (allowSync?.call() ?? _syncEnabled);
@@ -1241,6 +1242,7 @@ class PluginSyncService extends ChangeNotifier {
             'filter': filter,
           }, canSend: canSend);
           if (pins == null) return null;
+          onPinSaved?.call();
         }
       } on DioException catch (error) {
         if (error.response?.statusCode != 400) return null;
@@ -1318,17 +1320,19 @@ class PluginSyncService extends ChangeNotifier {
     if (!replayPendingPins || _prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
       return resolved != null;
     }
+    var savedAnyPin = false;
     final pins = await _replayPendingGuidePins(
       client,
       profile,
       serverId: serverId,
       // First sign-in may look for a profile before this device has enabled sync.
       allowSync: () => _syncEnabled && current(),
+      onPinSaved: () => savedAnyPin = true,
     );
     if (!current()) return false;
     if (resolved == null) {
-      // A pin change can create a previously missing server profile.
-      return pins != null && await fetchAndApply(replayedPins: pins) != null && current();
+      // One accepted edit creates the profile, even if a later edit needs a retry.
+      return savedAnyPin && await fetchAndApply(replayedPins: pins) != null && current();
     }
     if (pins == null && _prefs.get(UserPreferences.liveTvSavedFilterChanges).isEmpty) {
       // All edits were rejected. The original download still owns the pin list.
@@ -1709,6 +1713,9 @@ class PluginSyncService extends ChangeNotifier {
     if (!_syncEnabled || !supportedProfiles.contains(profile)) return false;
 
     final current = _guidePinAccountCheck(client);
+    final selection = _profileSelectionRevision;
+    late int resetRevision;
+    late String clearedProfileJson;
     Future<bool> deleteAndClear() async {
       if (!_syncEnabled || !current()) return false;
       final ep = await moonbaseEndpoint(client, _dio);
@@ -1729,7 +1736,7 @@ class PluginSyncService extends ChangeNotifier {
       // Cancel the timer and invalidate uploads it already queued behind DELETE.
       // The next automatic upload must start with the restored preferences.
       _pushDebounceTimer?.cancel();
-      _profileResetRevision++;
+      resetRevision = ++_profileResetRevision;
       _restoringResetAccounts.add(current);
 
       if (profile == 'global') {
@@ -1738,9 +1745,11 @@ class PluginSyncService extends ChangeNotifier {
         _lastSyncedProfileJson.remove(_snapshotKey(client, profile));
       }
       await _restoreLocalDefaults(global: profile == 'global');
+      clearedProfileJson = jsonEncode(_buildProfileFromLocal());
       return true;
     }
 
+    bool restored;
     try {
       final reset = await _guidePinSync.synchronized(
         () => _profileWrites.synchronized(
@@ -1748,11 +1757,18 @@ class PluginSyncService extends ChangeNotifier {
         ),
       );
       if (!reset || !current()) return false;
-      await pullSettingsForProfile(client, profile: profile, replayPendingPins: false);
-      return true;
+      restored = await pullSettingsForProfile(client, profile: profile, replayPendingPins: false);
     } finally {
       _restoringResetAccounts.remove(current);
     }
+    // With no inherited profile, a real edit made during the read is still local.
+    // Comparing the wire payload excludes background bookkeeping such as calendar refreshes.
+    if (!restored && current() && _syncEnabled &&
+        resetRevision == _profileResetRevision && selection == _profileSelectionRevision &&
+        clearedProfileJson != jsonEncode(_buildProfileFromLocal())) {
+      await pushSettings(client);
+    }
+    return true;
   }
 
   /// Drops the stored value of every setting a profile carries so each one
