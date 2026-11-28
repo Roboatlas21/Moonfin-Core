@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -9,8 +10,9 @@ Future<Response<Map<String, dynamic>>> postBrowserGuidePin(
   RequestOptions options,
 ) async {
   final client = http.Client();
+  final abort = Completer<void>();
   try {
-    final request = http.Request('POST', options.uri)
+    final request = http.AbortableRequest('POST', options.uri, abortTrigger: abort.future)
       ..followRedirects = false
       ..headers.addAll(options.headers.cast<String, String>())
       ..body = jsonEncode(options.data);
@@ -33,6 +35,9 @@ Future<Response<Map<String, dynamic>>> postBrowserGuidePin(
       response.data = jsonDecode(utf8.decode(reply.bodyBytes)) as Map<String, dynamic>?;
     }
     return response;
+  } on TimeoutException {
+    abort.complete();
+    rethrow;
   } finally {
     client.close();
   }

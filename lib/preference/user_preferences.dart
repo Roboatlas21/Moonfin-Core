@@ -929,6 +929,16 @@ class UserPreferences extends ChangeNotifier {
     return pref.withKey('${pref.key}_$scopeSuffix');
   }
 
+  /// Clears the account that requested the global reset, even if the viewer
+  /// switched accounts while the server was deleting its settings.
+  Future<void> clearSavedGuidePins({required String? accountScope}) async {
+    for (final pref in [liveTvSavedFilterChanges, liveTvSavedFilters]) {
+      final target = accountScope == null ? pref : pref.withKey('${pref.key}_$accountScope');
+      await _store.set(target, <String>[]);
+    }
+    _notifyChange(liveTvSavedFilters.key);
+  }
+
   T get<T>(Preference<T> pref) {
     if (_isScopedPreference(pref)) {
       final scoped = _scopedPreference(pref);

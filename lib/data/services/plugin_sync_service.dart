@@ -1752,6 +1752,7 @@ class PluginSyncService extends ChangeNotifier {
     final current = _guidePinAccountCheck(client);
     final selection = _profileSelectionRevision;
     final editProfile = syncProfile;
+    final pinScope = _prefs.activeProfileScopeSuffix();
     bool canRestore() => current() && _syncEnabled && selection == _profileSelectionRevision;
     late MoonbaseEndpoint endpoint;
     Future<bool> deleteAndClear() async {
@@ -1766,6 +1767,9 @@ class PluginSyncService extends ChangeNotifier {
             : '${ep.base}/Moonfin/Settings/Profile/$profile',
         options: Options(headers: ep.headers),
       );
+      if (profile == 'global') {
+        await _prefs.clearSavedGuidePins(accountScope: pinScope);
+      }
       if (!canRestore()) return false;
 
       // Cancel the timer and invalidate uploads it already queued behind DELETE.
@@ -1779,7 +1783,7 @@ class PluginSyncService extends ChangeNotifier {
       } else {
         _lastSyncedProfileJson.remove(_snapshotKey(client, profile));
       }
-      await _restoreLocalDefaults(global: profile == 'global');
+      await _restoreLocalDefaults();
       return true;
     }
 
@@ -1834,29 +1838,16 @@ class PluginSyncService extends ChangeNotifier {
   /// Guarded and batched the way the apply path is, because these writes must
   /// not read back as a local edit and push themselves straight to the server
   /// that was just cleared.
-  Future<void> _restoreLocalDefaults({required bool global}) async {
+  Future<void> _restoreLocalDefaults() async {
     _isSyncingFromServer = true;
     try {
-      await _prefs.batchNotifications(
-        () => _restoreLocalDefaultsUnbatched(global),
-      );
+      await _prefs.batchNotifications(_restoreLocalDefaultsUnbatched);
     } finally {
       _isSyncingFromServer = false;
     }
   }
 
-  Future<void> _restoreLocalDefaultsUnbatched(bool global) async {
-    if (global) {
-      final pins = _prefs.getEffectivePreference(
-        UserPreferences.liveTvSavedFilters,
-      );
-      final changes = _prefs.getEffectivePreference(
-        UserPreferences.liveTvSavedFilterChanges,
-      );
-      await _prefs.set(changes, <String>[]);
-      await _prefs.set(pins, <String>[]);
-    }
-
+  Future<void> _restoreLocalDefaultsUnbatched() async {
     // removePreference rather than a plain store delete, because reads fall
     // back to the unscoped key when the scoped one is gone, and a value from
     // before per-server scoping would resurface instead of the default.
