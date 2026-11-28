@@ -1411,6 +1411,20 @@ void main() {
       expect(vm.surfingChannels.any((c) => c.id == 'c200'), isFalse);
     });
 
+    test('an older Sports page cannot remove the station just found for focus', () async {
+      stubNumberedChannels(220);
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+      final vm = await loadFilter(GuideFilter.sports);
+      final held = pendingGuide(GuideFilter.sports);
+      final page = vm.loadMorePrograms();
+      await pumpEventQueue();
+      when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer(_serverFiltered((_) => true));
+      expect(await vm.ensureCategoryChannel('c200'), isTrue);
+      held.complete({'Items': []});
+      await page;
+      expect(vm.filteredChannels.any((c) => c.id == 'c200'), isTrue);
+    });
+
     test('targeted focus retries a failed category channel and skips known nonmatches', () async {
       stubNumberedChannels(3);
       when(() => _guide(liveTv, category: GuideFilter.sports)).thenAnswer((_) async => {

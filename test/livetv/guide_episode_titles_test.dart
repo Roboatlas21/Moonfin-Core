@@ -368,6 +368,7 @@ void main() {
         ),
       ));
       expect(tester.takeException(), isNull);
+      expect(Localizations.localeOf(tester.element(find.byType(EpgNowNextCard))).languageCode, 'de');
       await tester.tap(find.byType(TextButton));
       expect(retries, 1);
     });

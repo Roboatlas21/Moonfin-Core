@@ -709,6 +709,36 @@ void main() {
     expect(cell.isPast, isFalse);
   });
 
+  testWidgets('a recording recovery lets the Guide resize before an obsolete page replies', (tester) async {
+    await pumpGuide(tester);
+    final vm = guideModel(tester);
+    final oldStart = vm.windowStart;
+    final target = vm.windowEnd;
+    final held = Completer<Map<String, dynamic>>();
+    var failRecording = false;
+    when(() => _guideRequest(liveTvApi)).thenAnswer((inv) async {
+      if (inv.namedArguments[#startDate] == target) return held.future;
+      if (failRecording) {
+        failRecording = false;
+        throw const FormatException('Invalid recording refresh');
+      }
+      return {'Items': []};
+    });
+    final move = vm.setWindowStart(target);
+    const wider = Size(1700, 700);
+    tester.view.physicalSize = wider;
+    await _pumpFrames(tester);
+    expect(vm.guideWindow, isNot(resizedGuideWindow(wider)));
+    failRecording = true;
+    await vm.recordingChanged();
+    await _pumpFrames(tester);
+    final recoveredWidth = vm.guideWindow;
+    held.complete({'Items': []});
+    expect(await move, isFalse);
+    expect(vm.windowStart, oldStart);
+    expect(recoveredWidth, resizedGuideWindow(wider));
+  });
+
   for (final reloadDuringRequest in [false, true]) {
     testWidgets('a guide reload during resize finishes at the visible width (request pending=$reloadDuringRequest)', (tester) async {
       await pumpGuide(tester);

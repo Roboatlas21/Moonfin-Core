@@ -1358,10 +1358,16 @@ class LiveTvGuideViewModel extends ChangeNotifier {
         }
       }
       if (!current()) return false;
-      final queried = batch.map((channel) => channel.id);
+      // A focus lookup can settle one station while this page is in flight.
+      final queried = {
+        for (final channel in batch)
+          if (!_categoryQueriedIds.contains(channel.id) || _categoryFailedIds.contains(channel.id))
+            channel.id,
+      };
+      fetched.programs.removeWhere((id, _) => !queried.contains(id));
       _categoryFailedIds
         ..removeAll(queried)
-        ..addAll(failed);
+        ..addAll(failed.where(queried.contains));
       // Track category failures separately from All Channels. Mark the batch
       // as visited so failed channels don't block pagination; Retry handles them.
       _categoryQueriedIds.addAll(queried);
@@ -1565,6 +1571,7 @@ class LiveTvGuideViewModel extends ChangeNotifier {
 
   Future<void> _reloadPrograms() async {
     final loadGeneration = ++_loadGeneration;
+    _finishPendingWindow();
     final depth = _requestedPageDepth;
     // The replacement also refetches known category stations outside the search.
     _resetPrograms(keepCategoryListings: _isCategory(_filter) && _channelQuery.isNotEmpty);
