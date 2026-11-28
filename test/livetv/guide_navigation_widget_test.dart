@@ -1311,10 +1311,9 @@ void main() {
     await focusGuideNode(tester, 'GuideChannel:0');
     await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowLeft);
     expect(picker, findsOneWidget);
-    tester.widget<ListTile>(
-      find.widgetWithText(ListTile, 'Sports'),
-    ).focusNode!.requestFocus();
-    await _pumpFrames(tester);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
+    await _sendKeyAndPump(tester, LogicalKeyboardKey.arrowDown);
+    expect(tester.widget<ListTile>(find.widgetWithText(ListTile, 'Sports')).focusNode!.hasPrimaryFocus, isTrue);
     await _sendKeyAndPump(tester, LogicalKeyboardKey.select);
     expect(picker, findsNothing);
     expect(
@@ -1762,16 +1761,20 @@ void main() {
   testWidgets('landscape width is restored after a stale portrait resume', (tester) async {
     useLayout(InterfaceLayout.phone);
     const wide = Size(1500, 700);
-    await pumpGuide(tester, surface: wide);
+    final now = DateTime(2026, 9, 11, 10, 10);
+    await pumpGuide(tester, surface: wide, now: () => now);
     final vm = guideModel(tester);
     final landscapeWindow = vm.guideWindow;
     tester.view.physicalSize = phone;
     await _pumpFrames(tester);
     await vm.setWindowStart(vm.windowStart.subtract(const Duration(days: 1)));
+    expect(vm.atLivePosition, isFalse);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await _pumpFrames(tester);
     expect(vm.guideWindow, lessThan(landscapeWindow));
+    expect(vm.atLivePosition, isTrue);
+    expect(vm.windowStart, guideLeftEdge(now));
     tester.view.physicalSize = wide;
     await _pumpFrames(tester);
     expect(vm.guideWindow, landscapeWindow);
